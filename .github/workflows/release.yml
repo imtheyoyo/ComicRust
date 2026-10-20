@@ -28,6 +28,12 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || github.ref }}
 
+      - name: Document de recette présent
+        shell: bash
+        run: |
+          tag="${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}"
+          test -f "recette/$tag.md" || { echo "::error::recette/$tag.md manquant : rédiger la recette avant de publier"; exit 1; }
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ env.TARGET }}
@@ -59,6 +65,8 @@ jobs:
           New-Item -ItemType Directory -Force "$name/licences" | Out-Null
           Copy-Item "$out/ComicRust.exe", "$out/comicrust-cli.exe", "pdfium/bin/pdfium.dll" $name
           Copy-Item README.md, docs/INVENTAIRE_REA.md $name
+          Copy-Item "recette/$tag.md" "$name/RECETTE.md"
+          Compress-Archive -Path "recette/echantillons/*" -DestinationPath "ComicRust-echantillons.zip" -Force
           Copy-Item pdfium/LICENSE "$name/licences/PDFium-LICENSE.txt"
           Copy-Item licences/* "$name/licences/"
           Compress-Archive -Path "$name/*" -DestinationPath "$name.zip" -Force
@@ -78,3 +86,5 @@ jobs:
           files: |
             ${{ steps.pkg.outputs.zip }}
             ${{ steps.pkg.outputs.zip }}.sha256
+            recette/${{ steps.pkg.outputs.tag }}.md
+            ComicRust-echantillons.zip

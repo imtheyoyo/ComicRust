@@ -83,11 +83,18 @@ cargo test --all                 # tests PDF actifs si PDFIUM_DYNAMIC_LIB_PATH p
 cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ```
 
+## Recette
+
+Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
+[`recette/`](recette) (actuelle : [v0.2.0](recette/v0.2.0.md)), avec des BD d'essai dans
+[`recette/echantillons`](recette/echantillons).
+
 ## Publier une release
 
 Créer la release sur GitHub (ou `gh release create v0.3.0 --generate-notes`), pousser un tag
 `v*`, ou lancer le workflow *Release* à la main avec le nom du tag : la CI teste, compile la
-version Windows x64 (`ComicRust.exe` + `comicrust-cli.exe` + `pdfium.dll`) et attache le zip.
+version Windows x64 (`ComicRust.exe` + `comicrust-cli.exe` + `pdfium.dll`) et attache le zip,
+la recette et les échantillons. **La release échoue si `recette/<tag>.md` n'existe pas.**
 
 ## Correspondance .NET → Rust
 

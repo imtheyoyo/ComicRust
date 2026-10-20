@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<WebComic><Info><Series>Web Comic</Series><Number>1</Number><Title>Démo CBW</Title></Info>
+<Variables><Variable Key="d" Value="web"/></Variables>
+<Images><Image Url="{d}/page000.jpg"/><Image Url="{d}/page[000:1-5].jpg"/></Images></WebComic>
