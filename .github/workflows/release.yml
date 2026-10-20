@@ -23,7 +23,7 @@ jobs:
     name: Windows 11 x64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name || github.ref }}
 
@@ -55,7 +55,7 @@ jobs:
           "zip=$name.zip" >> $env:GITHUB_OUTPUT
 
       - name: Publication de la release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.pkg.outputs.tag }}
           target_commitish: ${{ github.sha }}
