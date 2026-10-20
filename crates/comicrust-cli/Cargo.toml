@@ -1,0 +1,10 @@
+[package]
+name = "comicrust-cli"
+description = "ComicRust en ligne de commande (tests, scripts)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+comicrust-core = { path = "../comicrust-core" }
+anyhow = "1"

@@ -7,13 +7,21 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Binaire PDFium utilisé pour les tests PDF (même version que la release).
+  PDFIUM_TAG: chromium/8111
 
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            pdfium: pdfium-win-x64.tgz
+            lib: bin
+          - os: ubuntu-latest
+            pdfium: pdfium-linux-x64.tgz
+            lib: lib
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -21,5 +29,14 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+
+      - name: PDFium
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/pdfium"
+          curl -sSfL "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}/${{ matrix.pdfium }}" \
+            | tar -xz -C "$RUNNER_TEMP/pdfium"
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$RUNNER_TEMP/pdfium/${{ matrix.lib }}" >> "$GITHUB_ENV"
+
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag de la release à créer/reconstruire depuis la branche choisie, ex. v0.1.0"
+        description: "Tag de la release à créer/reconstruire depuis la branche choisie, ex. v0.2.0"
         required: true
 
 permissions:
@@ -17,6 +17,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   TARGET: x86_64-pc-windows-msvc
+  PDFIUM_TAG: chromium/8111
 
 jobs:
   windows-x64:
@@ -33,11 +34,18 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: PDFium (lecture des PDF)
+        shell: bash
+        run: |
+          mkdir -p pdfium
+          curl -sSfL "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}/pdfium-win-x64.tgz" | tar -xz -C pdfium
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$PWD/pdfium/bin" >> "$GITHUB_ENV"
+
       - name: Tests
         run: cargo test --all --target $env:TARGET
 
       - name: Compilation release
-        run: cargo build --release --locked --target $env:TARGET -p comicrust
+        run: cargo build --release --locked --target $env:TARGET -p comicrust -p comicrust-cli
 
       - name: Empaquetage
         id: pkg
@@ -45,9 +53,12 @@ jobs:
         run: |
           $tag = "${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}"
           $name = "ComicRust-$tag-windows-x64"
-          New-Item -ItemType Directory -Force $name | Out-Null
-          Copy-Item "target/$env:TARGET/release/comicrust.exe" $name
+          $out = "target/$env:TARGET/release"
+          New-Item -ItemType Directory -Force "$name/licences" | Out-Null
+          Copy-Item "$out/ComicRust.exe", "$out/comicrust-cli.exe", "pdfium/bin/pdfium.dll" $name
           Copy-Item README.md, docs/INVENTAIRE_REA.md $name
+          Copy-Item pdfium/LICENSE "$name/licences/PDFium-LICENSE.txt"
+          Copy-Item licences/* "$name/licences/"
           Compress-Archive -Path "$name/*" -DestinationPath "$name.zip" -Force
           $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"

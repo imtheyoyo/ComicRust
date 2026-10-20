@@ -142,10 +142,11 @@ impl ComicInfo {
         if let Some(n) = &self.number {
             s.push_str(&format!(" #{n}"));
         }
-        if let Some(t) = &self.title {
-            if !t.is_empty() {
-                s.push_str(&format!(" - {t}"));
+        if let Some(t) = self.title.as_deref().filter(|t| !t.trim().is_empty()) {
+            if s.trim().is_empty() {
+                return t.trim().to_string();
             }
+            s.push_str(&format!(" - {t}"));
         }
         s.trim().to_string()
     }
@@ -183,5 +184,7 @@ mod tests {
         let again = ComicInfo::from_xml(&ci.to_xml().unwrap()).unwrap();
         assert_eq!(ci, again);
         assert_eq!(ci.caption(), "The Infinity Gauntlet #1 - Infinity Gauntlet");
+        let only_title = ComicInfo { title: Some("Silver Surfer 03".into()), ..Default::default() };
+        assert_eq!(only_title.caption(), "Silver Surfer 03");
     }
 }
