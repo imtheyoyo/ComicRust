@@ -27,7 +27,7 @@ Chaque [release](https://github.com/imtheyoyo/ComicRust/releases) contient
 `ComicRust-<version>-windows-x64.zip` (Windows 10/11 x64, aucun runtime à installer :
 CRT liée statiquement).
 
-Publier une release : `git tag v0.2.0 && git push origin v0.2.0` — la CI compile et attache le zip.
+Publier une release : créer la release sur GitHub (ou `gh release create v0.2.0 --generate-notes`), ou pousser un tag `v*` — la CI compile `comicrust.exe` et attache le zip.
 
 ## Correspondance .NET → Rust
 

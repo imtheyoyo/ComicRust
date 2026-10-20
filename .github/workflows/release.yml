@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  release:
+    types: [published]
   push:
     tags: ["v*"]
   workflow_dispatch:
@@ -23,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -41,7 +43,7 @@ jobs:
         id: pkg
         shell: pwsh
         run: |
-          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $tag = "${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}"
           $name = "ComicRust-$tag-windows-x64"
           New-Item -ItemType Directory -Force $name | Out-Null
           Copy-Item "target/$env:TARGET/release/comicrust.exe" $name
