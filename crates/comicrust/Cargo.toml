@@ -1,0 +1,10 @@
+[package]
+name = "comicrust"
+description = "ComicRust — gestionnaire et lecteur de BD (portage Rust de ComicRack)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+comicrust-core = { path = "../comicrust-core" }
+anyhow = "1"

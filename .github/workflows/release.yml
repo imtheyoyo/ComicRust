@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag existant à (re)construire, ex. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  windows-x64:
+    name: Windows 11 x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        run: cargo test --all --target $env:TARGET
+
+      - name: Compilation release
+        run: cargo build --release --locked --target $env:TARGET -p comicrust
+
+      - name: Empaquetage
+        id: pkg
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $name = "ComicRust-$tag-windows-x64"
+          New-Item -ItemType Directory -Force $name | Out-Null
+          Copy-Item "target/$env:TARGET/release/comicrust.exe" $name
+          Copy-Item README.md, docs/INVENTAIRE_REA.md $name
+          Compress-Archive -Path "$name/*" -DestinationPath "$name.zip" -Force
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "zip=$name.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Publication de la release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.pkg.outputs.tag }}
+          name: ComicRust ${{ steps.pkg.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ startsWith(steps.pkg.outputs.tag, 'v0.') }}
+          files: |
+            ${{ steps.pkg.outputs.zip }}
+            ${{ steps.pkg.outputs.zip }}.sha256
