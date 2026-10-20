@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag existant à (re)construire, ex. v0.1.0"
+        description: "Tag de la release à créer/reconstruire depuis la branche choisie, ex. v0.1.0"
         required: true
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -58,6 +58,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.pkg.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: ComicRust ${{ steps.pkg.outputs.tag }}
           generate_release_notes: true
           prerelease: ${{ startsWith(steps.pkg.outputs.tag, 'v0.') }}
