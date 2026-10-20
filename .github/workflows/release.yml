@@ -38,8 +38,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p pdfium
-          curl -sSfL "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}/pdfium-win-x64.tgz" | tar -xz -C pdfium
-          echo "PDFIUM_DYNAMIC_LIB_PATH=$PWD/pdfium/bin" >> "$GITHUB_ENV"
+          curl -sSfL -o pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}/pdfium-win-x64.tgz"
+          tar -xzf pdfium.tgz -C pdfium
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$(cygpath -w "$PWD/pdfium/bin")" >> "$GITHUB_ENV"
+          ls pdfium/bin
 
       - name: Tests
         run: cargo test --all --target $env:TARGET

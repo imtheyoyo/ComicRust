@@ -32,11 +32,16 @@ jobs:
 
       - name: PDFium
         shell: bash
+        working-directory: ${{ runner.temp }}
         run: |
-          mkdir -p "$RUNNER_TEMP/pdfium"
-          curl -sSfL "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}/${{ matrix.pdfium }}" \
-            | tar -xz -C "$RUNNER_TEMP/pdfium"
-          echo "PDFIUM_DYNAMIC_LIB_PATH=$RUNNER_TEMP/pdfium/${{ matrix.lib }}" >> "$GITHUB_ENV"
+          # Chemins relatifs : le tar de Git Bash prend « D:\… » pour « hôte:chemin ».
+          mkdir -p pdfium
+          curl -sSfL -o pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}/${{ matrix.pdfium }}"
+          tar -xzf pdfium.tgz -C pdfium
+          dir="$PWD/pdfium/${{ matrix.lib }}"
+          if command -v cygpath >/dev/null; then dir=$(cygpath -w "$dir"); fi
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$dir" >> "$GITHUB_ENV"
+          ls "pdfium/${{ matrix.lib }}"
 
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all
