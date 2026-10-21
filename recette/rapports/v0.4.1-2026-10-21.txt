@@ -1,0 +1,19 @@
+Rapport de recette ComicRust v0.4.1 — 21/10/2026 23:01
+Résultat : 13 OK, 0 échec(s), 1 non testé(s) sur 14.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- R-02 : 0
+- R-03 : 4
+
+NON TESTÉS (1) : C-02
+
+Bug découvert :
+Lorsque on clique sur Lire dans le panneau de Détail du livre, le livre s'ouvre mais pas à la page enregistrée dans comicrack.
+
+Améliorations à prendre en compte dans la prochaine mise à jour :
+- Création d'un thème Clair et Dark.
+- A l'ouverture d'un livre : Proposer d'ouvrir le livre à la page ouverte dans comicrack ou reprendre la page ouverte dans comicrust

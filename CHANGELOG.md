@@ -23,7 +23,7 @@ Correctif de la v0.4.0 (recette NO-GO).
 - Colonne « Scénariste » du tableau (au lieu de « Scénario »).
 
 ### Recette
-[recette/v0.4.1.md](recette/v0.4.1.md) — correctifs R-02, R-03, D-02 de la v0.4.0.
+[recette/v0.4.1.md](recette/v0.4.1.md) — GO (13/14 OK, 0 échec) ; corrige R-02, R-03, D-02 de la v0.4.0.
 Les listes intelligentes (L-04) sont prévues en v0.5.0.
 
 ## [v0.4.0] — 2026-10-21
