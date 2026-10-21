@@ -17,7 +17,7 @@ pub mod providers;
 pub use cbl::ReadingList;
 pub use comic_info::ComicInfo;
 pub use library::Library;
-pub use providers::{decode_image, open_book, BookFormat, PageImage, PageProvider};
+pub use providers::{decode_image, open_book, open_book_patiently, BookFormat, PageImage, PageProvider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

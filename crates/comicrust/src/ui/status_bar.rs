@@ -79,6 +79,9 @@ impl ComicRustApp {
             Some(b) if !b.opened => {
                 ui.spinner();
                 ui.label(format!("Ouverture de {}…", b.path.display()));
+                if comicrust_core::providers::is_being_rewritten(&b.path) {
+                    ui.label(RichText::new("(ComicRack enregistre ce fichier, patience…)").weak());
+                }
             }
             Some(b) => {
                 ui.label(RichText::new(&b.title).strong());

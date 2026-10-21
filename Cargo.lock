@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "comicrust-core",
  "eframe",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "comicrust-core",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "djvu-rs",
  "image",

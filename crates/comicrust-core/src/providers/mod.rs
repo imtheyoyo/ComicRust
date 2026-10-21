@@ -252,6 +252,63 @@ pub fn open_book(path: &Path) -> Result<Box<dyn PageProvider>, Error> {
     })
 }
 
+/// Le fichier est-il en train d'être réécrit ? ComicRack, quand il enregistre les
+/// informations d'un livre dans l'archive, renomme l'original en `<fichier>.tmp` le temps
+/// d'écrire le nouveau : le fichier est alors absent ou incomplet pendant quelques secondes.
+pub fn is_being_rewritten(path: &Path) -> bool {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    Path::new(&tmp).exists()
+}
+
+/// Comme [`open_book`], mais attend jusqu'à `patience` si le fichier est en cours de
+/// réécriture (voir [`is_being_rewritten`]) au lieu d'échouer tout de suite.
+pub fn open_book_patiently(path: &Path, patience: std::time::Duration) -> Result<Box<dyn PageProvider>, Error> {
+    let deadline = std::time::Instant::now() + patience;
+    loop {
+        match open_book(path) {
+            Ok(b) => return Ok(b),
+            Err(e) => {
+                if !is_being_rewritten(path) || std::time::Instant::now() >= deadline {
+                    return Err(e);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(400));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod rewrite_tests {
+    use super::*;
+
+    #[test]
+    fn waits_while_comicrack_rewrites_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("Thanos 01.cbz");
+        let tmp = dir.path().join("Thanos 01.cbz.tmp");
+        // Fichier absent, original renommé en .tmp : réécriture en cours.
+        crate::providers::zip::tests::write_cbz(&tmp);
+        assert!(is_being_rewritten(&book));
+        let (b, t) = (book.clone(), tmp.clone());
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(900));
+            std::fs::copy(&t, &b).unwrap();
+            std::fs::remove_file(&t).unwrap();
+        });
+        let start = std::time::Instant::now();
+        let opened = open_book_patiently(&book, std::time::Duration::from_secs(10)).unwrap();
+        assert!(!opened.pages().is_empty());
+        assert!(start.elapsed() >= std::time::Duration::from_millis(800));
+        writer.join().unwrap();
+        // Fichier vraiment absent (pas de .tmp) : échec immédiat.
+        let missing = dir.path().join("absent.cbz");
+        let start = std::time::Instant::now();
+        assert!(open_book_patiently(&missing, std::time::Duration::from_secs(10)).is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod testutil {
     use image::{Rgba, RgbaImage};

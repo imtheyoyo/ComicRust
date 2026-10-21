@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use comicrust_core::comic_lists::{find_comicdb, load_comic_lists, ComicList};
-use comicrust_core::db::{Changes, Counters, DbConfig, Watcher};
+use comicrust_core::db::{Changes, ComicDatabase, DbConfig, Watcher};
 use eframe::egui;
 
 pub const DB_INTERVAL: Duration = Duration::from_secs(5);
@@ -61,7 +61,11 @@ fn mtime(p: &PathBuf) -> Option<SystemTime> {
 
 /// `db` : base à surveiller (si l'actualisation automatique est active) ;
 /// `lists` : `ComicDb.xml` à lire puis à surveiller.
-pub fn spawn(db: Option<(DbConfig, Counters)>, lists: Option<ListsSource>, ctx: &egui::Context) -> WatchHandle {
+pub fn spawn(
+    db: Option<(DbConfig, Arc<ComicDatabase>)>,
+    lists: Option<ListsSource>,
+    ctx: &egui::Context,
+) -> WatchHandle {
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
@@ -69,7 +73,7 @@ pub fn spawn(db: Option<(DbConfig, Counters)>, lists: Option<ListsSource>, ctx: 
     std::thread::Builder::new()
         .name("comicrust-surveillance".into())
         .spawn(move || {
-            let mut watcher = db.map(|(cfg, counters)| Watcher::new(cfg, counters));
+            let mut watcher = db.map(|(cfg, db)| Watcher::new(cfg, &db));
             let mut failing = false;
             let mut lists_seen: Option<(Option<PathBuf>, Option<SystemTime>)> = None;
             let mut next_db = Instant::now() + DB_INTERVAL;

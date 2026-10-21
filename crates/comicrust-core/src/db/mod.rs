@@ -16,12 +16,14 @@
 //! livre reçoit la nouvelle valeur dans `comics.update_counter`) et `delete_counter` à
 //! chaque suppression. Il suffit donc de relire les livres dont le compteur dépasse le
 //! dernier vu, et la liste des identifiants quand `delete_counter` a changé.
+//! Par sécurité, toutes les `FULL_CHECK` la liste complète `id, update_counter` est en plus
+//! comparée à celle connue : un livre écrit sans que le compteur bouge est rattrapé.
 
 mod config;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mysql::prelude::Queryable;
 use mysql::{Conn, OptsBuilder};
@@ -54,7 +56,13 @@ pub struct ComicDatabase {
     pub unreadable: usize,
     /// Compteurs de la table `changes` au moment de la lecture.
     pub counters: Counters,
+    /// `comics.update_counter` de chaque ligne (identifiant en minuscules), fiches
+    /// illisibles comprises.
+    pub rows: HashMap<String, i64>,
 }
+
+/// Intervalle de la vérification complète.
+pub const FULL_CHECK: Duration = Duration::from_secs(60);
 
 /// `changes.update_counter` et `changes.delete_counter`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +79,29 @@ pub struct Changes {
     /// Identifiants encore présents (seulement si des livres ont été supprimés).
     pub present: Option<HashSet<String>>,
     pub counters: Counters,
+    /// `update_counter` des lignes relues.
+    pub rows: Vec<(String, i64)>,
+}
+
+impl Changes {
+    pub fn is_empty(&self) -> bool {
+        self.updated.is_empty() && self.present.is_none() && self.rows.is_empty()
+    }
+}
+
+/// Lit des lignes complètes (`id, update_counter, data`).
+fn read_rows(conn: &mut Conn, query: &str, params: mysql::Params, ch: &mut Changes) -> Result<(), Error> {
+    let rows: Vec<(String, Option<i64>, Option<String>)> = conn.exec(query, params).map_err(db_err)?;
+    for (id, counter, data) in rows {
+        ch.rows.push((id.to_ascii_lowercase(), counter.unwrap_or(0)));
+        if let Some(Ok(mut book)) = data.as_deref().map(LibraryBook::from_xml) {
+            if book.id.is_empty() {
+                book.id = id;
+            }
+            ch.updated.push(book);
+        }
+    }
+    Ok(())
 }
 
 /// Bilan d'une actualisation.
@@ -94,11 +125,20 @@ pub struct Watcher {
     cfg: DbConfig,
     conn: Option<Conn>,
     seen: Counters,
+    rows: HashMap<String, i64>,
+    last_full: Instant,
 }
 
 impl Watcher {
-    pub fn new(cfg: DbConfig, seen: Counters) -> Self {
-        Self { cfg, conn: None, seen }
+    /// `db` : la base telle qu'elle a été chargée (compteurs et lignes connues).
+    pub fn new(cfg: DbConfig, db: &ComicDatabase) -> Self {
+        Self { cfg, conn: None, seen: db.counters, rows: db.rows.clone(), last_full: Instant::now() }
+    }
+
+    /// Vérification complète immédiate (sinon faite toutes les `FULL_CHECK`).
+    pub fn full_check(&mut self) -> Result<Option<Changes>, Error> {
+        self.last_full = Instant::now() - FULL_CHECK;
+        self.poll()
     }
 
     /// Interroge la base ; `None` si rien n'a changé. En cas d'erreur, la connexion
@@ -107,10 +147,20 @@ impl Watcher {
         if self.conn.is_none() {
             self.conn = Some(connect(&self.cfg)?);
         }
-        let res = Self::poll_on(self.conn.as_mut().unwrap(), self.seen);
+        let full = self.last_full.elapsed() >= FULL_CHECK;
+        let res = Self::poll_on(self.conn.as_mut().unwrap(), self.seen, full.then_some(&self.rows));
+        if full {
+            self.last_full = Instant::now();
+        }
         match res {
             Ok(Some(ch)) => {
                 self.seen = ch.counters;
+                for (id, c) in &ch.rows {
+                    self.rows.insert(id.clone(), *c);
+                }
+                if let Some(present) = &ch.present {
+                    self.rows.retain(|id, _| present.contains(id));
+                }
                 Ok(Some(ch))
             }
             Ok(None) => Ok(None),
@@ -121,27 +171,50 @@ impl Watcher {
         }
     }
 
-    fn poll_on(conn: &mut Conn, seen: Counters) -> Result<Option<Changes>, Error> {
+    fn poll_on(
+        conn: &mut Conn,
+        seen: Counters,
+        known: Option<&HashMap<String, i64>>,
+    ) -> Result<Option<Changes>, Error> {
         let now = read_counters(conn)?;
-        if now == seen {
-            return Ok(None);
-        }
         let mut ch = Changes { counters: now, ..Default::default() };
         if now.update != seen.update {
-            let rows: Vec<(String, Option<String>)> =
-                conn.exec("SELECT id, data FROM comics WHERE update_counter > ?", (seen.update,)).map_err(db_err)?;
-            for (id, data) in rows {
-                if let Some(Ok(mut book)) = data.as_deref().map(LibraryBook::from_xml) {
-                    if book.id.is_empty() {
-                        book.id = id;
-                    }
-                    ch.updated.push(book);
-                }
-            }
+            read_rows(
+                conn,
+                "SELECT id, update_counter, data FROM comics WHERE update_counter > ?",
+                (seen.update,).into(),
+                &mut ch,
+            )?;
         }
-        if now.delete != seen.delete {
+        if let Some(known) = known {
+            // Vérification complète : lignes nouvelles, modifiées ou disparues.
+            let all: Vec<(String, Option<i64>)> =
+                conn.query("SELECT id, update_counter FROM comics").map_err(db_err)?;
+            let fetched: HashSet<String> = ch.rows.iter().map(|(id, _)| id.clone()).collect();
+            // Identifiants tels qu'en base (la clé primaire sert à la recherche).
+            let stale: Vec<String> = all
+                .iter()
+                .filter(|(id, c)| {
+                    let low = id.to_ascii_lowercase();
+                    known.get(&low) != Some(&c.unwrap_or(0)) && !fetched.contains(&low)
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            for chunk in stale.chunks(200) {
+                let marks = vec!["?"; chunk.len()].join(",");
+                let q = format!("SELECT id, update_counter, data FROM comics WHERE id IN ({marks})");
+                read_rows(conn, &q, chunk.to_vec().into(), &mut ch)?;
+            }
+            let present: HashSet<String> = all.into_iter().map(|(id, _)| id.to_ascii_lowercase()).collect();
+            if known.keys().any(|id| !present.contains(id)) {
+                ch.present = Some(present);
+            }
+        } else if now.delete != seen.delete {
             let ids: Vec<String> = conn.query("SELECT id FROM comics").map_err(db_err)?;
             ch.present = Some(ids.into_iter().map(|i| i.to_ascii_lowercase()).collect());
+        }
+        if ch.is_empty() && now == seen {
+            return Ok(None);
         }
         Ok(Some(ch))
     }
@@ -186,9 +259,11 @@ impl ComicDatabase {
             p.done.store(0, Ordering::Relaxed);
         }
         let mut db = ComicDatabase { counters, ..Default::default() };
-        let rows = conn.query_iter("SELECT id, data FROM comics").map_err(db_err)?;
+        let rows = conn.query_iter("SELECT id, update_counter, data FROM comics").map_err(db_err)?;
         for row in rows {
-            let (id, data): (String, Option<String>) = mysql::from_row_opt(row.map_err(db_err)?).map_err(db_err)?;
+            let (id, counter, data): (String, Option<i64>, Option<String>) =
+                mysql::from_row_opt(row.map_err(db_err)?).map_err(db_err)?;
+            db.rows.insert(id.to_ascii_lowercase(), counter.unwrap_or(0));
             match data.as_deref().map(LibraryBook::from_xml) {
                 Some(Ok(mut book)) => {
                     if book.id.is_empty() {
@@ -225,6 +300,7 @@ impl ComicDatabase {
     /// Applique les modifications lues par un [`Watcher`].
     pub fn apply(&mut self, ch: Changes) -> Applied {
         let mut out = Applied::default();
+        self.rows.extend(ch.rows);
         for book in ch.updated {
             match self.by_id.get(&book.id.to_ascii_lowercase()) {
                 Some(&i) => {
@@ -240,6 +316,7 @@ impl ComicDatabase {
         if let Some(present) = ch.present {
             let before = self.books.len();
             self.books.retain(|b| present.contains(&b.id.to_ascii_lowercase()));
+            self.rows.retain(|id, _| present.contains(id));
             out.removed = before - self.books.len();
             if out.removed > 0 {
                 self.reindex();
@@ -347,7 +424,7 @@ mod tests {
         conn.query_drop("Insert into changes values ('00000000-0000-0000-0000-000000000000', 3, 0)").unwrap();
         let mut db = ComicDatabase::load(&cfg, None).unwrap();
         assert_eq!(db.counters, Counters { update: 3, delete: 0 });
-        let mut w = Watcher::new(cfg.clone(), db.counters);
+        let mut w = Watcher::new(cfg.clone(), &db);
         assert!(w.poll().unwrap().is_none(), "rien n'a changé");
         let id42 = "bbbbbbbb-0000-0000-0000-000000000042";
         let xml42 = format!(
@@ -371,6 +448,21 @@ mod tests {
         assert!(db.get("bbbbbbbb-0000-0000-0000-000000000001").is_none());
         assert_eq!(db.get("cccccccc-0000-0000-0000-000000000001").unwrap().series.as_deref(), Some("Nouveau"));
         assert!(w.poll().unwrap().is_none());
+        assert!(w.full_check().unwrap().is_none(), "vérification complète : rien de plus");
+
+        // Écritures sans toucher aux compteurs de `changes` : seule la vérification
+        // complète les voit.
+        conn.exec_drop(
+            "Update comics set data=?, update_counter=9 where id=?",
+            (xml42.replace("Modifiée", "Discrète"), id42),
+        )
+        .unwrap();
+        conn.query_drop("Delete from comics where id='bbbbbbbb-0000-0000-0000-000000000002'").unwrap();
+        assert!(w.poll().unwrap().is_none(), "invisible pour le suivi par compteurs");
+        let ch = w.full_check().unwrap().expect("rattrapé par la vérification complète");
+        assert_eq!(db.apply(ch), Applied { added: 0, modified: 1, removed: 1 });
+        assert_eq!(db.get(id42).unwrap().series.as_deref(), Some("Discrète"));
+        assert!(w.full_check().unwrap().is_none());
 
         let mut bad = cfg.clone();
         bad.password = "mauvais".into();

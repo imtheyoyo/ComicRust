@@ -164,7 +164,8 @@ impl ComicRustApp {
             });
             ui.separator();
             details_grid(ui, &book);
-            for (title, text) in [("Résumé", &book.summary), ("Notes", &book.notes), ("Critique", &book.review)] {
+            for (title, text) in [("Résumé", &book.summary), ("Annotations", &book.notes), ("Critique", &book.review)]
+            {
                 if let Some(t) = text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
                     ui.add_space(6.0);
                     ui.label(RichText::new(title).strong());
@@ -178,87 +179,165 @@ impl ComicRustApp {
     }
 }
 
-fn details_grid(ui: &mut Ui, b: &LibraryBook) {
-    let mut rows: Vec<(&str, String)> = Vec::new();
-    let mut push = |k: &'static str, v: Option<String>| {
-        if let Some(v) = v.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
-            rows.push((k, v));
-        }
-    };
-    let s = |v: &Option<String>| v.clone();
-    push("Série", s(&b.series));
-    push(
-        "Numéro",
-        b.number.clone().map(|n| match b.count.filter(|c| *c > 0) {
-            Some(c) => format!("{n} sur {c}"),
-            None => n,
-        }),
-    );
-    push("Volume", b.volume.filter(|v| *v >= 0).map(|v| v.to_string()));
-    push(
-        "Autre série",
-        b.alternate_series.clone().map(|a| match &b.alternate_number {
-            Some(n) if !n.is_empty() => format!("{a} #{n}"),
-            _ => a,
-        }),
-    );
-    push("Arc", s(&b.story_arc));
-    push("Groupe de séries", s(&b.series_group));
-    let published = match (b.day.filter(|d| *d > 0), b.month.filter(|m| *m > 0), b.year.filter(|y| *y > 0)) {
-        (Some(d), Some(m), Some(y)) => Some(format!("{d:02}/{m:02}/{y}")),
-        (None, Some(m), Some(y)) => Some(format!("{m:02}/{y}")),
-        (_, _, Some(y)) => Some(y.to_string()),
+/// Oui / Non d'après les valeurs de ComicRack (`Yes`, `YesAndRightToLeft`, `No`, `Unknown`).
+fn yes_no(v: &Option<String>) -> Option<String> {
+    match v.as_deref()? {
+        "Yes" => Some("Oui".into()),
+        "YesAndRightToLeft" => Some("Oui (de droite à gauche)".into()),
+        "No" => Some("Non".into()),
         _ => None,
-    };
-    push("Parution", published);
-    push("Éditeur", s(&b.publisher));
-    push("Collection", s(&b.imprint));
-    push("Scénario", s(&b.writer));
-    push("Dessin", s(&b.penciller));
-    push("Encrage", s(&b.inker));
-    push("Couleurs", s(&b.colorist));
-    push("Lettrage", s(&b.letterer));
-    push("Couverture", s(&b.cover_artist));
-    push("Direction", s(&b.editor));
-    push("Traduction", s(&b.translator));
-    push("Genre", s(&b.genre));
-    push("Format", s(&b.format));
-    push("Langue", s(&b.language_iso));
-    push("Public", s(&b.age_rating).filter(|a| a != "Unknown"));
-    push("Noir et blanc", s(&b.black_and_white).filter(|v| v == "Yes").map(|_| "oui".into()));
-    push("Manga", s(&b.manga).filter(|v| v.starts_with("Yes")).map(|_| "oui".into()));
-    push("Personnages", s(&b.characters));
-    push("Équipes", s(&b.teams));
-    push("Principal", s(&b.main_character_or_team));
-    push("Lieux", s(&b.locations));
-    push("Étiquettes", s(&b.tags));
-    push("Note", b.rating.filter(|r| *r > 0.0).map(|r| format!("{r:.1} / 5").replace('.', ",")));
-    push("Note communauté", b.community_rating.filter(|r| *r > 0.0).map(|r| format!("{r:.1} / 5").replace('.', ",")));
-    push("Pages", b.page_count.map(|p| p.to_string()));
-    push(
-        "Lecture",
-        b.read_percent().map(|p| match b.current_page {
-            Some(c) if p > 0 => format!("{p} % (page {})", c + 1),
-            _ => format!("{p} %"),
-        }),
-    );
-    push("Ouvert", b.open_count.filter(|n| *n > 0).map(|n| format!("{n} fois")));
-    push("Dernière lecture", Some(long_date(b.opened.as_deref())));
-    push("Ajouté le", Some(short_date(b.added.as_deref())));
-    push("Sorti le", Some(short_date(b.released.as_deref())));
-    push("Taille", b.file_size.filter(|s| *s > 0).map(human_size));
-    push("Scan", s(&b.scan_information));
-    push("Fichier", s(&b.file));
-    egui::Grid::new("fiche").num_columns(2).spacing(vec2(10.0, 4.0)).striped(false).show(ui, |ui| {
-        for (k, v) in rows {
-            ui.label(RichText::new(k).weak());
-            ui.add(egui::Label::new(v).wrap());
-            ui.end_row();
-        }
-        if let Some(web) = b.web.as_deref().map(str::trim).filter(|w| w.starts_with("http")) {
-            ui.label(RichText::new("Web").weak());
-            ui.hyperlink_to(web, web);
+    }
+}
+
+const MONTHS: [&str; 12] = [
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+];
+
+/// Rangée de la fiche ; `always` : affichée même vide (« — »), comme dans ComicRack.
+struct Field {
+    label: &'static str,
+    value: Option<String>,
+    always: bool,
+}
+
+fn f(label: &'static str, value: Option<String>) -> Field {
+    Field { label, value: value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()), always: false }
+}
+
+fn always(label: &'static str, value: Option<String>) -> Field {
+    Field { always: true, ..f(label, value) }
+}
+
+fn section(ui: &mut Ui, id: &str, title: &str, fields: Vec<Field>) {
+    let fields: Vec<Field> = fields.into_iter().filter(|x| x.always || x.value.is_some()).collect();
+    if fields.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.label(RichText::new(title).strong());
+    egui::Grid::new(("fiche", id)).num_columns(2).min_col_width(125.0).spacing(vec2(10.0, 3.0)).show(ui, |ui| {
+        for x in fields {
+            ui.label(RichText::new(x.label).weak());
+            match x.value {
+                Some(v) => ui.add(egui::Label::new(v).wrap()),
+                None => ui.label(RichText::new("—").weak()),
+            };
             ui.end_row();
         }
     });
+}
+
+/// Fiche du livre, avec les libellés de la fenêtre « Informations » de ComicRack.
+fn details_grid(ui: &mut Ui, b: &LibraryBook) {
+    let s = |v: &Option<String>| v.clone();
+    let num = |n: Option<i32>| n.filter(|v| *v > 0).map(|v| v.to_string());
+    let number = b.number.clone().map(|n| match b.count.filter(|c| *c > 0) {
+        Some(c) => format!("{n} sur {c}"),
+        None => n,
+    });
+    let alt = b.alternate_series.clone().map(|a| match (&b.alternate_number, b.alternate_count.filter(|c| *c > 0)) {
+        (Some(n), Some(c)) if !n.is_empty() => format!("{a} #{n} sur {c}"),
+        (Some(n), None) if !n.is_empty() => format!("{a} #{n}"),
+        _ => a,
+    });
+    let month = b.month.filter(|m| (1..=12).contains(m)).map(|m| format!("{} ({m})", MONTHS[m as usize - 1]));
+    let rating = |r: Option<f32>| r.filter(|r| *r > 0.0).map(|r| format!("{r:.1} / 5").replace('.', ","));
+    section(
+        ui,
+        "details",
+        "Détails",
+        vec![
+            always("Série :", s(&b.series)),
+            always("Numéro :", number),
+            always("Volume :", b.volume.filter(|v| *v >= 0).map(|v| v.to_string())),
+            always("Titre :", s(&b.title)),
+            always("Année :", num(b.year)),
+            always("Mois :", month),
+            f("Jour :", num(b.day)),
+            always("Éditeur :", s(&b.publisher)),
+            f("Impression :", s(&b.imprint)),
+            f("Collection :", s(&b.editor)),
+            always("Série complète :", yes_no(&b.series_complete)),
+            f("Format :", s(&b.format)),
+            f("Genre :", s(&b.genre)),
+            f("Langue :", s(&b.language_iso)),
+            f("Limite d'âge :", s(&b.age_rating).filter(|a| a != "Unknown")),
+            f("Noir et Blanc :", yes_no(&b.black_and_white)),
+            f("Manga :", yes_no(&b.manga)),
+        ],
+    );
+    section(
+        ui,
+        "artistes",
+        "Artistes",
+        vec![
+            always("Scénariste :", s(&b.writer)),
+            always("Dessinateur :", s(&b.penciller)),
+            f("Encreur :", s(&b.inker)),
+            f("Coloriste :", s(&b.colorist)),
+            f("Lettreur :", s(&b.letterer)),
+            f("Artiste de couverture :", s(&b.cover_artist)),
+            f("Traducteur :", s(&b.translator)),
+        ],
+    );
+    section(
+        ui,
+        "plus",
+        "Plus",
+        vec![
+            f("Arc narratif :", s(&b.story_arc)),
+            f("Groupes de la Série :", s(&b.series_group)),
+            f("Série alternative :", alt),
+            f("Personnages :", s(&b.characters)),
+            f("Équipes :", s(&b.teams)),
+            f("Équipe/Personnage principal :", s(&b.main_character_or_team)),
+            f("Lieu(x) :", s(&b.locations)),
+            f("Étiquettes :", s(&b.tags)),
+            f("Informations sur le scan :", s(&b.scan_information)),
+        ],
+    );
+    section(
+        ui,
+        "lecture",
+        "Lecture",
+        vec![
+            f("Mon évaluation :", rating(b.rating)),
+            f("Évaluation communautaire :", rating(b.community_rating)),
+            always("Pages :", b.page_count.map(|p| p.to_string())),
+            f(
+                "Lu :",
+                b.read_percent().map(|p| match b.current_page {
+                    Some(c) if p > 0 => format!("{p} % (page {})", c + 1),
+                    _ => format!("{p} %"),
+                }),
+            ),
+            f("Ouvert/Lu le :", Some(long_date(b.opened.as_deref()))),
+            f("Ouvertures :", b.open_count.filter(|n| *n > 0).map(|n| format!("{n} fois"))),
+            f("Ajouté/Acheté le :", Some(short_date(b.added.as_deref()))),
+            f("Sorti :", Some(short_date(b.released.as_deref()))),
+        ],
+    );
+    section(
+        ui,
+        "fichier",
+        "Fichier",
+        vec![always("Fichier :", s(&b.file)), f("Taille :", b.file_size.filter(|s| *s > 0).map(human_size))],
+    );
+    if let Some(web) = b.web.as_deref().map(str::trim).filter(|w| w.starts_with("http")) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Web :").weak());
+            ui.hyperlink_to(web, web);
+        });
+    }
 }

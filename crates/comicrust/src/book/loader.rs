@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 
-use comicrust_core::{open_book, BookFormat, ComicInfo, PageImage};
+use comicrust_core::{open_book_patiently, BookFormat, ComicInfo, PageImage};
 use eframe::egui::{self, ColorImage};
 
 pub const THUMB_HEIGHT: u32 = 180;
@@ -68,7 +68,8 @@ impl BookLoader {
                     let _ = ev_tx.send(ev);
                     ctx.request_repaint();
                 };
-                let mut book = match open_book(&path) {
+                // ComicRack peut être en train de réécrire le fichier (quelques secondes).
+                let mut book = match open_book_patiently(&path, std::time::Duration::from_secs(20)) {
                     Ok(b) => b,
                     Err(e) => return send(Event::Failed(e.to_string())),
                 };

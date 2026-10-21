@@ -8,7 +8,8 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.2.0 | [v0.2.0.md](v0.2.0.md) — [page](https://claude.ai/artifact/WhQ9pNG5E5i4sbx4Kt9cPn) — rapports [1](rapports/v0.2.0-2026-10-21.txt), [2](rapports/v0.2.0-2026-10-21-b.txt) | **NO-GO** : C-06 en échec (listes .cbl) → corrigé en v0.2.1 |
 | v0.2.1 | [v0.2.1.md](v0.2.1.md) — [page à cocher](https://claude.ai/artifact/A79VA2D8U3f494YCspRkmE) — [rapport](rapports/v0.2.1-2026-10-21.txt) | **GO** (21/10/2026) : 26/26 OK |
 | v0.3.0 | [v0.3.0.md](v0.3.0.md) — [page à cocher](https://claude.ai/artifact/Ea1G6KJm9S2cm3Q79Gkkd5) — [rapports 1](rapports/v0.3.0-2026-10-21.txt), [2](rapports/v0.3.0-2026-10-21-b.txt) | **GO** (21/10/2026) : 44/46 OK, 0 échec (V-08 et N-08 non testés, non bloquants) |
-| v0.4.0 | [v0.4.0.md](v0.4.0.md) — [page à cocher](https://claude.ai/artifact/UM6713Lkk2Nf3ccxgoRVsT) | en attente |
+| v0.4.0 | [v0.4.0.md](v0.4.0.md) — [page à cocher](https://claude.ai/artifact/UM6713Lkk2Nf3ccxgoRVsT) — [rapport](rapports/v0.4.0-2026-10-21.txt) | **NO-GO** : R-02 en échec (fichier en cours de réécriture par ComicRack) → corrigé en v0.4.1 avec R-03 et D-02 ; L-04 (listes intelligentes) → v0.5.0 |
+| v0.4.1 | [v0.4.1.md](v0.4.1.md) | en attente |
 
 ## Déroulé
 

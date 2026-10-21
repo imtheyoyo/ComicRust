@@ -97,7 +97,8 @@ impl ComicRustApp {
             return;
         };
         let path = PathBuf::from(&file);
-        if !path.exists() {
+        // Absent mais « .tmp » présent : ComicRack réécrit le fichier, le lecteur patiente.
+        if !path.exists() && !comicrust_core::providers::is_being_rewritten(&path) {
             self.error = Some(format!(
                 "Fichier introuvable :\n{file}\n\nIl a peut-être été déplacé ou supprimé, ou le NAS n'est pas accessible."
             ));

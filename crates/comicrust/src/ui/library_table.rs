@@ -83,7 +83,7 @@ const COLS: [Col; 11] = [
         },
     },
     Col { title: "Éditeur", sort: None, width: 110.0, cell: |b| b.publisher.clone().unwrap_or_default() },
-    Col { title: "Scénario", sort: None, width: 140.0, cell: |b| b.writer.clone().unwrap_or_default() },
+    Col { title: "Scénariste", sort: None, width: 140.0, cell: |b| b.writer.clone().unwrap_or_default() },
     Col {
         title: "Pages",
         sort: Some(SortKey::PageCount),

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 
-use comicrust_core::open_book;
+use comicrust_core::open_book_patiently;
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 
 /// Hauteur des couvertures en cache (pixels).
@@ -84,7 +84,7 @@ fn make_cover(dir: Option<&Path>, job: &Job) -> Result<ColorImage, String> {
             return Ok(to_color(&img.into_rgba8()));
         }
     }
-    let mut book = open_book(&job.file).map_err(|e| e.to_string())?;
+    let mut book = open_book_patiently(&job.file, std::time::Duration::from_secs(20)).map_err(|e| e.to_string())?;
     let n = book.pages().len();
     if n == 0 {
         return Err("aucune page".into());

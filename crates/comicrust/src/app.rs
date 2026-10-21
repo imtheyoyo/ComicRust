@@ -168,7 +168,7 @@ impl ComicRustApp {
         self.library.watcher = None;
         let Some(db) = self.library.database() else { return };
         let db_watch =
-            if self.settings.auto_refresh { self.library.config.clone().map(|c| (c, db.counters)) } else { None };
+            if self.settings.auto_refresh { self.library.config.clone().map(|c| (c, db.clone())) } else { None };
         let lists = match (&self.settings.library_db, &self.settings.db_source) {
             (Some(p), _) => Some(ListsSource::File(p.clone())),
             (None, DbSource::ComicRackIni(ini)) => Some(ListsSource::FromIni(ini.clone())),

@@ -1,0 +1,29 @@
+Rapport de recette ComicRust v0.4.0 — 21/10/2026 22:14
+Résultat : 32 OK, 4 échec(s), 1 non testé(s) sur 37.
+Décision proposée : NO-GO (1 bloquant(s) en échec).
+
+ÉCHECS (4)
+- R-02 [Bloquant] Lire quelques pages d'un livre dans ComicRack, puis le fermer : dans ComicRust, la barre de lecture orange de ce livre avance et le bouton « 📖 Lire (page …) » de sa fiche propose la nouvelle page.
+  Note : ⚠ Erreur
+         Impossible d'ouvrir \\SERVEURNAS\Disque_DATA_1\_BDZ\_BD\COSMIC_COLLECTION\04_2011_2016\COSMIC COLLECTION #224 2012_05 - Thanos Rising 1-5 (Jason Aaron)(2013).cbz
+         E/S : Le fichier spécifié est introuvable. (os error 2)
+
+         Le fichier a été renommé en : COSMIC COLLECTION #224 2012_05 - Thanos Rising 1-5 (Jason Aaron)(2013).cbz.tmp
+         L'erreur ne s'est ensuite pas reproduite.
+- R-03 [Majeur] Ajouter un livre à la bibliothèque de ComicRack : il apparaît dans ComicRust (« 1 ajouté »).
+  Note : Parfois il faut fermer ComicRack pour que cela s'affiche.
+- L-04 [Majeur] Clic sur tes listes intelligentes : soit leurs livres s'affichent (comparer le nombre avec ComicRack), soit le message « ComicRack n'a pas mémorisé son contenu ». Noter combien affichent leur contenu et combien le message : ………
+  Note : Liste intelligente : ComicRack n'a pas mémorisé son contenu dans ComicDb.xml.
+         ComicRust saura calculer les listes intelligentes à l'étape suivante (moteur de requêtes).
+- L-07 [Mineur] Si L-01 n'a rien trouvé : « … » en haut du panneau → choisir le ComicDb.xml de ComicRack → les listes apparaissent.
+  Note : Non testé car utilisation de MySQL
+
+VALEURS NOTÉES ET REMARQUES
+- R-01 : 1 s
+- L-01 : \\SERVEURNAS\Disque_DATA_1\_BDZ\ComicRack\Data\ComicDb.xml
+- L-02 : 8
+- L-05 : à sa fermeture
+- D-02 : Différences constatées : Il faut ajouter les informations 'Série complète', 'Année', 'Mois', 'Editeur'.
+- T-05 : 1 s
+
+NON TESTÉS (1) : C-02

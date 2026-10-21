@@ -117,6 +117,9 @@ pub struct LibraryBook {
     pub tags: Option<String>,
     #[serde(rename = "CommunityRating", default)]
     pub community_rating: Option<f32>,
+    /// « Série complète » : `Yes`, `No` ou `Unknown`.
+    #[serde(rename = "SeriesComplete", default)]
+    pub series_complete: Option<String>,
     #[serde(rename = "ScanInformation", default)]
     pub scan_information: Option<String>,
     /// Rang de la couverture préférée parmi les pages de type « FrontCover ».
