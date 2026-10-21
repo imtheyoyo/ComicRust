@@ -1,0 +1,16 @@
+Rapport de recette ComicRust v0.2.1 — 21/10/2026 08:45
+Résultat : 26 OK, 0 échec(s), 0 non testé(s) sur 26.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- V-04 : 345 fichiers : 291 via ComicInfo.xml, 54 via le nom, 0 non reconnus
+- V-05 : 3
+- V-06 : (345 déjà en cache) ». Durée : 1 s
+- V-07 : trouvés 74 / 322 ; durée 2 s
+
+Décision : GO (Yoyo, 21/10/2026). Étape suivante : lecture de la base MySQL ComicRack CE.
+Remarque : V-07 a porté sur Z:\ (COSMIC COLLECTION, 345 fichiers) ; une recherche sur
+l'ensemble de la collection reste à observer lors de la prochaine recette.
