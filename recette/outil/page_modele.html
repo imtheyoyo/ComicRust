@@ -1,0 +1,405 @@
+<title>__TITRE__</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,600..800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Mise en page : une colonne de « bordereau de recette » ; en-tête collant (avancement + filtres),
+   sections numérotées comme le document, pied avec décision et rapport. */
+:root {
+  --bg: #f3f1ee;
+  --paper: #fffdfa;
+  --ink: #1f1c1a;
+  --muted: #6d6660;
+  --line: #e2ddd6;
+  --accent: #b7410e;        /* rouille, couleur de l'icône ComicRust */
+  --accent-soft: #f6e3d8;
+  --ok: #217a4a;
+  --ok-soft: #dcefe3;
+  --ko: #b3261e;
+  --ko-soft: #f8dedb;
+  --sev-b: #7a1f12;
+  --sev-m: #7a5a12;
+  --sev-l: #5d6670;
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171514; --paper: #211e1c; --ink: #ece7e1; --muted: #a39b93; --line: #34302c;
+    --accent: #e0703f; --accent-soft: #3a2519; --ok: #5cc48b; --ok-soft: #1c3326;
+    --ko: #f0766c; --ko-soft: #3d1f1c; --sev-b: #f19a86; --sev-m: #e5c27a; --sev-l: #a9b1ba;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #171514; --paper: #211e1c; --ink: #ece7e1; --muted: #a39b93; --line: #34302c;
+  --accent: #e0703f; --accent-soft: #3a2519; --ok: #5cc48b; --ok-soft: #1c3326;
+  --ko: #f0766c; --ko-soft: #3d1f1c; --sev-b: #f19a86; --sev-m: #e5c27a; --sev-l: #a9b1ba;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 16px/1.5 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 24px 64px; display: grid; gap: 24px; }
+h1, h2 { font-family: var(--font-display); font-stretch: 85%; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(1.7rem, 4vw, 2.3rem); font-weight: 800; letter-spacing: -0.01em; }
+h1 span { color: var(--accent); }
+h2 { font-size: 1.25rem; font-weight: 700; }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--accent-soft); padding: 0.05em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+.meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 12px 0 0; font-size: 0.95rem; }
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.rule { color: var(--muted); font-size: 0.95rem; margin: 12px 0 0; max-width: 68ch; }
+
+/* En-tête collant */
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); padding-block: 12px; border-bottom: 1px solid var(--line);
+  display: grid; gap: 10px;
+}
+.progress { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; display: flex; }
+.progress i { display: block; height: 100%; transition: width .25s; }
+.progress .p-ok { background: var(--ok); }
+.progress .p-ko { background: var(--ko); }
+.counts { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+.counts b { font-family: var(--font-mono); }
+.counts .c-ok b { color: var(--ok); } .counts .c-ko b { color: var(--ko); }
+.counts .gate { margin-left: auto; font-weight: 600; }
+.gate.go { color: var(--ok); } .gate.nogo { color: var(--ko); } .gate.wait { color: var(--muted); }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.filters button {
+  font: 600 0.9rem var(--font-body); padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer;
+}
+.filters button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.filters button span { font-family: var(--font-mono); font-size: 0.8rem; opacity: .75; margin-left: 4px; }
+
+/* Sections et tests */
+section.block { display: grid; gap: 10px; }
+.block header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.block header .num { font-family: var(--font-mono); color: var(--accent); font-weight: 700; }
+.block header .sc { margin-left: auto; font: 500 0.82rem var(--font-mono); color: var(--muted); }
+.intro { color: var(--muted); font-size: 0.95rem; margin: 0; max-width: 70ch; }
+ol.tests { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.test {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 8px 14px;
+  border-left: 4px solid var(--line);
+}
+.test.st-ok { border-left-color: var(--ok); }
+.test.st-ko { border-left-color: var(--ko); }
+.test .body { min-width: 0; }
+.test .head { display: flex; gap: 8px; align-items: center; margin-bottom: 2px; }
+.tid { font: 700 0.85rem var(--font-mono); }
+.sev { font: 600 0.72rem var(--font-body); text-transform: uppercase; letter-spacing: .06em; padding: 1px 7px; border-radius: 4px; border: 1px solid currentColor; }
+.sev-B { color: var(--sev-b); } .sev-M { color: var(--sev-m); } .sev-m { color: var(--sev-l); }
+.text { margin: 0; overflow-wrap: anywhere; }
+.st-ok .text { color: var(--muted); }
+.actions { display: flex; gap: 6px; align-items: flex-start; }
+.actions button {
+  font: 600 0.9rem var(--font-body); min-width: 74px; padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+}
+.actions .b-ok[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: var(--paper); }
+.actions .b-ko[aria-pressed="true"] { background: var(--ko); border-color: var(--ko); color: var(--paper); }
+.actions .b-ok:hover { border-color: var(--ok); } .actions .b-ko:hover { border-color: var(--ko); }
+.note { grid-column: 1 / -1; display: grid; gap: 4px; }
+.note label { font-size: 0.82rem; color: var(--muted); }
+.note textarea {
+  width: 100%; min-height: 64px; resize: vertical; font: 0.95rem/1.4 var(--font-body);
+  padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+}
+.st-ko .note textarea { border-color: var(--ko); background: var(--ko-soft); }
+button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.empty { color: var(--muted); font-style: italic; margin: 0; }
+
+details { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+details summary { cursor: pointer; font-weight: 600; }
+.tbl { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+td, th { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+details ul { margin: 8px 0 0; padding-left: 20px; }
+
+/* Pied */
+footer.report { display: grid; gap: 12px; border-top: 2px solid var(--ink); padding-top: 16px; }
+.report .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.primary {
+  font: 700 1rem var(--font-body); padding: 10px 18px; border-radius: 6px; cursor: pointer;
+  background: var(--accent); color: #fff; border: 0;
+}
+.ghost { font: 600 0.9rem var(--font-body); padding: 9px 14px; border-radius: 6px; cursor: pointer; background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.ghost.armed { color: var(--ko); border-color: var(--ko); }
+.status { font-size: 0.92rem; color: var(--muted); }
+#rapport { width: 100%; min-height: 180px; font: 0.85rem/1.45 var(--font-mono); padding: 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.hint { font-size: 0.85rem; color: var(--muted); margin: 0; }
+@media (max-width: 560px) {
+  .test { grid-template-columns: 1fr; }
+  .actions button { flex: 1; }
+  .counts .gate { margin-left: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .progress i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1 id="titre"></h1>
+    <dl class="meta" id="meta"></dl>
+    <p class="rule" id="rule"></p>
+  </div>
+
+  <div class="bar" role="region" aria-label="Avancement">
+    <div class="progress" aria-hidden="true"><i class="p-ok" id="pOk"></i><i class="p-ko" id="pKo"></i></div>
+    <div class="counts">
+      <span><b id="cDone">0</b> / <b id="cTotal">0</b> testés</span>
+      <span class="c-ok"><b id="cOk">0</b> OK</span>
+      <span class="c-ko"><b id="cKo">0</b> échecs</span>
+      <span><b id="cB">0</b> bloquants OK sur <b id="cBt">0</b></span>
+      <span class="gate wait" id="gate"></span>
+    </div>
+    <div class="filters" role="group" aria-label="Filtre">
+      <button type="button" data-f="tout" aria-pressed="true">Tout<span id="fTout"></span></button>
+      <button type="button" data-f="afaire" aria-pressed="false">À faire<span id="fAfaire"></span></button>
+      <button type="button" data-f="echecs" aria-pressed="false">Échecs<span id="fEchecs"></span></button>
+    </div>
+  </div>
+
+  <details id="auto"><summary>Déjà vérifié automatiquement</summary><p class="intro" id="autoIntro"></p><div class="tbl"><table><thead><tr><th>Vérification</th><th>Où</th><th>Résultat</th></tr></thead><tbody id="autoRows"></tbody></table></div></details>
+
+  <div id="sections" style="display:grid;gap:28px"></div>
+  <p class="empty" id="globalEmpty" hidden></p>
+
+  <details id="limits"><summary>Limites connues (ne pas compter comme échecs)</summary><ul id="limitsList"></ul></details>
+
+  <footer class="report">
+    <h2>Rapport</h2>
+    <p class="hint">Le rapport résume les échecs avec tes notes, les valeurs notées et les tests restants. Colle-le dans la conversation pour préparer la version suivante.</p>
+    <div class="row">
+      <button type="button" class="primary" id="copy">Copier le rapport</button>
+      <span class="status" id="copyStatus" role="status"></span>
+      <button type="button" class="ghost" id="reset" style="margin-left:auto">Tout effacer</button>
+    </div>
+    <textarea id="rapport" readonly hidden aria-label="Rapport à copier"></textarea>
+  </footer>
+</div>
+
+<script>
+const DATA = /*__DONNEES__*/null;
+const KEY = "comicrust-recette-" + DATA.version;
+const SEV = { B: "Bloquant", M: "Majeur", m: "Mineur" };
+
+// ---- état (gardé dans ce navigateur) ----
+let state = {};
+try { state = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { state = {}; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+const get = id => state[id] || (state[id] = { s: "", n: "" });
+
+// ---- petit rendu Markdown en ligne ----
+function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function inline(md) {
+  let h = esc(md);
+  h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
+  h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, t, u) => {
+    const url = /^https?:/.test(u) ? u : DATA.repo_base + u;
+    return '<a href="' + url + '" target="_blank" rel="noopener">' + t + "</a>";
+  });
+  return h;
+}
+const plain = md => md.replace(/`([^`]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+const wantsValue = t => t.includes("………");
+
+// ---- construction ----
+const all = [];
+document.getElementById("titre").innerHTML = esc(DATA.title).replace(DATA.version, '<span>' + DATA.version + "</span>");
+document.getElementById("meta").innerHTML = DATA.meta.map(([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + inline(v) + "</dd>").join("");
+document.getElementById("rule").innerHTML = inline(DATA.rule);
+document.getElementById("autoIntro").innerHTML = inline(DATA.auto_intro || "");
+document.getElementById("autoRows").innerHTML = DATA.auto.map(r => "<tr>" + r.map(c => "<td>" + inline(c) + "</td>").join("") + "</tr>").join("");
+document.getElementById("limitsList").innerHTML = DATA.limits.map(l => "<li>" + inline(l) + "</li>").join("");
+if (!DATA.auto.length) document.getElementById("auto").hidden = true;
+if (!DATA.limits.length) document.getElementById("limits").hidden = true;
+
+const secRoot = document.getElementById("sections");
+DATA.sections.forEach((sec, si) => {
+  const el = document.createElement("section");
+  el.className = "block";
+  el.innerHTML = '<header><span class="num">' + (si + 1) + '.</span><h2>' + esc(sec.title) + '</h2><span class="sc"></span></header>' +
+    (sec.intro ? '<p class="intro">' + inline(sec.intro) + "</p>" : "") + '<ol class="tests"></ol>';
+  const ol = el.querySelector("ol");
+  sec.items.forEach(it => {
+    const li = document.createElement("li");
+    li.className = "test";
+    li.id = "t-" + it.id;
+    const value = wantsValue(it.text);
+    li.innerHTML =
+      '<div class="body"><div class="head"><span class="tid">' + it.id + '</span><span class="sev sev-' + it.sev + '" title="' + SEV[it.sev] + '">' + SEV[it.sev] + "</span></div>" +
+      '<p class="text">' + inline(it.text) + "</p></div>" +
+      '<div class="actions"><button type="button" class="b-ok" aria-pressed="false">OK</button><button type="button" class="b-ko" aria-pressed="false">Échec</button></div>' +
+      '<div class="note" hidden><label for="n-' + it.id + '"></label><textarea id="n-' + it.id + '"></textarea></div>';
+    const rec = { it, li, sec: el, value };
+    li.querySelector(".b-ok").addEventListener("click", () => setStatus(rec, "ok"));
+    li.querySelector(".b-ko").addEventListener("click", () => setStatus(rec, "ko"));
+    const ta = li.querySelector("textarea");
+    ta.value = get(it.id).n || "";
+    ta.addEventListener("input", () => { get(it.id).n = ta.value; save(); });
+    ol.appendChild(li);
+    all.push(rec);
+  });
+  secRoot.appendChild(el);
+});
+
+function setStatus(rec, s) {
+  const st = get(rec.it.id);
+  st.s = st.s === s ? "" : s;   // un second clic annule
+  save();
+  paint(rec);
+  if (st.s === "ko") {
+    const ta = rec.li.querySelector("textarea");
+    ta.focus({ preventScroll: true });
+  }
+  refresh();
+}
+
+function paint(rec) {
+  const st = get(rec.it.id);
+  rec.li.classList.toggle("st-ok", st.s === "ok");
+  rec.li.classList.toggle("st-ko", st.s === "ko");
+  rec.li.querySelector(".b-ok").setAttribute("aria-pressed", st.s === "ok");
+  rec.li.querySelector(".b-ko").setAttribute("aria-pressed", st.s === "ko");
+  const note = rec.li.querySelector(".note");
+  const showNote = st.s === "ko" || rec.value || (st.n && st.n.trim());
+  note.hidden = !showNote;
+  note.querySelector("label").textContent = st.s === "ko"
+    ? "Ce qui s'est passé (étapes, message, fichier concerné)"
+    : (rec.value ? "Valeurs à noter (remplace les ………)" : "Note");
+}
+
+let filter = "tout";
+try { filter = localStorage.getItem(KEY + "-filtre") || "tout"; } catch (e) {}
+document.querySelectorAll(".filters button").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.f;
+  try { localStorage.setItem(KEY + "-filtre", filter); } catch (e) {}
+  refresh();
+}));
+
+function refresh() {
+  let ok = 0, ko = 0, bOk = 0, bT = 0, bKo = 0;
+  all.forEach(r => {
+    const s = get(r.it.id).s;
+    if (s === "ok") ok++; if (s === "ko") ko++;
+    if (r.it.sev === "B") { bT++; if (s === "ok") bOk++; if (s === "ko") bKo++; }
+    const visible = filter === "tout" || (filter === "afaire" && !s) || (filter === "echecs" && s === "ko");
+    r.li.hidden = !visible;
+  });
+  const total = all.length, done = ok + ko;
+  document.getElementById("cDone").textContent = done;
+  document.getElementById("cTotal").textContent = total;
+  document.getElementById("cOk").textContent = ok;
+  document.getElementById("cKo").textContent = ko;
+  document.getElementById("cB").textContent = bOk;
+  document.getElementById("cBt").textContent = bT;
+  document.getElementById("pOk").style.width = (ok / total * 100) + "%";
+  document.getElementById("pKo").style.width = (ko / total * 100) + "%";
+  document.getElementById("fTout").textContent = total;
+  document.getElementById("fAfaire").textContent = total - done;
+  document.getElementById("fEchecs").textContent = ko;
+  document.querySelectorAll(".filters button").forEach(b => b.setAttribute("aria-pressed", b.dataset.f === filter));
+  const gate = document.getElementById("gate");
+  if (bKo > 0) { gate.className = "gate nogo"; gate.textContent = "NO-GO : bloquant en échec"; }
+  else if (bOk === bT) { gate.className = "gate go"; gate.textContent = "GO possible : bloquants tous OK"; }
+  else { gate.className = "gate wait"; gate.textContent = (bT - bOk) + " bloquant(s) à tester"; }
+  document.querySelectorAll("section.block").forEach((sec, i) => {
+    const items = DATA.sections[i].items;
+    const d = items.filter(it => get(it.id).s).length;
+    sec.querySelector(".sc").textContent = d + "/" + items.length;
+    const anyVisible = [...sec.querySelectorAll(".test")].some(li => !li.hidden);
+    sec.hidden = !anyVisible;
+  });
+  const empty = document.getElementById("globalEmpty");
+  empty.hidden = all.some(r => !r.li.hidden);
+  empty.textContent = filter === "echecs" ? "Aucun échec pour l'instant." : "Tous les tests ont été passés.";
+}
+
+// ---- rapport ----
+function report() {
+  const ko = all.filter(r => get(r.it.id).s === "ko");
+  const ok = all.filter(r => get(r.it.id).s === "ok");
+  const todo = all.filter(r => !get(r.it.id).s);
+  const values = all.filter(r => get(r.it.id).s !== "ko" && (get(r.it.id).n || "").trim());
+  const bKo = ko.filter(r => r.it.sev === "B").length;
+  const bTodo = todo.filter(r => r.it.sev === "B").length;
+  const decision = bKo ? "NO-GO (" + bKo + " bloquant(s) en échec)" : bTodo ? "incomplète (" + bTodo + " bloquant(s) non testé(s))" : "GO possible (bloquants tous OK)";
+  const date = new Date().toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+  const L = [];
+  L.push("Rapport de recette ComicRust " + DATA.version + " — " + date);
+  L.push("Résultat : " + ok.length + " OK, " + ko.length + " échec(s), " + todo.length + " non testé(s) sur " + all.length + ".");
+  L.push("Décision proposée : " + decision + ".");
+  L.push("");
+  L.push("ÉCHECS (" + ko.length + ")");
+  if (!ko.length) L.push("  aucun");
+  ko.forEach(r => {
+    L.push("- " + r.it.id + " [" + SEV[r.it.sev] + "] " + plain(r.it.text));
+    const n = (get(r.it.id).n || "").trim();
+    L.push("  Note : " + (n ? n.replace(/\n/g, "\n         ") : "(pas de note)"));
+  });
+  if (values.length) {
+    L.push("");
+    L.push("VALEURS NOTÉES ET REMARQUES");
+    values.forEach(r => L.push("- " + r.it.id + " : " + get(r.it.id).n.trim().replace(/\n/g, " / ")));
+  }
+  if (todo.length) {
+    L.push("");
+    L.push("NON TESTÉS (" + todo.length + ") : " + todo.map(r => r.it.id + (r.it.sev === "B" ? "*" : "")).join(", ") + (bTodo ? "   (* = bloquant)" : ""));
+  }
+  return L.join("\n");
+}
+
+document.getElementById("copy").addEventListener("click", () => {
+  const text = report();
+  const ta = document.getElementById("rapport");
+  const status = document.getElementById("copyStatus");
+  ta.value = text;
+  const fallback = () => {
+    ta.hidden = false;
+    ta.focus(); ta.select();
+    status.textContent = "Copie automatique refusée : le texte est sélectionné, fais Ctrl+C.";
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      ta.hidden = false;
+      status.textContent = "Rapport copié. Colle-le dans la conversation.";
+    }, fallback);
+  } else fallback();
+});
+
+const resetBtn = document.getElementById("reset");
+let armed = null;
+resetBtn.addEventListener("click", () => {
+  if (!armed) {
+    resetBtn.classList.add("armed");
+    resetBtn.textContent = "Confirmer l'effacement";
+    armed = setTimeout(() => { armed = null; resetBtn.classList.remove("armed"); resetBtn.textContent = "Tout effacer"; }, 4000);
+    return;
+  }
+  clearTimeout(armed); armed = null;
+  state = {}; save();
+  all.forEach(r => { r.li.querySelector("textarea").value = ""; paint(r); });
+  resetBtn.classList.remove("armed"); resetBtn.textContent = "Tout effacer";
+  document.getElementById("rapport").hidden = true;
+  document.getElementById("copyStatus").textContent = "Coches et notes effacées.";
+  refresh();
+});
+
+all.forEach(paint);
+refresh();
+</script>

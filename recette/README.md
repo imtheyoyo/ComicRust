@@ -5,17 +5,22 @@ et à valider **avant de passer à l'étape suivante** du développement.
 
 | Version | Document | Décision |
 |---|---|---|
-| v0.2.0 | [v0.2.0.md](v0.2.0.md) | en attente |
+| v0.2.0 | [v0.2.0.md](v0.2.0.md) — [page à cocher](https://claude.ai/artifact/WhQ9pNG5E5i4sbx4Kt9cPn) | en attente |
 
 ## Déroulé
 
 1. La release est publiée en pré-release avec son document `recette/vX.Y.Z.md`
    (la CI refuse de publier une version sans recette, et la joint au zip sous `RECETTE.md`).
-2. Le testeur coche les tests réussis, note les anomalies et remplit le bilan.
-3. **GO** si tous les tests [B] sont OK (et les [M] en échec ont un correctif prévu) : on passe
+2. Une **page à cocher** est générée depuis le document
+   (`python3 recette/outil/generer_page.py recette/vX.Y.Z.md recette-vX.Y.Z.html`) et publiée :
+   boutons OK / Échec par test, note à l'échec, avancement, filtres, et « Copier le rapport »
+   qui résume les échecs avec les notes. Les coches restent dans le navigateur du testeur.
+   (On peut aussi cocher directement le Markdown.)
+3. Le rapport copié est collé dans la conversation : il sert de base à la version suivante.
+4. **GO** si tous les tests [B] sont OK (et les [M] en échec ont un correctif prévu) : on passe
    à l'étape suivante de la feuille de route. **NO-GO** : correctifs, nouvelle version `vX.Y.Z+1`
    avec sa propre recette (reprise des tests en échec + non-régression).
-4. Le document rempli est enregistré dans le dépôt (commit) et la décision reportée dans le
+5. Le bilan est enregistré dans le dépôt (commit) et la décision reportée dans le
    tableau ci-dessus.
 
 ## Gravités

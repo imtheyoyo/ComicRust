@@ -7,6 +7,9 @@
   de passer à l'étape suivante). Le rédiger avant de lancer la release ; la CI refuse de publier
   sans lui. Voir `recette/README.md` pour le format (gravités [B]/[M]/[m], section « déjà vérifié
   automatiquement », non-régression, limites connues, bilan GO/NO-GO).
+- Pour chaque recette, générer et publier la page à cocher avec `recette/outil/generer_page.py`
+  (une page par version). Yoyo colle le rapport copié depuis cette page : s'en servir pour la
+  version suivante (correctifs + non-régression).
 - Ne pas commencer l'étape suivante de la feuille de route tant que la recette de la version
   courante n'est pas validée (GO) par Yoyo.
 - Avant de publier : `cargo clippy --all-targets -- -D warnings` et `cargo test --all`
