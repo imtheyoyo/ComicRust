@@ -28,11 +28,28 @@ menu ⚙ → *Base ComicRack (MySQL)…*, puis soit choisir le `ComicRack.ini` (
 mot de passe n'est pas recopié dans ComicRust), soit saisir les paramètres. *Tester la
 connexion* affiche le nombre de livres.
 
-L'onglet **Bibliothèque** affiche alors toutes les BD de la base : couvertures (miniatures
-mises en cache dans `data\couvertures`), recherche sur série, titre, auteurs, arc, année et
-chemin, regroupement par série, barre de lecture. Un clic ouvre la BD à la page où ComicRack
-l'avait laissée. Les listes `.cbl` sont d'abord résolues par l'identifiant des livres dans la
-base, puis par la recherche dans un dossier (v0.2.1).
+L'onglet **Bibliothèque** affiche alors toutes les BD de la base, en **couvertures** (la page
+choisie comme couverture dans ComicRack, miniatures mises en cache dans `data\couvertures`) ou
+en **tableau** (colonnes triables d'un clic) :
+
+- recherche sur série, titre, auteurs, personnages, équipes, étiquettes, arc, année et chemin ;
+- **tri** (série, titre, parution, ajout, dernière lecture, note, pages, avancement, taille,
+  chemin, ordre de la liste) croissant ou décroissant, et **regroupement** (série, éditeur,
+  scénariste, année, arc, genre, format, état de lecture, ou aucun) ;
+- panneau **Listes** : dossiers, listes de lecture et listes intelligentes de ComicRack, lues
+  dans son `ComicDb.xml` (trouvé d'après `ComicRack.ini`, ou choisi avec « … ») ; une liste de
+  lecture s'affiche dans son ordre ;
+- panneau **Détails** : fiche complète du livre sélectionné (résumé, auteurs, personnages,
+  lieux, note, lecture…) ;
+- un clic sélectionne, un **double-clic** ou **Entrée** ouvre la BD à la page où ComicRack
+  l'avait laissée.
+
+Les **modifications faites dans ComicRack** (livre ajouté, modifié, supprimé, liste changée)
+apparaissent en quelques secondes, sans recharger : ComicRust suit les compteurs de la table
+`changes`, comme ComicRack lui-même (désactivable dans le menu ⚙).
+
+Les listes `.cbl` sont d'abord résolues par l'identifiant des livres dans la base, puis par la
+recherche dans un dossier (v0.2.1).
 
 ## Mises à jour
 
@@ -100,7 +117,7 @@ comicrust-cli missing "F:\BD" Thanos.cbl            # ou un ComicDB.xml à la pl
 
 | Crate | Rôle |
 |---|---|
-| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, listes `.cbl`, `ComicDB.xml`, index de fichiers, base MySQL (`db/`) |
+| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, listes `.cbl`, `ComicDB.xml` et ses listes (`comic_lists`), index de fichiers, base MySQL et suivi des modifications (`db/`) |
 | `comicrust` | l'application `ComicRust.exe` (egui) : `app`, `book/`, `library/`, `reading_list`, `update/`, `ui/`… |
 | `comicrust-cli` | outil en ligne de commande |
 
@@ -113,7 +130,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.3.0](recette/v0.3.0.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.4.0](recette/v0.4.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -141,10 +158,13 @@ la recette et les échantillons. **La release échoue si `recette/<tag>.md` n'ex
 
 1. ~~Lecture de la base **MySQL** de ComicRack CE, vue Bibliothèque (couvertures, recherche,
    groupement)~~ (v0.3.0).
-2. Panneau de détails, tri et groupements au choix, listes de la base (`ComicDB.xml`/MySQL).
+2. ~~Panneau de détails, tri et groupements au choix, vue tableau, listes de ComicRack,
+   couverture choisie, suivi des modifications~~ (v0.4.0).
 3. **Listes intelligentes** (syntaxe de requête ComicRack).
 4. Écriture de `ComicInfo.xml`, conversion CBR→CBZ, HEIF/AVIF, scrapers WebComic.
 5. Associations de fichiers Windows, serveur HTTP/OPDS, scripts.
+6. Version majeure : **enregistrer la lecture dans ComicRack** (page lue, « lu ») — ComicRust
+   cessera alors d'être en lecture seule.
 
 ## Licences
 

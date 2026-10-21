@@ -1,14 +1,20 @@
-//! Bibliothèque : livres de la base MySQL de ComicRack, chargés en arrière-plan,
-//! filtrés et triés pour la vue Bibliothèque.
+//! Bibliothèque : livres de la base MySQL de ComicRack, chargés en arrière-plan puis
+//! tenus à jour (voir `watch`), filtrés, triés et regroupés pour la vue Bibliothèque.
 
 pub mod covers;
+pub mod sorting;
+pub mod watch;
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
-use comicrust_core::db::{ComicDatabase, DbConfig, LoadProgress};
-use comicrust_core::library::LibraryBook;
+use comicrust_core::comic_lists::{ComicList, Members};
+use comicrust_core::db::{Applied, ComicDatabase, DbConfig, LoadProgress};
 use eframe::egui;
+
+pub use sorting::{GroupKey, SortKey};
 
 pub enum Status {
     /// Aucune base configurée.
@@ -22,21 +28,100 @@ pub enum Status {
     Failed(String),
 }
 
-/// Ligne de la vue : titre de série ou rangée de couvertures.
+/// Ligne de la vue : titre de groupe ou rangée de couvertures.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Row {
-    Header { series: String, count: usize },
+    Header { title: String, count: usize },
     Covers(Vec<usize>),
+}
+
+/// Listes de ComicRack (`ComicDb.xml`).
+#[derive(Default)]
+pub struct Lists {
+    pub path: Option<PathBuf>,
+    pub items: Vec<ComicList>,
+    pub error: Option<String>,
+    /// Nombre de livres de chaque liste présents dans la base, par identifiant de liste
+    /// (`None` : inconnu), calculé pour la génération de base indiquée.
+    counts: HashMap<String, Option<usize>>,
+    counts_for: Option<u64>,
+}
+
+impl Lists {
+    pub fn set(&mut self, path: Option<PathBuf>, result: Result<Vec<ComicList>, String>) {
+        self.path = path;
+        match result {
+            Ok(items) => {
+                self.items = items;
+                self.error = None;
+            }
+            Err(e) => {
+                self.items.clear();
+                self.error = Some(e);
+            }
+        }
+        self.counts_for = None;
+    }
+
+    pub fn count(&self, id: &str) -> Option<usize> {
+        self.counts.get(id).copied().flatten()
+    }
+
+    fn refresh_counts(&mut self, db: &ComicDatabase, generation: u64) {
+        if self.counts_for == Some(generation) {
+            return;
+        }
+        fn walk(l: &ComicList, db: &ComicDatabase, out: &mut HashMap<String, Option<usize>>) {
+            let n = match l.members() {
+                Members::All => Some(db.len()),
+                Members::Ids(ids) => Some(ids.iter().filter(|i| db.index_of(i).is_some()).count()),
+                Members::Unknown => None,
+            };
+            out.insert(l.id.clone(), n);
+            if let comicrust_core::comic_lists::ListKind::Folder { children, .. } = &l.kind {
+                for c in children {
+                    walk(c, db, out);
+                }
+            }
+        }
+        self.counts.clear();
+        for l in &self.items {
+            walk(l, db, &mut self.counts);
+        }
+        self.counts_for = Some(generation);
+    }
+}
+
+/// Options d'affichage qui déterminent la vue (cache invalidé quand elles changent).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewOptions {
+    pub sort: SortKey,
+    pub descending: bool,
+    pub group: GroupKey,
 }
 
 pub struct LibraryState {
     pub status: Status,
     pub search: String,
-    /// Indices des livres affichés, dans l'ordre (cache du filtre et du tri).
+    /// Liste ComicRack affichée (`None` : toute la bibliothèque).
+    pub selected_list: Option<String>,
+    /// Livre sélectionné (panneau de détails).
+    pub selected_book: Option<String>,
+    pub lists: Lists,
+    /// Dernière actualisation automatique (bilan affiché dans la barre d'état).
+    pub last_refresh: Option<Applied>,
+    /// Erreur de la surveillance (base injoignable…), effacée au retour.
+    pub watch_error: Option<String>,
+    /// Augmente à chaque modification de la base (invalide le cache de la vue).
+    generation: u64,
     view: Vec<usize>,
-    view_key: Option<(String, bool, usize)>,
-    /// Indique au panneau d'afficher le résultat d'un test de connexion.
+    /// Rang de chaque livre dans la liste affichée (ordre de lecture).
+    positions: HashMap<usize, usize>,
+    view_key: Option<(String, ViewOptions, Option<String>, u64)>,
     pub last_loaded_from: Option<String>,
+    pub watcher: Option<watch::WatchHandle>,
+    /// Paramètres de la base chargée (pour la surveillance).
+    pub config: Option<DbConfig>,
 }
 
 impl Default for LibraryState {
@@ -44,39 +129,20 @@ impl Default for LibraryState {
         Self {
             status: Status::NotConfigured,
             search: String::new(),
+            selected_list: None,
+            selected_book: None,
+            lists: Lists::default(),
+            last_refresh: None,
+            watch_error: None,
+            generation: 0,
             view: Vec::new(),
+            positions: HashMap::new(),
             view_key: None,
             last_loaded_from: None,
+            watcher: None,
+            config: None,
         }
     }
-}
-
-/// Clé de tri : série, volume, numéro (ordre naturel), titre.
-fn sort_key(b: &LibraryBook) -> (String, i32, String, String) {
-    (
-        b.series.clone().unwrap_or_default().to_lowercase(),
-        b.volume.unwrap_or(-1),
-        b.number.clone().unwrap_or_default(),
-        b.title.clone().unwrap_or_default().to_lowercase(),
-    )
-}
-
-fn matches(b: &LibraryBook, words: &[String]) -> bool {
-    if words.is_empty() {
-        return true;
-    }
-    let hay = format!(
-        "{} {} {} {} {} {} {}",
-        b.caption(),
-        b.series.as_deref().unwrap_or(""),
-        b.writer.as_deref().unwrap_or(""),
-        b.penciller.as_deref().unwrap_or(""),
-        b.story_arc.as_deref().unwrap_or(""),
-        b.year.map(|y| y.to_string()).unwrap_or_default(),
-        b.file.as_deref().unwrap_or(""),
-    )
-    .to_lowercase();
-    words.iter().all(|w| hay.contains(w))
 }
 
 impl LibraryState {
@@ -87,14 +153,17 @@ impl LibraryState {
         let p = progress.clone();
         let ctx = ctx.clone();
         let what = cfg.describe();
+        let c = cfg.clone();
         std::thread::Builder::new()
             .name("comicrust-db".into())
             .spawn(move || {
-                let _ = tx.send(ComicDatabase::load(&cfg, Some(&p)).map_err(|e| e.to_string()));
+                let _ = tx.send(ComicDatabase::load(&c, Some(&p)).map_err(|e| e.to_string()));
                 ctx.request_repaint();
             })
             .expect("fil de chargement de la base");
         self.status = Status::Loading { rx, progress, what: what.clone() };
+        self.config = Some(cfg);
+        self.watcher = None;
         self.last_loaded_from = Some(what);
         self.view_key = None;
     }
@@ -121,55 +190,84 @@ impl LibraryState {
         }
     }
 
+    /// Applique des modifications lues dans la base ComicRack.
+    pub fn apply_changes(&mut self, ch: comicrust_core::db::Changes) -> Applied {
+        let Status::Loaded(db) = &mut self.status else { return Applied::default() };
+        let applied = Arc::make_mut(db).apply(ch);
+        self.generation += 1;
+        self.last_refresh = Some(applied);
+        applied
+    }
+
     /// Nombre de livres affichés lors du dernier calcul de la vue.
     pub fn shown(&self) -> usize {
         self.view.len()
     }
 
-    /// Livres affichés (filtrés par la recherche, triés).
-    pub fn view(&mut self, group: bool) -> &[usize] {
+    /// Met à jour le nombre de livres par liste si la base ou les listes ont changé.
+    pub fn refresh_list_counts(&mut self) {
+        if let Some(db) = self.database() {
+            self.lists.refresh_counts(&db, self.generation);
+        }
+    }
+
+    pub fn selected_list(&self) -> Option<&ComicList> {
+        let id = self.selected_list.as_deref()?;
+        ComicList::find(&self.lists.items, id)
+    }
+
+    /// Rang d'un livre dans la liste ComicRack affichée.
+    pub fn position(&self, index: usize) -> Option<usize> {
+        self.positions.get(&index).copied()
+    }
+
+    /// Livres affichés (liste choisie, recherche, tri).
+    pub fn view(&mut self, opts: &ViewOptions) -> &[usize] {
         let Some(db) = self.database() else {
             self.view.clear();
             return &self.view;
         };
-        let key = (self.search.clone(), group, db.len());
-        if self.view_key.as_ref() != Some(&key) {
-            let words: Vec<String> = self.search.to_lowercase().split_whitespace().map(str::to_string).collect();
-            let mut v: Vec<usize> = (0..db.books.len()).filter(|&i| matches(&db.books[i], &words)).collect();
-            v.sort_by(|&a, &b| {
-                let (ka, kb) = (sort_key(&db.books[a]), sort_key(&db.books[b]));
-                ka.0.cmp(&kb.0).then(ka.1.cmp(&kb.1)).then_with(|| natord::compare(&ka.2, &kb.2)).then(ka.3.cmp(&kb.3))
-            });
-            self.view = v;
-            self.view_key = Some(key);
+        let key = (self.search.clone(), opts.clone(), self.selected_list.clone(), self.generation);
+        if self.view_key.as_ref() == Some(&key) {
+            return &self.view;
         }
+        // Livres de la liste choisie, dans l'ordre de la liste.
+        let members = self.selected_list().map(ComicList::members).unwrap_or(Members::All);
+        let base: Vec<usize> = match members {
+            Members::All => (0..db.books.len()).collect(),
+            Members::Ids(ids) => ids.iter().filter_map(|id| db.index_of(id)).collect(),
+            Members::Unknown => Vec::new(),
+        };
+        self.positions = base.iter().enumerate().map(|(pos, &i)| (i, pos)).collect();
+        let words: Vec<String> = self.search.to_lowercase().split_whitespace().map(str::to_string).collect();
+        let mut v: Vec<usize> = base.into_iter().filter(|&i| sorting::matches(&db.books[i], &words)).collect();
+        let positions = &self.positions;
+        sorting::sort(&mut v, &db.books, opts, |i| positions.get(&i).copied());
+        self.view = v;
+        self.view_key = Some(key);
         &self.view
     }
 
-    /// Découpe la vue en rangées de `columns` couvertures, avec un titre par série si `group`.
-    pub fn rows(&mut self, group: bool, columns: usize) -> Vec<Row> {
+    /// Découpe la vue en rangées de `columns` couvertures, avec un titre par groupe.
+    pub fn rows(&mut self, opts: &ViewOptions, columns: usize) -> Vec<Row> {
         let columns = columns.max(1);
         let db = self.database();
-        let view = self.view(group).to_vec();
+        let view = self.view(opts).to_vec();
         let Some(db) = db else { return Vec::new() };
-        let mut rows = Vec::new();
-        if !group {
-            rows.extend(view.chunks(columns).map(|c| Row::Covers(c.to_vec())));
-            return rows;
+        if opts.group == GroupKey::None {
+            return view.chunks(columns).map(|c| Row::Covers(c.to_vec())).collect();
         }
+        let mut rows = Vec::new();
         let mut i = 0;
         while i < view.len() {
-            let series = db.books[view[i]].series.clone().unwrap_or_default();
+            let title = opts.group.label(&db.books[view[i]]);
             let start = i;
-            while i < view.len() && db.books[view[i]].series.clone().unwrap_or_default() == series {
+            while i < view.len() && opts.group.label(&db.books[view[i]]) == title {
                 i += 1;
             }
-            let group_items = &view[start..i];
-            rows.push(Row::Header {
-                series: if series.is_empty() { "(sans série)".into() } else { series },
-                count: group_items.len(),
-            });
-            rows.extend(group_items.chunks(columns).map(|c| Row::Covers(c.to_vec())));
+            let items = &view[start..i];
+            rows.push(Row::Header { title, count: items.len() });
+            rows.extend(items.chunks(columns).map(|c| Row::Covers(c.to_vec())));
         }
         rows
     }
@@ -178,6 +276,8 @@ impl LibraryState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use comicrust_core::comic_lists::ListKind;
+    use comicrust_core::library::LibraryBook;
 
     fn book(id: &str, series: &str, number: &str, writer: &str) -> LibraryBook {
         LibraryBook {
@@ -201,32 +301,73 @@ mod tests {
         LibraryState { status: Status::Loaded(Arc::new(db)), ..Default::default() }
     }
 
+    fn series() -> ViewOptions {
+        ViewOptions { sort: SortKey::Series, descending: false, group: GroupKey::Series }
+    }
+
+    fn ids(s: &mut LibraryState, o: &ViewOptions) -> Vec<String> {
+        let db = s.database().unwrap();
+        s.view(o).iter().map(|&i| db.books[i].id.clone()).collect()
+    }
+
     #[test]
     fn sorted_by_series_then_natural_number() {
         let mut s = state();
-        let db = s.database().unwrap();
-        let ids: Vec<&str> = s.view(true).iter().map(|&i| db.books[i].id.as_str()).collect();
-        assert_eq!(ids, ["c", "e", "b", "a", "d"]);
+        assert_eq!(ids(&mut s, &series()), ["c", "e", "b", "a", "d"]);
+        let desc = ViewOptions { descending: true, group: GroupKey::None, ..series() };
+        assert_eq!(ids(&mut s, &desc), ["d", "a", "b", "e", "c"]);
     }
 
     #[test]
     fn search_all_words_case_insensitive() {
         let mut s = state();
         s.search = "starlin THANOS".into();
-        assert_eq!(s.view(true).len(), 3);
+        assert_eq!(s.view(&series()).len(), 3);
         s.search = "aaron".into();
-        assert_eq!(s.view(true).len(), 1);
+        assert_eq!(s.view(&series()).len(), 1);
     }
 
     #[test]
-    fn rows_with_series_headers() {
+    fn rows_with_group_headers() {
         let mut s = state();
-        let rows = s.rows(true, 2);
-        assert_eq!(rows[0], Row::Header { series: "COSMIC COLLECTION".into(), count: 1 });
+        let rows = s.rows(&series(), 2);
+        assert_eq!(rows[0], Row::Header { title: "COSMIC COLLECTION".into(), count: 1 });
         assert!(matches!(&rows[1], Row::Covers(v) if v.len() == 1));
-        assert_eq!(rows[2], Row::Header { series: "Thanos".into(), count: 3 });
+        assert_eq!(rows[2], Row::Header { title: "Thanos".into(), count: 3 });
         assert!(matches!(&rows[3], Row::Covers(v) if v.len() == 2));
         assert!(matches!(&rows[4], Row::Covers(v) if v.len() == 1));
-        assert_eq!(s.rows(false, 2).len(), 3);
+        let flat = ViewOptions { group: GroupKey::None, ..series() };
+        assert_eq!(s.rows(&flat, 2).len(), 3);
+        let by_writer = ViewOptions { group: GroupKey::Writer, ..series() };
+        let rows = s.rows(&by_writer, 10);
+        assert_eq!(rows[0], Row::Header { title: "Jason Aaron".into(), count: 1 });
+        assert_eq!(rows[2], Row::Header { title: "Jim Starlin".into(), count: 4 });
+    }
+
+    #[test]
+    fn reading_list_keeps_its_order() {
+        let mut s = state();
+        s.lists.items = vec![ComicList {
+            id: "l".into(),
+            name: "Ordre".into(),
+            description: String::new(),
+            kind: ListKind::Ids(vec!["d".into(), "zzz".into(), "a".into(), "c".into()]),
+        }];
+        s.selected_list = Some("l".into());
+        let o = ViewOptions { sort: SortKey::Position, descending: false, group: GroupKey::None };
+        assert_eq!(ids(&mut s, &o), ["d", "a", "c"], "identifiant absent de la base ignoré");
+        let db = s.database().unwrap();
+        assert_eq!(s.position(db.index_of("c").unwrap()), Some(2));
+    }
+
+    #[test]
+    fn changes_refresh_the_view() {
+        let mut s = state();
+        assert_eq!(s.view(&series()).len(), 5);
+        let mut ch = comicrust_core::db::Changes::default();
+        ch.updated.push(book("f", "Adam Warlock", "1", "Jim Starlin"));
+        let applied = s.apply_changes(ch);
+        assert_eq!(applied.added, 1);
+        assert_eq!(ids(&mut s, &series())[0], "f");
     }
 }

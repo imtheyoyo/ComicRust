@@ -56,6 +56,97 @@ pub struct LibraryBook {
     /// Date de dernière lecture.
     #[serde(rename = "Opened", default)]
     pub opened: Option<String>,
+    /// Date de parution saisie dans ComicRack (« Released »).
+    #[serde(rename = "Released", default)]
+    pub released: Option<String>,
+    #[serde(rename = "OpenCount", default)]
+    pub open_count: Option<u32>,
+    #[serde(rename = "FileSize", default)]
+    pub file_size: Option<u64>,
+    #[serde(rename = "AlternateNumber", default)]
+    pub alternate_number: Option<String>,
+    #[serde(rename = "AlternateCount", default)]
+    pub alternate_count: Option<i32>,
+    #[serde(rename = "SeriesGroup", default)]
+    pub series_group: Option<String>,
+    #[serde(rename = "Summary", default)]
+    pub summary: Option<String>,
+    #[serde(rename = "Notes", default)]
+    pub notes: Option<String>,
+    #[serde(rename = "Review", default)]
+    pub review: Option<String>,
+    #[serde(rename = "Month", default)]
+    pub month: Option<i32>,
+    #[serde(rename = "Day", default)]
+    pub day: Option<i32>,
+    #[serde(rename = "Inker", default)]
+    pub inker: Option<String>,
+    #[serde(rename = "Colorist", default)]
+    pub colorist: Option<String>,
+    #[serde(rename = "Letterer", default)]
+    pub letterer: Option<String>,
+    #[serde(rename = "CoverArtist", default)]
+    pub cover_artist: Option<String>,
+    #[serde(rename = "Editor", default)]
+    pub editor: Option<String>,
+    #[serde(rename = "Translator", default)]
+    pub translator: Option<String>,
+    #[serde(rename = "Imprint", default)]
+    pub imprint: Option<String>,
+    #[serde(rename = "Web", default)]
+    pub web: Option<String>,
+    #[serde(rename = "LanguageISO", default)]
+    pub language_iso: Option<String>,
+    #[serde(rename = "Format", default)]
+    pub format: Option<String>,
+    #[serde(rename = "AgeRating", default)]
+    pub age_rating: Option<String>,
+    #[serde(rename = "BlackAndWhite", default)]
+    pub black_and_white: Option<String>,
+    #[serde(rename = "Manga", default)]
+    pub manga: Option<String>,
+    #[serde(rename = "Characters", default)]
+    pub characters: Option<String>,
+    #[serde(rename = "Teams", default)]
+    pub teams: Option<String>,
+    #[serde(rename = "MainCharacterOrTeam", default)]
+    pub main_character_or_team: Option<String>,
+    #[serde(rename = "Locations", default)]
+    pub locations: Option<String>,
+    #[serde(rename = "Tags", default)]
+    pub tags: Option<String>,
+    #[serde(rename = "CommunityRating", default)]
+    pub community_rating: Option<f32>,
+    #[serde(rename = "ScanInformation", default)]
+    pub scan_information: Option<String>,
+    /// Rang de la couverture préférée parmi les pages de type « FrontCover ».
+    #[serde(rename = "PreferredFrontCover", default)]
+    pub preferred_front_cover: Option<i32>,
+    #[serde(rename = "Pages", default)]
+    pub pages: PageList,
+}
+
+/// `<Pages><Page Image="0" Type="FrontCover" …/></Pages>` : informations par page.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PageList {
+    #[serde(rename = "Page", default)]
+    pub page: Vec<PageInfo>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PageInfo {
+    /// Rang de l'image dans le fichier (ordre naturel des noms).
+    #[serde(rename = "@Image", default)]
+    pub image: i32,
+    /// Type de page (`FrontCover`, `Story`, `Other`, `Deleted`…), éventuellement combinés.
+    #[serde(rename = "@Type", default)]
+    pub kind: Option<String>,
+}
+
+impl PageInfo {
+    fn is(&self, t: &str) -> bool {
+        self.kind.as_deref().is_some_and(|k| k.split(',').any(|p| p.trim() == t))
+    }
 }
 
 impl LibraryBook {
@@ -76,6 +167,34 @@ impl LibraryBook {
             .as_deref()
             .map(|f| f.rsplit(['/', '\\']).next().unwrap_or(f).to_string())
             .unwrap_or_else(|| self.id.clone())
+    }
+
+    /// Image du fichier à utiliser comme couverture, comme `ComicInfo.FrontCoverPageIndex` :
+    /// la n-ième page « FrontCover » (n = `PreferredFrontCover`), sinon la première page
+    /// qui n'est pas de type « Other », sinon l'image 0.
+    pub fn front_cover_image(&self) -> usize {
+        let pages = &self.pages.page;
+        let covers: Vec<&PageInfo> = pages.iter().filter(|p| p.is("FrontCover")).collect();
+        let chosen = if covers.is_empty() {
+            pages.iter().find(|p| !p.is("Other"))
+        } else {
+            let n = self.preferred_front_cover.unwrap_or(0).clamp(0, covers.len() as i32 - 1);
+            Some(covers[n as usize])
+        };
+        chosen.map(|p| p.image.max(0) as usize).unwrap_or(0)
+    }
+
+    /// Pourcentage lu (0–100) d'après la dernière page lue enregistrée par ComicRack.
+    pub fn read_percent(&self) -> Option<u32> {
+        let (read, total) = (self.last_page_read?, self.page_count?);
+        if total == 0 {
+            return None;
+        }
+        // ComicRack compte la dernière page lue à partir de 0 ; 0 = jamais ouvert.
+        if read == 0 {
+            return Some(0);
+        }
+        Some((((read + 1) * 100) / total).min(100))
     }
 
     /// Fiche d'un livre telle que stockée dans la colonne `data` de MySQL.
@@ -154,6 +273,26 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn front_cover_from_pages() {
+        let b = LibraryBook::from_xml(
+            r#"<ComicBook Id="x"><Pages><Page Image="0" Type="Other"/><Page Image="1"/><Page Image="2" Type="FrontCover"/></Pages></ComicBook>"#,
+        )
+        .unwrap();
+        assert_eq!(b.front_cover_image(), 2);
+        let b = LibraryBook::from_xml(
+            r#"<ComicBook Id="x"><PreferredFrontCover>1</PreferredFrontCover><Pages><Page Image="0" Type="FrontCover"/><Page Image="5" Type="FrontCover, InnerCover"/></Pages></ComicBook>"#,
+        )
+        .unwrap();
+        assert_eq!(b.front_cover_image(), 5);
+        let b = LibraryBook::from_xml(
+            r#"<ComicBook Id="x"><Pages><Page Image="0" Type="Other"/><Page Image="1"/></Pages></ComicBook>"#,
+        )
+        .unwrap();
+        assert_eq!(b.front_cover_image(), 1);
+        assert_eq!(LibraryBook::from_xml(r#"<ComicBook Id="x"/>"#).unwrap().front_cover_image(), 0);
+    }
 
     #[test]
     fn normalize() {

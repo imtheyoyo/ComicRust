@@ -1,6 +1,6 @@
 //! Barre d'état (livre, format, page, taille).
 
-use eframe::egui::{RichText, Ui};
+use eframe::egui::{self, RichText, Ui};
 
 use crate::app::{ComicRustApp, Mode};
 use crate::library::Status;
@@ -26,6 +26,43 @@ impl ComicRustApp {
                     if let Some(w) = &self.library.last_loaded_from {
                         ui.separator();
                         ui.label(RichText::new(format!("base {w} (lecture seule)")).weak());
+                    }
+                    if let Some(e) = &self.library.watch_error {
+                        ui.separator();
+                        ui.label(
+                            RichText::new("⚠ base injoignable, nouvel essai…")
+                                .color(egui::Color32::from_rgb(240, 170, 90)),
+                        )
+                        .on_hover_text(e);
+                    } else if self.library.watcher.is_some() && self.settings.auto_refresh {
+                        ui.separator();
+                        let text = match self.library.last_refresh {
+                            Some(a) => {
+                                let mut parts = Vec::new();
+                                if a.added > 0 {
+                                    parts.push(format!("{} ajouté{}", a.added, if a.added > 1 { "s" } else { "" }));
+                                }
+                                if a.modified > 0 {
+                                    parts.push(format!(
+                                        "{} modifié{}",
+                                        a.modified,
+                                        if a.modified > 1 { "s" } else { "" }
+                                    ));
+                                }
+                                if a.removed > 0 {
+                                    parts.push(format!("{} retiré{}", a.removed, if a.removed > 1 { "s" } else { "" }));
+                                }
+                                if parts.is_empty() {
+                                    "↻ suivi de ComicRack".into()
+                                } else {
+                                    format!("↻ suivi de ComicRack, dernière modification : {}", parts.join(", "))
+                                }
+                            }
+                            None => "↻ suivi de ComicRack".into(),
+                        };
+                        ui.label(RichText::new(text).weak()).on_hover_text(
+                            "Les modifications faites dans ComicRack apparaissent ici en quelques secondes",
+                        );
                     }
                     if db.unreadable > 0 {
                         ui.separator();

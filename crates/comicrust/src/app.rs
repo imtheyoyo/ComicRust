@@ -161,6 +161,26 @@ impl ComicRustApp {
         self.show_list_panel = true;
     }
 
+    /// (Re)lance la surveillance de la base (modifications faites dans ComicRack) et la
+    /// lecture des listes (`ComicDb.xml`), une fois la base chargée.
+    pub(crate) fn restart_watch(&mut self, ctx: &Context) {
+        use crate::library::watch::{self, ListsSource};
+        self.library.watcher = None;
+        let Some(db) = self.library.database() else { return };
+        let db_watch =
+            if self.settings.auto_refresh { self.library.config.clone().map(|c| (c, db.counters)) } else { None };
+        let lists = match (&self.settings.library_db, &self.settings.db_source) {
+            (Some(p), _) => Some(ListsSource::File(p.clone())),
+            (None, DbSource::ComicRackIni(ini)) => Some(ListsSource::FromIni(ini.clone())),
+            _ => None,
+        };
+        if lists.is_none() {
+            self.library.lists.set(None, Err("ComicDb.xml non indiqué (base saisie à la main)".into()));
+        }
+        self.library.watch_error = None;
+        self.library.watcher = Some(watch::spawn(db_watch, lists, ctx));
+    }
+
     /// (Re)charge la base ComicRack configurée.
     pub(crate) fn load_library(&mut self, ctx: &Context) {
         match self.settings.db_source.config() {
@@ -239,6 +259,21 @@ impl eframe::App for ComicRustApp {
                     .default_size(150.0)
                     .min_size(90.0)
                     .show(ui, |ui| self.thumbnails_panel(ui));
+            }
+            let library_ready = self.mode == Mode::Library && self.library.database().is_some();
+            if library_ready && self.settings.show_comic_lists {
+                egui::Panel::left("listes-comicrack")
+                    .resizable(true)
+                    .default_size(230.0)
+                    .min_size(150.0)
+                    .show(ui, |ui| self.comic_lists_panel(ui));
+            }
+            if library_ready && self.settings.show_details {
+                egui::Panel::right("details")
+                    .resizable(true)
+                    .default_size(300.0)
+                    .min_size(220.0)
+                    .show(ui, |ui| self.details_panel(ui));
             }
             if self.show_list_panel && (self.list.is_some() || self.list_loading.is_some()) {
                 egui::Panel::right("list").resizable(true).default_size(260.0).show(ui, |ui| self.list_panel(ui));

@@ -1,67 +1,190 @@
-//! Vue Bibliothèque : grille de couvertures des livres de la base ComicRack, recherche,
-//! regroupement par série. Seules les rangées visibles sont dessinées (une bibliothèque
-//! peut compter des dizaines de milliers de livres).
+//! Vue Bibliothèque : livres de la base ComicRack en couvertures ou en tableau, avec
+//! recherche, tri et regroupement au choix. Seules les rangées visibles sont dessinées
+//! (une bibliothèque peut compter des dizaines de milliers de livres).
+//!
+//! Un clic sélectionne un livre (panneau de détails), un double-clic ou Entrée l'ouvre.
 
 use std::path::PathBuf;
 
+use comicrust_core::library::LibraryBook;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
 
 use crate::app::ComicRustApp;
 use crate::library::covers::{Cover, CoverCache};
-use crate::library::{Row, Status};
+use crate::library::{GroupKey, Row, SortKey, Status};
 
 const HEADER_H: f32 = 34.0;
 const CAPTION_H: f32 = 40.0;
 const GAP: f32 = 14.0;
 /// Rapport largeur/hauteur des emplacements de couverture (format comics).
-const COVER_RATIO: f32 = 0.66;
+pub(crate) const COVER_RATIO: f32 = 0.66;
+pub(crate) const ACCENT: Color32 = Color32::from_rgb(214, 110, 40);
+
+/// Dessine une couverture dans `rect` (alignée en bas, proportions gardées).
+pub(crate) fn paint_cover(ui: &Ui, covers: &mut CoverCache, book: &LibraryBook, rect: Rect) -> Rect {
+    let painter = ui.painter();
+    match covers.get(&book.id, book.file.as_deref(), book.front_cover_image()) {
+        Cover::Ready(tex) => {
+            let s = tex.size_vec2();
+            let k = (rect.width() / s.x).min(rect.height() / s.y);
+            let r = Rect::from_center_size(pos2(rect.center().x, rect.max.y - s.y * k / 2.0), s * k);
+            painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            painter.rect_stroke(r, 0.0, (1.0, Color32::from_black_alpha(90)), StrokeKind::Inside);
+            r
+        }
+        Cover::Pending => {
+            painter.rect_filled(rect.shrink(2.0), 3.0, Color32::from_gray(40));
+            rect
+        }
+        Cover::Failed => {
+            painter.rect_filled(rect.shrink(2.0), 3.0, Color32::from_gray(34));
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "⚠",
+                FontId::proportional(26.0),
+                Color32::from_rgb(200, 120, 90),
+            );
+            rect
+        }
+    }
+}
+
+/// Infobulle d'un livre.
+pub(crate) fn book_tooltip(ui: &mut Ui, book: &LibraryBook) {
+    ui.label(RichText::new(book.caption()).strong());
+    if let Some(t) = book.title.as_deref().filter(|t| !t.is_empty()) {
+        ui.label(RichText::new(t).italics());
+    }
+    if let Some(w) = &book.writer {
+        ui.label(format!("Scénario : {w}"));
+    }
+    if let Some(p) = &book.penciller {
+        ui.label(format!("Dessin : {p}"));
+    }
+    if let Some(y) = book.year.filter(|y| *y > 0) {
+        ui.label(format!("Année : {y}"));
+    }
+    if let Some(arc) = &book.story_arc {
+        ui.label(format!("Arc : {arc}"));
+    }
+    if let Some(f) = &book.file {
+        ui.label(RichText::new(f).weak().small());
+    }
+}
 
 impl ComicRustApp {
     pub(crate) fn library_shown(&self) -> usize {
         self.library.shown()
     }
 
-    pub(crate) fn library_view(&mut self, ui: &mut Ui) {
-        let ctx = ui.ctx().clone();
+    pub(crate) fn ensure_covers(&mut self, ctx: &egui::Context) {
         if self.covers.is_none() {
             let dir = self.data_dir.as_ref().map(|d| d.join(crate::paths::COVERS_DIR));
-            self.covers = Some(CoverCache::new(dir, &ctx));
+            self.covers = Some(CoverCache::new(dir, ctx));
         }
         if let Some(c) = &mut self.covers {
-            c.poll(&ctx);
+            c.poll(ctx);
         }
+    }
 
-        egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                let search = ui.add(
-                    egui::TextEdit::singleline(&mut self.library.search)
-                        .hint_text("Rechercher : série, numéro, auteur, titre, année…")
-                        .desired_width(320.0),
-                );
-                if search.changed() {
-                    if let Some(c) = &mut self.covers {
-                        c.cancel_pending();
+    /// Ouvre le livre de la base à la page où ComicRack l'avait laissé.
+    pub(crate) fn open_library_book(&mut self, ctx: &egui::Context, id: &str, from_start: bool) {
+        let Some(db) = self.library.database() else { return };
+        let Some(book) = db.get(id) else { return };
+        let Some(file) = book.file.clone() else {
+            self.error = Some(format!("« {} » n'a pas de fichier associé dans la base.", book.caption()));
+            return;
+        };
+        let path = PathBuf::from(&file);
+        if !path.exists() {
+            self.error = Some(format!(
+                "Fichier introuvable :\n{file}\n\nIl a peut-être été déplacé ou supprimé, ou le NAS n'est pas accessible."
+            ));
+            return;
+        }
+        if from_start {
+            self.settings.last_pages.remove(&path);
+            self.open_book_at(ctx, path, Some(0));
+        } else {
+            let start = book.current_page.map(|p| p as usize);
+            self.open_book_at(ctx, path, start);
+        }
+    }
+
+    fn library_toolbar(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        ui.horizontal_wrapped(|ui| {
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut self.library.search)
+                    .hint_text("Rechercher : série, auteur, titre, personnage, année…")
+                    .desired_width(300.0),
+            );
+            if search.changed() {
+                if let Some(c) = &mut self.covers {
+                    c.cancel_pending();
+                }
+            }
+            if !self.library.search.is_empty() && ui.button("✖").on_hover_text("Effacer la recherche").clicked() {
+                self.library.search.clear();
+            }
+            ui.separator();
+            ui.selectable_value(&mut self.settings.library_table, false, "▦ Couvertures");
+            ui.selectable_value(&mut self.settings.library_table, true, "☰ Tableau");
+            ui.separator();
+            ui.label("Trier :");
+            let in_list = self.library.selected_list.is_some();
+            egui::ComboBox::from_id_salt("tri").selected_text(self.settings.library_sort.label()).show_ui(ui, |ui| {
+                for k in SortKey::ALL {
+                    if k == SortKey::Position && !in_list {
+                        continue;
                     }
+                    ui.selectable_value(&mut self.settings.library_sort, k, k.label());
                 }
-                if !self.library.search.is_empty() && ui.button("✖").on_hover_text("Effacer la recherche").clicked() {
-                    self.library.search.clear();
-                }
-                ui.separator();
-                ui.checkbox(&mut self.settings.library_group_by_series, "Grouper par série");
+            });
+            let dir = if self.settings.library_descending { "⬇" } else { "⬆" };
+            if ui
+                .button(dir)
+                .on_hover_text(if self.settings.library_descending { "Ordre décroissant" } else { "Ordre croissant" })
+                .clicked()
+            {
+                self.settings.library_descending = !self.settings.library_descending;
+            }
+            ui.label("Grouper :");
+            egui::ComboBox::from_id_salt("groupe").selected_text(self.settings.library_group.label_of_key()).show_ui(
+                ui,
+                |ui| {
+                    for g in GroupKey::ALL {
+                        ui.selectable_value(&mut self.settings.library_group, g, g.label_of_key());
+                    }
+                },
+            );
+            if !self.settings.library_table {
                 ui.add(
                     egui::Slider::new(&mut self.settings.library_cover_height, 120.0..=320.0)
                         .show_value(false)
                         .text("Taille"),
                 );
-                ui.separator();
-                if ui.button("⟳ Recharger").on_hover_text("Relire la base ComicRack").clicked() {
-                    self.load_library(&ctx);
-                }
-                if ui.button("⚙ Base ComicRack…").clicked() {
-                    self.open_db_window();
-                }
-            });
+            }
+            ui.separator();
+            ui.toggle_value(&mut self.settings.show_comic_lists, "📂 Listes")
+                .on_hover_text("Listes de ComicRack (ComicDb.xml)");
+            ui.toggle_value(&mut self.settings.show_details, "ℹ Détails").on_hover_text("Fiche du livre sélectionné");
+            if ui.button("⟳").on_hover_text("Relire toute la base ComicRack").clicked() {
+                self.load_library(&ctx);
+            }
         });
+        // « Ordre de la liste » n'a de sens que dans une liste.
+        if !self.library.selected_list.is_some() && self.settings.library_sort == SortKey::Position {
+            self.settings.library_sort = SortKey::Series;
+        }
+    }
+
+    pub(crate) fn library_view(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        self.ensure_covers(&ctx);
+
+        egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| self.library_toolbar(ui));
         ui.separator();
 
         match &self.library.status {
@@ -105,26 +228,85 @@ impl ComicRustApp {
                     });
                 });
             }
-            Status::Loaded(_) => self.library_grid(ui),
+            Status::Loaded(_) => {
+                if let Some(list) = self.library.selected_list() {
+                    let unknown = list.members() == comicrust_core::comic_lists::Members::Unknown;
+                    let name = list.name.clone();
+                    ui.horizontal(|ui| {
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(format!("📂 {name}")).strong());
+                        if ui.small_button("✖ Toute la bibliothèque").clicked() {
+                            self.library.selected_list = None;
+                        }
+                    });
+                    if unknown {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.label("Liste intelligente : ComicRack n'a pas mémorisé son contenu dans ComicDb.xml.");
+                            ui.label(
+                                RichText::new(
+                                    "ComicRust saura calculer les listes intelligentes à l'étape suivante \
+                                     (moteur de requêtes).",
+                                )
+                                .weak(),
+                            );
+                        });
+                        return;
+                    }
+                }
+                self.library_keys(ui);
+                if self.settings.library_table {
+                    self.library_table(ui);
+                } else {
+                    self.library_grid(ui);
+                }
+            }
         }
+    }
+
+    /// Entrée ouvre le livre sélectionné ; Échap le désélectionne.
+    fn library_keys(&mut self, ui: &mut Ui) {
+        if ui.ctx().memory(|m| m.focused().is_some()) {
+            return; // saisie dans la recherche
+        }
+        let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+        if enter {
+            if let Some(id) = self.library.selected_book.clone() {
+                self.open_library_book(ui.ctx(), &id, false);
+            }
+        }
+        if esc {
+            self.library.selected_book = None;
+        }
+    }
+
+    fn empty_message(&self, ui: &mut Ui, db_empty: bool) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(40.0);
+            ui.label(if db_empty {
+                "La base ne contient aucun livre."
+            } else if self.library.selected_list.is_some() && self.library.search.is_empty() {
+                "Aucun livre de cette liste n'est dans la base."
+            } else {
+                "Aucun livre ne correspond."
+            });
+        });
     }
 
     fn library_grid(&mut self, ui: &mut Ui) {
         let Some(db) = self.library.database() else { return };
-        let group = self.settings.library_group_by_series;
+        let opts = self.settings.view_options();
         let cover_h = self.settings.library_cover_height;
         let cell = vec2(cover_h * COVER_RATIO, cover_h + CAPTION_H);
         let width = ui.available_width() - 2.0 * GAP;
         let columns = (((width + GAP) / (cell.x + GAP)).floor() as usize).max(1);
-        let rows = self.library.rows(group, columns);
-        let shown = self.library.view(group).len();
-        if shown == 0 {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.label(if db.is_empty() { "La base ne contient aucun livre." } else { "Aucun livre ne correspond." });
-            });
+        let rows = self.library.rows(&opts, columns);
+        if self.library.shown() == 0 {
+            self.empty_message(ui, db.is_empty());
             return;
         }
+        let in_list = self.library.selected_list.is_some();
+        let compact = opts.group == GroupKey::Series;
 
         let heights: Vec<f32> = rows
             .iter()
@@ -134,7 +316,8 @@ impl ComicRustApp {
             })
             .collect();
         let total: f32 = heights.iter().sum::<f32>() + GAP;
-        let mut open: Option<(PathBuf, Option<usize>)> = None;
+        let mut open: Option<String> = None;
+        let mut select: Option<String> = None;
 
         egui::ScrollArea::vertical().auto_shrink(false).id_salt("bibliotheque").show_viewport(ui, |ui, viewport| {
             ui.set_height(total);
@@ -147,13 +330,13 @@ impl ComicRustApp {
                     continue;
                 }
                 match row {
-                    Row::Header { series, count } => {
+                    Row::Header { title, count } => {
                         let r = Rect::from_min_size(origin + vec2(0.0, top), vec2(width, HEADER_H));
                         let p = ui.painter();
                         p.text(
                             pos2(r.min.x, r.center().y),
                             Align2::LEFT_CENTER,
-                            series,
+                            title,
                             FontId::proportional(18.0),
                             ui.visuals().strong_text_color(),
                         );
@@ -176,58 +359,24 @@ impl ComicRustApp {
                             let rect = Rect::from_min_size(min, cell);
                             let resp = ui.interact(rect, ui.scope_id().with(("livre", &book.id)), Sense::click());
                             let cover_rect = Rect::from_min_size(min, vec2(cell.x, cover_h));
-                            let painter = ui.painter();
-                            if resp.hovered() {
-                                painter.rect_filled(rect.expand(4.0), 6.0, ui.visuals().widgets.hovered.bg_fill);
+                            let selected = self.library.selected_book.as_deref() == Some(book.id.as_str());
+                            if selected {
+                                ui.painter().rect_filled(rect.expand(5.0), 6.0, ui.visuals().selection.bg_fill);
+                            } else if resp.hovered() {
+                                ui.painter().rect_filled(rect.expand(4.0), 6.0, ui.visuals().widgets.hovered.bg_fill);
                             }
                             let covers = self.covers.as_mut().unwrap();
-                            match covers.get(&book.id, book.file.as_deref()) {
-                                Cover::Ready(tex) => {
-                                    let s = tex.size_vec2();
-                                    let k = (cover_rect.width() / s.x).min(cover_rect.height() / s.y);
-                                    let r = Rect::from_center_size(
-                                        pos2(cover_rect.center().x, cover_rect.max.y - s.y * k / 2.0),
-                                        s * k,
-                                    );
-                                    painter.image(
-                                        tex.id(),
-                                        r,
-                                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                                        Color32::WHITE,
-                                    );
-                                    painter.rect_stroke(
-                                        r,
-                                        0.0,
-                                        (1.0, Color32::from_black_alpha(90)),
-                                        StrokeKind::Inside,
-                                    );
-                                }
-                                Cover::Pending => {
-                                    painter.rect_filled(cover_rect.shrink(2.0), 3.0, Color32::from_gray(40));
-                                }
-                                Cover::Failed => {
-                                    painter.rect_filled(cover_rect.shrink(2.0), 3.0, Color32::from_gray(34));
-                                    painter.text(
-                                        cover_rect.center(),
-                                        Align2::CENTER_CENTER,
-                                        "⚠",
-                                        FontId::proportional(26.0),
-                                        Color32::from_rgb(200, 120, 90),
-                                    );
-                                }
-                            }
+                            paint_cover(ui, covers, book, cover_rect);
+                            let painter = ui.painter();
                             // Avancement de lecture enregistré par ComicRack.
-                            if let (Some(read), Some(total)) = (book.last_page_read, book.page_count) {
-                                if read > 0 && total > 0 {
-                                    let f = ((read + 1) as f32 / total as f32).min(1.0);
-                                    let bar = Rect::from_min_size(
-                                        pos2(cover_rect.min.x, cover_rect.max.y - 4.0),
-                                        vec2(cover_rect.width() * f, 4.0),
-                                    );
-                                    painter.rect_filled(bar, 0.0, Color32::from_rgb(214, 110, 40));
-                                }
+                            if let Some(pct) = book.read_percent().filter(|p| *p > 0) {
+                                let bar = Rect::from_min_size(
+                                    pos2(cover_rect.min.x, cover_rect.max.y - 4.0),
+                                    vec2(cover_rect.width() * pct as f32 / 100.0, 4.0),
+                                );
+                                painter.rect_filled(bar, 0.0, ACCENT);
                             }
-                            let caption = if group {
+                            let mut caption = if compact {
                                 let mut c = book.number.as_deref().map(|n| format!("#{n}")).unwrap_or_default();
                                 if let Some(t) = book.title.as_deref().filter(|t| !t.is_empty()) {
                                     c = if c.is_empty() { t.to_string() } else { format!("{c} · {t}") };
@@ -240,38 +389,22 @@ impl ComicRustApp {
                             } else {
                                 book.caption()
                             };
+                            if in_list {
+                                if let Some(pos) = self.library.position(bi) {
+                                    caption = format!("{}. {caption}", pos + 1);
+                                }
+                            }
                             let galley =
                                 painter.layout(caption, FontId::proportional(12.5), ui.visuals().text_color(), cell.x);
                             let text_rect =
                                 Rect::from_min_size(pos2(min.x, cover_rect.max.y + 4.0), vec2(cell.x, CAPTION_H - 6.0));
                             painter.with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::WHITE);
 
-                            let resp = resp.on_hover_ui(|ui| {
-                                ui.label(RichText::new(book.caption()).strong());
-                                if let Some(t) = book.title.as_deref().filter(|t| !t.is_empty()) {
-                                    ui.label(RichText::new(t).italics());
-                                }
-                                if let Some(w) = &book.writer {
-                                    ui.label(format!("Scénario : {w}"));
-                                }
-                                if let Some(p) = &book.penciller {
-                                    ui.label(format!("Dessin : {p}"));
-                                }
-                                if let Some(y) = book.year {
-                                    ui.label(format!("Année : {y}"));
-                                }
-                                if let Some(arc) = &book.story_arc {
-                                    ui.label(format!("Arc : {arc}"));
-                                }
-                                if let Some(f) = &book.file {
-                                    ui.label(RichText::new(f).weak().small());
-                                }
-                            });
-                            if resp.clicked() {
-                                if let Some(f) = &book.file {
-                                    let start = book.current_page.map(|p| p as usize);
-                                    open = Some((PathBuf::from(f), start));
-                                }
+                            let resp = resp.on_hover_ui(|ui| book_tooltip(ui, book));
+                            if resp.double_clicked() {
+                                open = Some(book.id.clone());
+                            } else if resp.clicked() {
+                                select = Some(book.id.clone());
                             }
                         }
                     }
@@ -279,8 +412,12 @@ impl ComicRustApp {
             }
         });
 
-        if let Some((path, start)) = open {
-            self.open_book_at(ui.ctx(), path, start);
+        if let Some(id) = select {
+            self.library.selected_book = Some(id);
+        }
+        if let Some(id) = open {
+            self.library.selected_book = Some(id.clone());
+            self.open_library_book(ui.ctx(), &id, false);
         }
     }
 }

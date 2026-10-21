@@ -1,8 +1,9 @@
 //! Couvertures de la vue Bibliothèque.
 //!
-//! Chaque couverture est la première page du livre, réduite à `COVER_HEIGHT` pixels et
-//! gardée en JPEG dans `data\couvertures\<identifiant>.jpg` : elle n'est lue dans
-//! l'archive (souvent sur le NAS) qu'une seule fois. Trois fils de travail traitent les
+//! Chaque couverture est la page choisie comme couverture dans ComicRack (la première
+//! par défaut), réduite à `COVER_HEIGHT` pixels et gardée en JPEG dans
+//! `data\couvertures\<identifiant>.jpg` (`<identifiant>-p<image>.jpg` si ce n'est pas la
+//! première image) : elle n'est lue dans l'archive (souvent sur le NAS) qu'une seule fois. Trois fils de travail traitent les
 //! demandes, les plus récentes d'abord (ce que l'on voit à l'écran passe devant).
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -20,8 +21,15 @@ const WORKERS: usize = 3;
 const MAX_TEXTURES: usize = 600;
 
 struct Job {
+    /// Clé du cache (identifiant + image).
+    key: String,
     id: String,
     file: PathBuf,
+    image: usize,
+}
+
+fn cover_key(id: &str, image: usize) -> String {
+    format!("{id}#{image}")
 }
 
 #[derive(Default)]
@@ -53,10 +61,15 @@ pub struct CoverCache {
     failed: HashSet<String>,
 }
 
-/// Nom de fichier sûr pour un identifiant (GUID en pratique).
-fn cache_name(id: &str) -> String {
+/// Nom de fichier sûr pour un identifiant (GUID en pratique) ; l'image 0 garde le nom
+/// des versions précédentes, donc le cache existant reste valable.
+fn cache_name(id: &str, image: usize) -> String {
     let safe: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-    format!("{safe}.jpg")
+    if image == 0 {
+        format!("{safe}.jpg")
+    } else {
+        format!("{safe}-p{image}.jpg")
+    }
 }
 
 fn to_color(img: &image::RgbaImage) -> ColorImage {
@@ -65,17 +78,18 @@ fn to_color(img: &image::RgbaImage) -> ColorImage {
 
 /// Produit la couverture (depuis le cache disque ou l'archive).
 fn make_cover(dir: Option<&Path>, job: &Job) -> Result<ColorImage, String> {
-    let cached = dir.map(|d| d.join(cache_name(&job.id)));
+    let cached = dir.map(|d| d.join(cache_name(&job.id, job.image)));
     if let Some(p) = &cached {
         if let Ok(img) = image::open(p) {
             return Ok(to_color(&img.into_rgba8()));
         }
     }
     let mut book = open_book(&job.file).map_err(|e| e.to_string())?;
-    if book.pages().is_empty() {
+    let n = book.pages().len();
+    if n == 0 {
         return Err("aucune page".into());
     }
-    let page = book.render_page(0).map_err(|e| e.to_string())?;
+    let page = book.render_page(job.image.min(n - 1)).map_err(|e| e.to_string())?;
     let (w, h) = page.dimensions();
     let th = COVER_HEIGHT.min(h.max(1));
     let tw = ((w as f32 * th as f32 / h.max(1) as f32) as u32).max(1);
@@ -117,8 +131,8 @@ impl CoverCache {
                         }
                     };
                     let done = match make_cover(dir.as_deref(), &job) {
-                        Ok(img) => Done::Ok(job.id, img),
-                        Err(_) => Done::Failed(job.id),
+                        Ok(img) => Done::Ok(job.key, img),
+                        Err(_) => Done::Failed(job.key),
                     };
                     if tx.send(done).is_err() {
                         return;
@@ -163,20 +177,28 @@ impl CoverCache {
         }
     }
 
-    /// Couverture d'un livre visible ; la demande si elle n'est pas encore prête.
-    pub fn get(&mut self, id: &str, file: Option<&str>) -> Cover<'_> {
-        if self.textures.contains_key(id) {
-            return Cover::Ready(&self.textures[id]);
+    /// Couverture d'un livre visible (`image` : rang de l'image de couverture dans le
+    /// fichier) ; la demande si elle n'est pas encore prête.
+    pub fn get(&mut self, id: &str, file: Option<&str>, image: usize) -> Cover<'_> {
+        let key = cover_key(id, image);
+        if self.textures.contains_key(&key) {
+            return Cover::Ready(&self.textures[&key]);
         }
-        if self.failed.contains(id) || file.is_none() {
+        let Some(file) = file else { return Cover::Failed };
+        if self.failed.contains(&key) {
             return Cover::Failed;
         }
-        if self.requested.insert(id.to_string()) {
+        if self.requested.insert(key.clone()) {
             let (lock, cv) = &*self.shared;
-            lock.lock().unwrap().jobs.push_back(Job { id: id.to_string(), file: PathBuf::from(file.unwrap()) });
+            lock.lock().unwrap().jobs.push_back(Job { key, id: id.to_string(), file: PathBuf::from(file), image });
             cv.notify_one();
         }
         Cover::Pending
+    }
+
+    /// Oublie un échec (le fichier a pu réapparaître après une actualisation).
+    pub fn forget_failure(&mut self, id: &str, image: usize) {
+        self.failed.remove(&cover_key(id, image));
     }
 
     /// Oublie les demandes en attente (après un défilement rapide, par exemple).
@@ -184,7 +206,7 @@ impl CoverCache {
         let (lock, _) = &*self.shared;
         let mut q = lock.lock().unwrap();
         for j in q.jobs.drain(..) {
-            self.requested.remove(&j.id);
+            self.requested.remove(&j.key);
         }
     }
 }
@@ -217,11 +239,15 @@ mod tests {
         }
         let covers = dir.path().join("couvertures");
         std::fs::create_dir_all(&covers).unwrap();
-        let job = Job { id: "id/1".into(), file: book.clone() };
+        let job = Job { key: "k".into(), id: "id/1".into(), file: book.clone(), image: 0 };
         let img = make_cover(Some(&covers), &job).unwrap();
         assert_eq!(img.size, [240, 360]);
         let cached = covers.join("id_1.jpg");
         assert!(cached.exists());
+        // Couverture choisie au-delà du nombre d'images : la dernière image sert.
+        let other = Job { key: "k2".into(), id: "id/1".into(), file: book.clone(), image: 3 };
+        assert_eq!(make_cover(Some(&covers), &other).unwrap().size, [240, 360]);
+        assert!(covers.join("id_1-p3.jpg").exists());
         // Le livre disparaît : la couverture vient du cache disque.
         std::fs::remove_file(&book).unwrap();
         assert_eq!(make_cover(Some(&covers), &job).unwrap().size, [240, 360]);

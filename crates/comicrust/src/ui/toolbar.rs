@@ -106,6 +106,13 @@ impl ComicRustApp {
                         self.update.check(&ctx, true);
                         ui.close();
                     }
+                    if ui
+                        .checkbox(&mut self.settings.auto_refresh, "Suivre les modifications faites dans ComicRack")
+                        .on_hover_text("La bibliothèque se met à jour seule quand ComicRack modifie la base")
+                        .changed()
+                    {
+                        self.restart_watch(&ctx);
+                    }
                     ui.checkbox(&mut self.settings.check_updates, "Vérifier les mises à jour au démarrage");
                     ui.separator();
                     ui.label(

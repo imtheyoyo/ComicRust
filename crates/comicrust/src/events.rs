@@ -7,9 +7,44 @@ use crate::book::loader::Event;
 use crate::book::texture_options;
 use comicrust_core::ComicInfo;
 
+use crate::library::watch::WatchEvent;
+
 impl ComicRustApp {
+    /// Modifications faites dans ComicRack et listes relues.
+    fn poll_watch(&mut self) {
+        let events: Vec<WatchEvent> =
+            self.library.watcher.as_ref().map(|w| w.rx.try_iter().collect()).unwrap_or_default();
+        for ev in events {
+            match ev {
+                WatchEvent::Db(ch) => {
+                    if let Some(c) = &mut self.covers {
+                        for b in &ch.updated {
+                            c.forget_failure(&b.id, b.front_cover_image());
+                        }
+                    }
+                    self.library.apply_changes(ch);
+                    if let Some(id) = &self.library.selected_book {
+                        if self.library.database().is_some_and(|db| db.get(id).is_none()) {
+                            self.library.selected_book = None;
+                        }
+                    }
+                }
+                WatchEvent::DbError(e) => self.library.watch_error = e,
+                WatchEvent::Lists { path, result } => {
+                    self.library.lists.set(path, result);
+                    if self.library.selected_list().is_none() {
+                        self.library.selected_list = None;
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn poll_loader(&mut self, ctx: &Context) {
-        self.library.poll();
+        if self.library.poll() {
+            self.restart_watch(ctx);
+        }
+        self.poll_watch();
         // Base ComicRack disponible : une liste résolue sans elle l'est à nouveau, par identifiant.
         if self.library.database().is_some()
             && self.list_loading.is_none()
