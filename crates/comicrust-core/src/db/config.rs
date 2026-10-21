@@ -101,7 +101,7 @@ impl DbConfig {
         let bytes = std::fs::read(path)?;
         // ComicRack.ini peut être en UTF-8 (avec BOM) ou en UTF-16.
         let text = if bytes.starts_with(&[0xFF, 0xFE]) {
-            let u16s: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let u16s: Vec<u16> = bytes[2..].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
             String::from_utf16_lossy(&u16s)
         } else {
             String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}').to_string()
@@ -199,5 +199,17 @@ mod tests {
     fn missing_parts_are_reported() {
         assert!(DbConfig::from_connection_string("Server=x; Port=12").is_err());
         assert!(DbConfig::from_comicrack_ini_text("DataSource=C:\\ComicDB.xml").is_err());
+    }
+
+    #[test]
+    fn ini_utf16() {
+        let text = "Langue=fr\r\nDataSource=mysql:Server=nas; Uid=yo; Pwd=x; Database=bd;\r\n";
+        let mut bytes = vec![0xFF, 0xFE];
+        bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        let path = std::env::temp_dir().join(format!("comicrust-ini-{}.ini", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        let cfg = DbConfig::from_comicrack_ini(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(cfg.describe(), "yo@nas:3306/bd");
     }
 }
