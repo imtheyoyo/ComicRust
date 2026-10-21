@@ -57,7 +57,7 @@ jobs:
         run: |
           # Chaque avertissement devient une annotation (lisible sans télécharger les journaux).
           set +e
-          cargo clippy --all-targets --message-format=short -- -D warnings 2>&1 | tee clippy.log
+          cargo clippy --color never --all-targets --message-format=short -- -D warnings 2>&1 | tee clippy.log
           status=${PIPESTATUS[0]}
           grep -E '(^|: )(error|warning)' clippy.log | head -30 | while read -r l; do echo "::error::$l"; done
           exit $status
