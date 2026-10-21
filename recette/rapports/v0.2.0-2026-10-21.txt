@@ -1,0 +1,12 @@
+Rapport de recette ComicRust v0.2.0 — 21/10/2026 07:38
+Résultat : 61 OK, 0 échec(s), 9 non testé(s) sur 70.
+Décision proposée : incomplète (1 bloquant(s) non testé(s)).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- R-04 : s'ouvre ; noter le temps d'ouverture : 1s.
+- R-11 : Gros fichier : 1219 pages ; Taille fichier : 1,68 Go ; ouverture 1s ; navigation fluide ; mémoire de ComicRust.exe (Gestionnaire des tâches) : 235 Mo, reste stable en parcourant le livre.
+
+NON TESTÉS (9) : R-07, R-08, N-16, C-06*, C-07, T-01, T-02, T-03, T-04   (* = bloquant)
