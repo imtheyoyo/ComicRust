@@ -1,10 +1,12 @@
-//! Listes de lecture `.cbl` : chaque entrée est rattachée à un fichier, via la
-//! base ComicRack (`ComicDB.xml`) si elle est configurée, sinon en parcourant
-//! le dossier des BD (ou, à défaut, le dossier de la liste).
+//! Listes de lecture `.cbl` : chaque entrée est rattachée à un fichier, dans cet ordre :
+//! 1. par son identifiant `<Id>` dans la base MySQL de ComicRack (si elle est chargée) ;
+//! 2. via `ComicDB.xml` (si indiqué) ;
+//! 3. en parcourant le dossier des BD (ou, à défaut, le dossier de la liste).
 
 use std::path::{Path, PathBuf};
 
 use comicrust_core::cbl::CblBook;
+use comicrust_core::db::ComicDatabase;
 use comicrust_core::index::{FileIndex, ScanProgress};
 use comicrust_core::{Library, ReadingList};
 
@@ -36,11 +38,14 @@ pub struct ListState {
     pub unrecognized: Vec<PathBuf>,
     /// Le dossier parcouru est celui de la liste (aucun dossier des BD choisi).
     pub default_root: bool,
+    /// La base ComicRack était chargée lors de la résolution (sinon, à refaire quand elle arrive).
+    pub resolved_with_db: bool,
 }
 
 impl ListState {
     pub fn load(
         path: &Path,
+        comics: Option<&ComicDatabase>,
         library_db: Option<&Path>,
         comics_root: Option<&Path>,
         cache: Option<&Path>,
@@ -52,7 +57,16 @@ impl ListState {
         let mut sources = Vec::new();
         let (mut index_summary, mut unrecognized) = (None, Vec::new());
 
-        if let Some(db) = library_db {
+        if let Some(comics) = comics {
+            let mut by_id = 0;
+            for (entry, hit) in entries.iter_mut().zip(comics.resolve_ids(&list)) {
+                entry.file = hit.and_then(|b| b.file.clone()).map(PathBuf::from).filter(|p| p.exists());
+                by_id += usize::from(entry.file.is_some());
+            }
+            sources.push(format!("base ComicRack ({by_id} par identifiant)"));
+        }
+
+        if let Some(db) = library_db.filter(|_| entries.iter().any(|e| e.file.is_none())) {
             match std::fs::read_to_string(db)
                 .map_err(|e| e.to_string())
                 .and_then(|t| Library::from_xml(&t).map_err(|e| e.to_string()))
@@ -92,7 +106,8 @@ impl ListState {
             source: sources.join(" + "),
             index_summary,
             unrecognized,
-            default_root: comics_root.is_none() && library_db.is_none(),
+            default_root: comics_root.is_none() && library_db.is_none() && comics.is_none(),
+            resolved_with_db: comics.is_some(),
         })
     }
 

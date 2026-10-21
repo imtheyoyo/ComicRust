@@ -57,6 +57,17 @@ impl ComicRustApp {
                 ui.label(RichText::new(format!("ComicRust {}", env!("CARGO_PKG_VERSION"))).strong());
                 ui.label("Lecteur de BD en Rust, inspiré de ComicRack.");
                 ui.hyperlink("https://github.com/imtheyoyo/ComicRust");
+                if ui.button("Rechercher une mise à jour").clicked() {
+                    self.update.check(ctx, true);
+                }
+                ui.label(
+                    RichText::new(format!(
+                        "Version portable — données : {}",
+                        crate::paths::exe_dir().join("data").display()
+                    ))
+                    .weak()
+                    .small(),
+                );
                 ui.separator();
                 match comicrust_core::providers::pdfium_status() {
                     Ok(()) => ui.label("PDF : PDFium chargé ✔"),

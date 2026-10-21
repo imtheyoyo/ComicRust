@@ -5,7 +5,8 @@
 //! les champs propres à la bibliothèque (date d'ajout, page courante, note…).
 //! Le parseur ci-dessous est volontairement tolérant : les éléments inconnus
 //! sont ignorés, ce qui permet de lire une vraie base sans tout modéliser.
-//! (Ta base actuelle est sur MySQL : voir README, étape "backend MySQL".)
+//! La même fiche `<Book>` (racine `<ComicBook>`) est stockée telle quelle dans la
+//! colonne `data` de la table `comics` quand ComicRack utilise MySQL (voir `db`).
 
 use serde::Deserialize;
 
@@ -37,6 +38,50 @@ pub struct LibraryBook {
     pub last_page_read: Option<u32>,
     #[serde(rename = "Rating", default)]
     pub rating: Option<f32>,
+    #[serde(rename = "Count", default)]
+    pub count: Option<i32>,
+    #[serde(rename = "Writer", default)]
+    pub writer: Option<String>,
+    #[serde(rename = "Penciller", default)]
+    pub penciller: Option<String>,
+    #[serde(rename = "Genre", default)]
+    pub genre: Option<String>,
+    #[serde(rename = "StoryArc", default)]
+    pub story_arc: Option<String>,
+    #[serde(rename = "AlternateSeries", default)]
+    pub alternate_series: Option<String>,
+    /// Date d'ajout à la bibliothèque (texte ISO, tel que stocké par ComicRack).
+    #[serde(rename = "Added", default)]
+    pub added: Option<String>,
+    /// Date de dernière lecture.
+    #[serde(rename = "Opened", default)]
+    pub opened: Option<String>,
+}
+
+impl LibraryBook {
+    /// Libellé d'affichage : « Série v2 #12 - Titre », ou le nom du fichier à défaut.
+    pub fn caption(&self) -> String {
+        let ci = crate::ComicInfo {
+            series: self.series.clone(),
+            number: self.number.clone(),
+            volume: self.volume.filter(|v| *v >= 0),
+            title: self.title.clone(),
+            ..Default::default()
+        };
+        let c = ci.caption();
+        if !c.is_empty() {
+            return c;
+        }
+        self.file
+            .as_deref()
+            .map(|f| f.rsplit(['/', '\\']).next().unwrap_or(f).to_string())
+            .unwrap_or_else(|| self.id.clone())
+    }
+
+    /// Fiche d'un livre telle que stockée dans la colonne `data` de MySQL.
+    pub fn from_xml(xml: &str) -> Result<Self, crate::Error> {
+        Ok(quick_xml::de::from_str(xml.trim_start_matches('\u{feff}'))?)
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

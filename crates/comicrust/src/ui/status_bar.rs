@@ -2,10 +2,39 @@
 
 use eframe::egui::{RichText, Ui};
 
-use crate::app::ComicRustApp;
+use crate::app::{ComicRustApp, Mode};
+use crate::library::Status;
 
 impl ComicRustApp {
     pub(crate) fn status_bar(&self, ui: &mut Ui) {
+        if self.mode == Mode::Library {
+            ui.horizontal(|ui| match &self.library.status {
+                Status::NotConfigured => {
+                    ui.label("Aucune base ComicRack configurée (⚙ → Base ComicRack).");
+                }
+                Status::Loading { what, .. } => {
+                    ui.spinner();
+                    ui.label(format!("Chargement de la base {what}…"));
+                }
+                Status::Failed(_) => {
+                    ui.label("Base ComicRack inaccessible.");
+                }
+                Status::Loaded(db) => {
+                    ui.label(RichText::new(format!("{} livres", db.len())).strong());
+                    ui.separator();
+                    ui.label(format!("{} affichés", self.library_shown()));
+                    if let Some(w) = &self.library.last_loaded_from {
+                        ui.separator();
+                        ui.label(RichText::new(format!("base {w} (lecture seule)")).weak());
+                    }
+                    if db.unreadable > 0 {
+                        ui.separator();
+                        ui.label(RichText::new(format!("{} fiches illisibles ignorées", db.unreadable)).weak());
+                    }
+                }
+            });
+            return;
+        }
         ui.horizontal(|ui| match &self.book {
             None => {
                 ui.label("Aucune BD ouverte — glissez un fichier dans la fenêtre ou cliquez sur « Ouvrir ».");

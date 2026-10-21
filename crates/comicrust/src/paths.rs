@@ -13,10 +13,7 @@ pub const COVERS_DIR: &str = "couvertures";
 
 /// Dossier de l'exécutable.
 pub fn exe_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| PathBuf::from("."))
+    std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// `data\` à côté de l'exécutable, créé si besoin.

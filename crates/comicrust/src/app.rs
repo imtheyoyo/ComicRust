@@ -11,10 +11,20 @@ use eframe::egui::{self, Context, Ui};
 
 use crate::book::loader::BookLoader;
 use crate::book::Book;
+use crate::library::covers::CoverCache;
+use crate::library::LibraryState;
 use crate::reading_list::ListState;
-use crate::settings::Settings;
+use crate::settings::{DbSource, Settings};
+use crate::ui::db_window::DbWindow;
 
 const SETTINGS_KEY: &str = "comicrust.settings";
+
+/// Vue principale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Library,
+    Reader,
+}
 
 pub struct ComicRustApp {
     pub(crate) settings: Settings,
@@ -33,6 +43,12 @@ pub struct ComicRustApp {
     pub(crate) last_wheel_flip: Instant,
     pub(crate) title: String,
     pub(crate) scroll_to_thumb: bool,
+    pub(crate) mode: Mode,
+    pub(crate) library: LibraryState,
+    /// Créé à la première ouverture de la vue Bibliothèque.
+    pub(crate) covers: Option<CoverCache>,
+    pub(crate) db_window: Option<DbWindow>,
+    pub(crate) update: crate::update::UpdateState,
 }
 
 impl ComicRustApp {
@@ -55,7 +71,20 @@ impl ComicRustApp {
             last_wheel_flip: Instant::now(),
             title: String::new(),
             scroll_to_thumb: true,
+            mode: Mode::Reader,
+            library: LibraryState::default(),
+            covers: None,
+            db_window: None,
+            update: Default::default(),
         };
+        crate::update::cleanup_previous_install();
+        if app.settings.db_source != DbSource::None {
+            app.load_library(&cc.egui_ctx);
+            app.mode = Mode::Library;
+        }
+        if app.settings.check_updates {
+            app.update.check(&cc.egui_ctx, false);
+        }
         if app.data_dir.is_none() {
             app.error = Some(format!(
                 "Le dossier de ComicRust n'est pas modifiable ({}).\n\nComicRust est une application portable : \
@@ -81,10 +110,23 @@ impl ComicRustApp {
     }
 
     pub(crate) fn open_book(&mut self, ctx: &Context, path: PathBuf) {
+        self.open_book_at(ctx, path, None);
+    }
+
+    /// Ouvre un livre ; `start` (page lue d'après la base ComicRack) sert si ComicRust
+    /// n'a pas encore de page mémorisée pour ce fichier.
+    pub(crate) fn open_book_at(&mut self, ctx: &Context, path: PathBuf, start: Option<usize>) {
         self.remember_position();
+        self.mode = Mode::Reader;
         let max_side = ctx.input(|i| i.max_texture_side).min(16384) as u32;
         let loader = BookLoader::open(path.clone(), ctx.clone(), max_side);
-        let current = self.settings.last_pages.get(&path).copied().unwrap_or(0);
+        // Page de reprise : celle mémorisée par ComicRust, sinon celle de la base ComicRack.
+        let from_db = || {
+            let db = self.library.database()?;
+            let p = path.to_string_lossy();
+            db.books.iter().find(|b| b.file.as_deref() == Some(p.as_ref()))?.current_page.map(|c| c as usize)
+        };
+        let current = self.settings.last_pages.get(&path).copied().or(start).or_else(from_db).unwrap_or(0);
         self.settings.push_recent(path.clone());
         if let Some(list) = &mut self.list {
             list.current = list.position_of(&path);
@@ -102,13 +144,30 @@ impl ComicRustApp {
         let cache = self.data_dir.as_ref().map(|d| d.join(crate::paths::INDEX_CACHE_FILE));
         let progress = std::sync::Arc::new(ScanProgress::default());
         self.list_progress = progress.clone();
+        let comics = self.library.database();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(ListState::load(&path, db.as_deref(), root.as_deref(), cache.as_deref(), Some(&progress)));
+            let _ = tx.send(ListState::load(
+                &path,
+                comics.as_deref(),
+                db.as_deref(),
+                root.as_deref(),
+                cache.as_deref(),
+                Some(&progress),
+            ));
             ctx.request_repaint();
         });
         self.list_loading = Some(rx);
         self.show_list_panel = true;
+    }
+
+    /// (Re)charge la base ComicRack configurée.
+    pub(crate) fn load_library(&mut self, ctx: &Context) {
+        match self.settings.db_source.config() {
+            Ok(Some(cfg)) => self.library.start_loading(cfg, ctx),
+            Ok(None) => self.library = LibraryState::default(),
+            Err(e) => self.library.status = crate::library::Status::Failed(e),
+        }
     }
 
     pub(crate) fn reload_list(&mut self, ctx: &Context) {
@@ -170,7 +229,11 @@ impl eframe::App for ComicRustApp {
             if self.settings.show_status_bar {
                 egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
             }
-            if self.settings.show_thumbnails && self.book.as_ref().is_some_and(|b| b.opened) {
+            self.update_banner(ui);
+            if self.mode == Mode::Reader
+                && self.settings.show_thumbnails
+                && self.book.as_ref().is_some_and(|b| b.opened)
+            {
                 egui::Panel::left("thumbs")
                     .resizable(true)
                     .default_size(150.0)
@@ -181,8 +244,13 @@ impl eframe::App for ComicRustApp {
                 egui::Panel::right("list").resizable(true).default_size(260.0).show(ui, |ui| self.list_panel(ui));
             }
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.viewer(ui));
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| match self.mode {
+            Mode::Library => self.library_view(ui),
+            Mode::Reader => self.viewer(ui),
+        });
 
+        self.db_window_ui(&ctx);
+        self.update_window(&ctx);
         self.info_window(&ctx);
         self.about_window(&ctx);
         self.error_window(&ctx);

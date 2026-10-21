@@ -14,8 +14,32 @@ Chaque [release](https://github.com/imtheyoyo/ComicRust/releases) contient
 `ComicRust.exe`. Aucun runtime à installer. Le zip contient aussi `pdfium.dll` (lecture des
 PDF, à laisser à côté de l'exe) et `comicrust-cli.exe`.
 
-**Mode portable** : créer un fichier vide `ComicRust.portable` (ou un dossier `data`) à côté de
-l'exe ; les réglages sont alors enregistrés dans `data\` au lieu de `%APPDATA%\ComicRust`.
+**ComicRust est exclusivement portable** : il n'écrit rien en dehors de son dossier. Réglages,
+cache de l'index des BD et miniatures des couvertures vont dans `data\` à côté de l'exe (le
+dossier doit donc être accessible en écriture : éviter `C:\Program Files`). Copier le dossier
+suffit pour emporter ComicRust et ses réglages. Les réglages d'une version précédente
+(`%APPDATA%\ComicRust`) sont repris au premier lancement.
+
+## Bibliothèque (base MySQL de ComicRack)
+
+ComicRust lit la base **MySQL** de ComicRack CE, **en lecture seule** (uniquement des `SELECT`) :
+menu ⚙ → *Base ComicRack (MySQL)…*, puis soit choisir le `ComicRack.ini` (ligne
+`DataSource=mysql:Server=…; Port=…; Uid=…; Pwd=…; Database=…;`, relue à chaque connexion — le
+mot de passe n'est pas recopié dans ComicRust), soit saisir les paramètres. *Tester la
+connexion* affiche le nombre de livres.
+
+L'onglet **Bibliothèque** affiche alors toutes les BD de la base : couvertures (miniatures
+mises en cache dans `data\couvertures`), recherche sur série, titre, auteurs, arc, année et
+chemin, regroupement par série, barre de lecture. Un clic ouvre la BD à la page où ComicRack
+l'avait laissée. Les listes `.cbl` sont d'abord résolues par l'identifiant des livres dans la
+base, puis par la recherche dans un dossier (v0.2.1).
+
+## Mises à jour
+
+Au démarrage (désactivable dans le menu ⚙), ComicRust consulte les releases GitHub. Si une
+version plus récente existe, un bandeau propose de l'installer : le zip est téléchargé, son
+empreinte SHA-256 vérifiée, puis les fichiers remplacés (l'ancien exe est renommé en `.old` et
+supprimé au lancement suivant). Le dossier `data\` n'est jamais touché.
 
 ## Formats
 
@@ -76,19 +100,20 @@ comicrust-cli missing "F:\BD" Thanos.cbl            # ou un ComicDB.xml à la pl
 
 | Crate | Rôle |
 |---|---|
-| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, listes `.cbl`, `ComicDB.xml`, index de fichiers |
-| `comicrust` | l'application `ComicRust.exe` (egui) |
+| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, listes `.cbl`, `ComicDB.xml`, index de fichiers, base MySQL (`db/`) |
+| `comicrust` | l'application `ComicRust.exe` (egui) : `app`, `book/`, `library/`, `reading_list`, `update/`, `ui/`… |
 | `comicrust-cli` | outil en ligne de commande |
 
 ```powershell
 cargo test --all                 # tests PDF actifs si PDFIUM_DYNAMIC_LIB_PATH pointe vers PDFium
+                                 # test MySQL actif si COMICRUST_TEST_MYSQL contient une chaîne de connexion
 cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ```
 
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.2.1](recette/v0.2.1.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.3.0](recette/v0.3.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -108,14 +133,15 @@ la recette et les échantillons. **La release échoue si `recette/<tag>.md` n'ex
 | DjVuLibre (`djvm.exe`) | `djvu-rs` |
 | libwebp / libjxl | `image` (WebP) / `jxl-oxide` |
 | `XmlSerializer` (ComicDB.xml, CBL, ComicInfo, CBW) | `quick-xml` + `serde` |
-| MySqlConnector / SQLite | à venir (`sqlx`) |
+| MySqlConnector | `mysql` (lecture seule) |
+| Mise à jour (ClickOnce / site) | releases GitHub + SHA-256 (`ureq`, `sha2`) |
 | IronPython, WCF | à venir |
 
 ## Feuille de route
 
-1. **Bibliothèque** : modèle `ComicBook` complet, stockage SQLite, puis lecture de la base
-   **MySQL** de ComicRack CE.
-2. **Navigateur** : grille de couvertures avec cache disque, tri, groupement, recherche.
+1. ~~Lecture de la base **MySQL** de ComicRack CE, vue Bibliothèque (couvertures, recherche,
+   groupement)~~ (v0.3.0).
+2. Panneau de détails, tri et groupements au choix, listes de la base (`ComicDB.xml`/MySQL).
 3. **Listes intelligentes** (syntaxe de requête ComicRack).
 4. Écriture de `ComicInfo.xml`, conversion CBR→CBZ, HEIF/AVIF, scrapers WebComic.
 5. Associations de fichiers Windows, serveur HTTP/OPDS, scripts.

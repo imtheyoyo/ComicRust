@@ -18,6 +18,17 @@ impl ComicRustApp {
         if ctx.egui_wants_keyboard_input() {
             return;
         }
+        if self.mode == crate::app::Mode::Library {
+            // Vue Bibliothèque : seuls Ctrl+O et le plein écran.
+            let (open, full) = ctx.input(|i| (i.modifiers.command && i.key_pressed(Key::O), i.key_pressed(Key::F11)));
+            if open {
+                self.open_dialog(ctx);
+            }
+            if full {
+                self.toggle_fullscreen(ctx);
+            }
+            return;
+        }
         let manga = self.settings.manga;
         let (mut next, mut prev) = (false, false);
         let mut actions: Vec<Key> = Vec::new();

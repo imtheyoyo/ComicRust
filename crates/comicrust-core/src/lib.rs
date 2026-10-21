@@ -8,6 +8,7 @@
 
 pub mod cbl;
 pub mod comic_info;
+pub mod db;
 pub mod index;
 pub mod library;
 pub mod providers;
@@ -39,6 +40,8 @@ pub enum Error {
     Djvu(String),
     #[error("réseau : {0}")]
     Network(String),
+    #[error("base de données : {0}")]
+    Database(String),
     #[error("page {0} hors limites")]
     PageOutOfRange(usize),
     #[error("format non pris en charge : .{0}")]

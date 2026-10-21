@@ -11,10 +11,12 @@ mod app;
 mod book;
 mod events;
 mod input;
+mod library;
 mod paths;
 mod reading_list;
 mod settings;
 mod ui;
+mod update;
 
 use std::path::PathBuf;
 

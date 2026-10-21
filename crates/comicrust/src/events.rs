@@ -9,6 +9,15 @@ use comicrust_core::ComicInfo;
 
 impl ComicRustApp {
     pub(crate) fn poll_loader(&mut self, ctx: &Context) {
+        self.library.poll();
+        // Base ComicRack disponible : une liste résolue sans elle l'est à nouveau, par identifiant.
+        if self.library.database().is_some()
+            && self.list_loading.is_none()
+            && self.list.as_ref().is_some_and(|l| !l.resolved_with_db)
+        {
+            self.reload_list(ctx);
+        }
+        self.update.poll();
         if let Some(rx) = &self.list_loading {
             if let Ok(res) = rx.try_recv() {
                 self.list_loading = None;

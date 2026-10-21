@@ -1,14 +1,17 @@
-//! Barre d'outils du lecteur.
+//! Barre d'outils : choix de la vue (Bibliothèque / Lecteur), ouverture, commandes du lecteur.
 
 use eframe::egui::{self, Align, Layout, Ui};
 
-use crate::app::ComicRustApp;
+use crate::app::{ComicRustApp, Mode};
 use crate::settings::FitMode;
 
 impl ComicRustApp {
     pub(crate) fn toolbar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.mode, Mode::Library, "📚 Bibliothèque");
+            ui.selectable_value(&mut self.mode, Mode::Reader, "📖 Lecteur");
+            ui.separator();
             if ui.button("📂 Ouvrir").on_hover_text("Ouvrir une BD ou une liste .cbl (Ctrl+O)").clicked() {
                 self.open_dialog(&ctx);
             }
@@ -35,63 +38,82 @@ impl ComicRustApp {
             });
             ui.separator();
 
-            let has_book = self.book.as_ref().is_some_and(|b| b.opened && b.page_count() > 0);
-            ui.add_enabled_ui(has_book, |ui| {
-                let (first, prev, next, last) =
-                    if self.settings.manga { ("⏭", "▶", "◀", "⏮") } else { ("⏮", "◀", "▶", "⏭") };
-                if ui.button(first).on_hover_text("Première page (Début)").clicked() {
-                    self.go_to(0);
-                }
-                if ui.button(prev).on_hover_text("Page précédente").clicked() {
-                    self.prev_page(&ctx);
-                }
-                if let Some(book) = &self.book {
-                    let n = book.page_count().max(1);
-                    let mut page = book.current + 1;
-                    let resp = ui.add(egui::Slider::new(&mut page, 1..=n).show_value(false).trailing_fill(true));
-                    ui.label(format!("{} / {}", book.current + 1, book.page_count()));
-                    if resp.changed() {
-                        self.go_to(page - 1);
+            if self.mode == Mode::Reader {
+                let has_book = self.book.as_ref().is_some_and(|b| b.opened && b.page_count() > 0);
+                ui.add_enabled_ui(has_book, |ui| {
+                    let (first, prev, next, last) =
+                        if self.settings.manga { ("⏭", "▶", "◀", "⏮") } else { ("⏮", "◀", "▶", "⏭") };
+                    if ui.button(first).on_hover_text("Première page (Début)").clicked() {
+                        self.go_to(0);
                     }
-                }
-                if ui.button(next).on_hover_text("Page suivante").clicked() {
-                    self.next_page(&ctx);
-                }
-                if ui.button(last).on_hover_text("Dernière page (Fin)").clicked() {
-                    self.go_to(usize::MAX);
-                }
-            });
-            ui.separator();
+                    if ui.button(prev).on_hover_text("Page précédente").clicked() {
+                        self.prev_page(&ctx);
+                    }
+                    if let Some(book) = &self.book {
+                        let n = book.page_count().max(1);
+                        let mut page = book.current + 1;
+                        let resp = ui.add(egui::Slider::new(&mut page, 1..=n).show_value(false).trailing_fill(true));
+                        ui.label(format!("{} / {}", book.current + 1, book.page_count()));
+                        if resp.changed() {
+                            self.go_to(page - 1);
+                        }
+                    }
+                    if ui.button(next).on_hover_text("Page suivante").clicked() {
+                        self.next_page(&ctx);
+                    }
+                    if ui.button(last).on_hover_text("Dernière page (Fin)").clicked() {
+                        self.go_to(usize::MAX);
+                    }
+                });
+                ui.separator();
 
-            egui::ComboBox::from_id_salt("fit").selected_text(self.settings.fit.label()).show_ui(ui, |ui| {
-                for (i, m) in FitMode::ALL.into_iter().enumerate() {
-                    ui.selectable_value(&mut self.settings.fit, m, format!("{}  ({})", m.label(), i + 1));
+                egui::ComboBox::from_id_salt("fit").selected_text(self.settings.fit.label()).show_ui(ui, |ui| {
+                    for (i, m) in FitMode::ALL.into_iter().enumerate() {
+                        ui.selectable_value(&mut self.settings.fit, m, format!("{}  ({})", m.label(), i + 1));
+                    }
+                });
+                if ui.button("➖").on_hover_text("Zoom arrière (-)").clicked() {
+                    self.zoom = (self.zoom / 1.25).max(0.1);
                 }
-            });
-            if ui.button("➖").on_hover_text("Zoom arrière (-)").clicked() {
-                self.zoom = (self.zoom / 1.25).max(0.1);
+                if ui.button(format!("{:.0} %", self.zoom * 100.0)).on_hover_text("Zoom 100 % (0)").clicked() {
+                    self.zoom = 1.0;
+                }
+                if ui.button("➕").on_hover_text("Zoom avant (+)").clicked() {
+                    self.zoom = (self.zoom * 1.25).min(8.0);
+                }
+                ui.separator();
+                ui.toggle_value(&mut self.settings.double_page, "📖 Double page").on_hover_text("D");
+                ui.toggle_value(&mut self.settings.manga, "🈁 Manga").on_hover_text("Lecture de droite à gauche (M)");
+                ui.toggle_value(&mut self.settings.show_thumbnails, "▦ Vignettes").on_hover_text("T");
+                ui.toggle_value(&mut self.show_info, "ℹ Infos").on_hover_text("I");
+                if ui.button("⛶ Plein écran").on_hover_text("F11 / F, Échap pour sortir").clicked() {
+                    self.toggle_fullscreen(&ctx);
+                }
             }
-            if ui.button(format!("{:.0} %", self.zoom * 100.0)).on_hover_text("Zoom 100 % (0)").clicked() {
-                self.zoom = 1.0;
-            }
-            if ui.button("➕").on_hover_text("Zoom avant (+)").clicked() {
-                self.zoom = (self.zoom * 1.25).min(8.0);
-            }
-            ui.separator();
-            ui.toggle_value(&mut self.settings.double_page, "📖 Double page").on_hover_text("D");
-            ui.toggle_value(&mut self.settings.manga, "🈁 Manga").on_hover_text("Lecture de droite à gauche (M)");
-            ui.toggle_value(&mut self.settings.show_thumbnails, "▦ Vignettes").on_hover_text("T");
             if self.list.is_some() || self.list_loading.is_some() {
                 ui.toggle_value(&mut self.show_list_panel, "☰ Liste").on_hover_text("L");
-            }
-            ui.toggle_value(&mut self.show_info, "ℹ Infos").on_hover_text("I");
-            if ui.button("⛶ Plein écran").on_hover_text("F11 / F, Échap pour sortir").clicked() {
-                self.toggle_fullscreen(&ctx);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("?").on_hover_text("À propos et raccourcis").clicked() {
                     self.show_about = true;
                 }
+                ui.menu_button("⚙", |ui| {
+                    if ui.button("Base ComicRack (MySQL)…").clicked() {
+                        self.open_db_window();
+                        ui.close();
+                    }
+                    if ui.button("Rechercher une mise à jour…").clicked() {
+                        self.update.check(&ctx, true);
+                        ui.close();
+                    }
+                    ui.checkbox(&mut self.settings.check_updates, "Vérifier les mises à jour au démarrage");
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(format!("Données : {}", crate::paths::exe_dir().join("data").display()))
+                            .weak()
+                            .small(),
+                    );
+                });
             });
         });
     }

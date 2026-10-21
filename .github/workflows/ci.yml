@@ -43,6 +43,14 @@ jobs:
           echo "PDFIUM_DYNAMIC_LIB_PATH=$dir" >> "$GITHUB_ENV"
           ls "pdfium/${{ matrix.lib }}"
 
+      - name: MySQL de test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # MySQL 8 est préinstallé sur les runners Ubuntu (root/root).
+          sudo systemctl start mysql.service
+          mysql -uroot -proot -e "CREATE DATABASE comicrust_test; CREATE USER 'testeur'@'localhost' IDENTIFIED BY 'T3st;pw'; GRANT ALL ON comicrust_test.* TO 'testeur'@'localhost';"
+          echo "COMICRUST_TEST_MYSQL=Server=127.0.0.1; Port=3306; Uid=testeur; Pwd='T3st;pw'; Database=comicrust_test" >> "$GITHUB_ENV"
+
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all

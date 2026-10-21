@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use comicrust_core::db::DbConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +31,28 @@ impl FitMode {
     }
 }
 
+/// Où trouver la base MySQL de ComicRack.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum DbSource {
+    /// Pas de base : la vue Bibliothèque propose de la configurer.
+    #[default]
+    None,
+    /// Paramètres relus à chaque connexion dans ce `ComicRack.ini` (rien n'est recopié).
+    ComicRackIni(PathBuf),
+    /// Paramètres saisis dans ComicRust (gardés dans `data\comicrust.ron`).
+    Manual(DbConfig),
+}
+
+impl DbSource {
+    pub fn config(&self) -> Result<Option<DbConfig>, String> {
+        match self {
+            DbSource::None => Ok(None),
+            DbSource::ComicRackIni(p) => DbConfig::from_comicrack_ini(p).map(Some).map_err(|e| e.to_string()),
+            DbSource::Manual(c) => Ok(Some(c.clone())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -50,6 +73,16 @@ pub struct Settings {
     /// Dossier racine des BD, parcouru pour résoudre les listes `.cbl`.
     pub comics_root: Option<PathBuf>,
     pub last_dir: Option<PathBuf>,
+    /// Base MySQL de ComicRack (vue Bibliothèque, listes par identifiant).
+    pub db_source: DbSource,
+    /// Bibliothèque : regrouper par série.
+    pub library_group_by_series: bool,
+    /// Bibliothèque : hauteur des couvertures (points).
+    pub library_cover_height: f32,
+    /// Vérifier les nouvelles versions au démarrage.
+    pub check_updates: bool,
+    /// Version dont la mise à jour a été refusée (« Ignorer cette version »).
+    pub skipped_version: Option<String>,
 }
 
 impl Default for Settings {
@@ -67,6 +100,11 @@ impl Default for Settings {
             library_db: None,
             comics_root: None,
             last_dir: None,
+            db_source: DbSource::None,
+            library_group_by_series: true,
+            library_cover_height: 190.0,
+            check_updates: true,
+            skipped_version: None,
         }
     }
 }
