@@ -39,6 +39,10 @@ impl ComicRustApp {
             ui.separator();
 
             if self.mode == Mode::Reader {
+                if self.book.is_some() && ui.button("✖ Fermer").on_hover_text("Fermer le livre (Ctrl+W)").clicked() {
+                    self.close_book(&ctx);
+                    return;
+                }
                 let has_book = self.book.as_ref().is_some_and(|b| b.opened && b.page_count() > 0);
                 ui.add_enabled_ui(has_book, |ui| {
                     let (first, prev, next, last) =

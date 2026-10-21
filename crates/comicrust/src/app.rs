@@ -266,6 +266,20 @@ impl ComicRustApp {
         }
     }
 
+    /// Ferme le livre ouvert (sa page est mémorisée) et revient à la bibliothèque si
+    /// une base est chargée.
+    pub(crate) fn close_book(&mut self, ctx: &Context) {
+        self.remember_position();
+        self.book = None;
+        if self.fullscreen {
+            self.fullscreen = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
+        if self.library.database().is_some() {
+            self.mode = Mode::Library;
+        }
+    }
+
     pub(crate) fn remember_position(&mut self) {
         if let Some(b) = &self.book {
             if b.opened {

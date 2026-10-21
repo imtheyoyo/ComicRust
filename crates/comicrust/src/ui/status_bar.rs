@@ -23,6 +23,9 @@ impl ComicRustApp {
                     ui.label(RichText::new(format!("{} livres", db.len())).strong());
                     ui.separator();
                     ui.label(format!("{} affichés", self.library_shown()));
+                    if let Some(n) = self.library_stacks_shown() {
+                        ui.label(format!("en {n} piles"));
+                    }
                     if let Some(w) = &self.library.last_loaded_from {
                         ui.separator();
                         ui.label(RichText::new(format!("base {w} (lecture seule)")).weak());

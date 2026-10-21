@@ -5,11 +5,23 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
-## [Non publié]
+## [v0.5.1] — 2026-10-22
+
+Améliorations demandées après la recette v0.5.0 (GO), avant la v0.6.0.
+
+### Nouveautés
+- **Bouton « ✖ Fermer »** dans le lecteur (et Ctrl+W) : ferme le livre en mémorisant sa page
+  et revient à la bibliothèque.
+- **« 🗂 Empiler par série »** (vue en couvertures, aussi dans les listes) : une pile par série,
+  avec le nombre de livres et la part déjà lue ; un clic ouvre la pile, « ◀ Toutes les piles »
+  ou Échap y revient. Compatible avec le regroupement (éditeur, scénariste, année…).
 
 ### Corrections
 - « Doublons » : regroupement sensible à la casse (série et chemin), comme ComicRack
   (recette v0.5.0 : 166 doublons trouvés contre 154 pour ComicRack).
+
+### Recette
+[recette/v0.5.1.md](recette/v0.5.1.md)
 
 ## [v0.5.0] — 2026-10-22
 

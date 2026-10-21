@@ -78,6 +78,12 @@ impl ComicRustApp {
         self.library.shown()
     }
 
+    /// Nombre de piles affichées (vue empilée, aucune pile ouverte).
+    pub(crate) fn library_stacks_shown(&self) -> Option<usize> {
+        (self.settings.library_stack && !self.settings.library_table && self.library.open_stack.is_none())
+            .then(|| self.library.stacks_shown())
+    }
+
     pub(crate) fn ensure_covers(&mut self, ctx: &egui::Context) {
         if self.covers.is_none() {
             let dir = self.data_dir.as_ref().map(|d| d.join(crate::paths::COVERS_DIR));
@@ -149,6 +155,14 @@ impl ComicRustApp {
                 .clicked()
             {
                 self.settings.library_descending = !self.settings.library_descending;
+            }
+            if !self.settings.library_table
+                && ui
+                    .toggle_value(&mut self.settings.library_stack, "🗂 Empiler par série")
+                    .on_hover_text("Une pile par série ; clic sur une pile pour voir ses livres")
+                    .changed()
+            {
+                self.library.open_stack = None;
             }
             ui.label("Grouper :");
             egui::ComboBox::from_id_salt("groupe").selected_text(self.settings.library_group.label_of_key()).show_ui(
@@ -263,6 +277,18 @@ impl ComicRustApp {
                         return;
                     }
                 }
+                // Pile ouverte : rappel de la série et retour aux piles.
+                if self.settings.library_stack && !self.settings.library_table {
+                    if let Some(series) = self.library.open_stack.clone() {
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            if ui.button("◀ Toutes les piles").on_hover_text("Retour (Échap)").clicked() {
+                                self.library.open_stack = None;
+                            }
+                            ui.label(RichText::new(format!("🗂 {series}")).strong());
+                        });
+                    }
+                }
                 self.library_keys(ui);
                 if self.settings.library_table {
                     self.library_table(ui);
@@ -285,7 +311,11 @@ impl ComicRustApp {
             }
         }
         if esc {
-            self.library.selected_book = None;
+            if self.library.selected_book.is_some() {
+                self.library.selected_book = None;
+            } else {
+                self.library.open_stack = None;
+            }
         }
     }
 
@@ -309,7 +339,9 @@ impl ComicRustApp {
         let cell = vec2(cover_h * COVER_RATIO, cover_h + CAPTION_H);
         let width = ui.available_width() - 2.0 * GAP;
         let columns = (((width + GAP) / (cell.x + GAP)).floor() as usize).max(1);
-        let rows = self.library.rows(&opts, columns);
+        // Vue empilée : une pile par série, sauf quand une pile est ouverte.
+        let stacked = self.settings.library_stack && self.library.open_stack.is_none();
+        let rows = if stacked { self.library.stacked_rows(&opts, columns) } else { self.library.rows(&opts, columns) };
         if self.library.shown() == 0 {
             self.empty_message(ui, db.is_empty());
             return;
@@ -321,12 +353,13 @@ impl ComicRustApp {
             .iter()
             .map(|r| match r {
                 Row::Header { .. } => HEADER_H,
-                Row::Covers(_) => cell.y + GAP,
+                Row::Covers(_) | Row::Stacks(_) => cell.y + GAP,
             })
             .collect();
         let total: f32 = heights.iter().sum::<f32>() + GAP;
         let mut open: Option<String> = None;
         let mut select: Option<String> = None;
+        let mut open_stack: Option<String> = None;
 
         egui::ScrollArea::vertical().auto_shrink(false).id_salt("bibliotheque").show_viewport(ui, |ui, viewport| {
             ui.set_height(total);
@@ -417,10 +450,87 @@ impl ComicRustApp {
                             }
                         }
                     }
+                    Row::Stacks(stacks) => {
+                        for (k, stack) in stacks.iter().enumerate() {
+                            let first = &db.books[stack.books[0]];
+                            let min = origin + vec2(k as f32 * (cell.x + GAP), top);
+                            let rect = Rect::from_min_size(min, cell);
+                            let resp = ui.interact(rect, ui.scope_id().with(("pile", &stack.series)), Sense::click());
+                            if resp.hovered() {
+                                ui.painter().rect_filled(rect.expand(4.0), 6.0, ui.visuals().widgets.hovered.bg_fill);
+                            }
+                            // Feuilles décalées derrière la couverture : effet de pile.
+                            let off = (cell.x * 0.05).clamp(3.0, 8.0);
+                            let cover_rect = Rect::from_min_size(
+                                min + vec2(0.0, off * 2.0),
+                                vec2(cell.x - off * 2.0, cover_h - off * 2.0),
+                            );
+                            if stack.books.len() > 1 {
+                                let stroke = (1.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
+                                for d in [2.0, 1.0] {
+                                    let r = cover_rect.translate(vec2(off * d, -off * d));
+                                    ui.painter().rect_filled(r, 2.0, crate::ui::theme::placeholder(ui));
+                                    ui.painter().rect_stroke(r, 2.0, stroke, StrokeKind::Inside);
+                                }
+                            }
+                            let drawn = paint_cover(ui, self.covers.as_mut().unwrap(), first, cover_rect);
+                            let painter = ui.painter();
+                            // Nombre de livres de la pile.
+                            let badge = egui::pos2(drawn.max.x - 4.0, drawn.min.y + 4.0);
+                            let label = stack.books.len().to_string();
+                            let r = 9.0 + 3.0 * label.len().saturating_sub(1) as f32;
+                            painter.circle_filled(badge, r, ACCENT);
+                            painter.text(
+                                badge,
+                                Align2::CENTER_CENTER,
+                                label,
+                                FontId::proportional(12.0),
+                                Color32::WHITE,
+                            );
+                            // Avancement : part des livres de la série déjà lus.
+                            let read = stack
+                                .books
+                                .iter()
+                                .filter(|&&i| db.books[i].read_percent().is_some_and(|p| p >= 95))
+                                .count();
+                            if read > 0 {
+                                let bar = Rect::from_min_size(
+                                    pos2(drawn.min.x, drawn.max.y - 4.0),
+                                    vec2(drawn.width() * read as f32 / stack.books.len() as f32, 4.0),
+                                );
+                                painter.rect_filled(bar, 0.0, ACCENT);
+                            }
+                            let caption = format!(
+                                "{}\n{} livre{}",
+                                stack.series,
+                                stack.books.len(),
+                                if stack.books.len() > 1 { "s" } else { "" }
+                            );
+                            let galley =
+                                painter.layout(caption, FontId::proportional(12.5), ui.visuals().text_color(), cell.x);
+                            let text_rect =
+                                Rect::from_min_size(pos2(min.x, min.y + cover_h + 4.0), vec2(cell.x, CAPTION_H - 6.0));
+                            painter.with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::WHITE);
+                            let resp = resp.on_hover_ui(|ui| {
+                                ui.label(RichText::new(&stack.series).strong());
+                                ui.label(format!("{} livres, {} lus", stack.books.len(), read));
+                                ui.label(RichText::new("Clic : ouvrir la pile").weak());
+                            });
+                            if resp.clicked() {
+                                open_stack = Some(stack.series.clone());
+                            }
+                        }
+                    }
                 }
             }
         });
 
+        if let Some(s) = open_stack {
+            self.library.open_stack = Some(s);
+            if let Some(c) = &mut self.covers {
+                c.cancel_pending();
+            }
+        }
         if let Some(id) = select {
             self.library.selected_book = Some(id);
         }

@@ -31,8 +31,22 @@ pub enum Status {
 /// Ligne de la vue : titre de groupe ou rangée de couvertures.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Row {
-    Header { title: String, count: usize },
+    Header {
+        title: String,
+        count: usize,
+    },
     Covers(Vec<usize>),
+    /// Piles (une par série) quand la vue est empilée.
+    Stacks(Vec<Stack>),
+}
+
+/// Pile de livres d'une même série (vue « Empiler par série »).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stack {
+    /// Nom de la série (« (sans série) » si vide).
+    pub series: String,
+    /// Livres de la série, dans l'ordre de la vue ; le premier sert de couverture.
+    pub books: Vec<usize>,
 }
 
 /// Contenu calculé de toutes les listes, pour un état donné de la base et des listes.
@@ -99,6 +113,10 @@ impl Lists {
     }
 }
 
+/// Ce dont dépend la vue : recherche, options, liste, version de la base et des listes,
+/// pile ouverte.
+type ViewKey = (String, ViewOptions, Option<String>, u64, Option<String>);
+
 /// Options d'affichage qui déterminent la vue (cache invalidé quand elles changent).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewOptions {
@@ -114,6 +132,8 @@ pub struct LibraryState {
     pub selected_list: Option<String>,
     /// Livre sélectionné (panneau de détails).
     pub selected_book: Option<String>,
+    /// Pile ouverte (série) dans la vue empilée.
+    pub open_stack: Option<String>,
     pub lists: Lists,
     /// Dernière actualisation automatique (bilan affiché dans la barre d'état).
     pub last_refresh: Option<Applied>,
@@ -124,7 +144,7 @@ pub struct LibraryState {
     view: Vec<usize>,
     /// Rang de chaque livre dans la liste affichée (ordre de lecture).
     positions: HashMap<usize, usize>,
-    view_key: Option<(String, ViewOptions, Option<String>, u64)>,
+    view_key: Option<ViewKey>,
     pub last_loaded_from: Option<String>,
     pub watcher: Option<watch::WatchHandle>,
     /// Paramètres de la base chargée (pour la surveillance).
@@ -138,6 +158,7 @@ impl Default for LibraryState {
             search: String::new(),
             selected_list: None,
             selected_book: None,
+            open_stack: None,
             lists: Lists::default(),
             last_refresh: None,
             watch_error: None,
@@ -204,6 +225,12 @@ impl LibraryState {
         self.generation += 1;
         self.last_refresh = Some(applied);
         applied
+    }
+
+    /// Nombre de séries (piles) parmi les livres affichés.
+    pub fn stacks_shown(&self) -> usize {
+        let Some(db) = self.database() else { return 0 };
+        self.view.iter().map(|&i| GroupKey::Series.label(&db.books[i])).collect::<std::collections::HashSet<_>>().len()
     }
 
     /// Nombre de livres affichés lors du dernier calcul de la vue.
@@ -288,7 +315,13 @@ impl LibraryState {
             self.view.clear();
             return &self.view;
         };
-        let key = (self.search.clone(), opts.clone(), self.selected_list.clone(), self.generation + self.lists.version);
+        let key = (
+            self.search.clone(),
+            opts.clone(),
+            self.selected_list.clone(),
+            self.generation + self.lists.version,
+            self.open_stack.clone(),
+        );
         if self.view_key.as_ref() == Some(&key) {
             return &self.view;
         }
@@ -301,7 +334,12 @@ impl LibraryState {
         };
         self.positions = base.iter().enumerate().map(|(pos, &i)| (i, pos)).collect();
         let words: Vec<String> = self.search.to_lowercase().split_whitespace().map(str::to_string).collect();
-        let mut v: Vec<usize> = base.into_iter().filter(|&i| sorting::matches(&db.books[i], &words)).collect();
+        let stack = self.open_stack.clone();
+        let mut v: Vec<usize> = base
+            .into_iter()
+            .filter(|&i| sorting::matches(&db.books[i], &words))
+            .filter(|&i| stack.as_ref().is_none_or(|s| GroupKey::Series.label(&db.books[i]) == *s))
+            .collect();
         let positions = &self.positions;
         sorting::sort(&mut v, &db.books, opts, |i| positions.get(&i).copied());
         self.view = v;
@@ -310,6 +348,50 @@ impl LibraryState {
     }
 
     /// Découpe la vue en rangées de `columns` couvertures, avec un titre par groupe.
+    /// Piles de la vue (une par série, dans l'ordre d'apparition).
+    pub fn stacks(&mut self, opts: &ViewOptions) -> Vec<Stack> {
+        let db = self.database();
+        let view = self.view(opts).to_vec();
+        let Some(db) = db else { return Vec::new() };
+        let mut index: HashMap<String, usize> = HashMap::new();
+        let mut out: Vec<Stack> = Vec::new();
+        for i in view {
+            let series = GroupKey::Series.label(&db.books[i]);
+            match index.get(&series) {
+                Some(&k) => out[k].books.push(i),
+                None => {
+                    index.insert(series.clone(), out.len());
+                    out.push(Stack { series, books: vec![i] });
+                }
+            }
+        }
+        out
+    }
+
+    /// Rangées de la vue empilée : des piles, avec un titre par groupe (sauf groupe
+    /// « Série », redondant avec les piles).
+    pub fn stacked_rows(&mut self, opts: &ViewOptions, columns: usize) -> Vec<Row> {
+        let columns = columns.max(1);
+        let stacks = self.stacks(opts);
+        let Some(db) = self.database() else { return Vec::new() };
+        if matches!(opts.group, GroupKey::None | GroupKey::Series) {
+            return stacks.chunks(columns).map(|c| Row::Stacks(c.to_vec())).collect();
+        }
+        let mut rows = Vec::new();
+        let mut i = 0;
+        while i < stacks.len() {
+            let title = opts.group.label(&db.books[stacks[i].books[0]]);
+            let start = i;
+            while i < stacks.len() && opts.group.label(&db.books[stacks[i].books[0]]) == title {
+                i += 1;
+            }
+            let items = &stacks[start..i];
+            rows.push(Row::Header { title, count: items.iter().map(|s| s.books.len()).sum() });
+            rows.extend(items.chunks(columns).map(|c| Row::Stacks(c.to_vec())));
+        }
+        rows
+    }
+
     pub fn rows(&mut self, opts: &ViewOptions, columns: usize) -> Vec<Row> {
         let columns = columns.max(1);
         let db = self.database();
@@ -431,5 +513,25 @@ mod tests {
         let applied = s.apply_changes(ch);
         assert_eq!(applied.added, 1);
         assert_eq!(ids(&mut s, &series())[0], "f");
+    }
+
+    #[test]
+    fn stacks_by_series() {
+        let mut s = state();
+        let flat = ViewOptions { group: GroupKey::None, ..series() };
+        let stacks = s.stacks(&flat);
+        let names: Vec<(&str, usize)> = stacks.iter().map(|x| (x.series.as_str(), x.books.len())).collect();
+        assert_eq!(names, [("COSMIC COLLECTION", 1), ("Thanos", 3), ("Warlock", 1)]);
+        let db = s.database().unwrap();
+        assert_eq!(db.books[stacks[1].books[0]].id, "e", "couverture de la pile : Thanos #1");
+        assert_eq!(s.stacked_rows(&flat, 2).len(), 2);
+        // Pile ouverte : seulement ses livres.
+        s.open_stack = Some("Thanos".into());
+        assert_eq!(ids(&mut s, &flat), ["e", "b", "a"]);
+        let by_writer = ViewOptions { group: GroupKey::Writer, ..series() };
+        s.open_stack = None;
+        let rows = s.stacked_rows(&by_writer, 5);
+        assert_eq!(rows[0], Row::Header { title: "Jason Aaron".into(), count: 1 });
+        assert!(matches!(&rows[3], Row::Stacks(v) if v.len() == 2), "Starlin : Thanos et Warlock");
     }
 }

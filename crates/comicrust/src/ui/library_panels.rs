@@ -83,6 +83,7 @@ impl ComicRustApp {
                 .and_then(|id| ComicList::find(&self.library.lists.items, id))
                 .is_some_and(|l| matches!(l.kind, ListKind::Ids(_)));
             self.library.selected_list = c;
+            self.library.open_stack = None;
             // Une liste de lecture s'affiche dans son ordre, sans groupes.
             if is_reading_list {
                 self.settings.library_sort = SortKey::Position;

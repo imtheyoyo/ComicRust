@@ -42,7 +42,9 @@ en **tableau** (colonnes triables d'un clic) :
   avec les critères et les règles de ComicRack (ComicRack ne garde pas leur contenu avec MySQL) ;
 - panneau **Détails** : fiche complète du livre sélectionné (résumé, auteurs, personnages,
   lieux, note, lecture…) ;
-- un clic sélectionne, un **double-clic** ou **Entrée** ouvre la BD ; si ComicRack et
+- **empilement par série** : une pile par série (clic pour l'ouvrir) ;
+- un clic sélectionne, un **double-clic** ou **Entrée** ouvre la BD (« ✖ Fermer » ou Ctrl+W
+  dans le lecteur pour revenir) ; si ComicRack et
   ComicRust n'ont pas retenu la même page, ComicRust demande laquelle reprendre (réglable) ;
 - thème **clair** ou **sombre** (menu ⚙).
 
@@ -132,7 +134,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.5.0](recette/v0.5.0.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.5.1](recette/v0.5.1.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release

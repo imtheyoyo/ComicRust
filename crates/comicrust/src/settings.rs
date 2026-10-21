@@ -104,6 +104,8 @@ pub struct Settings {
     pub library_group: GroupKey,
     /// Bibliothèque : vue en tableau plutôt qu'en couvertures.
     pub library_table: bool,
+    /// Bibliothèque : une pile par série (vue en couvertures).
+    pub library_stack: bool,
     /// Panneaux de la bibliothèque : listes ComicRack (gauche) et détails (droite).
     pub show_comic_lists: bool,
     pub show_details: bool,
@@ -139,6 +141,7 @@ impl Default for Settings {
             library_descending: false,
             library_group: GroupKey::Series,
             library_table: false,
+            library_stack: false,
             show_comic_lists: true,
             show_details: true,
             auto_refresh: true,

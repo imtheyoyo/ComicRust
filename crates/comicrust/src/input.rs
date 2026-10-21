@@ -67,6 +67,9 @@ impl ComicRustApp {
             if i.modifiers.command && i.key_pressed(Key::O) {
                 actions.push(Key::F1); // marqueur "ouvrir"
             }
+            if i.modifiers.command && i.key_pressed(Key::W) {
+                actions.push(Key::F2); // marqueur "fermer le livre"
+            }
         });
         for k in actions {
             match k {
@@ -102,6 +105,10 @@ impl ComicRustApp {
                 Key::Plus | Key::Equals => self.zoom = (self.zoom * 1.25).min(8.0),
                 Key::Minus => self.zoom = (self.zoom / 1.25).max(0.1),
                 Key::Num0 => self.zoom = 1.0,
+                Key::F2 => {
+                    self.close_book(ctx);
+                    return;
+                }
                 Key::F1 => self.open_dialog(ctx),
                 _ => {}
             }
