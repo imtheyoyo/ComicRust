@@ -140,6 +140,10 @@ Créer la release sur GitHub (ou `gh release create v0.3.0 --generate-notes`), p
 version Windows x64 (`ComicRust.exe` + `comicrust-cli.exe` + `pdfium.dll`) et attache le zip,
 la recette et les échantillons. **La release échoue si `recette/<tag>.md` n'existe pas.**
 
+Les notes de chaque release viennent de [`CHANGELOG.md`](CHANGELOG.md) (section `## [vX.Y.Z]`) :
+**la release échoue aussi si cette section manque**. Le workflow *Notes de version* recopie le
+journal dans les releases déjà publiées.
+
 ## Correspondance .NET → Rust
 
 | ComicRack (.NET) | ComicRust |

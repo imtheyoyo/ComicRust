@@ -7,6 +7,8 @@
   de passer à l'étape suivante). Le rédiger avant de lancer la release ; la CI refuse de publier
   sans lui. Voir `recette/README.md` pour le format (gravités [B]/[M]/[m], section « déjà vérifié
   automatiquement », non-régression, limites connues, bilan GO/NO-GO).
+- **Chaque version a sa section dans `CHANGELOG.md`** (`## [vX.Y.Z] — date`, en français : Nouveautés /
+  Corrections / Recette). Elle devient les notes de la release GitHub ; la CI refuse de publier sans elle.
 - Pour chaque recette, générer et publier la page à cocher avec `recette/outil/generer_page.py`
   (une page par version). Yoyo colle le rapport copié depuis cette page : s'en servir pour la
   version suivante (correctifs + non-régression).

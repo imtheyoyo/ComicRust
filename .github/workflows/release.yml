@@ -34,6 +34,14 @@ jobs:
           tag="${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}"
           test -f "recette/$tag.md" || { echo "::error::recette/$tag.md manquant : rédiger la recette avant de publier"; exit 1; }
 
+      - name: Notes de version (CHANGELOG.md)
+        shell: bash
+        run: |
+          tag="${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}"
+          # Échoue si CHANGELOG.md n'a pas de section pour cette version.
+          scripts/notes_de_version.sh "$tag" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ env.TARGET }}
@@ -81,7 +89,8 @@ jobs:
           tag_name: ${{ steps.pkg.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ComicRust ${{ steps.pkg.outputs.tag }}
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/notes.md
+          generate_release_notes: false
           prerelease: ${{ startsWith(steps.pkg.outputs.tag, 'v0.') }}
           files: |
             ${{ steps.pkg.outputs.zip }}

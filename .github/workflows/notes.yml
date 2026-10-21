@@ -1,0 +1,37 @@
+name: Notes de version
+
+# Remplace les notes des releases GitHub existantes par leur section de CHANGELOG.md.
+# Les nouvelles releases les reçoivent déjà à la publication (release.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Tags séparés par des espaces (vide : toutes les releases)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Mettre à jour les notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAGS: ${{ github.event.inputs.tags }}
+        run: |
+          tags="$TAGS"
+          if [ -z "$tags" ]; then
+            tags=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          fi
+          for t in $tags; do
+            if scripts/notes_de_version.sh "$t" > notes.md; then
+              gh release edit "$t" --notes-file notes.md
+              echo "✔ $t"
+            else
+              echo "::warning::$t : pas de section dans CHANGELOG.md, notes inchangées"
+            fi
+          done
