@@ -3,7 +3,7 @@
 
 use comicrust_core::comic_lists::{ComicList, ListKind};
 use comicrust_core::library::LibraryBook;
-use eframe::egui::{self, vec2, Color32, Rect, RichText, Ui};
+use eframe::egui::{self, vec2, Rect, RichText, Ui};
 
 use super::library_table::{human_size, long_date, short_date};
 use super::library_view::{paint_cover, ACCENT, COVER_RATIO};
@@ -24,6 +24,9 @@ impl ComicRustApp {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.heading("Listes");
+            if self.library.lists.computing() {
+                ui.spinner().on_hover_text("Calcul des listes…");
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("…").on_hover_text("Choisir le ComicDb.xml de ComicRack").clicked() {
                     if let Some(p) = rfd::FileDialog::new()
@@ -38,7 +41,7 @@ impl ComicRustApp {
             });
         });
         ui.separator();
-        self.library.refresh_list_counts();
+        self.library.poll_lists(ui.ctx());
         let db = self.library.database();
         let mut chosen: Option<Option<String>> = None;
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -58,10 +61,18 @@ impl ComicRustApp {
             self.library.lists.items = items;
             ui.add_space(8.0);
             if let Some(e) = &self.library.lists.error {
-                ui.label(RichText::new(format!("⚠ {e}")).small().color(Color32::from_rgb(240, 170, 90)));
+                ui.label(RichText::new(format!("⚠ {e}")).small().color(crate::ui::theme::warning(ui)));
                 ui.label(RichText::new("« … » en haut du panneau pour choisir le fichier.").small().weak());
             } else if let Some(p) = &self.library.lists.path {
                 ui.label(RichText::new(p.display().to_string()).small().weak());
+                if ui
+                    .small_button("📋 Copier le bilan des listes")
+                    .on_hover_text("Nombre de livres de chaque liste selon ComicRust et selon ComicRack")
+                    .clicked()
+                {
+                    let text = self.lists_report();
+                    ui.ctx().copy_text(text);
+                }
             } else {
                 ui.label(RichText::new("Recherche du ComicDb.xml…").small().weak());
             }
@@ -84,6 +95,18 @@ impl ComicRustApp {
         }
     }
 
+    /// Infobulle d'une liste : description, et comparaison avec le compte de ComicRack.
+    fn list_tooltip(&self, ui: &mut Ui, l: &ComicList) {
+        if !l.description.is_empty() {
+            ui.label(&l.description);
+        }
+        match self.library.lists.count(&l.id) {
+            Some(n) => ui.label(format!("ComicRust : {n} livres")),
+            None => ui.label("ComicRust : liste intelligente pas encore calculable"),
+        };
+        ui.label(RichText::new(format!("ComicRack (dernier enregistrement) : {} livres", l.comicrack_count)).weak());
+    }
+
     fn list_node(&self, ui: &mut Ui, l: &ComicList, chosen: &mut Option<Option<String>>) {
         let selected = self.library.selected_list.as_deref() == Some(l.id.as_str());
         let count = self.library.lists.count(&l.id).map(|n| format!(" ({n})")).unwrap_or_default();
@@ -93,7 +116,8 @@ impl ComicRustApp {
                 let id = ui.make_persistent_id(("dossier", &l.id));
                 egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                     .show_header(ui, |ui| {
-                        if ui.selectable_label(selected, text).clicked() {
+                        let r = ui.selectable_label(selected, text).on_hover_ui(|ui| self.list_tooltip(ui, l));
+                        if r.clicked() {
                             *chosen = Some(Some(l.id.clone()));
                         }
                     })
@@ -104,18 +128,42 @@ impl ComicRustApp {
                     });
             }
             _ => {
-                let mut r = ui.selectable_label(selected, text);
-                if !l.description.is_empty() {
-                    r = r.on_hover_text(&l.description);
-                }
-                if matches!(l.kind, ListKind::Smart { cached: None }) {
-                    r = r.on_hover_text("Liste intelligente : contenu non mémorisé par ComicRack");
-                }
+                let r = ui.selectable_label(selected, text).on_hover_ui(|ui| self.list_tooltip(ui, l));
                 if r.clicked() {
                     *chosen = Some(Some(l.id.clone()));
                 }
             }
         }
+    }
+
+    /// Bilan texte : pour chaque liste, livres comptés par ComicRust et par ComicRack.
+    pub(crate) fn lists_report(&self) -> String {
+        fn walk(app: &ComicRustApp, l: &[ComicList], depth: usize, out: &mut String) {
+            for x in l {
+                let ours = match app.library.lists.count(&x.id) {
+                    Some(n) => n.to_string(),
+                    None => "?".into(),
+                };
+                let flag = if ours == x.comicrack_count.to_string() { "" } else { "  ≠" };
+                out.push_str(&format!(
+                    "{}{} {} — ComicRust {ours} / ComicRack {}{flag}\n",
+                    "  ".repeat(depth),
+                    icon(x),
+                    x.name,
+                    x.comicrack_count
+                ));
+                if let ListKind::Folder { children, .. } = &x.kind {
+                    walk(app, children, depth + 1, out);
+                }
+            }
+        }
+        let mut out = format!(
+            "Bilan des listes ComicRust v{} — {}\n(ComicRack : nombre enregistré dans ComicDb.xml à sa dernière sauvegarde)\n\n",
+            env!("CARGO_PKG_VERSION"),
+            self.library.lists.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default()
+        );
+        walk(self, &self.library.lists.items, 0, &mut out);
+        out
     }
 
     /// Fiche du livre sélectionné.
@@ -174,7 +222,9 @@ impl ComicRustApp {
             }
         });
         if let Some(from_start) = open {
-            self.open_library_book(&ctx, &book.id, from_start);
+            // « Lire (page N) » : la page de ComicRack, telle qu'affichée sur le bouton.
+            let page = if from_start { 0 } else { book.current_page.unwrap_or(0) as usize };
+            self.open_library_book(&ctx, &book.id, crate::app::Start::Page(page));
         }
     }
 }

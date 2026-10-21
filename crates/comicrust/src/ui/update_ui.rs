@@ -2,7 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
-use eframe::egui::{self, Color32, Context, RichText, Ui, ViewportCommand};
+use eframe::egui::{self, Context, RichText, Ui, ViewportCommand};
 
 use crate::app::ComicRustApp;
 use crate::update::{self, Status, CURRENT};
@@ -21,7 +21,7 @@ impl ComicRustApp {
                 ui.label(
                     RichText::new(format!("⬆ {} est disponible", rel.name))
                         .strong()
-                        .color(Color32::from_rgb(240, 170, 90)),
+                        .color(crate::ui::theme::warning(ui)),
                 );
                 ui.label(RichText::new(format!("(version actuelle : v{CURRENT})")).weak());
                 if rel.zip.is_some() && ui.button("Installer").clicked() {
@@ -57,7 +57,7 @@ impl ComicRustApp {
                 if simulated != CURRENT {
                     ui.label(
                         RichText::new(format!("Mode recette : comparée aux releases comme v{simulated}"))
-                            .color(Color32::from_rgb(240, 170, 90)),
+                            .color(crate::ui::theme::warning(ui)),
                     );
                 }
                 ui.checkbox(&mut self.settings.check_updates, "Vérifier les nouvelles versions au démarrage");
@@ -73,7 +73,7 @@ impl ComicRustApp {
                         });
                     }
                     Status::UpToDate => {
-                        ui.label(RichText::new("✔ Tu as la dernière version.").color(Color32::LIGHT_GREEN));
+                        ui.label(RichText::new("✔ Tu as la dernière version.").color(crate::ui::theme::ok(ui)));
                     }
                     Status::Available(rel) => {
                         ui.label(RichText::new(format!("{} est disponible.", rel.name)).strong());
@@ -112,14 +112,14 @@ impl ComicRustApp {
                     Status::Installed(rel) => {
                         ui.label(
                             RichText::new(format!("✔ {} est installée. Redémarre ComicRust pour l'utiliser.", rel.name))
-                                .color(Color32::LIGHT_GREEN),
+                                .color(crate::ui::theme::ok(ui)),
                         );
                         if ui.button("Redémarrer maintenant").clicked() {
                             restart = true;
                         }
                     }
                     Status::Failed(e) => {
-                        ui.label(RichText::new(format!("✖ {e}")).color(Color32::LIGHT_RED));
+                        ui.label(RichText::new(format!("✖ {e}")).color(crate::ui::theme::error(ui)));
                     }
                 }
                 ui.separator();

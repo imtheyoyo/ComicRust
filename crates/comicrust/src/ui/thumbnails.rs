@@ -68,7 +68,7 @@ impl ComicRustApp {
                     egui::Align2::CENTER_CENTER,
                     format!("{}", i + 1),
                     egui::FontId::proportional(12.0),
-                    if selected { Color32::WHITE } else { Color32::GRAY },
+                    if selected { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() },
                 );
                 if resp.clicked() {
                     clicked = Some(i);

@@ -1,6 +1,6 @@
 //! Fenêtres : informations du livre, à propos, erreurs.
 
-use eframe::egui::{self, Color32, Context, RichText};
+use eframe::egui::{self, Context, RichText};
 
 use crate::app::ComicRustApp;
 
@@ -71,7 +71,7 @@ impl ComicRustApp {
                 ui.separator();
                 match comicrust_core::providers::pdfium_status() {
                     Ok(()) => ui.label("PDF : PDFium chargé ✔"),
-                    Err(e) => ui.label(RichText::new(format!("PDF : {e}")).color(Color32::LIGHT_RED)),
+                    Err(e) => ui.label(RichText::new(format!("PDF : {e}")).color(crate::ui::theme::error(ui))),
                 };
                 ui.separator();
                 egui::Grid::new("keys").num_columns(2).show(ui, |ui| {
@@ -113,6 +113,53 @@ impl ComicRustApp {
         });
         if close {
             self.error = None;
+        }
+    }
+
+    /// « Reprendre à quelle page ? » quand ComicRack et ComicRust ne sont pas d'accord.
+    pub(crate) fn resume_window(&mut self, ctx: &egui::Context) {
+        let Some(p) = &mut self.resume_prompt else { return };
+        let name = p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut choice: Option<(usize, Option<crate::settings::ResumeChoice>)> = None;
+        let mut cancel = false;
+        egui::Window::new("Reprendre la lecture")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new(&name).strong());
+                ui.label("ComicRack et ComicRust n'ont pas retenu la même page :");
+                ui.add_space(6.0);
+                let (crack, crust) = (p.comicrack, p.comicrust);
+                if ui.button(format!("📖 Page {} — lue dans ComicRack", crack + 1)).clicked() {
+                    choice = Some((crack, Some(crate::settings::ResumeChoice::ComicRack)));
+                }
+                if ui.button(format!("📖 Page {} — lue dans ComicRust", crust + 1)).clicked() {
+                    choice = Some((crust, Some(crate::settings::ResumeChoice::ComicRust)));
+                }
+                if ui.button("⏮ Depuis le début").clicked() {
+                    choice = Some((0, None));
+                }
+                ui.add_space(4.0);
+                ui.checkbox(&mut p.remember, "Toujours faire ce choix (modifiable dans le menu ⚙)");
+                ui.add_space(4.0);
+                if ui.button("Annuler").clicked() {
+                    cancel = true;
+                }
+            });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            cancel = true;
+        }
+        if let Some((page, pref)) = choice {
+            let p = self.resume_prompt.take().unwrap();
+            if p.remember {
+                if let Some(pref) = pref {
+                    self.settings.resume = pref;
+                }
+            }
+            self.open_book_at(ctx, p.path, crate::app::Start::Page(page));
+        } else if cancel {
+            self.resume_prompt = None;
         }
     }
 }

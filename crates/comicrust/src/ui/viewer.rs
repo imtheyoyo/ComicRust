@@ -10,8 +10,7 @@ use crate::settings::FitMode;
 impl ComicRustApp {
     pub(crate) fn viewer(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let bg =
-            Color32::from_rgb(self.settings.background[0], self.settings.background[1], self.settings.background[2]);
+        let bg = crate::ui::theme::reader_background(ui);
         ui.painter().rect_filled(ui.max_rect(), 0.0, bg);
 
         let Some(book) = &self.book else {
@@ -83,7 +82,7 @@ impl ComicRustApp {
                             Color32::LIGHT_RED,
                         );
                     } else {
-                        painter.rect_filled(r.shrink(4.0), 2.0, Color32::from_gray(36));
+                        painter.rect_filled(r.shrink(4.0), 2.0, crate::ui::theme::placeholder(ui));
                         painter.text(
                             r.center(),
                             egui::Align2::CENTER_CENTER,

@@ -113,6 +113,24 @@ impl ComicRustApp {
                     {
                         self.restart_watch(&ctx);
                     }
+                    ui.menu_button(format!("Thème : {}", self.settings.theme.label()), |ui| {
+                        for t in crate::ui::theme::Theme::ALL {
+                            if ui.radio_value(&mut self.settings.theme, t, t.label()).changed() {
+                                t.apply(&ctx);
+                            }
+                        }
+                    });
+                    ui.menu_button(format!("Reprise de lecture : {}", self.settings.resume.label()), |ui| {
+                        use crate::settings::ResumeChoice;
+                        ui.label(
+                            egui::RichText::new("Quand ComicRack et ComicRust n'ont pas retenu la même page")
+                                .weak()
+                                .small(),
+                        );
+                        for c in [ResumeChoice::Ask, ResumeChoice::ComicRack, ResumeChoice::ComicRust] {
+                            ui.radio_value(&mut self.settings.resume, c, c.label());
+                        }
+                    });
                     ui.checkbox(&mut self.settings.check_updates, "Vérifier les mises à jour au démarrage");
                     ui.separator();
                     ui.label(

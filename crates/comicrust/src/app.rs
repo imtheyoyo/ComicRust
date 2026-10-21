@@ -14,10 +14,29 @@ use crate::book::Book;
 use crate::library::covers::CoverCache;
 use crate::library::LibraryState;
 use crate::reading_list::ListState;
-use crate::settings::{DbSource, Settings};
+use crate::settings::{DbSource, ResumeChoice, Settings};
 use crate::ui::db_window::DbWindow;
 
 const SETTINGS_KEY: &str = "comicrust.settings";
+
+/// Page d'ouverture d'un livre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// Page mémorisée (ComicRust ou ComicRack, voir `Settings::resume`) ; la page de
+    /// ComicRack est cherchée d'après le chemin du fichier.
+    Auto,
+    /// Comme `Auto`, avec la page de ComicRack déjà connue (livre de la bibliothèque).
+    Resume(Option<usize>),
+    Page(usize),
+}
+
+/// Question « reprendre à quelle page ? » en attente.
+pub struct ResumePrompt {
+    pub path: PathBuf,
+    pub comicrack: usize,
+    pub comicrust: usize,
+    pub remember: bool,
+}
 
 /// Vue principale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,12 +68,13 @@ pub struct ComicRustApp {
     pub(crate) covers: Option<CoverCache>,
     pub(crate) db_window: Option<DbWindow>,
     pub(crate) update: crate::update::UpdateState,
+    pub(crate) resume_prompt: Option<ResumePrompt>,
 }
 
 impl ComicRustApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>, data_dir: Option<PathBuf>) -> Self {
         let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        settings.theme.apply(&cc.egui_ctx);
         let mut app = Self {
             settings,
             book: None,
@@ -76,6 +96,7 @@ impl ComicRustApp {
             covers: None,
             db_window: None,
             update: Default::default(),
+            resume_prompt: None,
         };
         crate::update::cleanup_previous_install();
         if app.settings.db_source != DbSource::None {
@@ -110,23 +131,50 @@ impl ComicRustApp {
     }
 
     pub(crate) fn open_book(&mut self, ctx: &Context, path: PathBuf) {
-        self.open_book_at(ctx, path, None);
+        self.open_book_at(ctx, path, Start::Auto);
     }
 
-    /// Ouvre un livre ; `start` (page lue d'après la base ComicRack) sert si ComicRust
-    /// n'a pas encore de page mémorisée pour ce fichier.
-    pub(crate) fn open_book_at(&mut self, ctx: &Context, path: PathBuf, start: Option<usize>) {
+    /// Page où ComicRack a laissé ce fichier (base ComicRack), si elle est au-delà de la
+    /// première.
+    pub(crate) fn comicrack_page(&self, path: &Path) -> Option<usize> {
+        let db = self.library.database()?;
+        let p = path.to_string_lossy();
+        let book = db.books.iter().find(|b| b.file.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(&p)))?;
+        book.current_page.map(|c| c as usize).filter(|c| *c > 0)
+    }
+
+    /// Ouvre un livre. `Start::Auto` reprend à la page mémorisée : celle de ComicRust ou
+    /// celle de ComicRack ; si les deux existent et diffèrent, la préférence décide (ou
+    /// une question est posée).
+    pub(crate) fn open_book_at(&mut self, ctx: &Context, path: PathBuf, start: Start) {
+        // Position du livre en cours d'abord : on peut rouvrir le même.
         self.remember_position();
+        let current = match start {
+            Start::Page(p) => p,
+            Start::Auto | Start::Resume(_) => {
+                let crust = self.settings.last_pages.get(&path).copied().filter(|p| *p > 0);
+                let crack = match start {
+                    Start::Resume(p) => p.filter(|p| *p > 0),
+                    _ => self.comicrack_page(&path),
+                };
+                match (crack, crust) {
+                    (Some(a), Some(b)) if a != b => match self.settings.resume {
+                        ResumeChoice::ComicRack => a,
+                        ResumeChoice::ComicRust => b,
+                        ResumeChoice::Ask => {
+                            self.resume_prompt =
+                                Some(ResumePrompt { path, comicrack: a, comicrust: b, remember: false });
+                            return;
+                        }
+                    },
+                    (a, b) => b.or(a).unwrap_or(0),
+                }
+            }
+        };
+        self.resume_prompt = None;
         self.mode = Mode::Reader;
         let max_side = ctx.input(|i| i.max_texture_side).min(16384) as u32;
         let loader = BookLoader::open(path.clone(), ctx.clone(), max_side);
-        // Page de reprise : celle mémorisée par ComicRust, sinon celle de la base ComicRack.
-        let from_db = || {
-            let db = self.library.database()?;
-            let p = path.to_string_lossy();
-            db.books.iter().find(|b| b.file.as_deref() == Some(p.as_ref()))?.current_page.map(|c| c as usize)
-        };
-        let current = self.settings.last_pages.get(&path).copied().or(start).or_else(from_db).unwrap_or(0);
         self.settings.push_recent(path.clone());
         if let Some(list) = &mut self.list {
             list.current = list.position_of(&path);
@@ -279,11 +327,17 @@ impl eframe::App for ComicRustApp {
                 egui::Panel::right("list").resizable(true).default_size(260.0).show(ui, |ui| self.list_panel(ui));
             }
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| match self.mode {
+        // Lecteur : fond peint par la vue ; bibliothèque : fond du thème (clair ou sombre).
+        let frame = match self.mode {
+            Mode::Reader => egui::Frame::NONE,
+            Mode::Library => egui::Frame::NONE.fill(ui.visuals().panel_fill),
+        };
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| match self.mode {
             Mode::Library => self.library_view(ui),
             Mode::Reader => self.viewer(ui),
         });
 
+        self.resume_window(&ctx);
         self.db_window_ui(&ctx);
         self.update_window(&ctx);
         self.info_window(&ctx);

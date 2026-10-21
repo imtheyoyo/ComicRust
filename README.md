@@ -38,11 +38,13 @@ en **tableau** (colonnes triables d'un clic) :
   scénariste, année, arc, genre, format, état de lecture, ou aucun) ;
 - panneau **Listes** : dossiers, listes de lecture et listes intelligentes de ComicRack, lues
   dans son `ComicDb.xml` (trouvé d'après `ComicRack.ini`, ou choisi avec « … ») ; une liste de
-  lecture s'affiche dans son ordre ;
+  lecture s'affiche dans son ordre ; les **listes intelligentes sont calculées par ComicRust**
+  avec les critères et les règles de ComicRack (ComicRack ne garde pas leur contenu avec MySQL) ;
 - panneau **Détails** : fiche complète du livre sélectionné (résumé, auteurs, personnages,
   lieux, note, lecture…) ;
-- un clic sélectionne, un **double-clic** ou **Entrée** ouvre la BD à la page où ComicRack
-  l'avait laissée.
+- un clic sélectionne, un **double-clic** ou **Entrée** ouvre la BD ; si ComicRack et
+  ComicRust n'ont pas retenu la même page, ComicRust demande laquelle reprendre (réglable) ;
+- thème **clair** ou **sombre** (menu ⚙).
 
 Les **modifications faites dans ComicRack** (livre ajouté, modifié, supprimé, liste changée)
 apparaissent en quelques secondes, sans recharger : ComicRust suit les compteurs de la table
@@ -117,7 +119,7 @@ comicrust-cli missing "F:\BD" Thanos.cbl            # ou un ComicDB.xml à la pl
 
 | Crate | Rôle |
 |---|---|
-| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, listes `.cbl`, `ComicDB.xml` et ses listes (`comic_lists`), index de fichiers, base MySQL et suivi des modifications (`db/`) |
+| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, listes `.cbl`, `ComicDB.xml` et ses listes (`comic_lists`), listes intelligentes (`smart`), index de fichiers, base MySQL et suivi des modifications (`db/`) |
 | `comicrust` | l'application `ComicRust.exe` (egui) : `app`, `book/`, `library/`, `reading_list`, `update/`, `ui/`… |
 | `comicrust-cli` | outil en ligne de commande |
 
@@ -130,7 +132,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.4.1](recette/v0.4.1.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.5.0](recette/v0.5.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -164,7 +166,8 @@ journal dans les releases déjà publiées.
    groupement)~~ (v0.3.0).
 2. ~~Panneau de détails, tri et groupements au choix, vue tableau, listes de ComicRack,
    couverture choisie, suivi des modifications~~ (v0.4.0).
-3. **Listes intelligentes** (syntaxe de requête ComicRack).
+3. ~~**Listes intelligentes** calculées par ComicRust, thème clair/sombre, choix de la page
+   de reprise~~ (v0.5.0).
 4. Écriture de `ComicInfo.xml`, conversion CBR→CBZ, HEIF/AVIF, scrapers WebComic.
 5. Associations de fichiers Windows, serveur HTTP/OPDS, scripts.
 6. Version majeure : **enregistrer la lecture dans ComicRack** (page lue, « lu ») — ComicRust

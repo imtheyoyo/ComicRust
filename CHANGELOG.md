@@ -5,6 +5,32 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.5.0] — 2026-10-22
+
+### Nouveautés
+- **Listes intelligentes calculées par ComicRust** : ComicRack ne garde pas leur contenu quand
+  la bibliothèque est dans MySQL ; ComicRust lit leurs critères dans `ComicDb.xml` et les
+  applique lui-même, avec les règles de ComicRack : critères texte (est, contient, contient
+  l'un de / tous, commence, finit, liste contient, expression régulière), nombres, dates
+  (« dans les N derniers jours »), oui/non, groupes « tous / au moins un », critères inversés,
+  liste de départ, limites, **série entièrement complète**, **doublons**, **fichiers à mettre
+  à jour**. Les 29 listes intelligentes de ta bibliothèque sont toutes prises en charge.
+- Bulle d'aide de chaque liste : nombre de livres selon ComicRust et selon ComicRack ;
+  « 📋 Copier le bilan des listes » compare les deux pour toutes les listes.
+- **Reprise de lecture** : quand ComicRack et ComicRust n'ont pas retenu la même page, une
+  question propose les deux (ou le début), avec « Toujours faire ce choix » ; réglable dans le
+  menu ⚙ (Demander / Page de ComicRack / Page de ComicRust).
+- **Thème clair ou sombre** (ou celui de Windows), dans le menu ⚙.
+
+### Corrections
+- « 📖 Lire (page N) » dans la fiche ouvre bien à la page N enregistrée par ComicRack (la page
+  mémorisée par ComicRust passait avant).
+- Les listes sont calculées dans un fil séparé : l'interface ne se fige pas quand ComicRack
+  modifie la base.
+
+### Recette
+[recette/v0.5.0.md](recette/v0.5.0.md)
+
 ## [v0.4.1] — 2026-10-21
 
 Correctif de la v0.4.0 (recette NO-GO).

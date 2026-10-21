@@ -1,6 +1,6 @@
 //! Barre d'état (livre, format, page, taille).
 
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{RichText, Ui};
 
 use crate::app::{ComicRustApp, Mode};
 use crate::library::Status;
@@ -30,8 +30,7 @@ impl ComicRustApp {
                     if let Some(e) = &self.library.watch_error {
                         ui.separator();
                         ui.label(
-                            RichText::new("⚠ base injoignable, nouvel essai…")
-                                .color(egui::Color32::from_rgb(240, 170, 90)),
+                            RichText::new("⚠ base injoignable, nouvel essai…").color(crate::ui::theme::warning(ui)),
                         )
                         .on_hover_text(e);
                     } else if self.library.watcher.is_some() && self.settings.auto_refresh {

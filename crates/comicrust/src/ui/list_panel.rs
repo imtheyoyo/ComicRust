@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use eframe::egui::{self, Color32, RichText, Ui};
+use eframe::egui::{self, RichText, Ui};
 
 use crate::app::ComicRustApp;
 
@@ -45,7 +45,7 @@ impl ComicRustApp {
                 RichText::new(
                     "Aucun fichier trouvé dans le dossier de la liste : choisis le dossier où sont rangées tes BD.",
                 )
-                .color(Color32::from_rgb(230, 170, 60)),
+                .color(crate::ui::theme::warning(ui)),
             );
         }
         let mut action = None::<ListAction>;

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use comicrust_core::library::LibraryBook;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
 
-use crate::app::ComicRustApp;
+use crate::app::{ComicRustApp, Start};
 use crate::library::covers::{Cover, CoverCache};
 use crate::library::{GroupKey, Row, SortKey, Status};
 
@@ -33,11 +33,11 @@ pub(crate) fn paint_cover(ui: &Ui, covers: &mut CoverCache, book: &LibraryBook, 
             r
         }
         Cover::Pending => {
-            painter.rect_filled(rect.shrink(2.0), 3.0, Color32::from_gray(40));
+            painter.rect_filled(rect.shrink(2.0), 3.0, crate::ui::theme::placeholder(ui));
             rect
         }
         Cover::Failed => {
-            painter.rect_filled(rect.shrink(2.0), 3.0, Color32::from_gray(34));
+            painter.rect_filled(rect.shrink(2.0), 3.0, crate::ui::theme::placeholder(ui));
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -88,8 +88,9 @@ impl ComicRustApp {
         }
     }
 
-    /// Ouvre le livre de la base à la page où ComicRack l'avait laissé.
-    pub(crate) fn open_library_book(&mut self, ctx: &egui::Context, id: &str, from_start: bool) {
+    /// Ouvre un livre de la base : `Start::Auto` (double-clic, Entrée) applique la règle de
+    /// reprise ; `Start::Page` ouvre à la page demandée (boutons de la fiche).
+    pub(crate) fn open_library_book(&mut self, ctx: &egui::Context, id: &str, start: Start) {
         let Some(db) = self.library.database() else { return };
         let Some(book) = db.get(id) else { return };
         let Some(file) = book.file.clone() else {
@@ -97,6 +98,10 @@ impl ComicRustApp {
             return;
         };
         let path = PathBuf::from(&file);
+        let start = match start {
+            Start::Auto => Start::Resume(book.current_page.map(|p| p as usize)),
+            other => other,
+        };
         // Absent mais « .tmp » présent : ComicRack réécrit le fichier, le lecteur patiente.
         if !path.exists() && !comicrust_core::providers::is_being_rewritten(&path) {
             self.error = Some(format!(
@@ -104,13 +109,7 @@ impl ComicRustApp {
             ));
             return;
         }
-        if from_start {
-            self.settings.last_pages.remove(&path);
-            self.open_book_at(ctx, path, Some(0));
-        } else {
-            let start = book.current_page.map(|p| p as usize);
-            self.open_book_at(ctx, path, start);
-        }
+        self.open_book_at(ctx, path, start);
     }
 
     fn library_toolbar(&mut self, ui: &mut Ui) {
@@ -134,7 +133,7 @@ impl ComicRustApp {
             ui.selectable_value(&mut self.settings.library_table, true, "☰ Tableau");
             ui.separator();
             ui.label("Trier :");
-            let in_list = self.library.selected_list.is_some();
+            let in_list = self.library.reading_list_shown();
             egui::ComboBox::from_id_salt("tri").selected_text(self.settings.library_sort.label()).show_ui(ui, |ui| {
                 for k in SortKey::ALL {
                     if k == SortKey::Position && !in_list {
@@ -176,7 +175,7 @@ impl ComicRustApp {
             }
         });
         // « Ordre de la liste » n'a de sens que dans une liste.
-        if !self.library.selected_list.is_some() && self.settings.library_sort == SortKey::Position {
+        if !self.library.reading_list_shown() && self.settings.library_sort == SortKey::Position {
             self.settings.library_sort = SortKey::Series;
         }
     }
@@ -217,7 +216,7 @@ impl ComicRustApp {
                 ui.vertical_centered(|ui| {
                     ui.add_space(ui.available_height() * 0.25);
                     ui.heading("⚠ Base ComicRack inaccessible");
-                    ui.label(RichText::new(err).color(Color32::LIGHT_RED));
+                    ui.label(RichText::new(err).color(crate::ui::theme::error(ui)));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         if ui.button("Réessayer").clicked() {
@@ -231,7 +230,16 @@ impl ComicRustApp {
             }
             Status::Loaded(_) => {
                 if let Some(list) = self.library.selected_list() {
-                    let unknown = list.members() == comicrust_core::comic_lists::Members::Unknown;
+                    let unknown = match self
+                        .library
+                        .list_members(&list.id)
+                        .unwrap_or(comicrust_core::comic_lists::Members::All)
+                    {
+                        comicrust_core::comic_lists::Members::Unknown(why) => Some(why),
+                        _ => None,
+                    };
+                    let approximate = matches!(&list.kind,
+                        comicrust_core::comic_lists::ListKind::Smart { query: Some(q), .. } if q.is_approximate());
                     let name = list.name.clone();
                     ui.horizontal(|ui| {
                         ui.add_space(12.0);
@@ -239,18 +247,18 @@ impl ComicRustApp {
                         if ui.small_button("✖ Toute la bibliothèque").clicked() {
                             self.library.selected_list = None;
                         }
+                        if approximate {
+                            ui.label(
+                                RichText::new("⚠ sélection « au hasard » : peut différer de celle de ComicRack")
+                                    .color(crate::ui::theme::warning(ui)),
+                            );
+                        }
                     });
-                    if unknown {
+                    if let Some(why) = unknown {
                         ui.vertical_centered(|ui| {
                             ui.add_space(40.0);
-                            ui.label("Liste intelligente : ComicRack n'a pas mémorisé son contenu dans ComicDb.xml.");
-                            ui.label(
-                                RichText::new(
-                                    "ComicRust saura calculer les listes intelligentes à l'étape suivante \
-                                     (moteur de requêtes).",
-                                )
-                                .weak(),
-                            );
+                            ui.label("ComicRust ne peut pas encore afficher cette liste intelligente :");
+                            ui.label(RichText::new(why).strong());
                         });
                         return;
                     }
@@ -273,7 +281,7 @@ impl ComicRustApp {
         let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
         if enter {
             if let Some(id) = self.library.selected_book.clone() {
-                self.open_library_book(ui.ctx(), &id, false);
+                self.open_library_book(ui.ctx(), &id, Start::Auto);
             }
         }
         if esc {
@@ -306,7 +314,7 @@ impl ComicRustApp {
             self.empty_message(ui, db.is_empty());
             return;
         }
-        let in_list = self.library.selected_list.is_some();
+        let in_list = self.library.reading_list_shown();
         let compact = opts.group == GroupKey::Series;
 
         let heights: Vec<f32> = rows
@@ -418,7 +426,7 @@ impl ComicRustApp {
         }
         if let Some(id) = open {
             self.library.selected_book = Some(id.clone());
-            self.open_library_book(ui.ctx(), &id, false);
+            self.open_library_book(ui.ctx(), &id, Start::Auto);
         }
     }
 }

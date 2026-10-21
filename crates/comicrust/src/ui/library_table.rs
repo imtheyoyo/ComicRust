@@ -113,7 +113,7 @@ impl ComicRustApp {
             });
             return;
         }
-        let in_list = self.library.selected_list.is_some();
+        let in_list = self.library.reading_list_shown();
         let mut open = None;
         let mut select = None;
         let mut sort_by = None;
@@ -197,7 +197,7 @@ impl ComicRustApp {
         }
         if let Some(id) = open {
             self.library.selected_book = Some(id.clone());
-            self.open_library_book(ui.ctx(), &id, false);
+            self.open_library_book(ui.ctx(), &id, crate::app::Start::Auto);
         }
     }
 }

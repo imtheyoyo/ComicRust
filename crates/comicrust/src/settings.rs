@@ -33,6 +33,25 @@ impl FitMode {
     }
 }
 
+/// Page de reprise quand ComicRack et ComicRust ont mémorisé des pages différentes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ResumeChoice {
+    #[default]
+    Ask,
+    ComicRack,
+    ComicRust,
+}
+
+impl ResumeChoice {
+    pub fn label(self) -> &'static str {
+        match self {
+            ResumeChoice::Ask => "Demander",
+            ResumeChoice::ComicRack => "Page de ComicRack",
+            ResumeChoice::ComicRust => "Page de ComicRust",
+        }
+    }
+}
+
 /// Où trouver la base MySQL de ComicRack.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum DbSource {
@@ -66,7 +85,8 @@ pub struct Settings {
     pub manga: bool,
     pub show_thumbnails: bool,
     pub show_status_bar: bool,
-    pub background: [u8; 3],
+    /// Thème de l'interface.
+    pub theme: crate::ui::theme::Theme,
     pub recent: Vec<PathBuf>,
     /// Dernière page lue par fichier (équivalent de `CurrentPage` dans ComicRack).
     pub last_pages: HashMap<PathBuf, usize>,
@@ -89,6 +109,8 @@ pub struct Settings {
     pub show_details: bool,
     /// Relire automatiquement les modifications faites dans ComicRack.
     pub auto_refresh: bool,
+    /// Reprise de lecture quand ComicRack et ComicRust divergent.
+    pub resume: ResumeChoice,
     /// Bibliothèque : hauteur des couvertures (points).
     pub library_cover_height: f32,
     /// Vérifier les nouvelles versions au démarrage.
@@ -106,7 +128,7 @@ impl Default for Settings {
             manga: false,
             show_thumbnails: true,
             show_status_bar: true,
-            background: [24, 24, 26],
+            theme: crate::ui::theme::Theme::Dark,
             recent: Vec::new(),
             last_pages: HashMap::new(),
             library_db: None,
@@ -120,6 +142,7 @@ impl Default for Settings {
             show_comic_lists: true,
             show_details: true,
             auto_refresh: true,
+            resume: ResumeChoice::Ask,
             library_cover_height: 190.0,
             check_updates: true,
             skipped_version: None,

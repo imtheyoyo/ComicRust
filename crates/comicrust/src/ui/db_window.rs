@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
 use comicrust_core::db::{test_connection, DbConfig};
-use eframe::egui::{self, Color32, Context, RichText};
+use eframe::egui::{self, Context, RichText};
 
 use crate::app::ComicRustApp;
 use crate::settings::DbSource;
@@ -128,8 +128,8 @@ impl ComicRustApp {
                         let path = PathBuf::from(w.ini_path.trim().trim_matches('"'));
                         if !w.ini_path.trim().is_empty() {
                             match DbConfig::from_comicrack_ini(&path) {
-                                Ok(c) => ui.label(RichText::new(format!("✔ {}", c.describe())).color(Color32::LIGHT_GREEN)),
-                                Err(e) => ui.label(RichText::new(format!("✖ {e}")).color(Color32::LIGHT_RED)),
+                                Ok(c) => ui.label(RichText::new(format!("✔ {}", c.describe())).color(crate::ui::theme::ok(ui))),
+                                Err(e) => ui.label(RichText::new(format!("✖ {e}")).color(crate::ui::theme::error(ui))),
                             };
                         }
                         ui.label(
@@ -199,10 +199,10 @@ impl ComicRustApp {
                 });
                 match &w.test_result {
                     Some(Ok(m)) => {
-                        ui.label(RichText::new(format!("✔ {m}")).color(Color32::LIGHT_GREEN));
+                        ui.label(RichText::new(format!("✔ {m}")).color(crate::ui::theme::ok(ui)));
                     }
                     Some(Err(e)) => {
-                        ui.label(RichText::new(format!("✖ {e}")).color(Color32::LIGHT_RED));
+                        ui.label(RichText::new(format!("✖ {e}")).color(crate::ui::theme::error(ui)));
                     }
                     None => {}
                 }

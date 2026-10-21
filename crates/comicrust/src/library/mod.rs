@@ -35,16 +35,42 @@ pub enum Row {
     Covers(Vec<usize>),
 }
 
+/// Contenu calculé de toutes les listes, pour un état donné de la base et des listes.
+pub struct Resolved {
+    pub key: (u64, u64, chrono::NaiveDate),
+    pub members: HashMap<String, Members>,
+    /// Nombre de livres présents dans la base (`None` : liste non calculable).
+    pub counts: HashMap<String, Option<usize>>,
+}
+
+fn compute_resolved(key: (u64, u64, chrono::NaiveDate), lists: &[ComicList], db: &ComicDatabase) -> Resolved {
+    let members = comicrust_core::comic_lists::resolve_all(lists, db);
+    let counts = members
+        .iter()
+        .map(|(id, m)| {
+            let n = match m {
+                Members::All => Some(db.len()),
+                Members::Ids(ids) => Some(ids.iter().filter(|i| db.index_of(i).is_some()).count()),
+                Members::Unknown(_) => None,
+            };
+            (id.clone(), n)
+        })
+        .collect();
+    Resolved { key, members, counts }
+}
+
 /// Listes de ComicRack (`ComicDb.xml`).
 #[derive(Default)]
 pub struct Lists {
     pub path: Option<PathBuf>,
     pub items: Vec<ComicList>,
     pub error: Option<String>,
-    /// Nombre de livres de chaque liste présents dans la base, par identifiant de liste
-    /// (`None` : inconnu), calculé pour la génération de base indiquée.
-    counts: HashMap<String, Option<usize>>,
-    counts_for: Option<u64>,
+    /// Augmente à chaque relecture de `ComicDb.xml`.
+    version: u64,
+    /// Dernier calcul terminé (éventuellement un peu ancien pendant qu'un autre tourne).
+    resolved: Option<Arc<Resolved>>,
+    /// Calcul en cours dans un fil.
+    pending: Option<((u64, u64, chrono::NaiveDate), Receiver<Resolved>)>,
 }
 
 impl Lists {
@@ -60,35 +86,16 @@ impl Lists {
                 self.error = Some(e);
             }
         }
-        self.counts_for = None;
+        self.version += 1;
     }
 
     pub fn count(&self, id: &str) -> Option<usize> {
-        self.counts.get(id).copied().flatten()
+        self.resolved.as_ref()?.counts.get(id).copied().flatten()
     }
 
-    fn refresh_counts(&mut self, db: &ComicDatabase, generation: u64) {
-        if self.counts_for == Some(generation) {
-            return;
-        }
-        fn walk(l: &ComicList, db: &ComicDatabase, out: &mut HashMap<String, Option<usize>>) {
-            let n = match l.members() {
-                Members::All => Some(db.len()),
-                Members::Ids(ids) => Some(ids.iter().filter(|i| db.index_of(i).is_some()).count()),
-                Members::Unknown => None,
-            };
-            out.insert(l.id.clone(), n);
-            if let comicrust_core::comic_lists::ListKind::Folder { children, .. } = &l.kind {
-                for c in children {
-                    walk(c, db, out);
-                }
-            }
-        }
-        self.counts.clear();
-        for l in &self.items {
-            walk(l, db, &mut self.counts);
-        }
-        self.counts_for = Some(generation);
+    /// Calcul en cours (affiché par un petit indicateur).
+    pub fn computing(&self) -> bool {
+        self.pending.is_some()
     }
 }
 
@@ -204,16 +211,70 @@ impl LibraryState {
         self.view.len()
     }
 
-    /// Met à jour le nombre de livres par liste si la base ou les listes ont changé.
-    pub fn refresh_list_counts(&mut self) {
-        if let Some(db) = self.database() {
-            self.lists.refresh_counts(&db, self.generation);
+    /// Recalcule le contenu des listes dans un fil quand la base, les listes ou le jour
+    /// (listes « des N derniers jours ») ont changé ; récupère le résultat terminé.
+    pub fn poll_lists(&mut self, ctx: &egui::Context) {
+        let Some(db) = self.database() else { return };
+        let key = (self.generation, self.lists.version, chrono::Local::now().date_naive());
+        if let Some((k, rx)) = &self.lists.pending {
+            match rx.try_recv() {
+                Ok(r) => {
+                    let done = *k;
+                    self.lists.resolved = Some(Arc::new(r));
+                    self.lists.pending = None;
+                    if done == key {
+                        self.view_key = None; // la liste affichée a pu changer
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => self.lists.pending = None,
+            }
         }
+        if self.lists.resolved.as_ref().is_some_and(|r| r.key == key) || self.lists.pending.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let items = self.lists.items.clone();
+        let ctx = ctx.clone();
+        std::thread::Builder::new()
+            .name("comicrust-listes".into())
+            .spawn(move || {
+                let _ = tx.send(compute_resolved(key, &items, &db));
+                ctx.request_repaint();
+            })
+            .expect("fil de calcul des listes");
+        self.lists.pending = Some((key, rx));
+    }
+
+    /// Contenu de la liste affichée : celui du calcul en arrière-plan s'il est à jour,
+    /// sinon calculé ici (une seule liste, rapide).
+    fn selected_members(&self, db: &ComicDatabase) -> Members {
+        let Some(list) = self.selected_list() else { return Members::All };
+        let key = (self.generation, self.lists.version, chrono::Local::now().date_naive());
+        if let Some(m) = self.lists.resolved.as_ref().filter(|r| r.key == key).and_then(|r| r.members.get(&list.id)) {
+            return m.clone();
+        }
+        list.resolve(db, &self.lists.items)
+    }
+
+    /// Contenu d'une liste (pour l'affichage de son état).
+    pub fn list_members(&self, id: &str) -> Option<Members> {
+        let db = self.database()?;
+        let list = ComicList::find(&self.lists.items, id)?;
+        Some(match self.lists.resolved.as_ref().and_then(|r| r.members.get(&list.id)) {
+            Some(m) => m.clone(),
+            None => list.resolve(&db, &self.lists.items),
+        })
     }
 
     pub fn selected_list(&self) -> Option<&ComicList> {
         let id = self.selected_list.as_deref()?;
         ComicList::find(&self.lists.items, id)
+    }
+
+    /// La liste affichée est-elle une liste de lecture (ordre significatif) ?
+    pub fn reading_list_shown(&self) -> bool {
+        self.selected_list().is_some_and(|l| matches!(l.kind, comicrust_core::comic_lists::ListKind::Ids(_)))
     }
 
     /// Rang d'un livre dans la liste ComicRack affichée.
@@ -227,16 +288,16 @@ impl LibraryState {
             self.view.clear();
             return &self.view;
         };
-        let key = (self.search.clone(), opts.clone(), self.selected_list.clone(), self.generation);
+        let key = (self.search.clone(), opts.clone(), self.selected_list.clone(), self.generation + self.lists.version);
         if self.view_key.as_ref() == Some(&key) {
             return &self.view;
         }
         // Livres de la liste choisie, dans l'ordre de la liste.
-        let members = self.selected_list().map(ComicList::members).unwrap_or(Members::All);
+        let members = self.selected_members(&db);
         let base: Vec<usize> = match members {
             Members::All => (0..db.books.len()).collect(),
             Members::Ids(ids) => ids.iter().filter_map(|id| db.index_of(id)).collect(),
-            Members::Unknown => Vec::new(),
+            Members::Unknown(_) => Vec::new(),
         };
         self.positions = base.iter().enumerate().map(|(pos, &i)| (i, pos)).collect();
         let words: Vec<String> = self.search.to_lowercase().split_whitespace().map(str::to_string).collect();
@@ -352,6 +413,7 @@ mod tests {
             name: "Ordre".into(),
             description: String::new(),
             kind: ListKind::Ids(vec!["d".into(), "zzz".into(), "a".into(), "c".into()]),
+            comicrack_count: 0,
         }];
         s.selected_list = Some("l".into());
         let o = ViewOptions { sort: SortKey::Position, descending: false, group: GroupKey::None };

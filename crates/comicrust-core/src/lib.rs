@@ -13,6 +13,7 @@ pub mod db;
 pub mod index;
 pub mod library;
 pub mod providers;
+pub mod smart;
 
 pub use cbl::ReadingList;
 pub use comic_info::ComicInfo;

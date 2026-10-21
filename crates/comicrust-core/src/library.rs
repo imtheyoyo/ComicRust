@@ -117,6 +117,35 @@ pub struct LibraryBook {
     pub tags: Option<String>,
     #[serde(rename = "CommunityRating", default)]
     pub community_rating: Option<f32>,
+    #[serde(rename = "BookAge", default)]
+    pub book_age: Option<String>,
+    #[serde(rename = "BookCollectionStatus", default)]
+    pub book_collection_status: Option<String>,
+    #[serde(rename = "BookCondition", default)]
+    pub book_condition: Option<String>,
+    #[serde(rename = "BookLocation", default)]
+    pub book_location: Option<String>,
+    #[serde(rename = "BookNotes", default)]
+    pub book_notes: Option<String>,
+    #[serde(rename = "BookOwner", default)]
+    pub book_owner: Option<String>,
+    #[serde(rename = "BookStore", default)]
+    pub book_store: Option<String>,
+    #[serde(rename = "ISBN", default)]
+    pub isbn: Option<String>,
+    #[serde(rename = "BookPrice", default)]
+    pub book_price: Option<f32>,
+    /// Case « cochée » de ComicRack (vraie par défaut).
+    #[serde(rename = "@Checked", default)]
+    pub checked: Option<bool>,
+    /// Informations modifiées dans ComicRack mais pas encore écrites dans le fichier.
+    #[serde(rename = "ComicInfoIsDirty", default)]
+    pub comic_info_is_dirty: Option<bool>,
+    #[serde(rename = "ComicBookIsDirty", default)]
+    pub comic_book_is_dirty: Option<bool>,
+    /// Fichier signalé manquant par ComicRack.
+    #[serde(rename = "Missing", default)]
+    pub missing: Option<bool>,
     /// « Série complète » : `Yes`, `No` ou `Unknown`.
     #[serde(rename = "SeriesComplete", default)]
     pub series_complete: Option<String>,
@@ -197,7 +226,7 @@ impl LibraryBook {
         if read == 0 {
             return Some(0);
         }
-        Some((((read + 1) * 100) / total).min(100))
+        Some((((read + 1) * 100) / total).clamp(1, 100))
     }
 
     /// Fiche d'un livre telle que stockée dans la colonne `data` de MySQL.
