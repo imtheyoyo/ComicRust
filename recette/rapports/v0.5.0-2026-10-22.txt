@@ -1,0 +1,13 @@
+Rapport de recette ComicRust v0.5.0 — 22/10/2026 00:01
+Résultat : 27 OK, 0 échec(s), 0 non testé(s) sur 27.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- LI-02 : bilan des listes (ComicRust / ComicRack, ≠ = différent) :
+  Bibliothèque 5318 / 5319 ≠ ; Doublons 166 / 154 ≠ ; Non-lu 5316 / 5318 ≠ ; Lecture en cours 2 / 1 ≠ ;
+  toutes les autres listes identiques (COSMIC COLLECTION 345, BD_X 488, Complet 3151, Séries complétes 14,
+  A scrapper 3137, Manque Tomes 289, En cours 510, A définir 5298, A_DEFINIR 437, Fichiers à mettre à jour 20,
+  Thanos - Guide complet 321, Récemment lu 2, Récemment ajouté 1…).

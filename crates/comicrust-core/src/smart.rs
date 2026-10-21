@@ -365,7 +365,9 @@ impl<'a> Ctx<'a> {
             for &i in candidates {
                 let b = &books[i];
                 let key = (
-                    compressed_name(&shadow_series(b)).to_lowercase(),
+                    // Casse respectée : ComicRack regroupe d'abord par une empreinte (hash)
+                    // sensible à la casse, avant de comparer sans la casse.
+                    compressed_name(&shadow_series(b)),
                     s(&b.format),
                     b.volume.unwrap_or(-1),
                     shadow_number(b),
@@ -377,7 +379,7 @@ impl<'a> Ctx<'a> {
                 );
                 by_meta.entry(key).or_default().push(i);
                 if let Some(f) = b.file.as_deref().filter(|f| !f.is_empty()) {
-                    by_path.entry(f.to_lowercase()).or_default().push(i);
+                    by_path.entry(f.to_string()).or_default().push(i);
                 }
             }
             by_meta.into_values().chain(by_path.into_values()).filter(|g| g.len() > 1).flatten().collect()
@@ -839,19 +841,23 @@ mod tests {
             mk("c", "Thorgal", "1", "Yes", "X:/Thorgal 1.cbz"),
             mk("d", "Thorgal", "2", "No", "X:/Thorgal 2.cbz"),
             mk("e", "The Blacksad", "2", "Yes", "X:/autre/Blacksad 2.cbz"),
-            mk("f", "Lanfeust", "1", "No", "x:/LANFEUST 1.cbz"),
+            mk("f", "Lanfeust", "1", "No", "X:/Lanfeust 1.cbz"),
             mk("g", "Lanfeust", "9", "No", "X:/Lanfeust 1.cbz"),
+            // Casse différente : pas des doublons pour ComicRack (empreinte sensible à la casse).
+            mk("h", "BLACKSAD", "1", "Yes", "x:/BLACKSAD 1.cbz"),
+            mk("i", "Thorgal", "3", "Yes", "x:/thorgal 1.cbz"),
         ];
         let q = |kind: &str, op: i32| SmartQuery { matchers: vec![v(kind, op, "")], ..Default::default() };
         // Toute la série « Oui » : Blacksad (a, b) ; « The Blacksad » est une autre série.
         assert_eq!(q("SmartListSeriesAllCompleteMatcher", 0).select(&books, 0..7), [0, 1, 4]);
+        let all = 0..books.len();
         assert_eq!(
             q("SmartListSeriesAllCompleteMatcher", 2).select(&books, 0..7),
             [2, 3],
             "Thorgal : mélange → inconnu"
         );
-        // Doublons : Blacksad 2 (« The » ignoré) par les infos, Lanfeust par le chemin (sans casse).
-        assert_eq!(q("ComicBookDuplicateMatcher", 0).select(&books, 0..7), [1, 4, 5, 6]);
+        // Doublons : Blacksad 2 (« The » ignoré) par les infos, Lanfeust par le chemin.
+        assert_eq!(q("ComicBookDuplicateMatcher", 0).select(&books, all), [1, 4, 5, 6]);
         assert_eq!(q("ComicBookDuplicateMatcher", 1).select(&books, 0..7).len(), 7, "désactivé : tous");
     }
 

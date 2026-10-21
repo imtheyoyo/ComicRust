@@ -10,7 +10,7 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.3.0 | [v0.3.0.md](v0.3.0.md) — [page à cocher](https://claude.ai/artifact/Ea1G6KJm9S2cm3Q79Gkkd5) — [rapports 1](rapports/v0.3.0-2026-10-21.txt), [2](rapports/v0.3.0-2026-10-21-b.txt) | **GO** (21/10/2026) : 44/46 OK, 0 échec (V-08 et N-08 non testés, non bloquants) |
 | v0.4.0 | [v0.4.0.md](v0.4.0.md) — [page à cocher](https://claude.ai/artifact/UM6713Lkk2Nf3ccxgoRVsT) — [rapport](rapports/v0.4.0-2026-10-21.txt) | **NO-GO** : R-02 en échec (fichier en cours de réécriture par ComicRack) → corrigé en v0.4.1 avec R-03 et D-02 ; L-04 (listes intelligentes) → v0.5.0 |
 | v0.4.1 | [v0.4.1.md](v0.4.1.md) — [page à cocher](https://claude.ai/artifact/EPiv8UMvedto36yVW3aDy9) — [rapport](rapports/v0.4.1-2026-10-21.txt) | **GO** (21/10/2026) : 13/14 OK, 0 échec (C-02 non testé) ; bug « Lire » et 2 améliorations → v0.5.0 |
-| v0.5.0 | [v0.5.0.md](v0.5.0.md) — [page à cocher](https://claude.ai/artifact/EZEYDSV9tsp51VbZA8dmzt) | en attente |
+| v0.5.0 | [v0.5.0.md](v0.5.0.md) — [page à cocher](https://claude.ai/artifact/EZEYDSV9tsp51VbZA8dmzt) — [rapport](rapports/v0.5.0-2026-10-22.txt) | **GO** (22/10/2026) : 27/27 OK ; 43/47 listes identiques à ComicRack, écart « Doublons » corrigé ensuite |
 
 ## Déroulé
 

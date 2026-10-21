@@ -5,6 +5,12 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [Non publié]
+
+### Corrections
+- « Doublons » : regroupement sensible à la casse (série et chemin), comme ComicRack
+  (recette v0.5.0 : 166 doublons trouvés contre 154 pour ComicRack).
+
 ## [v0.5.0] — 2026-10-22
 
 ### Nouveautés
@@ -29,7 +35,7 @@ ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa
   modifie la base.
 
 ### Recette
-[recette/v0.5.0.md](recette/v0.5.0.md)
+[recette/v0.5.0.md](recette/v0.5.0.md) — GO (27/27 OK).
 
 ## [v0.4.1] — 2026-10-21
 
