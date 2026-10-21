@@ -127,10 +127,7 @@ impl ComicInfo {
 
     /// Champs multi-valeurs séparés par des virgules (Writer, Characters, Tags…).
     pub fn split_list(value: &Option<String>) -> Vec<&str> {
-        value
-            .as_deref()
-            .map(|v| v.split(',').map(str::trim).filter(|s| !s.is_empty()).collect())
-            .unwrap_or_default()
+        value.as_deref().map(|v| v.split(',').map(str::trim).filter(|s| !s.is_empty()).collect()).unwrap_or_default()
     }
 
     /// Libellé d'affichage proche de ComicRack : "Series v2 #12 - Title".

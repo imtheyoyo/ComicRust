@@ -62,10 +62,7 @@ impl SevenZipProvider {
     }
 
     fn read_entry(&mut self, name: &str) -> Result<Vec<u8>, Error> {
-        self.load_all()?
-            .get(name)
-            .cloned()
-            .ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))
+        self.load_all()?.get(name).cloned().ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))
     }
 }
 

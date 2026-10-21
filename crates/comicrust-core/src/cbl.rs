@@ -40,10 +40,7 @@ impl ReadingList {
         Ok(quick_xml::de::from_str(xml.trim_start_matches('\u{feff}'))?)
     }
     pub fn to_xml(&self) -> Result<String, crate::Error> {
-        Ok(format!(
-            "<?xml version=\"1.0\"?>\n{}",
-            quick_xml::se::to_string(self)?
-        ))
+        Ok(format!("<?xml version=\"1.0\"?>\n{}", quick_xml::se::to_string(self)?))
     }
 }
 

@@ -69,7 +69,11 @@ pub fn normalize_series(s: &str) -> String {
 
 pub fn normalize_number(n: &str) -> String {
     let t = n.trim().trim_start_matches('0');
-    if t.is_empty() { "0".into() } else { t.to_lowercase() }
+    if t.is_empty() {
+        "0".into()
+    } else {
+        t.to_lowercase()
+    }
 }
 
 impl Library {
@@ -119,11 +123,14 @@ mod tests {
   <Book Id="BBB" File="F:\BD\cm25.cbz"><Series>Captain Marvel</Series><Number>025</Number><Unknown>ignoré</Unknown></Book>
 </Books></ComicDatabase>"#;
         let lib = Library::from_xml(db).unwrap();
-        let cbl = ReadingList::from_xml(r#"<ReadingList><Name>T</Name><Books>
+        let cbl = ReadingList::from_xml(
+            r#"<ReadingList><Name>T</Name><Books>
   <Book Series="The Iron Man" Number="55" Volume="1968"/>
   <Book Series="Captain Marvel" Number="25"/>
   <Book Series="Warlock" Number="9"/>
-</Books></ReadingList>"#).unwrap();
+</Books></ReadingList>"#,
+        )
+        .unwrap();
         let r = lib.resolve(&cbl);
         assert_eq!(r[0].unwrap().id, "AAA");
         assert_eq!(r[1].unwrap().id, "BBB");

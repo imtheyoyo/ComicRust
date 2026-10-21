@@ -70,12 +70,8 @@ impl WebComic {
     /// Liste des URL de pages, variables et plages résolues.
     pub fn page_urls(&self, cbw_path: &Path) -> Result<Vec<String>, Error> {
         let dir = cbw_path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut vars: Vec<(String, String)> = self
-            .variables
-            .variable
-            .iter()
-            .map(|v| (v.key.clone(), v.value.clone()))
-            .collect();
+        let mut vars: Vec<(String, String)> =
+            self.variables.variable.iter().map(|v| (v.key.clone(), v.value.clone())).collect();
         vars.push((
             "ComicFileName".into(),
             cbw_path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -120,10 +116,7 @@ impl WebComicProvider {
     pub fn open(path: &Path) -> Result<Self, Error> {
         let wc = WebComic::from_xml(&std::fs::read_to_string(path)?)?;
         let urls = wc.page_urls(path)?;
-        let pages = urls
-            .iter()
-            .map(|u| u.rsplit(['/', '\\']).next().unwrap_or(u).to_string())
-            .collect();
+        let pages = urls.iter().map(|u| u.rsplit(['/', '\\']).next().unwrap_or(u).to_string()).collect();
         Ok(Self {
             base_dir: path.parent().map(Path::to_path_buf).unwrap_or_default(),
             info: wc.info,

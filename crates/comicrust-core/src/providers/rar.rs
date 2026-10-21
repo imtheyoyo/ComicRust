@@ -77,11 +77,7 @@ impl RarProvider {
         if !self.cache.contains_key(name) {
             self.scan(name)?;
         }
-        let data = if self.solid {
-            self.cache.get(name).cloned()
-        } else {
-            self.cache.remove(name)
-        };
+        let data = if self.solid { self.cache.get(name).cloned() } else { self.cache.remove(name) };
         data.ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))
     }
 }

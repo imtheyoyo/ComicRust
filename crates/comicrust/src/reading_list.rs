@@ -53,7 +53,10 @@ impl ListState {
         let (mut index_summary, mut unrecognized) = (None, Vec::new());
 
         if let Some(db) = library_db {
-            match std::fs::read_to_string(db).map_err(|e| e.to_string()).and_then(|t| Library::from_xml(&t).map_err(|e| e.to_string())) {
+            match std::fs::read_to_string(db)
+                .map_err(|e| e.to_string())
+                .and_then(|t| Library::from_xml(&t).map_err(|e| e.to_string()))
+            {
                 Ok(lib) => {
                     for (entry, hit) in entries.iter_mut().zip(lib.resolve(&list)) {
                         entry.file = hit.and_then(|b| b.file.clone()).map(PathBuf::from).filter(|p| p.exists());

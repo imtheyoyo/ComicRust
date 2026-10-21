@@ -45,10 +45,14 @@ pub fn parse_file_name(file_name: &str) -> Option<(String, String)> {
     let groups = GROUPS.get_or_init(|| Regex::new(r"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}").unwrap());
     let hash = HASH.get_or_init(|| Regex::new(r"^(?<series>[^#]+?)\s*#\s*(?<num>\d+(?:\.\d+)?[a-zA-Z]?)\b").unwrap());
     let tome = TOME.get_or_init(|| {
-        Regex::new(r"(?i)^(?<series>.+?)[\s_\-.,]+(?:t|tome|vol\.?|volume|n°|no\.?|num[ée]ro)\s*(?<num>\d+(?:\.\d+)?)\b").unwrap()
+        Regex::new(
+            r"(?i)^(?<series>.+?)[\s_\-.,]+(?:t|tome|vol\.?|volume|n°|no\.?|num[ée]ro)\s*(?<num>\d+(?:\.\d+)?)\b",
+        )
+        .unwrap()
     });
     let end = END.get_or_init(|| {
-        Regex::new(r"(?i)^(?<series>.*?)[\s_.\-]*(?:n[°o]\.?\s*)?(?<num>\d+(?:\.\d+)?[a-z]?)(?:\s*of\s*\d+)?\s*$").unwrap()
+        Regex::new(r"(?i)^(?<series>.*?)[\s_.\-]*(?:n[°o]\.?\s*)?(?<num>\d+(?:\.\d+)?[a-z]?)(?:\s*of\s*\d+)?\s*$")
+            .unwrap()
     });
     let titled = TITLED.get_or_init(|| Regex::new(r"^(?<series>[^\d]+?)[\s_\-]+(?<num>\d{1,4})\s*-+\s*\S").unwrap());
 
@@ -305,7 +309,14 @@ impl FileIndex {
         }
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         if let Some((series, number)) = parse_file_name(&name) {
-            self.push(IndexedFile { path: path.clone(), series, number, volume: None, year: None, source: Source::FileName });
+            self.push(IndexedFile {
+                path: path.clone(),
+                series,
+                number,
+                volume: None,
+                year: None,
+                source: Source::FileName,
+            });
             if !recognized {
                 self.stats.via_file_name += 1;
                 recognized = true;
@@ -385,9 +396,18 @@ mod tests {
         let p = parse_file_name;
         let s = |a: &str, b: &str| Some((a.to_string(), b.to_string()));
         // Noms réels de la collection de Yoyo (recette v0.2.0, test C-06).
-        assert_eq!(p("COSMIC COLLECTION #061 1990_03---INFINITY GAUNTLET---Silver surfer v3 34-38 (Jim Starlin).cbz"), s("COSMIC COLLECTION", "061"));
-        assert_eq!(p("COSMIC COLLECTION #224 2012_05 - Thanos Rising 1-5 (Jason Aaron)(2013).cbz"), s("COSMIC COLLECTION", "224"));
-        assert_eq!(p("COSMIC COLLECTION #005 1966_01---THE GALACTUS TRILOGY---Fantastic Four 48-50 (Stan Lee).cbz"), s("COSMIC COLLECTION", "005"));
+        assert_eq!(
+            p("COSMIC COLLECTION #061 1990_03---INFINITY GAUNTLET---Silver surfer v3 34-38 (Jim Starlin).cbz"),
+            s("COSMIC COLLECTION", "061")
+        );
+        assert_eq!(
+            p("COSMIC COLLECTION #224 2012_05 - Thanos Rising 1-5 (Jason Aaron)(2013).cbz"),
+            s("COSMIC COLLECTION", "224")
+        );
+        assert_eq!(
+            p("COSMIC COLLECTION #005 1966_01---THE GALACTUS TRILOGY---Fantastic Four 48-50 (Stan Lee).cbz"),
+            s("COSMIC COLLECTION", "005")
+        );
         // Formes classiques.
         assert_eq!(p("Infinity Gauntlet 001 (1991) (Digital).cbz"), s("Infinity Gauntlet", "001"));
         assert_eq!(p("Iron Man v1 #055.cbr"), s("Iron Man v1", "055"));
@@ -444,7 +464,10 @@ mod tests {
             .books
             .book
             .iter()
-            .map(|b| idx.find(&b.series, &b.number, b.year, b.volume).map(|p| p.file_name().unwrap().to_string_lossy().into_owned()))
+            .map(|b| {
+                idx.find(&b.series, &b.number, b.year, b.volume)
+                    .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            })
             .collect();
         // 6 livres COSMIC COLLECTION trouvés ; « Compil by Yo Thanos » et « Spider-Man »
         // ne sont pas dans ce dossier.

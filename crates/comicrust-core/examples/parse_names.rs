@@ -4,8 +4,16 @@ fn main() {
     let (mut ok, mut ko) = (0, 0);
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         match comicrust_core::index::parse_file_name(line) {
-            Some((s, n)) => { ok += 1; if ok <= 3 { println!("OK  {s} | {n} <- {line}"); } }
-            None => { ko += 1; println!("KO  {line}"); }
+            Some((s, n)) => {
+                ok += 1;
+                if ok <= 3 {
+                    println!("OK  {s} | {n} <- {line}");
+                }
+            }
+            None => {
+                ko += 1;
+                println!("KO  {line}");
+            }
         }
     }
     println!("{ok} reconnus, {ko} non reconnus");

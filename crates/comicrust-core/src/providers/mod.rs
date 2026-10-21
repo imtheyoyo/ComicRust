@@ -87,7 +87,9 @@ impl BookFormat {
             Some(BookFormat::SevenZip)
         } else if head.starts_with(b"%PDF") {
             Some(BookFormat::Pdf)
-        } else if head.starts_with(b"AT&TFORM") || head.starts_with(b"FORM") && head.get(8..12).is_some_and(|t| t.starts_with(b"DJV")) {
+        } else if head.starts_with(b"AT&TFORM")
+            || head.starts_with(b"FORM") && head.get(8..12).is_some_and(|t| t.starts_with(b"DJV"))
+        {
             Some(BookFormat::Djvu)
         } else if head.len() > 262 && &head[257..262] == b"ustar" {
             Some(BookFormat::Tar)
@@ -121,14 +123,11 @@ impl BookFormat {
 }
 
 /// Extensions de livres proposées dans les dialogues d'ouverture.
-pub const BOOK_EXTENSIONS: &[&str] = &[
-    "cbz", "zip", "cbr", "rar", "cb7", "7z", "cbt", "tar", "pdf", "djvu", "djv", "cbw",
-];
+pub const BOOK_EXTENSIONS: &[&str] =
+    &["cbz", "zip", "cbr", "rar", "cb7", "7z", "cbt", "tar", "pdf", "djvu", "djv", "cbw"];
 
 /// Extensions d'image reconnues dans les archives.
-pub const IMAGE_EXTS: &[&str] = &[
-    "jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "tif", "tiff", "webp", "jxl",
-];
+pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "tif", "tiff", "webp", "jxl"];
 
 pub fn is_book_path(path: &Path) -> bool {
     path.extension()
@@ -144,8 +143,7 @@ pub fn is_image_name(name: &str) -> bool {
     if file.starts_with("._") || lower.contains("__macosx/") || file == "thumbs.db" {
         return false;
     }
-    file.rsplit_once('.')
-        .is_some_and(|(_, ext)| IMAGE_EXTS.contains(&ext))
+    file.rsplit_once('.').is_some_and(|(_, ext)| IMAGE_EXTS.contains(&ext))
 }
 
 /// Tri "naturel" des noms de pages (page2 < page10), comme ComicRack.
@@ -189,9 +187,7 @@ pub fn decode_image(bytes: &[u8]) -> Result<PageImage, Error> {
     if bytes.starts_with(&[0xFF, 0x0A]) || bytes.starts_with(b"\0\0\0\x0cJXL \r\n\x87\n") {
         return decode_jxl(bytes);
     }
-    let img = image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()?
-        .decode()?;
+    let img = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.decode()?;
     Ok(img.into_rgba8())
 }
 
@@ -242,11 +238,7 @@ pub trait PageProvider {
 /// Ouvre un livre en choisissant le fournisseur adapté (fabrique type `ComicBookFactory`).
 pub fn open_book(path: &Path) -> Result<Box<dyn PageProvider>, Error> {
     let format = BookFormat::detect(path).ok_or_else(|| {
-        Error::Unsupported(
-            path.extension()
-                .map(|e| e.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "?".into()),
-        )
+        Error::Unsupported(path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "?".into()))
     })?;
     Ok(match format {
         BookFormat::Folder => Box::new(FolderProvider::open(path)?),

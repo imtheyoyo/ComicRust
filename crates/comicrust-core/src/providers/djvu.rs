@@ -56,8 +56,7 @@ impl PageProvider for DjvuProvider {
             ..Default::default()
         };
         let pm = render_pixmap(page, &opts).map_err(err)?;
-        PageImage::from_raw(pm.width, pm.height, pm.data)
-            .ok_or_else(|| Error::Djvu("tampon de rendu invalide".into()))
+        PageImage::from_raw(pm.width, pm.height, pm.data).ok_or_else(|| Error::Djvu("tampon de rendu invalide".into()))
     }
     fn comic_info(&mut self) -> Result<Option<ComicInfo>, Error> {
         Ok(None)

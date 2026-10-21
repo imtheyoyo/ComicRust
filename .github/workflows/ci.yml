@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
 
       - name: PDFium
@@ -43,5 +43,6 @@ jobs:
           echo "PDFIUM_DYNAMIC_LIB_PATH=$dir" >> "$GITHUB_ENV"
           ls "pdfium/${{ matrix.lib }}"
 
+      - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all

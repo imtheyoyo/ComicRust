@@ -12,10 +12,10 @@ pub mod index;
 pub mod library;
 pub mod providers;
 
-pub use providers::{decode_image, open_book, BookFormat, PageImage, PageProvider};
 pub use cbl::ReadingList;
 pub use comic_info::ComicInfo;
 pub use library::Library;
+pub use providers::{decode_image, open_book, BookFormat, PageImage, PageProvider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
