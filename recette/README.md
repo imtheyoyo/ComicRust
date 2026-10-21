@@ -5,7 +5,8 @@ et à valider **avant de passer à l'étape suivante** du développement.
 
 | Version | Document | Décision |
 |---|---|---|
-| v0.2.0 | [v0.2.0.md](v0.2.0.md) — [page à cocher](https://claude.ai/artifact/WhQ9pNG5E5i4sbx4Kt9cPn) — [rapport du 21/10](rapports/v0.2.0-2026-10-21.txt) | en attente : 61/70 OK, 0 échec, C-06 (bloquant) à passer |
+| v0.2.0 | [v0.2.0.md](v0.2.0.md) — [page](https://claude.ai/artifact/WhQ9pNG5E5i4sbx4Kt9cPn) — rapports [1](rapports/v0.2.0-2026-10-21.txt), [2](rapports/v0.2.0-2026-10-21-b.txt) | **NO-GO** : C-06 en échec (listes .cbl) → corrigé en v0.2.1 |
+| v0.2.1 | [v0.2.1.md](v0.2.1.md) | en attente |
 
 ## Déroulé
 

@@ -8,6 +8,7 @@
 
 pub mod cbl;
 pub mod comic_info;
+pub mod index;
 pub mod library;
 pub mod providers;
 

@@ -176,7 +176,7 @@ pub(crate) fn index_entries<I: IntoIterator<Item = String>>(names: I) -> (Vec<St
     (pages, info)
 }
 
-pub(crate) fn parse_comic_info(bytes: &[u8]) -> Result<ComicInfo, Error> {
+pub fn parse_comic_info(bytes: &[u8]) -> Result<ComicInfo, Error> {
     let text = String::from_utf8_lossy(bytes);
     ComicInfo::from_xml(text.trim_start_matches('\u{feff}'))
 }

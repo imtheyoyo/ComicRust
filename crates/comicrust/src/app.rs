@@ -14,6 +14,7 @@ use eframe::egui::{
 
 use crate::loader::{BookLoader, Event, Request, THUMB_HEIGHT};
 use crate::reading_list::ListState;
+use comicrust_core::index::ScanProgress;
 use crate::settings::{FitMode, Settings};
 
 const SETTINGS_KEY: &str = "comicrust.settings";
@@ -52,6 +53,9 @@ pub struct ComicRustApp {
     book: Option<Book>,
     list: Option<ListState>,
     list_loading: Option<Receiver<Result<ListState, String>>>,
+    list_progress: std::sync::Arc<ScanProgress>,
+    /// Dossier des données de l'application (cache de l'index des BD).
+    data_dir: Option<PathBuf>,
     zoom: f32,
     fullscreen: bool,
     show_info: bool,
@@ -68,7 +72,7 @@ fn texture_options() -> TextureOptions {
 }
 
 impl ComicRustApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>, data_dir: Option<PathBuf>) -> Self {
         let settings: Settings = cc
             .storage
             .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
@@ -79,6 +83,8 @@ impl ComicRustApp {
             book: None,
             list: None,
             list_loading: None,
+            list_progress: Default::default(),
+            data_dir,
             zoom: 1.0,
             fullscreen: false,
             show_info: false,
@@ -143,9 +149,12 @@ impl ComicRustApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let db = self.settings.library_db.clone();
         let root = self.settings.comics_root.clone();
+        let cache = self.data_dir.as_ref().map(|d| d.join("index-bd.json"));
+        let progress = std::sync::Arc::new(ScanProgress::default());
+        self.list_progress = progress.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(ListState::load(&path, db.as_deref(), root.as_deref()));
+            let _ = tx.send(ListState::load(&path, db.as_deref(), root.as_deref(), cache.as_deref(), Some(&progress)));
             ctx.request_repaint();
         });
         self.list_loading = Some(rx);
@@ -631,16 +640,29 @@ impl ComicRustApp {
     fn list_panel(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         if self.list_loading.is_some() {
+            let (done, total) = self.list_progress.get();
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label("Recherche des fichiers de la liste…");
             });
+            if total > 0 {
+                ui.add(egui::ProgressBar::new(done as f32 / total as f32).text(format!("{done} / {total} fichiers lus")));
+            } else {
+                ui.label(RichText::new("Parcours des dossiers…").weak());
+            }
+            ctx.request_repaint_after(Duration::from_millis(150));
             return;
         }
         let Some(list) = &self.list else { return };
         ui.heading(&list.name);
         ui.label(format!("{} / {} numéros trouvés", list.found(), list.entries.len()));
         ui.label(RichText::new(&list.source).weak().small());
+        if let Some(summary) = &list.index_summary {
+            ui.label(RichText::new(summary).weak().small());
+        }
+        if list.found() == 0 && list.default_root {
+            ui.label(RichText::new("Aucun fichier trouvé dans le dossier de la liste : choisis le dossier où sont rangées tes BD.").color(Color32::from_rgb(230, 170, 60)));
+        }
         let mut action = None::<ListAction>;
         ui.horizontal_wrapped(|ui| {
             if ui.button("📁 Dossier des BD…").on_hover_text("Dossier parcouru pour retrouver les fichiers").clicked() {
@@ -649,8 +671,8 @@ impl ComicRustApp {
             if ui.button("🗄 ComicDB.xml…").on_hover_text("Base ComicRack (optionnelle)").clicked() {
                 action = Some(ListAction::PickDb);
             }
-            if ui.button("📋 Copier les manquants").clicked() {
-                ui.ctx().copy_text(list.missing_report());
+            if ui.button("📋 Copier le diagnostic").on_hover_text("Bilan, numéros manquants et fichiers non reconnus").clicked() {
+                ui.ctx().copy_text(list.diagnostic());
             }
         });
         ui.separator();

@@ -1,0 +1,21 @@
+Rapport de recette ComicRust v0.2.0 — 21/10/2026 07:51
+Résultat : 64 OK, 1 échec(s), 5 non testé(s) sur 70.
+Décision proposée : NO-GO (1 bloquant(s) en échec).
+
+ÉCHECS (1)
+- C-06 [Bloquant] Ta liste Thanos réelle (.cbl crushingkrisis) + « Dossier des BD… » → dossier BD du NAS
+  Note : Aucun fichier n'est retrouvé ; la liste .cbl est générée depuis comicrack ce
+         (liste « Test liste », 8 entrées COSMIC COLLECTION / Compil by Yo Thanos / Spider-Man :
+          voir crates/comicrust-core/tests/fixtures/liste_thanos_yoyo.cbl)
+
+VALEURS NOTÉES ET REMARQUES
+- R-04 : 1 s
+- R-11 : 1219 pages ; 1,68 Go ; ouverture 1 s ; navigation fluide ; 235 Mo stables
+- C-07 : sans objet
+
+NON TESTÉS (5) : R-08, T-01, T-02, T-03, T-04
+
+Analyse : fichiers nommés « COSMIC COLLECTION #061 1990_03---…---Silver surfer v3 34-38 (…) .cbz » ;
+la v0.2.0 prenait le dernier nombre du nom (38). Les CBZ contiennent un ComicInfo.xml
+(Series COSMIC COLLECTION, Number 61, Volume 2) identique aux valeurs de la liste.
+Correctif : v0.2.1 (correspondance par ComicInfo.xml, noms « #NNN », cache, diagnostic).

@@ -43,6 +43,11 @@ impl RarProvider {
         Ok(Self { path: path.to_path_buf(), solid, pages, info_entry, cache: HashMap::new() })
     }
 
+    /// Archive « solide » : lire une entrée oblige à décompresser les précédentes.
+    pub fn is_solid(&self) -> bool {
+        self.solid
+    }
+
     /// Une passe sur l'archive ; lit `target` (ou tout ce qui est utile si solide).
     fn scan(&mut self, target: &str) -> Result<(), Error> {
         let mut wanted: std::collections::HashSet<String> = if self.solid {

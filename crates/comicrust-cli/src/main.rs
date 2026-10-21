@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use comicrust_core::library::FileIndex;
+use comicrust_core::index::FileIndex;
 use comicrust_core::{open_book, Library, ReadingList};
 
 const USAGE: &str = "usage :
@@ -82,7 +82,7 @@ fn missing(source: &Path, list: &Path) -> Result<()> {
     let rl = ReadingList::from_xml(&std::fs::read_to_string(list)?)?;
     let found: Vec<bool> = if source.is_dir() {
         let idx = FileIndex::scan(source);
-        println!("{} fichiers indexés dans {}", idx.file_count, source.display());
+        println!("{} — {}", source.display(), idx.summary());
         rl.books.book.iter().map(|b| idx.find(&b.series, &b.number, b.year, b.volume).is_some()).collect()
     } else {
         let lib = Library::from_xml(&std::fs::read_to_string(source).context("lecture ComicDB.xml")?)?;

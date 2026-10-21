@@ -45,8 +45,10 @@ WebComic : URL, variables `{…}` et plages `[000:1-24]` pris en charge ; les «
 - vignettes, plein écran, glisser-déposer, fichiers récents, reprise à la dernière page lue ;
 - pages décodées et préchargées en arrière-plan (l'interface ne bloque pas sur une archive lente) ;
 - **listes `.cbl`** : chaque entrée est retrouvée dans la base `ComicDB.xml` (si indiquée) ou dans
-  le dossier des BD (noms du type `Série 012 (1991).cbz`) ; numéros manquants barrés et
-  copiables ; en fin de livre, la page suivante ouvre le livre suivant de la liste.
+  le dossier des BD, d'après le **`ComicInfo.xml`** de chaque archive (série, numéro, volume, comme
+  ComicRack) puis, à défaut, d'après le nom du fichier (`Série #061 …`, `Série T03`, `Série 012 (1991)`) ;
+  l'index est mis en cache, la recherche affiche sa progression et un diagnostic copiable ;
+  numéros manquants barrés ; en fin de livre, la page suivante ouvre le livre suivant de la liste.
 
 | Touche | Action |
 |---|---|
@@ -86,7 +88,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.2.0](recette/v0.2.0.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.2.1](recette/v0.2.1.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release

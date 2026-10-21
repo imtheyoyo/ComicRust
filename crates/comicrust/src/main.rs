@@ -34,14 +34,18 @@ fn main() -> eframe::Result {
         viewport = viewport.with_icon(icon);
     }
     let mut options = eframe::NativeOptions { viewport, ..Default::default() };
-    if let Some(dir) = portable_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        options.persistence_path = Some(dir.join("comicrust.ron"));
-    }
+    let data_dir = match portable_dir() {
+        Some(dir) => {
+            let _ = std::fs::create_dir_all(&dir);
+            options.persistence_path = Some(dir.join("comicrust.ron"));
+            Some(dir)
+        }
+        None => eframe::storage_dir("ComicRust"),
+    };
 
     eframe::run_native(
         "ComicRust",
         options,
-        Box::new(move |cc| Ok(Box::new(app::ComicRustApp::new(cc, initial)))),
+        Box::new(move |cc| Ok(Box::new(app::ComicRustApp::new(cc, initial, data_dir)))),
     )
 }
