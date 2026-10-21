@@ -1,0 +1,15 @@
+Rapport de recette ComicRust v0.3.0 — 21/10/2026 14:19
+Résultat : 31 OK, 0 échec(s), 15 non testé(s) sur 46.
+Décision proposée : incomplète (6 bloquant(s) non testé(s)).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- B-02 : Connexion réussie : 5318 livres
+- B-03 : Durée du chargement : 1 s ; nombre de livres dans la barre d'état : 5318
+- V-01 : 1 s
+- V-02 : 100 Mo
+- V-05 : Noter un exemple : livre COSMIC COLLECTION v3 #224 page attendue 2 page ouverte 2
+
+NON TESTÉS (15) : V-01*, V-08, L-01*, L-02*, L-03, L-04, L-05, U-02*, U-03, U-04*, U-05*, U-06, U-07, U-08, N-08   (* = bloquant)
