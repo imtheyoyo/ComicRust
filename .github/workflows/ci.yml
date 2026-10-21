@@ -59,6 +59,6 @@ jobs:
           set +e
           cargo clippy --all-targets --message-format=short -- -D warnings 2>&1 | tee clippy.log
           status=${PIPESTATUS[0]}
-          grep -E ': (error|warning)' clippy.log | head -30 | while read -r l; do echo "::error::$l"; done
+          grep -E '(^|: )(error|warning)' clippy.log | head -30 | while read -r l; do echo "::error::$l"; done
           exit $status
       - run: cargo test --all
