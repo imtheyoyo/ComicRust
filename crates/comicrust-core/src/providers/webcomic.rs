@@ -820,7 +820,6 @@ mod tests {
         std::fs::create_dir(dir.join("img")).unwrap();
         std::fs::write(dir.join("img/a1.png"), colored(4, 6, 10)).unwrap();
         std::fs::write(dir.join("img/a2.png"), colored(4, 6, 20)).unwrap();
-        std::fs::write(dir.join("img/b1.png?x=1&y=2"), colored(4, 6, 30)).unwrap();
         std::fs::write(dir.join("img/b1.png"), colored(4, 6, 30)).unwrap();
     }
 
