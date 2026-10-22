@@ -13,6 +13,7 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.5.0 | [v0.5.0.md](v0.5.0.md) — [page à cocher](https://claude.ai/artifact/EZEYDSV9tsp51VbZA8dmzt) — [rapport](rapports/v0.5.0-2026-10-22.txt) | **GO** (22/10/2026) : 27/27 OK ; 43/47 listes identiques à ComicRack, écart « Doublons » corrigé ensuite |
 | v0.5.1 | [v0.5.1.md](v0.5.1.md) — [page à cocher](https://claude.ai/artifact/QfPJazk15xis6XsNScquMW) — [rapport](rapports/v0.5.1-2026-10-22.txt) | **GO** (22/10/2026) : 16/18, bloquants OK ; D-01 (doublons 166/154) et E-06 (progression lue dans ComicRust) → v0.5.2 |
 | v0.5.2 | [v0.5.2.md](v0.5.2.md) — [page à cocher](https://claude.ai/artifact/3B28PkHQxair4gh9yEc9bR) — [rapport](rapports/v0.5.2-2026-10-22.txt) | **GO** (22/10/2026) : 18/18 OK ; doublons 154/154, 46/47 listes identiques à ComicRack |
+| v0.6.0 | [v0.6.0.md](v0.6.0.md) — [page à cocher](https://claude.ai/artifact/UKA82YSL9ATVfgRcFwnmkh) | en cours |
 
 ## Déroulé
 
@@ -40,7 +41,8 @@ et à valider **avant de passer à l'étape suivante** du développement.
 
 Le dossier [`echantillons/`](echantillons) contient des BD de test **générées** (aucune œuvre
 réelle) dans chaque format, plus des cas limites : faux CBR (ZIP renommé), fichier tronqué,
-dossier d'images, liste `Thanos.cbl` avec un numéro volontairement absent.
+dossier d'images, liste `Thanos.cbl` avec un numéro volontairement absent ; depuis la v0.6.0,
+pages HEIF/AVIF (`Images HEIF AVIF.cbz`) et WebComic à scrapers et composition (`scraper/`).
 
 ## Rédiger la recette d'une nouvelle version
 
