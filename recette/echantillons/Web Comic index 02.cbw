@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scraper d'index : le sommaire donne les chapitres, chaque chapitre ses planches.
+     Attendu : 5 pages (couverture + 4 planches), sans la publicité ni les mentions légales. -->
+<WebComic>
+  <Info><Series>Web Comic</Series><Number>2</Number><Title>Scraper d'index</Title></Info>
+  <Images>
+    <Image Type="IndexScraper">
+      <Parts>
+        <Part>{ComicFilePath}/scraper/index.html</Part>
+        <Part Cut="&lt;ul class=.chapitres.&gt;(?&lt;link&gt;[\s\S]*?)&lt;/ul&gt;">href=(?&lt;link&gt;\S+?\.html)</Part>
+        <Part>class=.planche. src=.(?&lt;link&gt;[^"]+)</Part>
+      </Parts>
+    </Image>
+  </Images>
+</WebComic>

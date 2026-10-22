@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Composition : deux images côte à côte par page, lecture de droite à gauche, fond noir,
+     bordure. Attendu : 3 pages (2 + 2 + 1 images). -->
+<WebComic>
+  <Info><Series>Web Comic</Series><Number>4</Number><Title>Composition</Title></Info>
+  <Compositing Columns="2" BorderWidth="2" BackgroundColor="#000000" RightToLeft="true"/>
+  <Images>
+    <Image Url="web/page[000:1-5].jpg"/>
+  </Images>
+</WebComic>

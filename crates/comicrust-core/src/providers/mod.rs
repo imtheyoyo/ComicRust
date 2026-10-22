@@ -16,6 +16,7 @@
 
 mod djvu;
 mod folder;
+pub mod heif;
 mod pdf;
 mod rar;
 mod sevenz;
@@ -127,7 +128,8 @@ pub const BOOK_EXTENSIONS: &[&str] =
     &["cbz", "zip", "cbr", "rar", "cb7", "7z", "cbt", "tar", "pdf", "djvu", "djv", "cbw"];
 
 /// Extensions d'image reconnues dans les archives.
-pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "tif", "tiff", "webp", "jxl"];
+pub const IMAGE_EXTS: &[&str] =
+    &["jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "tif", "tiff", "webp", "jxl", "heic", "heif", "hif", "avif"];
 
 pub fn is_book_path(path: &Path) -> bool {
     path.extension()
@@ -182,8 +184,11 @@ pub fn parse_comic_info(bytes: &[u8]) -> Result<ComicInfo, Error> {
 /// Image décodée prête à l'affichage.
 pub type PageImage = image::RgbaImage;
 
-/// Décode les octets d'une page (JPEG, PNG, GIF, BMP, TIFF, WebP, JPEG XL).
+/// Décode les octets d'une page (JPEG, PNG, GIF, BMP, TIFF, WebP, JPEG XL, HEIF, AVIF).
 pub fn decode_image(bytes: &[u8]) -> Result<PageImage, Error> {
+    if heif::is_heif_family(bytes) {
+        return heif::decode(bytes);
+    }
     if bytes.starts_with(&[0xFF, 0x0A]) || bytes.starts_with(b"\0\0\0\x0cJXL \r\n\x87\n") {
         return decode_jxl(bytes);
     }

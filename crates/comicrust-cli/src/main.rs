@@ -4,6 +4,7 @@
 //!   comicrust-cli render  <livre> <page> <sortie>  décode une page (n° à partir de 1) en PNG/JPEG
 //!   comicrust-cli cover   <livre> <sortie>         extrait la 1re page telle quelle
 //!   comicrust-cli cbl     <liste.cbl>              affiche une liste de lecture
+//!   comicrust-cli convert <livre.cbr|cb7|cbt>      crée le CBZ à côté (original gardé)
 //!   comicrust-cli missing <ComicDB.xml|dossier> <liste.cbl>
 //!                                                  numéros de la liste introuvables
 //!
@@ -20,6 +21,7 @@ const USAGE: &str = "usage :
   comicrust-cli render  <livre> <page> <sortie.png>
   comicrust-cli cover   <livre> <sortie>
   comicrust-cli cbl     <liste.cbl>
+  comicrust-cli convert <livre.cbr|cb7|cbt>
   comicrust-cli missing <ComicDB.xml|dossier> <liste.cbl>";
 
 fn main() -> Result<()> {
@@ -46,6 +48,11 @@ fn main() -> Result<()> {
             for (i, b) in rl.books.book.iter().enumerate() {
                 println!("{:4}. {} #{} ({})", i + 1, b.series, b.number, b.year.unwrap_or_default());
             }
+            Ok(())
+        }
+        ["convert", path] => {
+            let done = comicrust_core::writer::convert_to_cbz(Path::new(path), None)?;
+            println!("{} pages → {}", done.pages, done.path.display());
             Ok(())
         }
         ["missing", source, list] => missing(Path::new(source), Path::new(list)),

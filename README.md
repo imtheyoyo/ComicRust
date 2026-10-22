@@ -56,6 +56,23 @@ apparaissent en quelques secondes, sans recharger : ComicRust suit les compteurs
 Les listes `.cbl` sont d'abord résolues par l'identifiant des livres dans la base, puis par la
 recherche dans un dossier (v0.2.1).
 
+### Fichiers BD (v0.6.0)
+
+Menu **🛠 Fichiers** de la bibliothèque (livre sélectionné ou livres affichés) et clic droit
+sur une couverture. **ComicRust modifie alors des fichiers, jamais la base ComicRack.**
+
+- **Écrire les infos dans le fichier** : la fiche du livre dans la base ComicRack (série,
+  numéro, auteurs, résumé, pages…) est écrite dans le `ComicInfo.xml` du CBZ, comme
+  « Mettre à jour les fichiers » de ComicRack (mêmes éléments, même ordre ; éléments ajoutés
+  par d'autres logiciels gardés). Les pages sont recopiées sans recompression dans un fichier
+  temporaire vérifié qui remplace l'original ; un fichier déjà à jour n'est pas touché. Un
+  livre écrit sort de « Fichiers à mettre à jour » dans ComicRust (pas dans ComicRack).
+- **Convertir en CBZ** (CBR, CB7, CBT) : nouveau `.cbz` à côté de l'original, mêmes pages,
+  `ComicInfo.xml` de la base. L'original est gardé, ou rangé dans le sous-dossier
+  `_originaux` ; la base ComicRack indique toujours l'ancien fichier : ComicRust ouvre alors le
+  CBZ à sa place.
+- Bilan avec les erreurs, copiable (« 📋 Copier le bilan »).
+
 ## Mises à jour
 
 Au démarrage (désactivable dans le menu ⚙), ComicRust consulte les releases GitHub. Si une
@@ -79,10 +96,18 @@ supprimé au lancement suivant). Le dossier `data\` n'est jamais touché.
 
 Comme ComicRack, le format est reconnu **par la signature du fichier** : un `.cbr` qui est en
 réalité un ZIP s'ouvre normalement. Images reconnues dans les archives : JPEG, PNG, GIF, BMP,
-TIFF, WebP, JPEG XL. Les métadonnées `ComicInfo.xml` sont lues (fenêtre *Infos*).
+TIFF, WebP, JPEG XL, **HEIF/HEIC** et **AVIF**. Les métadonnées `ComicInfo.xml` sont lues
+(fenêtre *Infos*).
 
-WebComic : URL, variables `{…}` et plages `[000:1-24]` pris en charge ; les « scrapers »
-(`!`, `?`) et la composition de plusieurs images par page ne le sont pas encore.
+HEIF / AVIF : l'AVIF est décodé en pur Rust (`oxideav-avif`) ; le HEIC par le décodeur de
+Windows (extensions « Extensions d'image HEIF » et « Extensions vidéo HEVC » du Microsoft
+Store), à défaut par un décodeur pur Rust (`heif-oxide`) plus lent et encore imparfait.
+
+WebComic (comme ComicRack) : URL, variables `{…}`, plages `[000:1-24]`, **scrapers** d'index
+(`!`, `Type="IndexScraper"`) et de navigation (`?`, `Type="BrowseScraper"`) avec leurs options
+(`<Part>`, `Cut`, `Reverse`, `AddOwn`, `Sort`, `MaximumMatches`, groupe `link`, `<base href>`),
+et **composition** de plusieurs images par page (`<Compositing>` : lignes × colonnes ou taille
+de page fixe, bordure, fond, droite à gauche). Exemples dans `recette/echantillons`.
 
 ## Lecteur
 
@@ -115,6 +140,7 @@ WebComic : URL, variables `{…}` et plages `[000:1-24]` pris en charge ; les «
 comicrust-cli info    "F:\BD\Thanos Quest 01.cbr"
 comicrust-cli render  "F:\BD\Silver Surfer 03.pdf" 1 page1.png
 comicrust-cli cbl     Thanos.cbl
+comicrust-cli convert "F:\BD\Silver Surfer 04.cbr"     # crée le .cbz à côté
 comicrust-cli missing "F:\BD" Thanos.cbl            # ou un ComicDB.xml à la place du dossier
 ```
 
@@ -122,7 +148,7 @@ comicrust-cli missing "F:\BD" Thanos.cbl            # ou un ComicDB.xml à la pl
 
 | Crate | Rôle |
 |---|---|
-| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, listes `.cbl`, `ComicDB.xml` et ses listes (`comic_lists`), listes intelligentes (`smart`), index de fichiers, base MySQL et suivi des modifications (`db/`) |
+| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, écriture dans les fichiers (`writer`), listes `.cbl`, `ComicDB.xml` et ses listes (`comic_lists`), listes intelligentes (`smart`), index de fichiers, base MySQL et suivi des modifications (`db/`) |
 | `comicrust` | l'application `ComicRust.exe` (egui) : `app`, `book/`, `library/`, `reading_list`, `update/`, `ui/`… |
 | `comicrust-cli` | outil en ligne de commande |
 
@@ -135,7 +161,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.5.2](recette/v0.5.2.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.6.0](recette/v0.6.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -158,6 +184,7 @@ journal dans les releases déjà publiées.
 | PDFiumSharp | `pdfium-render` |
 | DjVuLibre (`djvm.exe`) | `djvu-rs` |
 | libwebp / libjxl | `image` (WebP) / `jxl-oxide` |
+| libheif (HEIF, AVIF) | `oxideav-avif` (AVIF) ; WIC de Windows ou `heif-oxide` (HEIC) |
 | `XmlSerializer` (ComicDB.xml, CBL, ComicInfo, CBW) | `quick-xml` + `serde` |
 | MySqlConnector | `mysql` (lecture seule) |
 | Mise à jour (ClickOnce / site) | releases GitHub + SHA-256 (`ureq`, `sha2`) |
@@ -171,8 +198,9 @@ journal dans les releases déjà publiées.
    couverture choisie, suivi des modifications~~ (v0.4.0).
 3. ~~**Listes intelligentes** calculées par ComicRust, thème clair/sombre, choix de la page
    de reprise~~ (v0.5.0).
-4. Écriture de `ComicInfo.xml`, conversion CBR→CBZ, HEIF/AVIF, scrapers WebComic.
-5. Associations de fichiers Windows, serveur HTTP/OPDS, scripts.
+4. ~~Écriture de `ComicInfo.xml`, conversion CBR→CBZ, HEIF/AVIF, scrapers WebComic~~ (v0.6.0).
+5. Associations de fichiers Windows, serveur HTTP/OPDS, scripts ; plus tard, un **mode
+   serveur sous Docker** (bibliothèque et lecture depuis un navigateur ou une application OPDS).
 6. Version majeure : **enregistrer la lecture dans ComicRack** (page lue, « lu ») — ComicRust
    cessera alors d'être en lecture seule.
 

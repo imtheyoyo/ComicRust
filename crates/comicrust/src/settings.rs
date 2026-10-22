@@ -155,6 +155,15 @@ pub struct Settings {
     pub check_updates: bool,
     /// Version dont la mise à jour a été refusée (« Ignorer cette version »).
     pub skipped_version: Option<String>,
+    /// Infos écrites par ComicRust dans le fichier : identifiant (minuscules) → compteur
+    /// de la fiche en base à ce moment. Tant que la fiche n'a pas changé, le livre n'est
+    /// plus « à mettre à jour » dans ComicRust (ComicRack, lui, n'est pas prévenu).
+    pub info_written: HashMap<String, i64>,
+    /// Livres convertis en CBZ : ancien chemin (celui de la base) → CBZ créé. Si l'ancien
+    /// fichier n'existe plus, ComicRust ouvre le CBZ à sa place.
+    pub converted: HashMap<PathBuf, PathBuf>,
+    /// Conversion : ranger l'original dans le sous-dossier `_originaux`.
+    pub move_converted_original: bool,
 }
 
 impl Default for Settings {
@@ -187,6 +196,9 @@ impl Default for Settings {
             library_cover_height: 190.0,
             check_updates: true,
             skipped_version: None,
+            info_written: HashMap::new(),
+            converted: HashMap::new(),
+            move_converted_original: false,
         }
     }
 }
@@ -213,6 +225,14 @@ impl Settings {
 
     pub fn view_options(&self) -> ViewOptions {
         ViewOptions { sort: self.library_sort, descending: self.library_descending, group: self.library_group }
+    }
+
+    /// Fichier à ouvrir pour un chemin de la base : le CBZ converti si l'original n'est plus là.
+    pub fn effective_path(&self, path: &std::path::Path) -> PathBuf {
+        match self.converted.get(path) {
+            Some(cbz) if !path.exists() && cbz.exists() => cbz.clone(),
+            _ => path.to_path_buf(),
+        }
     }
 
     pub fn push_recent(&mut self, path: PathBuf) {

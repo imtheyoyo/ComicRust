@@ -15,6 +15,7 @@ pub mod library;
 pub mod name_info;
 pub mod providers;
 pub mod smart;
+pub mod writer;
 
 pub use cbl::ReadingList;
 pub use comic_info::ComicInfo;

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Web comic réel (accès Internet nécessaire) : les 6 derniers épisodes de xkcd.com, par le
+     scraper d'index de ComicRack (page des archives, puis image de chaque épisode). -->
+<WebComic>
+  <Info><Series>xkcd</Series><Title>Derniers épisodes</Title><Web>https://xkcd.com</Web></Info>
+  <Images>
+    <Image Type="IndexScraper">
+      <Parts>
+        <Part>https://xkcd.com/archive/</Part>
+        <Part MaximumMatches="6" Reverse="true">&lt;a href="(?&lt;link&gt;/\d+/)" title="\d+-\d+-\d+"</Part>
+        <Part MaximumMatches="1">&lt;div id="comic"&gt;\s*&lt;img src="(?&lt;link&gt;[^"]+)"</Part>
+      </Parts>
+    </Image>
+  </Images>
+</WebComic>

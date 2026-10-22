@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scraper de navigation (« ? ») : première planche | image de la planche | lien « suivante ».
+     Attendu : 4 pages (page005, page006-007 en double page, page008, page009). -->
+<WebComic>
+  <Info><Series>Web Comic</Series><Number>3</Number><Title>Scraper de navigation</Title></Info>
+  <Images>
+    <Image Url="?{ComicFilePath}/scraper/planche1.html|id=.strip.&gt;&lt;img src=.(?&lt;link&gt;[^&quot;]+)|rel=.next. href=.(?&lt;link&gt;[^&quot;]+)"/>
+  </Images>
+</WebComic>

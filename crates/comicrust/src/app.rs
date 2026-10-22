@@ -69,6 +69,10 @@ pub struct ComicRustApp {
     pub(crate) db_window: Option<DbWindow>,
     pub(crate) update: crate::update::UpdateState,
     pub(crate) resume_prompt: Option<ResumePrompt>,
+    /// Travaux sur les fichiers BD : confirmation, travail en cours, fenêtre du bilan.
+    pub(crate) file_dialog: Option<crate::library::files::FileDialog>,
+    pub(crate) file_job: Option<crate::library::files::FileJob>,
+    pub(crate) show_file_job: bool,
 }
 
 impl ComicRustApp {
@@ -101,6 +105,9 @@ impl ComicRustApp {
             db_window: None,
             update: Default::default(),
             resume_prompt: None,
+            file_dialog: None,
+            file_job: None,
+            show_file_job: false,
         };
         crate::update::cleanup_previous_install();
         if app.settings.db_source != DbSource::None {
@@ -414,6 +421,7 @@ impl eframe::App for ComicRustApp {
         });
 
         self.resume_window(&ctx);
+        self.files_windows(&ctx);
         self.db_window_ui(&ctx);
         self.update_window(&ctx);
         self.info_window(&ctx);

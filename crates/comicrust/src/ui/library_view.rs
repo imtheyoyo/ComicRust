@@ -87,7 +87,9 @@ impl ComicRustApp {
     pub(crate) fn ensure_covers(&mut self, ctx: &egui::Context) {
         if self.covers.is_none() {
             let dir = self.data_dir.as_ref().map(|d| d.join(crate::paths::COVERS_DIR));
-            self.covers = Some(CoverCache::new(dir, ctx));
+            let mut covers = CoverCache::new(dir, ctx);
+            covers.redirects = self.settings.converted.clone();
+            self.covers = Some(covers);
         }
         if let Some(c) = &mut self.covers {
             c.poll(ctx);
@@ -124,7 +126,8 @@ impl ComicRustApp {
             self.error = Some(format!("« {} » n'a pas de fichier associé dans la base.", book.caption()));
             return;
         };
-        let path = PathBuf::from(&file);
+        // Livre converti en CBZ par ComicRust et original rangé : le CBZ est ouvert.
+        let path = self.settings.effective_path(&PathBuf::from(&file));
         let start = match start {
             Start::Auto => Start::Resume(book.current_page.map(|p| p as usize)),
             other => other,
@@ -205,6 +208,7 @@ impl ComicRustApp {
             ui.toggle_value(&mut self.settings.show_comic_lists, "📂 Listes")
                 .on_hover_text("Listes de ComicRack (ComicDb.xml)");
             ui.toggle_value(&mut self.settings.show_details, "ℹ Détails").on_hover_text("Fiche du livre sélectionné");
+            self.files_menu(ui);
             if ui.button("⟳").on_hover_text("Relire toute la base ComicRack").clicked() {
                 self.load_library(&ctx);
             }
@@ -399,6 +403,7 @@ impl ComicRustApp {
         let mut select: Option<String> = None;
         let mut open_stack: Option<String> = None;
         let mut select_stack: Option<String> = None;
+        let mut file_request: Option<(crate::library::files::FileAction, String)> = None;
 
         egui::ScrollArea::vertical().auto_shrink(false).id_salt("bibliotheque").show_viewport(ui, |ui, viewport| {
             ui.set_height(total);
@@ -482,6 +487,15 @@ impl ComicRustApp {
                             painter.with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::WHITE);
 
                             let resp = resp.on_hover_ui(|ui| book_tooltip(ui, book));
+                            resp.context_menu(|ui| {
+                                Self::book_file_menu(
+                                    ui,
+                                    &self.settings,
+                                    &book.id,
+                                    book.file.as_deref(),
+                                    &mut file_request,
+                                )
+                            });
                             if resp.double_clicked() {
                                 open = Some(book.id.clone());
                             } else if resp.clicked() {
@@ -585,6 +599,10 @@ impl ComicRustApp {
         if let Some(id) = open {
             self.library.selected_book = Some(id.clone());
             self.open_library_book(ui.ctx(), &id, Start::Auto);
+        }
+        if let Some((action, id)) = file_request {
+            self.library.selected_book = Some(id.clone());
+            self.ask_file_action(action, &[id]);
         }
     }
 }

@@ -2,6 +2,7 @@
 //! tenus à jour (voir `watch`), filtrés, triés et regroupés pour la vue Bibliothèque.
 
 pub mod covers;
+pub mod files;
 pub mod sorting;
 pub mod watch;
 
@@ -230,6 +231,31 @@ impl LibraryState {
         applied
     }
 
+    /// Livres dont ComicRust a écrit les infos dans le fichier : ils ne sont plus « à mettre
+    /// à jour » tant que leur fiche n'a pas changé dans ComicRack (sinon l'entrée est
+    /// oubliée). Renvoie `true` si un livre a changé d'état.
+    pub fn apply_info_written(&mut self, written: &mut HashMap<String, i64>) -> bool {
+        let Status::Loaded(db) = &mut self.status else { return false };
+        written.retain(|id, counter| db.rows.get(id) == Some(counter));
+        let to_clear: Vec<String> = written
+            .keys()
+            .filter(|id| db.get(id).is_some_and(|b| b.comic_info_is_dirty == Some(true)))
+            .cloned()
+            .collect();
+        if to_clear.is_empty() {
+            return false;
+        }
+        let db = Arc::make_mut(db);
+        for id in &to_clear {
+            if let Some(b) = db.get_mut(id) {
+                b.comic_info_is_dirty = Some(false);
+            }
+        }
+        self.generation += 1;
+        self.view_key = None;
+        true
+    }
+
     /// Nombre de séries (piles) parmi les livres affichés.
     pub fn stacks_shown(&self) -> usize {
         let Some(db) = self.database() else { return 0 };
@@ -445,6 +471,32 @@ mod tests {
             book("e", "Thanos", "1", "Jim Starlin"),
         ]);
         LibraryState { status: Status::Loaded(Arc::new(db)), ..Default::default() }
+    }
+
+    #[test]
+    fn info_written_clears_dirty_flag_until_comicrack_changes_the_book() {
+        let mut a = book("a", "Thanos", "1", "Jim Starlin");
+        a.comic_info_is_dirty = Some(true);
+        let mut db = ComicDatabase::from_books(vec![a, book("b", "Thanos", "2", "Jim Starlin")]);
+        db.rows.insert("a".into(), 7);
+        let mut s = LibraryState { status: Status::Loaded(Arc::new(db)), ..Default::default() };
+        let mut written = HashMap::from([("a".to_string(), 7), ("b".to_string(), 3)]);
+        assert!(s.apply_info_written(&mut written));
+        assert_eq!(s.database().unwrap().get("a").unwrap().comic_info_is_dirty, Some(false));
+        assert_eq!(written.len(), 1, "b : compteur inconnu, entrée oubliée");
+        assert!(!s.apply_info_written(&mut written), "déjà fait");
+
+        // ComicRack modifie la fiche (nouveau compteur, de nouveau « à mettre à jour »).
+        let mut changed = book("a", "Thanos", "1", "Jim Starlin");
+        changed.comic_info_is_dirty = Some(true);
+        s.apply_changes(comicrust_core::db::Changes {
+            updated: vec![changed],
+            rows: vec![("a".into(), 8)],
+            ..Default::default()
+        });
+        assert!(!s.apply_info_written(&mut written));
+        assert!(written.is_empty());
+        assert_eq!(s.database().unwrap().get("a").unwrap().comic_info_is_dirty, Some(true));
     }
 
     fn series() -> ViewOptions {

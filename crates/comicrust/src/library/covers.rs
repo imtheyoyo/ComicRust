@@ -25,6 +25,8 @@ struct Job {
     key: String,
     id: String,
     file: PathBuf,
+    /// CBZ créé par une conversion, ouvert si `file` n'existe plus.
+    alt: Option<PathBuf>,
     image: usize,
 }
 
@@ -59,6 +61,8 @@ pub struct CoverCache {
     lru: VecDeque<String>,
     requested: HashSet<String>,
     failed: HashSet<String>,
+    /// Livres convertis en CBZ (voir `Settings::converted`).
+    pub redirects: HashMap<PathBuf, PathBuf>,
 }
 
 /// Nom de fichier sûr pour un identifiant (GUID en pratique) ; l'image 0 garde le nom
@@ -84,7 +88,11 @@ fn make_cover(dir: Option<&Path>, job: &Job) -> Result<ColorImage, String> {
             return Ok(to_color(&img.into_rgba8()));
         }
     }
-    let mut book = open_book_patiently(&job.file, std::time::Duration::from_secs(20)).map_err(|e| e.to_string())?;
+    let file = match &job.alt {
+        Some(alt) if !job.file.exists() => alt,
+        _ => &job.file,
+    };
+    let mut book = open_book_patiently(file, std::time::Duration::from_secs(20)).map_err(|e| e.to_string())?;
     let n = book.pages().len();
     if n == 0 {
         return Err("aucune page".into());
@@ -148,6 +156,7 @@ impl CoverCache {
             lru: VecDeque::new(),
             requested: HashSet::new(),
             failed: HashSet::new(),
+            redirects: HashMap::new(),
         }
     }
 
@@ -190,7 +199,13 @@ impl CoverCache {
         }
         if self.requested.insert(key.clone()) {
             let (lock, cv) = &*self.shared;
-            lock.lock().unwrap().jobs.push_back(Job { key, id: id.to_string(), file: PathBuf::from(file), image });
+            lock.lock().unwrap().jobs.push_back(Job {
+                key,
+                id: id.to_string(),
+                file: PathBuf::from(file),
+                alt: self.redirects.get(std::path::Path::new(file)).cloned(),
+                image,
+            });
             cv.notify_one();
         }
         Cover::Pending
@@ -239,13 +254,13 @@ mod tests {
         }
         let covers = dir.path().join("couvertures");
         std::fs::create_dir_all(&covers).unwrap();
-        let job = Job { key: "k".into(), id: "id/1".into(), file: book.clone(), image: 0 };
+        let job = Job { key: "k".into(), id: "id/1".into(), file: book.clone(), alt: None, image: 0 };
         let img = make_cover(Some(&covers), &job).unwrap();
         assert_eq!(img.size, [240, 360]);
         let cached = covers.join("id_1.jpg");
         assert!(cached.exists());
         // Couverture choisie au-delà du nombre d'images : la dernière image sert.
-        let other = Job { key: "k2".into(), id: "id/1".into(), file: book.clone(), image: 3 };
+        let other = Job { key: "k2".into(), id: "id/1".into(), file: book.clone(), alt: None, image: 3 };
         assert_eq!(make_cover(Some(&covers), &other).unwrap().size, [240, 360]);
         assert!(covers.join("id_1-p3.jpg").exists());
         // Le livre disparaît : la couverture vient du cache disque.

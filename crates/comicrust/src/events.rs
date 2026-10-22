@@ -23,6 +23,7 @@ impl ComicRustApp {
                         }
                     }
                     self.library.apply_changes(ch);
+                    self.library.apply_info_written(&mut self.settings.info_written);
                     if let Some(id) = &self.library.selected_book {
                         if self.library.database().is_some_and(|db| db.get(id).is_none()) {
                             self.library.selected_book = None;
@@ -42,8 +43,10 @@ impl ComicRustApp {
 
     pub(crate) fn poll_loader(&mut self, ctx: &Context) {
         if self.library.poll() {
+            self.library.apply_info_written(&mut self.settings.info_written);
             self.restart_watch(ctx);
         }
+        self.poll_files();
         self.poll_watch();
         // Base ComicRack disponible : une liste résolue sans elle l'est à nouveau, par identifiant.
         if self.library.database().is_some()

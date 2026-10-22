@@ -116,6 +116,7 @@ impl ComicRustApp {
         let in_list = self.library.reading_list_shown();
         let mut open = None;
         let mut select = None;
+        let mut file_request: Option<(crate::library::files::FileAction, String)> = None;
         let mut sort_by = None;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         // Colonnes plus larges que la fenêtre : défilement horizontal.
@@ -182,6 +183,9 @@ impl ComicRustApp {
                         });
                     }
                     let resp = row.response();
+                    resp.context_menu(|ui| {
+                        Self::book_file_menu(ui, &self.settings, &book.id, book.file.as_deref(), &mut file_request)
+                    });
                     if resp.double_clicked() {
                         open = Some(book.id.clone());
                     } else if resp.clicked() {
@@ -197,6 +201,10 @@ impl ComicRustApp {
                 self.settings.library_sort = k;
                 self.settings.library_descending = false;
             }
+        }
+        if let Some((action, id)) = file_request {
+            self.library.selected_book = Some(id.clone());
+            self.ask_file_action(action, &[id]);
         }
         if let Some(id) = select {
             self.library.selected_book = Some(id);

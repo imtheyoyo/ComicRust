@@ -246,6 +246,33 @@ pub fn test_connection(cfg: &DbConfig) -> Result<usize, Error> {
     Ok(n.unwrap_or(0) as usize)
 }
 
+/// Fiche complète en base d'un livre, relue au moment de l'appel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+    /// XML `<ComicBook>` (colonne `comics.data`).
+    pub data: String,
+    /// `comics.update_counter` de la ligne.
+    pub counter: i64,
+}
+
+/// Relit les fiches de quelques livres (lecture seule). Clé : identifiant en minuscules ;
+/// un livre absent de la base n'a pas d'entrée.
+pub fn fetch_records(cfg: &DbConfig, ids: &[String]) -> Result<HashMap<String, Record>, Error> {
+    let mut conn = connect(cfg)?;
+    let mut out = HashMap::new();
+    for chunk in ids.chunks(200) {
+        let marks = vec!["?"; chunk.len()].join(",");
+        let q = format!("SELECT id, update_counter, data FROM comics WHERE id IN ({marks})");
+        let rows: Vec<(String, Option<i64>, Option<String>)> = conn.exec(&q, chunk.to_vec()).map_err(db_err)?;
+        for (id, counter, data) in rows {
+            if let Some(data) = data {
+                out.insert(id.to_ascii_lowercase(), Record { data, counter: counter.unwrap_or(0) });
+            }
+        }
+    }
+    Ok(out)
+}
+
 impl ComicDatabase {
     /// Charge toutes les fiches (lecture seule).
     pub fn load(cfg: &DbConfig, progress: Option<&LoadProgress>) -> Result<Self, Error> {
@@ -331,6 +358,11 @@ impl ComicDatabase {
     }
 
     /// Rang du livre dans `books` (identifiant sans casse).
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut LibraryBook> {
+        let i = self.index_of(id)?;
+        self.books.get_mut(i)
+    }
+
     pub fn index_of(&self, id: &str) -> Option<usize> {
         self.by_id.get(&id.trim().to_ascii_lowercase()).copied()
     }
@@ -463,6 +495,13 @@ mod tests {
         assert_eq!(db.apply(ch), Applied { added: 0, modified: 1, removed: 1 });
         assert_eq!(db.get(id42).unwrap().series.as_deref(), Some("Discrète"));
         assert!(w.full_check().unwrap().is_none());
+
+        // Fiches relues pour l'écriture dans les fichiers.
+        let recs = fetch_records(&cfg, &[id42.to_uppercase(), "inconnu".into()]).unwrap();
+        assert_eq!(recs.len(), 1);
+        let rec = &recs[id42];
+        assert_eq!(rec.counter, 9);
+        assert!(rec.data.contains("Discrète"));
 
         let mut bad = cfg.clone();
         bad.password = "mauvais".into();
