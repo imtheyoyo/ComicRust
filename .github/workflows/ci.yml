@@ -61,4 +61,12 @@ jobs:
           status=${PIPESTATUS[0]}
           grep -E '(^|: )(error|warning)' clippy.log | head -30 | while read -r l; do echo "::error::$l"; done
           exit $status
-      - run: cargo test --all
+      - name: Tests
+        shell: bash
+        run: |
+          # Tests en échec et messages d'erreur en annotations (journaux non accessibles).
+          set +e
+          cargo test --all --color never 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          grep -E "panicked at|^test .* FAILED|^---- |assertion|left:|right:|Error|error\[" test.log | head -40 | while read -r l; do echo "::error::$l"; done
+          exit $status

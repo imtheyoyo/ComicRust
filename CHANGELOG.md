@@ -5,6 +5,43 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.6.0] — 2026-10-22
+
+Piste « Fichiers BD » : ComicRust peut modifier des fichiers BD ; la base ComicRack reste en
+lecture seule.
+
+### Nouveautés
+- **Écrire les infos dans le fichier** (menu « 🛠 Fichiers » de la bibliothèque, ou clic droit
+  sur une couverture ; livre sélectionné ou tous les livres affichés) : la fiche du livre dans
+  la base ComicRack (série, numéro, auteurs, résumé, pages…) est écrite dans le
+  `ComicInfo.xml` du CBZ, comme « Mettre à jour les fichiers » de ComicRack : mêmes éléments,
+  même ordre, éléments ajoutés par d'autres logiciels gardés. Les pages sont recopiées sans
+  recompression dans un fichier temporaire, vérifié avant de remplacer l'original ; un fichier
+  déjà à jour n'est pas touché ; un fichier que ComicRack est en train d'enregistrer est
+  laissé. Un livre écrit sort de « Fichiers à mettre à jour » dans ComicRust, tant que sa
+  fiche ne change pas dans ComicRack.
+- **Convertir en CBZ** les CBR, CB7 et CBT : nouveau `.cbz` à côté de l'original (mêmes pages,
+  `ComicInfo.xml` de la base) ; l'original est gardé ou rangé dans le sous-dossier
+  `_originaux`. La base ComicRack indiquant toujours l'ancien fichier, ComicRust ouvre le CBZ
+  à sa place quand l'original n'est plus là.
+- Fenêtre d'avancement (bouton « ⏹ Arrêter ») et bilan copiable avec les erreurs.
+- **Pages HEIF/HEIC et AVIF** dans les archives et les dossiers d'images : AVIF décodé en pur
+  Rust ; HEIC par le décodeur de Windows (extensions HEIF et HEVC du Microsoft Store), à défaut
+  par un décodeur pur Rust.
+- **WebComic : scrapers et composition**, comme ComicRack : scraper d'index (`!`) et de
+  navigation (`?`), motifs `<Part>` avec leurs options (`Cut`, `Reverse`, `AddOwn`, `Sort`,
+  `MaximumMatches`), `<base href>` ; plusieurs images par page (lignes × colonnes ou taille de
+  page fixe, bordure, fond, droite à gauche). Exemples dans les échantillons de recette.
+- `comicrust-cli convert <livre.cbr>` : conversion en ligne de commande.
+
+### Corrections
+- WebComic composé de droite à gauche avec une bordure : images décalées de deux bordures
+  dans ComicRack ; centrées dans ComicRust. Page de taille fixe : une image qui ne tient plus
+  en hauteur passe à la page suivante au lieu de déborder.
+
+### Recette
+[recette/v0.6.0.md](recette/v0.6.0.md) — en cours.
+
 ## [v0.5.2] — 2026-10-22
 
 Améliorations et correctifs demandés après la recette v0.5.1.
