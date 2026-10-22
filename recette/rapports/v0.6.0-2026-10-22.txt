@@ -1,0 +1,22 @@
+Rapport de recette ComicRust v0.6.0 — 22/10/2026 18:36
+Résultat : 26 OK, 2 échec(s), 0 non testé(s) sur 28.
+Décision proposée : NO-GO (1 bloquant(s) en échec).
+
+ÉCHECS (2)
+- W-01 [Bloquant] Choisir un livre CBZ de la liste « Fichiers à mettre à jour » de ComicRack (fiche modifiée dans ComicRack, pas encore écrite). Dans ComicRust : clic droit sur sa couverture → « 📝 Écrire les infos dans le fichier » → « Lancer » : bilan « 1 écrit(s), 0 erreur(s) ».
+  Note : Aucun fichier cbz à mettre à jour.
+- W-05 [Majeur] Dans ComicRust, la liste intelligente « Fichiers à mettre à jour » ne contient plus ce livre (ComicRack, lui, le garde jusqu'à ce qu'il le mette à jour).
+  Note : Aucun fichier cbz à mettre à jour dans W-01
+
+VALEURS NOTÉES ET REMARQUES
+- W-06 : ComicRust v0.6.0 — Écrire les infos dans les fichiers — 2026-10-22 18:17 / 3 livres traités sur 3 : 1 écrits, 2 déjà à jour, 0 erreur(s) / - Serie Test Ecriture - test titre — \\SERVEURNAS\Disque_DATA_1\_BDZ\_BD\Séries_Temp\29 - Marvel Team-Up #55 - L'araignée #6 - Le Titan Vert.cbz : écrit / - Serie Test Ecriture — \\SERVEURNAS\Disque_DATA_1\_BDZ\_BD\Séries_Temp\30 - Avengers Annual #7 - Les Vengeurs - La menace finale.cbz : déjà à jour / - Serie Test Ecriture — \\SERVEURNAS\Disque_DATA_1\_BDZ\_BD\Séries_Temp\02 - Logan's Run (1977) #06.cbz : déjà à jour
+- H-02 : oui
+- K-04 : 6
+
+ANALYSE (Claude)
+- W-01 et W-05 n'ont pas pu être joués : la liste « Fichiers à mettre à jour » de ComicRack est vide.
+  ComicRack a l'option « Les Livres sont automatiquement mis à jour » (AutoUpdateComicsFiles) :
+  il écrit lui-même le ComicInfo.xml dès qu'une fiche change et retire aussitôt l'indicateur
+  « à mettre à jour » (QueueManager). Les 2 « déjà à jour » de W-06 le confirment : ComicRack
+  avait déjà écrit ces fichiers ; le 3e (titre modifié juste avant) ne l'était pas encore.
+- L'écriture elle-même est validée par W-06 (1 écrit, 0 erreur sur le NAS) et W-02, W-03, W-04, W-08 OK.
