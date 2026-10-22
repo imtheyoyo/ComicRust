@@ -12,6 +12,7 @@ zip = { version = "2", default-features = false, features = ["bzip2", "deflate",
 thiserror = "2"
 natord = "1.0"
 regex = "1"
+fancy-regex = "0.14"
 unrar-ng = { version = "0.7", default-features = false }
 sevenz-rust2 = { version = "0.24", default-features = false, features = ["aes256", "bzip2", "compress", "deflate", "ppmd", "util"] }
 tar = "0.4"

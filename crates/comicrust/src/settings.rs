@@ -33,6 +33,36 @@ impl FitMode {
     }
 }
 
+/// Présentation propre à une liste (ou à toute la bibliothèque) : tri, regroupement, piles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListView {
+    pub sort: SortKey,
+    pub descending: bool,
+    pub group: GroupKey,
+    pub stack: bool,
+}
+
+/// Clé de la présentation de toute la bibliothèque dans `Settings::list_views`.
+pub const LIBRARY_VIEW_KEY: &str = "";
+
+/// Lecture faite dans ComicRust (la base ComicRack n'est pas modifiée).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ReadProgress {
+    /// Page la plus loin atteinte (à partir de 0).
+    pub max_page: usize,
+    pub pages: usize,
+}
+
+impl ReadProgress {
+    /// Pourcentage lu, avec la formule de ComicRack (`ReadPercentage`).
+    pub fn percent(&self) -> Option<u32> {
+        if self.pages == 0 || self.max_page == 0 {
+            return None;
+        }
+        Some((((self.max_page + 1) * 100 / self.pages) as u32).clamp(1, 100))
+    }
+}
+
 /// Page de reprise quand ComicRack et ComicRust ont mémorisé des pages différentes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ResumeChoice {
@@ -90,6 +120,8 @@ pub struct Settings {
     pub recent: Vec<PathBuf>,
     /// Dernière page lue par fichier (équivalent de `CurrentPage` dans ComicRack).
     pub last_pages: HashMap<PathBuf, usize>,
+    /// Avancement de lecture dans ComicRust, par fichier.
+    pub read_progress: HashMap<PathBuf, ReadProgress>,
     /// `ComicDB.xml` de ComicRack choisi à la main : listes de la bibliothèque et
     /// résolution des listes `.cbl`. Sans lui, celui du `ComicRack.ini` est cherché.
     pub library_db: Option<PathBuf>,
@@ -106,6 +138,10 @@ pub struct Settings {
     pub library_table: bool,
     /// Bibliothèque : une pile par série (vue en couvertures).
     pub library_stack: bool,
+    /// Présentation de chaque liste (identifiant de liste ; `""` : toute la bibliothèque).
+    /// Les champs `library_sort`, `library_descending`, `library_group` et `library_stack`
+    /// sont ceux de la liste affichée.
+    pub list_views: HashMap<String, ListView>,
     /// Panneaux de la bibliothèque : listes ComicRack (gauche) et détails (droite).
     pub show_comic_lists: bool,
     pub show_details: bool,
@@ -133,6 +169,7 @@ impl Default for Settings {
             theme: crate::ui::theme::Theme::Dark,
             recent: Vec::new(),
             last_pages: HashMap::new(),
+            read_progress: HashMap::new(),
             library_db: None,
             comics_root: None,
             last_dir: None,
@@ -142,6 +179,7 @@ impl Default for Settings {
             library_group: GroupKey::Series,
             library_table: false,
             library_stack: false,
+            list_views: HashMap::new(),
             show_comic_lists: true,
             show_details: true,
             auto_refresh: true,
@@ -156,6 +194,23 @@ impl Default for Settings {
 impl Settings {
     pub const MAX_RECENT: usize = 15;
 
+    /// Présentation actuelle (celle de la liste affichée).
+    pub fn current_view(&self) -> ListView {
+        ListView {
+            sort: self.library_sort,
+            descending: self.library_descending,
+            group: self.library_group,
+            stack: self.library_stack,
+        }
+    }
+
+    pub fn set_current_view(&mut self, v: ListView) {
+        self.library_sort = v.sort;
+        self.library_descending = v.descending;
+        self.library_group = v.group;
+        self.library_stack = v.stack;
+    }
+
     pub fn view_options(&self) -> ViewOptions {
         ViewOptions { sort: self.library_sort, descending: self.library_descending, group: self.library_group }
     }
@@ -164,5 +219,19 @@ impl Settings {
         self.recent.retain(|p| p != &path);
         self.recent.insert(0, path);
         self.recent.truncate(Self::MAX_RECENT);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn comicrust_read_percent_like_comicrack() {
+        let p = |max_page, pages| ReadProgress { max_page, pages }.percent();
+        assert_eq!(p(0, 20), None, "jamais avancé");
+        assert_eq!(p(9, 20), Some(50));
+        assert_eq!(p(19, 20), Some(100));
+        assert_eq!(p(1, 500), Some(1), "au moins 1 %");
     }
 }

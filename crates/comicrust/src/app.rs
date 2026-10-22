@@ -73,7 +73,11 @@ pub struct ComicRustApp {
 
 impl ComicRustApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>, data_dir: Option<PathBuf>) -> Self {
-        let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
+        let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
+        // Au démarrage, toute la bibliothèque est affichée : sa présentation s'applique.
+        if let Some(v) = settings.list_views.get(crate::settings::LIBRARY_VIEW_KEY).copied() {
+            settings.set_current_view(v);
+        }
         settings.theme.apply(&cc.egui_ctx);
         let mut app = Self {
             settings,
@@ -209,6 +213,45 @@ impl ComicRustApp {
         self.show_list_panel = true;
     }
 
+    /// Affiche une liste ComicRack (`None` : toute la bibliothèque). Chaque liste garde sa
+    /// présentation (tri, regroupement, piles) ; une liste jamais ouverte part de celle de
+    /// la bibliothèque, ou de l'ordre de la liste et sans groupes pour une liste de lecture.
+    pub(crate) fn select_list(&mut self, id: Option<String>) {
+        use crate::settings::LIBRARY_VIEW_KEY;
+        let key = |id: &Option<String>| id.clone().unwrap_or_else(|| LIBRARY_VIEW_KEY.to_string());
+        let old = key(&self.library.selected_list);
+        let current = self.settings.current_view();
+        self.settings.list_views.insert(old, current);
+        let new_key = key(&id);
+        let view = match self.settings.list_views.get(&new_key) {
+            Some(v) => *v,
+            None => {
+                let base = self.settings.list_views.get(LIBRARY_VIEW_KEY).copied().unwrap_or(current);
+                let reading = id
+                    .as_deref()
+                    .and_then(|i| comicrust_core::comic_lists::ComicList::find(&self.library.lists.items, i))
+                    .is_some_and(|l| matches!(l.kind, comicrust_core::comic_lists::ListKind::Ids(_)));
+                if reading {
+                    crate::settings::ListView {
+                        sort: crate::library::SortKey::Position,
+                        descending: false,
+                        group: crate::library::GroupKey::None,
+                        stack: false,
+                    }
+                } else {
+                    base
+                }
+            }
+        };
+        self.settings.set_current_view(view);
+        self.library.selected_list = id;
+        self.library.open_stack = None;
+        self.library.selected_stack = None;
+        if let Some(c) = &mut self.covers {
+            c.cancel_pending();
+        }
+    }
+
     /// (Re)lance la surveillance de la base (modifications faites dans ComicRack) et la
     /// lecture des listes (`ComicDb.xml`), une fois la base chargée.
     pub(crate) fn restart_watch(&mut self, ctx: &Context) {
@@ -284,8 +327,27 @@ impl ComicRustApp {
         if let Some(b) = &self.book {
             if b.opened {
                 self.settings.last_pages.insert(b.path.clone(), b.current);
+                // Page la plus loin atteinte (en double page, la seconde page compte).
+                let shown = self.spread(b, b.current).into_iter().max().unwrap_or(b.current);
+                let p = self.settings.read_progress.entry(b.path.clone()).or_default();
+                p.max_page = p.max_page.max(shown);
+                p.pages = b.page_count();
             }
         }
+    }
+
+    /// Avancement lu dans ComicRust pour un livre de la base : (pourcentage, page).
+    pub(crate) fn comicrust_progress(&self, book: &comicrust_core::library::LibraryBook) -> Option<(u32, usize)> {
+        let path = PathBuf::from(book.file.as_deref()?);
+        let pct = self.settings.read_progress.get(&path)?.percent()?;
+        Some((pct, self.settings.last_pages.get(&path).copied().unwrap_or(0)))
+    }
+
+    /// Avancement affiché : le plus avancé entre ComicRack (base) et ComicRust.
+    pub(crate) fn read_percent(&self, book: &comicrust_core::library::LibraryBook) -> Option<u32> {
+        let db = book.read_percent().filter(|p| *p > 0);
+        let ours = self.comicrust_progress(book).map(|p| p.0);
+        db.max(ours)
     }
 }
 
@@ -362,6 +424,10 @@ impl eframe::App for ComicRustApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.remember_position();
+        // La présentation actuelle est celle de la liste affichée.
+        let key = self.library.selected_list.clone().unwrap_or_default();
+        let current = self.settings.current_view();
+        self.settings.list_views.insert(key, current);
         eframe::set_value(storage, SETTINGS_KEY, &self.settings);
     }
 }

@@ -143,6 +143,13 @@ pub struct LibraryBook {
     pub comic_info_is_dirty: Option<bool>,
     #[serde(rename = "ComicBookIsDirty", default)]
     pub comic_book_is_dirty: Option<bool>,
+    /// « Utiliser les valeurs proposées » (vrai par défaut) : série, numéro… déduits du
+    /// nom du fichier quand la fiche est vide.
+    #[serde(rename = "EnableProposed", default)]
+    pub enable_proposed: Option<bool>,
+    /// Valeurs proposées, calculées au premier besoin (cache ; laisser par défaut).
+    #[serde(skip)]
+    pub proposed_cache: std::sync::OnceLock<crate::name_info::NameInfo>,
     /// Fichier signalé manquant par ComicRack.
     #[serde(rename = "Missing", default)]
     pub missing: Option<bool>,
@@ -214,6 +221,62 @@ impl LibraryBook {
             Some(covers[n as usize])
         };
         chosen.map(|p| p.image.max(0) as usize).unwrap_or(0)
+    }
+
+    /// Valeurs déduites du nom du fichier (`ComicNameInfo` de ComicRack).
+    pub fn proposed(&self) -> &crate::name_info::NameInfo {
+        self.proposed_cache.get_or_init(|| crate::name_info::from_file_path(self.file.as_deref().unwrap_or("")))
+    }
+
+    fn use_proposed(&self) -> bool {
+        self.enable_proposed.unwrap_or(true)
+    }
+
+    /// Série, ou celle proposée si elle est vide (`ShadowSeries`).
+    pub fn shadow_series(&self) -> String {
+        match self.series.as_deref().filter(|s| !s.is_empty()) {
+            Some(x) => x.to_string(),
+            None if self.use_proposed() => self.proposed().series.clone(),
+            None => String::new(),
+        }
+    }
+
+    /// Numéro, ou celui proposé s'il est vide (`ShadowNumber` ; « - » = pas de numéro).
+    pub fn shadow_number(&self) -> String {
+        match self.number.as_deref().filter(|s| !s.is_empty()) {
+            Some(x) => x.to_string(),
+            None if self.use_proposed() => self.proposed().number.clone(),
+            None => String::new(),
+        }
+    }
+
+    pub fn shadow_volume(&self) -> i32 {
+        match self.volume.unwrap_or(-1) {
+            -1 if self.use_proposed() => self.proposed().volume,
+            v => v,
+        }
+    }
+
+    pub fn shadow_year(&self) -> i32 {
+        match self.year.unwrap_or(-1) {
+            -1 if self.use_proposed() => self.proposed().year,
+            y => y,
+        }
+    }
+
+    pub fn shadow_count(&self) -> i32 {
+        match self.count.unwrap_or(-1) {
+            -1 if self.use_proposed() => self.proposed().count,
+            c => c,
+        }
+    }
+
+    pub fn shadow_format(&self) -> String {
+        match self.format.as_deref().filter(|s| !s.is_empty()) {
+            Some(x) => x.to_string(),
+            None if self.use_proposed() => self.proposed().format.clone(),
+            None => String::new(),
+        }
     }
 
     /// Pourcentage lu (0–100) d'après la dernière page lue enregistrée par ComicRack.

@@ -134,6 +134,8 @@ pub struct LibraryState {
     pub selected_book: Option<String>,
     /// Pile ouverte (série) dans la vue empilée.
     pub open_stack: Option<String>,
+    /// Pile sélectionnée (un clic) dans la vue empilée.
+    pub selected_stack: Option<String>,
     pub lists: Lists,
     /// Dernière actualisation automatique (bilan affiché dans la barre d'état).
     pub last_refresh: Option<Applied>,
@@ -159,6 +161,7 @@ impl Default for LibraryState {
             selected_list: None,
             selected_book: None,
             open_stack: None,
+            selected_stack: None,
             lists: Lists::default(),
             last_refresh: None,
             watch_error: None,

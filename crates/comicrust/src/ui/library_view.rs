@@ -94,6 +94,27 @@ impl ComicRustApp {
         }
     }
 
+    /// Livres affichés, un par ligne : « Série #n (volume, année) — fichier ».
+    pub(crate) fn shown_books_report(&mut self) -> String {
+        let Some(db) = self.library.database() else { return String::new() };
+        let opts = self.settings.view_options();
+        let name = self.library.selected_list().map(|l| l.name.clone()).unwrap_or_else(|| "Bibliothèque".into());
+        let view = self.library.view(&opts).to_vec();
+        let mut out = format!("{name} — {} livres (ComicRust v{})\n\n", view.len(), env!("CARGO_PKG_VERSION"));
+        for i in view {
+            let b = &db.books[i];
+            out.push_str(&format!(
+                "{} #{} (v{}, {}) — {}\n",
+                b.shadow_series(),
+                b.shadow_number(),
+                b.shadow_volume(),
+                b.shadow_year(),
+                b.file.as_deref().unwrap_or("")
+            ));
+        }
+        out
+    }
+
     /// Ouvre un livre de la base : `Start::Auto` (double-clic, Entrée) applique la règle de
     /// reprise ; `Start::Page` ouvre à la page demandée (boutons de la fiche).
     pub(crate) fn open_library_book(&mut self, ctx: &egui::Context, id: &str, start: Start) {
@@ -159,7 +180,7 @@ impl ComicRustApp {
             if !self.settings.library_table
                 && ui
                     .toggle_value(&mut self.settings.library_stack, "🗂 Empiler par série")
-                    .on_hover_text("Une pile par série ; clic sur une pile pour voir ses livres")
+                    .on_hover_text("Une pile par série ; double-clic sur une pile pour voir ses livres")
                     .changed()
             {
                 self.library.open_stack = None;
@@ -196,6 +217,8 @@ impl ComicRustApp {
 
     pub(crate) fn library_view(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        // Avancement du livre ouvert à jour dès le retour à la bibliothèque.
+        self.remember_position();
         self.ensure_covers(&ctx);
 
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| self.library_toolbar(ui));
@@ -259,7 +282,17 @@ impl ComicRustApp {
                         ui.add_space(12.0);
                         ui.label(RichText::new(format!("📂 {name}")).strong());
                         if ui.small_button("✖ Toute la bibliothèque").clicked() {
-                            self.library.selected_list = None;
+                            self.select_list(None);
+                        }
+                        if ui
+                            .small_button("📋 Copier les livres")
+                            .on_hover_text(
+                                "Liste des livres affichés (série, numéro, fichier), pour comparer avec ComicRack",
+                            )
+                            .clicked()
+                        {
+                            let text = self.shown_books_report();
+                            ui.ctx().copy_text(text);
                         }
                         if approximate {
                             ui.label(
@@ -305,7 +338,12 @@ impl ComicRustApp {
             return; // saisie dans la recherche
         }
         let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        if enter {
+        let stacked = self.settings.library_stack && !self.settings.library_table && self.library.open_stack.is_none();
+        if enter && stacked {
+            if let Some(s) = self.library.selected_stack.clone() {
+                self.library.open_stack = Some(s);
+            }
+        } else if enter {
             if let Some(id) = self.library.selected_book.clone() {
                 self.open_library_book(ui.ctx(), &id, Start::Auto);
             }
@@ -360,6 +398,7 @@ impl ComicRustApp {
         let mut open: Option<String> = None;
         let mut select: Option<String> = None;
         let mut open_stack: Option<String> = None;
+        let mut select_stack: Option<String> = None;
 
         egui::ScrollArea::vertical().auto_shrink(false).id_salt("bibliotheque").show_viewport(ui, |ui, viewport| {
             ui.set_height(total);
@@ -411,7 +450,7 @@ impl ComicRustApp {
                             paint_cover(ui, covers, book, cover_rect);
                             let painter = ui.painter();
                             // Avancement de lecture enregistré par ComicRack.
-                            if let Some(pct) = book.read_percent().filter(|p| *p > 0) {
+                            if let Some(pct) = self.read_percent(book) {
                                 let bar = Rect::from_min_size(
                                     pos2(cover_rect.min.x, cover_rect.max.y - 4.0),
                                     vec2(cover_rect.width() * pct as f32 / 100.0, 4.0),
@@ -456,7 +495,10 @@ impl ComicRustApp {
                             let min = origin + vec2(k as f32 * (cell.x + GAP), top);
                             let rect = Rect::from_min_size(min, cell);
                             let resp = ui.interact(rect, ui.scope_id().with(("pile", &stack.series)), Sense::click());
-                            if resp.hovered() {
+                            let selected = self.library.selected_stack.as_deref() == Some(stack.series.as_str());
+                            if selected {
+                                ui.painter().rect_filled(rect.expand(5.0), 6.0, ui.visuals().selection.bg_fill);
+                            } else if resp.hovered() {
                                 ui.painter().rect_filled(rect.expand(4.0), 6.0, ui.visuals().widgets.hovered.bg_fill);
                             }
                             // Feuilles décalées derrière la couverture : effet de pile.
@@ -491,7 +533,7 @@ impl ComicRustApp {
                             let read = stack
                                 .books
                                 .iter()
-                                .filter(|&&i| db.books[i].read_percent().is_some_and(|p| p >= 95))
+                                .filter(|&&i| self.read_percent(&db.books[i]).is_some_and(|p| p >= 95))
                                 .count();
                             if read > 0 {
                                 let bar = Rect::from_min_size(
@@ -514,10 +556,12 @@ impl ComicRustApp {
                             let resp = resp.on_hover_ui(|ui| {
                                 ui.label(RichText::new(&stack.series).strong());
                                 ui.label(format!("{} livres, {} lus", stack.books.len(), read));
-                                ui.label(RichText::new("Clic : ouvrir la pile").weak());
+                                ui.label(RichText::new("Double-clic (ou Entrée) : ouvrir la pile").weak());
                             });
-                            if resp.clicked() {
+                            if resp.double_clicked() {
                                 open_stack = Some(stack.series.clone());
+                            } else if resp.clicked() {
+                                select_stack = Some(stack.series.clone());
                             }
                         }
                     }
@@ -525,7 +569,11 @@ impl ComicRustApp {
             }
         });
 
+        if let Some(s) = select_stack {
+            self.library.selected_stack = Some(s);
+        }
         if let Some(s) = open_stack {
+            self.library.selected_stack = Some(s.clone());
             self.library.open_stack = Some(s);
             if let Some(c) = &mut self.covers {
                 c.cancel_pending();

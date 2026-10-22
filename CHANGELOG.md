@@ -5,6 +5,31 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.5.2] — 2026-10-22
+
+Améliorations et correctifs demandés après la recette v0.5.1.
+
+### Nouveautés
+- **Chaque liste garde sa présentation** : tri, sens, regroupement et « Empiler par série »
+  sont mémorisés pour chaque liste et pour toute la bibliothèque. Une liste ouverte pour la
+  première fois reprend la présentation de la bibliothèque (une liste de lecture : son ordre,
+  sans groupes).
+- **Piles : double-clic** (ou Entrée) pour ouvrir une pile ; un clic la sélectionne.
+- « 📋 Copier les livres » au-dessus d'une liste : la liste des livres affichés (série,
+  numéro, volume, année, fichier), pour comparer avec ComicRack.
+
+### Corrections
+- **Lecture faite dans ComicRust** : la barre orange, la part lue des piles, la colonne « Lu »
+  et la fiche (« Lu dans ComicRust : x % (page n) ») en tiennent compte ; le plus avancé entre
+  ComicRack et ComicRust est affiché. La base ComicRack n'est toujours pas modifiée.
+- **Valeurs proposées d'après le nom du fichier** : quand la fiche ne donne pas la série, le
+  numéro, le volume, l'année ou le format, ComicRust les déduit du nom du fichier avec
+  l'algorithme de ComicRack (`ComicNameInfo`), comme ComicRack pour ses doublons, ses
+  statistiques de série et ses listes intelligentes (recette v0.5.1 : 166 doublons contre 154).
+
+### Recette
+[recette/v0.5.2.md](recette/v0.5.2.md)
+
 ## [v0.5.1] — 2026-10-22
 
 Améliorations demandées après la recette v0.5.0 (GO), avant la v0.6.0.
@@ -21,7 +46,7 @@ Améliorations demandées après la recette v0.5.0 (GO), avant la v0.6.0.
   (recette v0.5.0 : 166 doublons trouvés contre 154 pour ComicRack).
 
 ### Recette
-[recette/v0.5.1.md](recette/v0.5.1.md)
+[recette/v0.5.1.md](recette/v0.5.1.md) — GO (16/18, bloquants OK) ; D-01 et E-06 → v0.5.2.
 
 ## [v0.5.0] — 2026-10-22
 

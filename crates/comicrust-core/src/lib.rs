@@ -12,6 +12,7 @@ pub mod comic_lists;
 pub mod db;
 pub mod index;
 pub mod library;
+pub mod name_info;
 pub mod providers;
 pub mod smart;
 

@@ -1,0 +1,16 @@
+Rapport de recette ComicRust v0.5.1 — 22/10/2026 07:49
+Résultat : 16 OK, 2 échec(s), 0 non testé(s) sur 18.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (2)
+- E-06 [Mineur] La barre orange sous une pile montre la part des livres lus de la série ; l'infobulle donne « N livres, M lus ».
+  Note : livres lus par ComicRust : Aucune barre orange visible.
+- D-01 [Majeur] « Doublons » a le même nombre que ComicRack (154).
+  Note : Nombre ComicRust : 166 / ComicRack : 154
+
+Améliorations :
+- Empiler par série : faire 2 clics pour ouvrir la série.
+- Chaque liste garde sa propre configuration : empiler par série, grouper.
+
+Bug constaté :
+- Livre lu dans ComicRust : barre orange de progression ne s'affiche plus ; l'information est manquante dans les détails du livre.

@@ -32,8 +32,8 @@ impl ComicRustApp {
                 WatchEvent::DbError(e) => self.library.watch_error = e,
                 WatchEvent::Lists { path, result } => {
                     self.library.lists.set(path, result);
-                    if self.library.selected_list().is_none() {
-                        self.library.selected_list = None;
+                    if self.library.selected_list.is_some() && self.library.selected_list().is_none() {
+                        self.select_list(None);
                     }
                 }
             }

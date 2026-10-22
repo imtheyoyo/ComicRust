@@ -136,24 +136,12 @@ fn file_stem(b: &LibraryBook) -> String {
     }
 }
 
-/// Série et numéro « proposés » d'après le nom du fichier quand la fiche est vide
-/// (`ShadowSeries`, `ShadowNumber` de ComicRack).
-fn proposed(b: &LibraryBook) -> Option<(String, String)> {
-    crate::index::parse_file_name(&file_stem(b))
-}
-
 fn shadow_series(b: &LibraryBook) -> String {
-    match b.series.as_deref().filter(|s| !s.trim().is_empty()) {
-        Some(x) => x.to_string(),
-        None => proposed(b).map(|p| p.0).unwrap_or_default(),
-    }
+    b.shadow_series()
 }
 
 fn shadow_number(b: &LibraryBook) -> String {
-    match b.number.as_deref().filter(|s| !s.trim().is_empty()) {
-        Some(x) => x.to_string(),
-        None => proposed(b).map(|p| p.1).unwrap_or_default(),
-    }
+    b.shadow_number()
 }
 
 /// Date ComicRack sérialisée (`2019-10-01T12:58:00.123+02:00`).
@@ -166,7 +154,7 @@ fn iso_date(v: &Option<String>) -> Option<NaiveDate> {
 }
 
 fn published(b: &LibraryBook) -> Option<NaiveDate> {
-    let y = b.year.filter(|y| *y > 0)?.clamp(1, 9999);
+    let y = Some(b.shadow_year()).filter(|y| *y > 0)?.clamp(1, 9999);
     let m = b.month.unwrap_or(1).clamp(1, 12) as u32;
     let last = (28..=31).rev().find(|d| NaiveDate::from_ymd_opt(y, m, *d).is_some()).unwrap_or(28);
     let d = b.day.unwrap_or(1).clamp(1, last as i32) as u32;
@@ -197,7 +185,7 @@ fn getter(kind: &str) -> Option<Getter> {
         "Editor" => Str(|b| s(&b.editor)),
         "File" => Str(file_stem),
         "FullPath" => Str(|b| s(&b.file)),
-        "Format" => Str(|b| s(&b.format)),
+        "Format" => Str(|b| b.shadow_format()),
         "Genre" => Str(|b| s(&b.genre)),
         "ISBN" => Str(|b| s(&b.isbn)),
         "Imprint" => Str(|b| s(&b.imprint)),
@@ -225,7 +213,7 @@ fn getter(kind: &str) -> Option<Getter> {
         "AlternateNumber" => Num(|b| parse_num(b.alternate_number.as_deref().unwrap_or(""))),
         "BookPrice" => Num(|b| b.book_price.unwrap_or(-1.0)),
         "CommunityRating" => Num(|b| b.community_rating.unwrap_or(0.0)),
-        "Count" => Num(|b| b.count.unwrap_or(-1) as f32),
+        "Count" => Num(|b| b.shadow_count() as f32),
         "Day" => Num(|b| b.day.unwrap_or(-1) as f32),
         "FileSize" => Num(|b| b.file_size.unwrap_or(0) as f32 / 1024.0 / 1024.0),
         "Month" => Num(|b| b.month.unwrap_or(-1) as f32),
@@ -233,8 +221,8 @@ fn getter(kind: &str) -> Option<Getter> {
         "PageCount" => Num(|b| b.page_count.unwrap_or(0) as f32),
         "Rating" => Num(|b| b.rating.unwrap_or(0.0)),
         "ReadPercentage" => Num(|b| b.read_percent().unwrap_or(0) as f32),
-        "Volume" => Num(|b| b.volume.unwrap_or(-1) as f32),
-        "Year" => Num(|b| b.year.unwrap_or(-1) as f32),
+        "Volume" => Num(|b| b.shadow_volume() as f32),
+        "Year" => Num(|b| b.shadow_year() as f32),
         // Dates
         "Added" => Date(|b| iso_date(&b.added)),
         "Opened" => Date(|b| iso_date(&b.opened)),
@@ -349,7 +337,7 @@ impl<'a> Ctx<'a> {
             let mut m: HashMap<(String, i32), Option<YesNo>> = HashMap::new();
             for b in books {
                 let v = yes_no(&b.series_complete);
-                m.entry((shadow_series(b), b.volume.unwrap_or(-1)))
+                m.entry((shadow_series(b), b.shadow_volume()))
                     .and_modify(|e| {
                         if *e != Some(v) {
                             *e = Some(YesNo::Unknown);
@@ -368,11 +356,11 @@ impl<'a> Ctx<'a> {
                     // Casse respectée : ComicRack regroupe d'abord par une empreinte (hash)
                     // sensible à la casse, avant de comparer sans la casse.
                     compressed_name(&shadow_series(b)),
-                    s(&b.format),
-                    b.volume.unwrap_or(-1),
+                    b.shadow_format(),
+                    b.shadow_volume(),
                     shadow_number(b),
                     s(&b.language_iso),
-                    b.year.filter(|y| *y >= 0).unwrap_or(-1),
+                    Some(b.shadow_year()).filter(|y| *y >= 0).unwrap_or(-1),
                     b.month.filter(|m| *m >= 0).unwrap_or(-1),
                     b.day.filter(|d| *d >= 0).unwrap_or(-1),
                     s(&b.black_and_white),
@@ -580,7 +568,7 @@ impl Prepared {
                 let v = ctx
                     .series_complete
                     .as_ref()
-                    .and_then(|m| m.get(&(shadow_series(b), b.volume.unwrap_or(-1))))
+                    .and_then(|m| m.get(&(shadow_series(b), b.shadow_volume())))
                     .copied()
                     .unwrap_or(YesNo::Unknown);
                 yes_no_test(op, v)
@@ -691,8 +679,8 @@ impl SmartQuery {
                     shadow_series(x)
                         .to_lowercase()
                         .cmp(&shadow_series(y).to_lowercase())
-                        .then(s(&x.format).cmp(&s(&y.format)))
-                        .then(x.volume.unwrap_or(-1).cmp(&y.volume.unwrap_or(-1)))
+                        .then(x.shadow_format().cmp(&y.shadow_format()))
+                        .then(x.shadow_volume().cmp(&y.shadow_volume()))
                         .then_with(|| natord::compare(&shadow_number(x), &shadow_number(y)))
                 }),
                 Selection::Random => {

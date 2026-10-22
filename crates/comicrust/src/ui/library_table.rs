@@ -172,7 +172,13 @@ impl ComicRustApp {
                     }
                     for c in &COLS {
                         row.col(|ui| {
-                            ui.label((c.cell)(book));
+                            // « Lu » : le plus avancé entre ComicRack et ComicRust.
+                            let text = if c.sort == Some(SortKey::ReadPercent) {
+                                self.read_percent(book).map(|p| format!("{p} %")).unwrap_or_default()
+                            } else {
+                                (c.cell)(book)
+                            };
+                            ui.label(text);
                         });
                     }
                     let resp = row.response();

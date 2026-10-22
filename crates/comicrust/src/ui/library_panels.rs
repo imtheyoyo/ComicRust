@@ -8,7 +8,6 @@ use eframe::egui::{self, vec2, Rect, RichText, Ui};
 use super::library_table::{human_size, long_date, short_date};
 use super::library_view::{paint_cover, ACCENT, COVER_RATIO};
 use crate::app::ComicRustApp;
-use crate::library::SortKey;
 
 fn icon(l: &ComicList) -> &'static str {
     match &l.kind {
@@ -78,21 +77,7 @@ impl ComicRustApp {
             }
         });
         if let Some(c) = chosen {
-            let is_reading_list = c
-                .as_deref()
-                .and_then(|id| ComicList::find(&self.library.lists.items, id))
-                .is_some_and(|l| matches!(l.kind, ListKind::Ids(_)));
-            self.library.selected_list = c;
-            self.library.open_stack = None;
-            // Une liste de lecture s'affiche dans son ordre, sans groupes.
-            if is_reading_list {
-                self.settings.library_sort = SortKey::Position;
-                self.settings.library_descending = false;
-                self.settings.library_group = crate::library::GroupKey::None;
-            }
-            if let Some(cv) = &mut self.covers {
-                cv.cancel_pending();
-            }
+            self.select_list(c);
         }
     }
 
@@ -185,7 +170,7 @@ impl ComicRustApp {
             let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), w / COVER_RATIO), egui::Sense::hover());
             let cover = Rect::from_center_size(rect.center(), vec2(w, w / COVER_RATIO));
             let drawn = paint_cover(ui, self.covers.as_mut().unwrap(), &book, cover);
-            if let Some(pct) = book.read_percent().filter(|p| *p > 0) {
+            if let Some(pct) = self.read_percent(&book) {
                 let bar = Rect::from_min_size(
                     egui::pos2(drawn.min.x, drawn.max.y - 5.0),
                     vec2(drawn.width() * pct as f32 / 100.0, 5.0),
@@ -212,7 +197,7 @@ impl ComicRustApp {
                 }
             });
             ui.separator();
-            details_grid(ui, &book);
+            details_grid(ui, &book, self.comicrust_progress(&book));
             for (title, text) in [("Résumé", &book.summary), ("Annotations", &book.notes), ("Critique", &book.review)]
             {
                 if let Some(t) = text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
@@ -290,7 +275,7 @@ fn section(ui: &mut Ui, id: &str, title: &str, fields: Vec<Field>) {
 }
 
 /// Fiche du livre, avec les libellés de la fenêtre « Informations » de ComicRack.
-fn details_grid(ui: &mut Ui, b: &LibraryBook) {
+fn details_grid(ui: &mut Ui, b: &LibraryBook, comicrust: Option<(u32, usize)>) {
     let s = |v: &Option<String>| v.clone();
     let num = |n: Option<i32>| n.filter(|v| *v > 0).map(|v| v.to_string());
     let number = b.number.clone().map(|n| match b.count.filter(|c| *c > 0) {
@@ -367,12 +352,13 @@ fn details_grid(ui: &mut Ui, b: &LibraryBook) {
             f("Évaluation communautaire :", rating(b.community_rating)),
             always("Pages :", b.page_count.map(|p| p.to_string())),
             f(
-                "Lu :",
+                "Lu dans ComicRack :",
                 b.read_percent().map(|p| match b.current_page {
                     Some(c) if p > 0 => format!("{p} % (page {})", c + 1),
                     _ => format!("{p} %"),
                 }),
             ),
+            f("Lu dans ComicRust :", comicrust.map(|(p, page)| format!("{p} % (page {})", page + 1))),
             f("Ouvert/Lu le :", Some(long_date(b.opened.as_deref()))),
             f("Ouvertures :", b.open_count.filter(|n| *n > 0).map(|n| format!("{n} fois"))),
             f("Ajouté/Acheté le :", Some(short_date(b.added.as_deref()))),
