@@ -1,0 +1,11 @@
+Rapport de recette ComicRust v0.5.2 — 22/10/2026 14:25
+Résultat : 18 OK, 0 échec(s), 0 non testé(s) sur 18.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- D-01 : bilan des listes — 46 listes sur 47 identiques à ComicRack, dont Doublons 154 / 154,
+  Bibliothèque 5318 / 5318, Fichiers à mettre à jour 53 / 53, Non-lu 5317 / 5317.
+  Seul écart : Lecture en cours — ComicRust 1 / ComicRack 0 ≠

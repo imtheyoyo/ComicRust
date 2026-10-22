@@ -28,7 +28,7 @@ Améliorations et correctifs demandés après la recette v0.5.1.
   statistiques de série et ses listes intelligentes (recette v0.5.1 : 166 doublons contre 154).
 
 ### Recette
-[recette/v0.5.2.md](recette/v0.5.2.md)
+[recette/v0.5.2.md](recette/v0.5.2.md) — GO (18/18 OK ; doublons 154 / 154 comme ComicRack).
 
 ## [v0.5.1] — 2026-10-22
 
