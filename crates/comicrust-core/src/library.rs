@@ -63,6 +63,12 @@ pub struct LibraryBook {
     pub open_count: Option<u32>,
     #[serde(rename = "FileSize", default)]
     pub file_size: Option<u64>,
+    /// Date de modification du fichier relevée à l'ajout ou au dernier examen (ISO 8601).
+    #[serde(rename = "FileModifiedTime", default)]
+    pub file_modified_time: Option<String>,
+    /// Date de création du fichier (ISO 8601).
+    #[serde(rename = "FileCreationTime", default)]
+    pub file_creation_time: Option<String>,
     #[serde(rename = "AlternateNumber", default)]
     pub alternate_number: Option<String>,
     #[serde(rename = "AlternateCount", default)]
