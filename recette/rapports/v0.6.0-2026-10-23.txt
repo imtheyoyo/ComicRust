@@ -1,0 +1,14 @@
+Rapport de recette ComicRust v0.6.0 — 23/10/2026 07:06
+Résultat : 28 OK, 0 échec(s), 0 non testé(s) sur 28.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- W-06 : 3 livres traités sur 3 : 1 écrits, 2 déjà à jour, 0 erreur(s) (bilan du 22/10 18:17, voir v0.6.0-2026-10-22.txt)
+- H-02 : oui (extensions Windows HEIF et HEVC installées)
+- K-04 : 6
+
+W-01 et W-05 rejoués le 23/10 (option « Les Livres sont automatiquement mis à jour » de ComicRack
+décochée pendant le test) : OK.

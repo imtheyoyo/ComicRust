@@ -40,7 +40,7 @@ lecture seule.
   en hauteur passe à la page suivante au lieu de déborder.
 
 ### Recette
-[recette/v0.6.0.md](recette/v0.6.0.md) — en cours.
+[recette/v0.6.0.md](recette/v0.6.0.md) — GO (28/28 OK).
 
 ## [v0.5.2] — 2026-10-22
 
