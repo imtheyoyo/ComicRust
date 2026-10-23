@@ -3,6 +3,7 @@
 
 pub mod covers;
 pub mod files;
+pub mod scan;
 pub mod sorting;
 pub mod watch;
 
@@ -13,6 +14,7 @@ use std::sync::Arc;
 
 use comicrust_core::comic_lists::{ComicList, Members};
 use comicrust_core::db::{Applied, ComicDatabase, DbConfig, LoadProgress};
+use comicrust_core::store::{Store, StoreConfig};
 use eframe::egui;
 
 pub use sorting::{GroupKey, SortKey};
@@ -27,6 +29,46 @@ pub enum Status {
     },
     Loaded(Arc<ComicDatabase>),
     Failed(String),
+}
+
+/// D'où vient la bibliothèque affichée.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LibrarySource {
+    /// Base MySQL de ComicRack (lecture seule).
+    ComicRackMySql(DbConfig),
+    /// Bibliothèque `ComicDb.xml` de ComicRack (lecture seule, relue quand elle change).
+    ComicRackXml(PathBuf),
+    /// Base propre à ComicRust (mode autonome).
+    Standalone(StoreConfig),
+}
+
+impl LibrarySource {
+    pub fn describe(&self) -> String {
+        match self {
+            LibrarySource::ComicRackMySql(c) => format!("base ComicRack {} (lecture seule)", c.describe()),
+            LibrarySource::ComicRackXml(p) => format!("ComicRack {} (lecture seule)", p.display()),
+            LibrarySource::Standalone(c) => format!("base ComicRust {}", c.describe()),
+        }
+    }
+
+    /// Lit toute la bibliothèque (dans un fil d'arrière-plan).
+    pub fn load(&self, progress: Option<&LoadProgress>) -> Result<ComicDatabase, String> {
+        match self {
+            LibrarySource::ComicRackMySql(c) => ComicDatabase::load(c, progress).map_err(|e| e.to_string()),
+            LibrarySource::ComicRackXml(p) => load_comicdb_xml(p),
+            LibrarySource::Standalone(c) => {
+                Store::open(c).and_then(|mut s| s.load(progress)).map_err(|e| e.to_string())
+            }
+        }
+    }
+}
+
+/// Livres d'un `ComicDb.xml` de ComicRack (bibliothèque sans MySQL).
+pub fn load_comicdb_xml(path: &std::path::Path) -> Result<ComicDatabase, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{} : {e}", path.display()))?;
+    let lib = comicrust_core::Library::from_xml(text.trim_start_matches('\u{feff}'))
+        .map_err(|e| format!("{} illisible : {e}", path.display()))?;
+    Ok(ComicDatabase::from_books(lib.books.book))
 }
 
 /// Ligne de la vue : titre de groupe ou rangée de couvertures.
@@ -150,8 +192,10 @@ pub struct LibraryState {
     view_key: Option<ViewKey>,
     pub last_loaded_from: Option<String>,
     pub watcher: Option<watch::WatchHandle>,
-    /// Paramètres de la base chargée (pour la surveillance).
-    pub config: Option<DbConfig>,
+    /// Bibliothèque chargée (pour la surveillance).
+    pub source: Option<LibrarySource>,
+    /// Analyse des dossiers de BD en cours (mode autonome).
+    pub scan: Option<scan::ScanJob>,
 }
 
 impl Default for LibraryState {
@@ -172,32 +216,50 @@ impl Default for LibraryState {
             view_key: None,
             last_loaded_from: None,
             watcher: None,
-            config: None,
+            source: None,
+            scan: None,
         }
     }
 }
 
 impl LibraryState {
-    /// Lance le chargement de la base dans un fil (lecture seule).
-    pub fn start_loading(&mut self, cfg: DbConfig, ctx: &egui::Context) {
+    /// Lance le chargement de la bibliothèque dans un fil.
+    pub fn start_loading(&mut self, source: LibrarySource, ctx: &egui::Context) {
         let (tx, rx) = mpsc::channel();
         let progress = Arc::new(LoadProgress::default());
         let p = progress.clone();
         let ctx = ctx.clone();
-        let what = cfg.describe();
-        let c = cfg.clone();
+        let what = source.describe();
+        let src = source.clone();
         std::thread::Builder::new()
             .name("comicrust-db".into())
             .spawn(move || {
-                let _ = tx.send(ComicDatabase::load(&c, Some(&p)).map_err(|e| e.to_string()));
+                let _ = tx.send(src.load(Some(&p)));
                 ctx.request_repaint();
             })
             .expect("fil de chargement de la base");
         self.status = Status::Loading { rx, progress, what: what.clone() };
-        self.config = Some(cfg);
+        self.source = Some(source);
         self.watcher = None;
         self.last_loaded_from = Some(what);
         self.view_key = None;
+    }
+
+    /// Remplace toute la base (ComicDb.xml relu après une modification par ComicRack).
+    pub fn replace(&mut self, db: ComicDatabase) {
+        if matches!(self.status, Status::Loaded(_)) {
+            self.status = Status::Loaded(Arc::new(db));
+            self.generation += 1;
+            self.view_key = None;
+        }
+    }
+
+    /// Mode autonome ?
+    pub fn standalone(&self) -> Option<&StoreConfig> {
+        match &self.source {
+            Some(LibrarySource::Standalone(c)) => Some(c),
+            _ => None,
+        }
     }
 
     /// À appeler à chaque image : renvoie `true` quand la base vient d'arriver.

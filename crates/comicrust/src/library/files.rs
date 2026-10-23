@@ -1,5 +1,7 @@
 //! Travaux sur les fichiers BD, faits dans un fil : écrire les infos de la base dans les
 //! CBZ, convertir les CBR / CB7 / CBT en CBZ. La base ComicRack n'est jamais modifiée.
+//! Les fiches viennent de la base MySQL de ComicRack (relues à l'instant) ou, pour les
+//! autres bibliothèques (base ComicRust, ComicDb.xml), de la bibliothèque chargée.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -7,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 
-use comicrust_core::db::{self, DbConfig, Record};
+use comicrust_core::db::{self, ComicDatabase, DbConfig, Record};
 use comicrust_core::library::LibraryBook;
 use comicrust_core::writer::{self, Outcome};
 use eframe::egui;
@@ -37,6 +39,15 @@ impl FileAction {
             FileAction::Convert => matches!(ext.as_str(), "cbr" | "rar" | "cb7" | "7z" | "cbt" | "tar"),
         }
     }
+}
+
+/// D'où viennent les fiches à écrire dans les fichiers.
+pub enum RecordSource {
+    /// Base MySQL de ComicRack : fiches relues au moment d'écrire.
+    ComicRackMySql(DbConfig),
+    /// Bibliothèque chargée (base ComicRust, ComicDb.xml).
+    Loaded(Arc<ComicDatabase>),
+    None,
 }
 
 /// Livre concerné.
@@ -120,8 +131,8 @@ fn run_one(
         FileAction::WriteInfo => {
             let Some(rec) = rec else {
                 return Err(match db_error {
-                    Some(e) => format!("fiche non relue dans la base ComicRack : {e}"),
-                    None => "livre absent de la base ComicRack".into(),
+                    Some(e) => format!("fiche non relue dans la bibliothèque : {e}"),
+                    None => "livre absent de la bibliothèque".into(),
                 });
             };
             let o = writer::write_comic_info(&t.path, &rec.data).map_err(|e| e.to_string())?;
@@ -146,7 +157,7 @@ impl FileJob {
     pub fn start(
         action: FileAction,
         targets: Vec<Target>,
-        cfg: Option<DbConfig>,
+        source: RecordSource,
         move_orig: bool,
         ctx: &egui::Context,
     ) -> Self {
@@ -172,19 +183,28 @@ impl FileJob {
         std::thread::Builder::new()
             .name("comicrust-fichiers".into())
             .spawn(move || {
-                *current.lock().unwrap() = "lecture des fiches dans la base ComicRack…".into();
+                *current.lock().unwrap() = "lecture des fiches dans la bibliothèque…".into();
                 ctx.request_repaint();
                 let ids: Vec<String> = targets.iter().map(|t| t.id.clone()).collect();
-                let records: HashMap<String, Record> = match cfg {
-                    Some(cfg) => match db::fetch_records(&cfg, &ids) {
+                let records: HashMap<String, Record> = match source {
+                    RecordSource::Loaded(db) => ids
+                        .iter()
+                        .filter_map(|id| {
+                            let b = db.get(id)?;
+                            let data = b.to_record_xml().ok()?;
+                            let counter = db.rows.get(&id.to_ascii_lowercase()).copied().unwrap_or(0);
+                            Some((id.to_ascii_lowercase(), Record { data, counter }))
+                        })
+                        .collect(),
+                    RecordSource::ComicRackMySql(cfg) => match db::fetch_records(&cfg, &ids) {
                         Ok(r) => r,
                         Err(e) => {
                             *db_error.lock().unwrap() = Some(e.to_string());
                             HashMap::new()
                         }
                     },
-                    None => {
-                        *db_error.lock().unwrap() = Some("aucune base ComicRack configurée".into());
+                    RecordSource::None => {
+                        *db_error.lock().unwrap() = Some("aucune bibliothèque chargée".into());
                         HashMap::new()
                     }
                 };
@@ -249,7 +269,7 @@ impl FileJob {
         }
         out.push_str(&format!(", {err} erreur(s)\n"));
         if let Some(e) = self.db_error.lock().unwrap().as_deref() {
-            out.push_str(&format!("Base ComicRack : {e}\n"));
+            out.push_str(&format!("Bibliothèque : {e}\n"));
         }
         if self.cancel.load(Ordering::Relaxed) {
             out.push_str("Interrompu.\n");

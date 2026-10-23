@@ -102,18 +102,23 @@ impl ComicRustApp {
                     self.show_about = true;
                 }
                 ui.menu_button("⚙", |ui| {
-                    if ui.button("Base ComicRack (MySQL)…").clicked() {
-                        self.open_db_window();
+                    if ui
+                        .button("Assistant de configuration…")
+                        .on_hover_text("ComicRust autonome ou avec ComicRack, base, dossiers de BD")
+                        .clicked()
+                    {
+                        self.open_setup();
                         ui.close();
                     }
                     if ui.button("Rechercher une mise à jour…").clicked() {
                         self.update.check(&ctx, true);
                         ui.close();
                     }
-                    if ui
-                        .checkbox(&mut self.settings.auto_refresh, "Suivre les modifications faites dans ComicRack")
-                        .on_hover_text("La bibliothèque se met à jour seule quand ComicRack modifie la base")
-                        .changed()
+                    if self.settings.library_mode.is_comicrack()
+                        && ui
+                            .checkbox(&mut self.settings.auto_refresh, "Suivre les modifications faites dans ComicRack")
+                            .on_hover_text("La bibliothèque se met à jour seule quand ComicRack modifie la base")
+                            .changed()
                     {
                         self.restart_watch(&ctx);
                     }

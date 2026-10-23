@@ -15,7 +15,6 @@ use crate::library::covers::CoverCache;
 use crate::library::LibraryState;
 use crate::reading_list::ListState;
 use crate::settings::{DbSource, ResumeChoice, Settings};
-use crate::ui::db_window::DbWindow;
 
 const SETTINGS_KEY: &str = "comicrust.settings";
 
@@ -66,18 +65,26 @@ pub struct ComicRustApp {
     pub(crate) library: LibraryState,
     /// Créé à la première ouverture de la vue Bibliothèque.
     pub(crate) covers: Option<CoverCache>,
-    pub(crate) db_window: Option<DbWindow>,
     pub(crate) update: crate::update::UpdateState,
     pub(crate) resume_prompt: Option<ResumePrompt>,
     /// Travaux sur les fichiers BD : confirmation, travail en cours, fenêtre du bilan.
     pub(crate) file_dialog: Option<crate::library::files::FileDialog>,
     pub(crate) file_job: Option<crate::library::files::FileJob>,
     pub(crate) show_file_job: bool,
+    /// Assistant de configuration (premier démarrage ou menu ⚙).
+    pub(crate) setup: Option<crate::ui::setup_window::SetupWindow>,
+    /// Dernière analyse des dossiers (mode autonome) : bilan affiché sur demande.
+    pub(crate) last_scan: Option<crate::library::scan::ScanDone>,
+    pub(crate) show_last_scan: bool,
+    /// Analyser les dossiers dès que la bibliothèque est chargée (démarrage, assistant).
+    pub(crate) scan_after_load: bool,
+    pub(crate) scan_manual: bool,
 }
 
 impl ComicRustApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>, data_dir: Option<PathBuf>) -> Self {
         let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
+        settings.migrate();
         // Au démarrage, toute la bibliothèque est affichée : sa présentation s'applique.
         if let Some(v) = settings.list_views.get(crate::settings::LIBRARY_VIEW_KEY).copied() {
             settings.set_current_view(v);
@@ -102,15 +109,23 @@ impl ComicRustApp {
             mode: Mode::Reader,
             library: LibraryState::default(),
             covers: None,
-            db_window: None,
             update: Default::default(),
             resume_prompt: None,
             file_dialog: None,
             file_job: None,
             show_file_job: false,
+            setup: None,
+            last_scan: None,
+            show_last_scan: false,
+            scan_after_load: true,
+            scan_manual: false,
         };
         crate::update::cleanup_previous_install();
-        if app.settings.db_source != DbSource::None {
+        if app.settings.library_mode == crate::settings::LibraryMode::Unset {
+            // Premier démarrage : ComicRust seul ou avec ComicRack ?
+            app.setup = Some(crate::ui::setup_window::SetupWindow::new(&app.settings));
+            app.mode = Mode::Library;
+        } else {
             app.load_library(&cc.egui_ctx);
             app.mode = Mode::Library;
         }
@@ -160,6 +175,7 @@ impl ComicRustApp {
     pub(crate) fn open_book_at(&mut self, ctx: &Context, path: PathBuf, start: Start) {
         // Position du livre en cours d'abord : on peut rouvrir le même.
         self.remember_position();
+        let _ = self.store_progress();
         let current = match start {
             Start::Page(p) => p,
             Start::Auto | Start::Resume(_) => {
@@ -259,32 +275,89 @@ impl ComicRustApp {
         }
     }
 
-    /// (Re)lance la surveillance de la base (modifications faites dans ComicRack) et la
-    /// lecture des listes (`ComicDb.xml`), une fois la base chargée.
+    /// (Re)lance la surveillance de la bibliothèque et la lecture des listes de ComicRack
+    /// (`ComicDb.xml`), une fois la bibliothèque chargée.
     pub(crate) fn restart_watch(&mut self, ctx: &Context) {
         use crate::library::watch::{self, ListsSource};
+        use crate::settings::LibraryMode;
         self.library.watcher = None;
         let Some(db) = self.library.database() else { return };
-        let db_watch =
-            if self.settings.auto_refresh { self.library.config.clone().map(|c| (c, db.clone())) } else { None };
-        let lists = match (&self.settings.library_db, &self.settings.db_source) {
-            (Some(p), _) => Some(ListsSource::File(p.clone())),
-            (None, DbSource::ComicRackIni(ini)) => Some(ListsSource::FromIni(ini.clone())),
-            _ => None,
+        let standalone = self.settings.library_mode == LibraryMode::Standalone;
+        let db_watch = if self.settings.auto_refresh || standalone {
+            self.library.source.clone().map(|c| (c, db.clone()))
+        } else {
+            None
         };
-        if lists.is_none() {
+        let ini = self.settings.comicrack_ini.clone().or_else(|| match &self.settings.db_source {
+            DbSource::ComicRackIni(ini) => Some(ini.clone()),
+            _ => None,
+        });
+        let lists = if standalone {
+            None
+        } else {
+            match (&self.settings.library_db, ini) {
+                (Some(p), _) => Some(ListsSource::File(p.clone())),
+                (None, Some(ini)) => Some(ListsSource::FromIni(ini)),
+                _ => None,
+            }
+        };
+        if standalone {
+            self.library.lists.set(None, Err("Listes propres à ComicRust : prévues en v0.9.0".into()));
+        } else if lists.is_none() {
             self.library.lists.set(None, Err("ComicDb.xml non indiqué (base saisie à la main)".into()));
         }
         self.library.watch_error = None;
         self.library.watcher = Some(watch::spawn(db_watch, lists, ctx));
     }
 
-    /// (Re)charge la base ComicRack configurée.
+    /// Bibliothèque choisie dans les réglages.
+    pub(crate) fn library_source(&self) -> Result<Option<crate::library::LibrarySource>, String> {
+        use crate::library::LibrarySource;
+        use crate::settings::LibraryMode;
+        Ok(match self.settings.library_mode {
+            LibraryMode::Unset => None,
+            LibraryMode::ComicRackMySql => self.settings.db_source.config()?.map(LibrarySource::ComicRackMySql),
+            LibraryMode::ComicRackXml => self.settings.library_db.clone().map(LibrarySource::ComicRackXml),
+            LibraryMode::Standalone => self.settings.store.clone().map(LibrarySource::Standalone),
+        })
+    }
+
+    /// (Re)charge la bibliothèque configurée.
     pub(crate) fn load_library(&mut self, ctx: &Context) {
-        match self.settings.db_source.config() {
-            Ok(Some(cfg)) => self.library.start_loading(cfg, ctx),
+        match self.library_source() {
+            Ok(Some(src)) => self.library.start_loading(src, ctx),
             Ok(None) => self.library = LibraryState::default(),
             Err(e) => self.library.status = crate::library::Status::Failed(e),
+        }
+    }
+
+    /// Mode autonome : analyse des dossiers de BD (ajouts, modifications, manquants).
+    /// `manual` : lancée par l'utilisateur (le bilan s'affiche s'il y a des erreurs).
+    pub(crate) fn start_scan(&mut self, ctx: &Context, manual: bool) {
+        if self.library.scan.is_some() {
+            return;
+        }
+        self.scan_manual = manual;
+        let (Some(cfg), Some(db)) = (self.library.standalone().cloned(), self.library.database()) else { return };
+        self.library.scan = Some(crate::library::scan::ScanJob::start(cfg, db, ctx));
+    }
+
+    /// Résultat de l'analyse des dossiers.
+    pub(crate) fn poll_scan(&mut self) {
+        let Some(job) = &self.library.scan else { return };
+        let Some(res) = job.poll() else { return };
+        self.library.scan = None;
+        match res {
+            Ok(done) => {
+                if !done.changes.is_empty() {
+                    self.library.apply_changes(done.changes.clone());
+                }
+                if self.scan_manual && !done.report.errors.is_empty() {
+                    self.show_last_scan = true;
+                }
+                self.last_scan = Some(done);
+            }
+            Err(e) => self.error = Some(format!("Analyse des dossiers impossible :\n{e}")),
         }
     }
 
@@ -320,6 +393,7 @@ impl ComicRustApp {
     /// une base est chargée.
     pub(crate) fn close_book(&mut self, ctx: &Context) {
         self.remember_position();
+        let _ = self.store_progress();
         self.book = None;
         if self.fullscreen {
             self.fullscreen = false;
@@ -343,6 +417,37 @@ impl ComicRustApp {
         }
     }
 
+    /// Mode autonome : enregistre dans la base de ComicRust la lecture du livre ouvert
+    /// (page courante, page la plus loin, date ; une fois par livre fermé ou quitté).
+    pub(crate) fn store_progress(&mut self) -> Option<std::thread::JoinHandle<()>> {
+        let b = self.book.as_ref()?;
+        if !b.opened || b.stored {
+            return None;
+        }
+        let (cfg, db) = (self.library.standalone().cloned()?, self.library.database()?);
+        let p = b.path.to_string_lossy().into_owned();
+        let book = db.books.iter().find(|x| {
+            x.file.as_deref().is_some_and(|f| {
+                f.eq_ignore_ascii_case(&p) || self.settings.effective_path(Path::new(f)).as_path() == b.path.as_path()
+            })
+        })?;
+        let shown = self.spread(b, b.current).into_iter().max().unwrap_or(b.current) as u32;
+        let current = b.current as u32;
+        let last = book.last_page_read.unwrap_or(0).max(shown);
+        let id = book.id.clone();
+        if let Some(b) = &mut self.book {
+            b.stored = true;
+        }
+        Some(std::thread::spawn(move || {
+            let opened = comicrust_core::scanner::now_iso();
+            if let Err(e) =
+                comicrust_core::store::Store::open(&cfg).and_then(|mut s| s.set_progress(&id, current, last, &opened))
+            {
+                eprintln!("lecture non enregistrée : {e}");
+            }
+        }))
+    }
+
     /// Avancement lu dans ComicRust pour un livre de la base : (pourcentage, page).
     pub(crate) fn comicrust_progress(&self, book: &comicrust_core::library::LibraryBook) -> Option<(u32, usize)> {
         let path = PathBuf::from(book.file.as_deref()?);
@@ -362,6 +467,13 @@ impl eframe::App for ComicRustApp {
     /// Appelé avant chaque `ui`, et aussi quand la fenêtre est masquée : le
     /// chargement continue donc même fenêtre réduite.
     fn logic(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Fermeture de la fenêtre : la lecture en cours est enregistrée avant de quitter.
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.remember_position();
+            if let Some(h) = self.store_progress() {
+                let _ = h.join();
+            }
+        }
         self.poll_loader(ctx);
         self.handle_input(ctx);
         self.schedule_loading();
@@ -422,7 +534,8 @@ impl eframe::App for ComicRustApp {
 
         self.resume_window(&ctx);
         self.files_windows(&ctx);
-        self.db_window_ui(&ctx);
+        self.setup_window(&ctx);
+        self.scan_window(&ctx);
         self.update_window(&ctx);
         self.info_window(&ctx);
         self.about_window(&ctx);

@@ -209,7 +209,25 @@ impl ComicRustApp {
                 .on_hover_text("Listes de ComicRack (ComicDb.xml)");
             ui.toggle_value(&mut self.settings.show_details, "ℹ Détails").on_hover_text("Fiche du livre sélectionné");
             self.files_menu(ui);
-            if ui.button("⟳").on_hover_text("Relire toute la base ComicRack").clicked() {
+            if self.library.standalone().is_some() {
+                if let Some(job) = &self.library.scan {
+                    if ui.button("⏹ Arrêter l'analyse").clicked() {
+                        job.stop();
+                    }
+                } else if ui
+                    .button("🔍 Analyser les dossiers")
+                    .on_hover_text("Ajouter les nouveaux fichiers, relire les fichiers modifiés, repérer les manquants")
+                    .clicked()
+                {
+                    self.start_scan(&ctx, true);
+                }
+                if self.last_scan.is_some()
+                    && ui.small_button("📋").on_hover_text("Bilan de la dernière analyse").clicked()
+                {
+                    self.show_last_scan = true;
+                }
+            }
+            if ui.button("⟳").on_hover_text("Relire toute la bibliothèque").clicked() {
                 self.load_library(&ctx);
             }
         });
@@ -232,12 +250,11 @@ impl ComicRustApp {
             Status::NotConfigured => {
                 ui.vertical_centered(|ui| {
                     ui.add_space(ui.available_height() * 0.25);
-                    ui.heading("Bibliothèque ComicRack");
-                    ui.label("Indique où se trouve ta base ComicRack (MySQL) pour afficher tous tes livres.");
-                    ui.label(RichText::new("Lecture seule : ComicRust ne modifie jamais ta base.").weak());
+                    ui.heading("Bibliothèque");
+                    ui.label("Choisis comment utiliser ComicRust : seul, avec tes dossiers de BD, ou avec ComicRack.");
                     ui.add_space(12.0);
-                    if ui.button(RichText::new("⚙  Configurer la base ComicRack…").size(17.0)).clicked() {
-                        self.open_db_window();
+                    if ui.button(RichText::new("⚙  Assistant de configuration…").size(17.0)).clicked() {
+                        self.open_setup();
                     }
                 });
             }
@@ -256,15 +273,15 @@ impl ComicRustApp {
                 let err = err.clone();
                 ui.vertical_centered(|ui| {
                     ui.add_space(ui.available_height() * 0.25);
-                    ui.heading("⚠ Base ComicRack inaccessible");
+                    ui.heading("⚠ Bibliothèque inaccessible");
                     ui.label(RichText::new(err).color(crate::ui::theme::error(ui)));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         if ui.button("Réessayer").clicked() {
                             self.load_library(&ctx);
                         }
-                        if ui.button("Paramètres…").clicked() {
-                            self.open_db_window();
+                        if ui.button("Assistant de configuration…").clicked() {
+                            self.open_setup();
                         }
                     });
                 });

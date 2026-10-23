@@ -36,6 +36,8 @@ pub struct Book {
     pub thumbs_requested: HashSet<usize>,
     pub current: usize,
     pub opened: bool,
+    /// Lecture déjà enregistrée dans la base de ComicRust (mode autonome).
+    pub stored: bool,
 }
 
 impl Book {
@@ -56,6 +58,7 @@ impl Book {
             thumbs_requested: HashSet::new(),
             current,
             opened: false,
+            stored: false,
         }
     }
 

@@ -30,6 +30,10 @@ impl ComicRustApp {
                         }
                     }
                 }
+                WatchEvent::Replace(db) => {
+                    self.library.replace(db);
+                    self.library.apply_info_written(&mut self.settings.info_written);
+                }
                 WatchEvent::DbError(e) => self.library.watch_error = e,
                 WatchEvent::Lists { path, result } => {
                     self.library.lists.set(path, result);
@@ -45,7 +49,11 @@ impl ComicRustApp {
         if self.library.poll() {
             self.library.apply_info_written(&mut self.settings.info_written);
             self.restart_watch(ctx);
+            if std::mem::take(&mut self.scan_after_load) {
+                self.start_scan(ctx, false);
+            }
         }
+        self.poll_scan();
         self.poll_files();
         self.poll_watch();
         // Base ComicRack disponible : une liste résolue sans elle l'est à nouveau, par identifiant.

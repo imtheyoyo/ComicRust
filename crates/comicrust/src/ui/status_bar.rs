@@ -10,14 +10,14 @@ impl ComicRustApp {
         if self.mode == Mode::Library {
             ui.horizontal(|ui| match &self.library.status {
                 Status::NotConfigured => {
-                    ui.label("Aucune base ComicRack configurée (⚙ → Base ComicRack).");
+                    ui.label("Bibliothèque non configurée (⚙ → Assistant de configuration).");
                 }
                 Status::Loading { what, .. } => {
                     ui.spinner();
-                    ui.label(format!("Chargement de la base {what}…"));
+                    ui.label(format!("Chargement de la {what}…"));
                 }
                 Status::Failed(_) => {
-                    ui.label("Base ComicRack inaccessible.");
+                    ui.label("Bibliothèque inaccessible.");
                 }
                 Status::Loaded(db) => {
                     ui.label(RichText::new(format!("{} livres", db.len())).strong());
@@ -28,7 +28,7 @@ impl ComicRustApp {
                     }
                     if let Some(w) = &self.library.last_loaded_from {
                         ui.separator();
-                        ui.label(RichText::new(format!("base {w} (lecture seule)")).weak());
+                        ui.label(RichText::new(w).weak());
                     }
                     if let Some(e) = &self.library.watch_error {
                         ui.separator();
@@ -36,6 +36,16 @@ impl ComicRustApp {
                             RichText::new("⚠ base injoignable, nouvel essai…").color(crate::ui::theme::warning(ui)),
                         )
                         .on_hover_text(e);
+                    } else if let Some(job) = &self.library.scan {
+                        ui.separator();
+                        ui.spinner();
+                        let (done, total) = job.progress.get();
+                        ui.label(format!("Analyse des dossiers : {done} / {total} fichiers"));
+                    } else if self.library.watcher.is_some() && self.library.standalone().is_some() {
+                        if let Some(scan) = &self.last_scan {
+                            ui.separator();
+                            ui.label(RichText::new(format!("dernière analyse : {}", scan.report.summary())).weak());
+                        }
                     } else if self.library.watcher.is_some() && self.settings.auto_refresh {
                         ui.separator();
                         let text = match self.library.last_refresh {

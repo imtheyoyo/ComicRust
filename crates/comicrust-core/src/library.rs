@@ -8,184 +8,190 @@
 //! La même fiche `<Book>` (racine `<ComicBook>`) est stockée telle quelle dans la
 //! colonne `data` de la table `comics` quand ComicRack utilise MySQL (voir `db`).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cbl::ReadingList;
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct LibraryBook {
     #[serde(rename = "@Id")]
     pub id: String,
-    #[serde(rename = "@File", default)]
+    #[serde(rename = "@File", default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
-    #[serde(rename = "Series", default)]
+    #[serde(rename = "Series", default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
-    #[serde(rename = "Number", default)]
+    #[serde(rename = "Number", default, skip_serializing_if = "Option::is_none")]
     pub number: Option<String>,
-    #[serde(rename = "Volume", default)]
+    #[serde(rename = "Volume", default, skip_serializing_if = "Option::is_none")]
     pub volume: Option<i32>,
-    #[serde(rename = "Year", default)]
+    #[serde(rename = "Year", default, skip_serializing_if = "Option::is_none")]
     pub year: Option<i32>,
-    #[serde(rename = "Title", default)]
+    #[serde(rename = "Title", default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(rename = "Publisher", default)]
+    #[serde(rename = "Publisher", default, skip_serializing_if = "Option::is_none")]
     pub publisher: Option<String>,
-    #[serde(rename = "PageCount", default)]
+    #[serde(rename = "PageCount", default, skip_serializing_if = "Option::is_none")]
     pub page_count: Option<u32>,
-    #[serde(rename = "CurrentPage", default)]
+    #[serde(rename = "CurrentPage", default, skip_serializing_if = "Option::is_none")]
     pub current_page: Option<u32>,
-    #[serde(rename = "LastPageRead", default)]
+    #[serde(rename = "LastPageRead", default, skip_serializing_if = "Option::is_none")]
     pub last_page_read: Option<u32>,
-    #[serde(rename = "Rating", default)]
+    #[serde(rename = "Rating", default, skip_serializing_if = "Option::is_none")]
     pub rating: Option<f32>,
-    #[serde(rename = "Count", default)]
+    #[serde(rename = "Count", default, skip_serializing_if = "Option::is_none")]
     pub count: Option<i32>,
-    #[serde(rename = "Writer", default)]
+    #[serde(rename = "Writer", default, skip_serializing_if = "Option::is_none")]
     pub writer: Option<String>,
-    #[serde(rename = "Penciller", default)]
+    #[serde(rename = "Penciller", default, skip_serializing_if = "Option::is_none")]
     pub penciller: Option<String>,
-    #[serde(rename = "Genre", default)]
+    #[serde(rename = "Genre", default, skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
-    #[serde(rename = "StoryArc", default)]
+    #[serde(rename = "StoryArc", default, skip_serializing_if = "Option::is_none")]
     pub story_arc: Option<String>,
-    #[serde(rename = "AlternateSeries", default)]
+    #[serde(rename = "AlternateSeries", default, skip_serializing_if = "Option::is_none")]
     pub alternate_series: Option<String>,
     /// Date d'ajout à la bibliothèque (texte ISO, tel que stocké par ComicRack).
-    #[serde(rename = "Added", default)]
+    #[serde(rename = "Added", default, skip_serializing_if = "Option::is_none")]
     pub added: Option<String>,
     /// Date de dernière lecture.
-    #[serde(rename = "Opened", default)]
+    #[serde(rename = "Opened", default, skip_serializing_if = "Option::is_none")]
     pub opened: Option<String>,
     /// Date de parution saisie dans ComicRack (« Released »).
-    #[serde(rename = "Released", default)]
+    #[serde(rename = "Released", default, skip_serializing_if = "Option::is_none")]
     pub released: Option<String>,
-    #[serde(rename = "OpenCount", default)]
+    #[serde(rename = "OpenCount", default, skip_serializing_if = "Option::is_none")]
     pub open_count: Option<u32>,
-    #[serde(rename = "FileSize", default)]
+    #[serde(rename = "FileSize", default, skip_serializing_if = "Option::is_none")]
     pub file_size: Option<u64>,
     /// Date de modification du fichier relevée à l'ajout ou au dernier examen (ISO 8601).
-    #[serde(rename = "FileModifiedTime", default)]
+    #[serde(rename = "FileModifiedTime", default, skip_serializing_if = "Option::is_none")]
     pub file_modified_time: Option<String>,
     /// Date de création du fichier (ISO 8601).
-    #[serde(rename = "FileCreationTime", default)]
+    #[serde(rename = "FileCreationTime", default, skip_serializing_if = "Option::is_none")]
     pub file_creation_time: Option<String>,
-    #[serde(rename = "AlternateNumber", default)]
+    #[serde(rename = "AlternateNumber", default, skip_serializing_if = "Option::is_none")]
     pub alternate_number: Option<String>,
-    #[serde(rename = "AlternateCount", default)]
+    #[serde(rename = "AlternateCount", default, skip_serializing_if = "Option::is_none")]
     pub alternate_count: Option<i32>,
-    #[serde(rename = "SeriesGroup", default)]
+    #[serde(rename = "SeriesGroup", default, skip_serializing_if = "Option::is_none")]
     pub series_group: Option<String>,
-    #[serde(rename = "Summary", default)]
+    #[serde(rename = "Summary", default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
-    #[serde(rename = "Notes", default)]
+    #[serde(rename = "Notes", default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(rename = "Review", default)]
+    #[serde(rename = "Review", default, skip_serializing_if = "Option::is_none")]
     pub review: Option<String>,
-    #[serde(rename = "Month", default)]
+    #[serde(rename = "Month", default, skip_serializing_if = "Option::is_none")]
     pub month: Option<i32>,
-    #[serde(rename = "Day", default)]
+    #[serde(rename = "Day", default, skip_serializing_if = "Option::is_none")]
     pub day: Option<i32>,
-    #[serde(rename = "Inker", default)]
+    #[serde(rename = "Inker", default, skip_serializing_if = "Option::is_none")]
     pub inker: Option<String>,
-    #[serde(rename = "Colorist", default)]
+    #[serde(rename = "Colorist", default, skip_serializing_if = "Option::is_none")]
     pub colorist: Option<String>,
-    #[serde(rename = "Letterer", default)]
+    #[serde(rename = "Letterer", default, skip_serializing_if = "Option::is_none")]
     pub letterer: Option<String>,
-    #[serde(rename = "CoverArtist", default)]
+    #[serde(rename = "CoverArtist", default, skip_serializing_if = "Option::is_none")]
     pub cover_artist: Option<String>,
-    #[serde(rename = "Editor", default)]
+    #[serde(rename = "Editor", default, skip_serializing_if = "Option::is_none")]
     pub editor: Option<String>,
-    #[serde(rename = "Translator", default)]
+    #[serde(rename = "Translator", default, skip_serializing_if = "Option::is_none")]
     pub translator: Option<String>,
-    #[serde(rename = "Imprint", default)]
+    #[serde(rename = "Imprint", default, skip_serializing_if = "Option::is_none")]
     pub imprint: Option<String>,
-    #[serde(rename = "Web", default)]
+    #[serde(rename = "Web", default, skip_serializing_if = "Option::is_none")]
     pub web: Option<String>,
-    #[serde(rename = "LanguageISO", default)]
+    #[serde(rename = "LanguageISO", default, skip_serializing_if = "Option::is_none")]
     pub language_iso: Option<String>,
-    #[serde(rename = "Format", default)]
+    #[serde(rename = "Format", default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
-    #[serde(rename = "AgeRating", default)]
+    #[serde(rename = "AgeRating", default, skip_serializing_if = "Option::is_none")]
     pub age_rating: Option<String>,
-    #[serde(rename = "BlackAndWhite", default)]
+    #[serde(rename = "BlackAndWhite", default, skip_serializing_if = "Option::is_none")]
     pub black_and_white: Option<String>,
-    #[serde(rename = "Manga", default)]
+    #[serde(rename = "Manga", default, skip_serializing_if = "Option::is_none")]
     pub manga: Option<String>,
-    #[serde(rename = "Characters", default)]
+    #[serde(rename = "Characters", default, skip_serializing_if = "Option::is_none")]
     pub characters: Option<String>,
-    #[serde(rename = "Teams", default)]
+    #[serde(rename = "Teams", default, skip_serializing_if = "Option::is_none")]
     pub teams: Option<String>,
-    #[serde(rename = "MainCharacterOrTeam", default)]
+    #[serde(rename = "MainCharacterOrTeam", default, skip_serializing_if = "Option::is_none")]
     pub main_character_or_team: Option<String>,
-    #[serde(rename = "Locations", default)]
+    #[serde(rename = "Locations", default, skip_serializing_if = "Option::is_none")]
     pub locations: Option<String>,
-    #[serde(rename = "Tags", default)]
+    #[serde(rename = "Tags", default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<String>,
-    #[serde(rename = "CommunityRating", default)]
+    #[serde(rename = "CommunityRating", default, skip_serializing_if = "Option::is_none")]
     pub community_rating: Option<f32>,
-    #[serde(rename = "BookAge", default)]
+    #[serde(rename = "BookAge", default, skip_serializing_if = "Option::is_none")]
     pub book_age: Option<String>,
-    #[serde(rename = "BookCollectionStatus", default)]
+    #[serde(rename = "BookCollectionStatus", default, skip_serializing_if = "Option::is_none")]
     pub book_collection_status: Option<String>,
-    #[serde(rename = "BookCondition", default)]
+    #[serde(rename = "BookCondition", default, skip_serializing_if = "Option::is_none")]
     pub book_condition: Option<String>,
-    #[serde(rename = "BookLocation", default)]
+    #[serde(rename = "BookLocation", default, skip_serializing_if = "Option::is_none")]
     pub book_location: Option<String>,
-    #[serde(rename = "BookNotes", default)]
+    #[serde(rename = "BookNotes", default, skip_serializing_if = "Option::is_none")]
     pub book_notes: Option<String>,
-    #[serde(rename = "BookOwner", default)]
+    #[serde(rename = "BookOwner", default, skip_serializing_if = "Option::is_none")]
     pub book_owner: Option<String>,
-    #[serde(rename = "BookStore", default)]
+    #[serde(rename = "BookStore", default, skip_serializing_if = "Option::is_none")]
     pub book_store: Option<String>,
-    #[serde(rename = "ISBN", default)]
+    #[serde(rename = "ISBN", default, skip_serializing_if = "Option::is_none")]
     pub isbn: Option<String>,
-    #[serde(rename = "BookPrice", default)]
+    #[serde(rename = "BookPrice", default, skip_serializing_if = "Option::is_none")]
     pub book_price: Option<f32>,
     /// Case « cochée » de ComicRack (vraie par défaut).
-    #[serde(rename = "@Checked", default)]
+    #[serde(rename = "@Checked", default, skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
     /// Informations modifiées dans ComicRack mais pas encore écrites dans le fichier.
-    #[serde(rename = "ComicInfoIsDirty", default)]
+    #[serde(rename = "ComicInfoIsDirty", default, skip_serializing_if = "Option::is_none")]
     pub comic_info_is_dirty: Option<bool>,
-    #[serde(rename = "ComicBookIsDirty", default)]
+    #[serde(rename = "ComicBookIsDirty", default, skip_serializing_if = "Option::is_none")]
     pub comic_book_is_dirty: Option<bool>,
     /// « Utiliser les valeurs proposées » (vrai par défaut) : série, numéro… déduits du
     /// nom du fichier quand la fiche est vide.
-    #[serde(rename = "EnableProposed", default)]
+    #[serde(rename = "EnableProposed", default, skip_serializing_if = "Option::is_none")]
     pub enable_proposed: Option<bool>,
     /// Valeurs proposées, calculées au premier besoin (cache ; laisser par défaut).
     #[serde(skip)]
     pub proposed_cache: std::sync::OnceLock<crate::name_info::NameInfo>,
     /// Fichier signalé manquant par ComicRack.
-    #[serde(rename = "Missing", default)]
+    #[serde(rename = "Missing", default, skip_serializing_if = "Option::is_none")]
     pub missing: Option<bool>,
     /// « Série complète » : `Yes`, `No` ou `Unknown`.
-    #[serde(rename = "SeriesComplete", default)]
+    #[serde(rename = "SeriesComplete", default, skip_serializing_if = "Option::is_none")]
     pub series_complete: Option<String>,
-    #[serde(rename = "ScanInformation", default)]
+    #[serde(rename = "ScanInformation", default, skip_serializing_if = "Option::is_none")]
     pub scan_information: Option<String>,
     /// Rang de la couverture préférée parmi les pages de type « FrontCover ».
-    #[serde(rename = "PreferredFrontCover", default)]
+    #[serde(rename = "PreferredFrontCover", default, skip_serializing_if = "Option::is_none")]
     pub preferred_front_cover: Option<i32>,
-    #[serde(rename = "Pages", default)]
+    #[serde(rename = "Pages", default, skip_serializing_if = "PageList::is_empty")]
     pub pages: PageList,
 }
 
 /// `<Pages><Page Image="0" Type="FrontCover" …/></Pages>` : informations par page.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PageList {
     #[serde(rename = "Page", default)]
     pub page: Vec<PageInfo>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PageInfo {
     /// Rang de l'image dans le fichier (ordre naturel des noms).
     #[serde(rename = "@Image", default)]
     pub image: i32,
     /// Type de page (`FrontCover`, `Story`, `Other`, `Deleted`…), éventuellement combinés.
-    #[serde(rename = "@Type", default)]
+    #[serde(rename = "@Type", default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+}
+
+impl PageList {
+    pub fn is_empty(&self) -> bool {
+        self.page.is_empty()
+    }
 }
 
 impl PageInfo {
@@ -299,6 +305,12 @@ impl LibraryBook {
     }
 
     /// Fiche d'un livre telle que stockée dans la colonne `data` de MySQL.
+    /// Fiche au format de ComicRack (`<ComicBook Id=".." File="..">…`), comme la colonne
+    /// `data` de MySQL : sert à écrire les infos dans un fichier quelle que soit la base.
+    pub fn to_record_xml(&self) -> Result<String, crate::Error> {
+        Ok(quick_xml::se::to_string_with_root("ComicBook", self)?)
+    }
+
     pub fn from_xml(xml: &str) -> Result<Self, crate::Error> {
         Ok(quick_xml::de::from_str(xml.trim_start_matches('\u{feff}'))?)
     }
@@ -393,6 +405,24 @@ mod tests {
         .unwrap();
         assert_eq!(b.front_cover_image(), 1);
         assert_eq!(LibraryBook::from_xml(r#"<ComicBook Id="x"/>"#).unwrap().front_cover_image(), 0);
+    }
+
+    #[test]
+    fn record_xml_round_trip() {
+        let b = LibraryBook::from_xml(
+            r#"<ComicBook Id="x" File="Z:\BD\a &amp; b.cbz"><Series>Thanos &amp; Cie</Series><Number>1</Number><Rating>4.5</Rating><Checked>true</Checked><Pages><Page Image="0" Type="FrontCover"/><Page Image="1"/></Pages></ComicBook>"#,
+        )
+        .unwrap();
+        let xml = b.to_record_xml().unwrap();
+        assert!(!xml.contains("<Title"), "champs vides absents : {xml}");
+        let again = LibraryBook::from_xml(&xml).unwrap();
+        assert_eq!(again.file, b.file);
+        assert_eq!(again.series.as_deref(), Some("Thanos & Cie"));
+        assert_eq!(again.rating, Some(4.5));
+        assert_eq!(again.pages.page.len(), 2);
+        assert_eq!(again.pages.page[0].kind.as_deref(), Some("FrontCover"));
+        let info = crate::writer::comic_info_from_record(&xml, None).unwrap();
+        assert!(info.contains("<Series>Thanos &amp; Cie</Series>"));
     }
 
     #[test]

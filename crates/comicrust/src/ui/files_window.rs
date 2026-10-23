@@ -64,7 +64,7 @@ impl ComicRustApp {
         let busy = self.file_job.as_ref().is_some_and(|j| !j.is_finished());
         ui.add_enabled_ui(!busy, |ui| {
             ui.menu_button("🛠 Fichiers", |ui| {
-                ui.label(RichText::new("La base ComicRack n'est pas modifiée.").weak().small());
+                ui.label(RichText::new("Seuls les fichiers BD sont modifiés.").weak().small());
                 let selected = self.library.selected_book.clone();
                 let n_shown = self.library.shown();
                 ui.label(RichText::new("Livre sélectionné").strong());
@@ -105,14 +105,22 @@ impl ComicRustApp {
     pub(crate) fn poll_files(&mut self) {
         let Some(job) = &mut self.file_job else { return };
         let new = job.poll();
+        let standalone = self.library.standalone().cloned();
         let mut written = false;
+        let mut store_updates: Vec<(String, Done)> = Vec::new();
         for r in new {
-            match r.outcome {
-                Ok(Done::Info { counter, .. }) => {
+            let Ok(done) = r.outcome else { continue };
+            if standalone.is_some() {
+                // Base de ComicRust : la fiche elle-même est mise à jour (pas d'astuce d'affichage).
+                store_updates.push((r.target.id.clone(), done));
+                continue;
+            }
+            match done {
+                Done::Info { counter, .. } => {
                     self.settings.info_written.insert(r.target.id.to_ascii_lowercase(), counter);
                     written = true;
                 }
-                Ok(Done::Converted { cbz, .. }) => {
+                Done::Converted { cbz, .. } => {
                     if let Some(db) = self.library.database() {
                         if let Some(f) = db.get(&r.target.id).and_then(|b| b.file.clone()) {
                             self.settings.converted.insert(f.into(), cbz.clone());
@@ -122,11 +130,36 @@ impl ComicRustApp {
                         c.redirects = self.settings.converted.clone();
                     }
                 }
-                Err(_) => {}
             }
         }
         if written {
             self.library.apply_info_written(&mut self.settings.info_written);
+        }
+        if let (Some(cfg), Some(db), false) = (standalone, self.library.database(), store_updates.is_empty()) {
+            // Fiches modifiées en arrière-plan ; la surveillance de la base les ramène à l'écran.
+            std::thread::spawn(move || {
+                let mut books = Vec::new();
+                for (id, done) in store_updates {
+                    let Some(existing) = db.get(&id) else { continue };
+                    match done {
+                        Done::Info { .. } => {
+                            let mut b = existing.clone();
+                            b.comic_info_is_dirty = None;
+                            books.push(b);
+                        }
+                        Done::Converted { cbz, .. } => {
+                            match comicrust_core::scanner::book_from_file(&cbz, id.clone()) {
+                                Ok(fresh) => books.push(comicrust_core::scanner::refresh_book(existing, fresh)),
+                                Err(e) => eprintln!("{} : {e}", cbz.display()),
+                            }
+                        }
+                    }
+                }
+                if let Err(e) = comicrust_core::store::Store::open(&cfg).and_then(|mut s| s.upsert(&books).map(|_| ()))
+                {
+                    eprintln!("base ComicRust non mise à jour : {e}");
+                }
+            });
         }
     }
 
@@ -136,6 +169,7 @@ impl ComicRustApp {
     }
 
     fn file_dialog_window(&mut self, ctx: &Context) {
+        let standalone = self.library.standalone().is_some();
         let Some(d) = &mut self.file_dialog else { return };
         let mut go = false;
         let mut cancel = false;
@@ -147,23 +181,24 @@ impl ComicRustApp {
             match d.action {
                 FileAction::WriteInfo => {
                     ui.label(format!(
-                        "{n} livre{} au format CBZ : les infos de la base ComicRack (série, numéro, auteurs, \
+                        "{n} livre{} au format CBZ : les infos de la bibliothèque (série, numéro, auteurs, \
                          résumé, pages…) seront écrites dans le ComicInfo.xml de chaque fichier.",
                         if n > 1 { "s" } else { "" }
                     ));
-                    ui.label(
-                        RichText::new(
-                            "Les pages ne sont pas recompressées ; un fichier déjà à jour n'est pas touché. La base \
-                             ComicRack n'est pas modifiée : ComicRack garde ces livres dans « Fichiers à mettre à \
-                             jour », ComicRust ne les y montre plus.",
-                        )
-                        .weak(),
-                    );
+                    let note = if standalone {
+                        "Les pages ne sont pas recompressées ; un fichier déjà à jour n'est pas touché. Les livres \
+                         écrits sortent de « Fichiers à mettre à jour »."
+                    } else {
+                        "Les pages ne sont pas recompressées ; un fichier déjà à jour n'est pas touché. La base \
+                         ComicRack n'est pas modifiée : ComicRack garde ces livres dans « Fichiers à mettre à jour », \
+                         ComicRust ne les y montre plus."
+                    };
+                    ui.label(RichText::new(note).weak());
                 }
                 FileAction::Convert => {
                     ui.label(format!(
                         "{n} livre{} CBR / CB7 / CBT : un fichier .cbz est créé à côté de {}, avec les mêmes \
-                         pages et les infos de la base ComicRack.",
+                         pages et les infos de la bibliothèque.",
                         if n > 1 { "s" } else { "" },
                         if n > 1 { "chacun" } else { "l'original" }
                     ));
@@ -174,14 +209,24 @@ impl ComicRustApp {
                         true,
                         format!("Ranger l'original dans le sous-dossier « {ORIGINALS_DIR} »"),
                     );
-                    ui.label(
-                        RichText::new(
-                            "⚠ La base ComicRack (lecture seule) indique toujours l'ancien fichier. ComicRust ouvrira \
-                             le CBZ si l'original n'est plus là ; dans ComicRack, il faudra ajouter le CBZ à la \
-                             bibliothèque.",
-                        )
-                        .color(crate::ui::theme::warning(ui)),
-                    );
+                    if standalone {
+                        ui.label(
+                            RichText::new(
+                                "La fiche du livre indiquera le CBZ (lecture et infos gardées). Un original gardé à sa \
+                                 place sera vu comme un nouveau livre à la prochaine analyse des dossiers.",
+                            )
+                            .weak(),
+                        );
+                    } else {
+                        ui.label(
+                            RichText::new(
+                                "⚠ La base ComicRack (lecture seule) indique toujours l'ancien fichier. ComicRust \
+                                 ouvrira le CBZ si l'original n'est plus là ; dans ComicRack, il faudra ajouter le \
+                                 CBZ à la bibliothèque.",
+                            )
+                            .color(crate::ui::theme::warning(ui)),
+                        );
+                    }
                 }
             }
             if d.ignored > 0 {
@@ -216,8 +261,17 @@ impl ComicRustApp {
         if go {
             let d = self.file_dialog.take().unwrap();
             self.settings.move_converted_original = d.move_original;
-            let cfg = self.settings.db_source.config().ok().flatten();
-            self.file_job = Some(FileJob::start(d.action, d.targets, cfg, d.move_original, ctx));
+            use crate::library::files::RecordSource;
+            use crate::settings::LibraryMode;
+            let source = match (self.settings.library_mode, self.library.database()) {
+                (LibraryMode::ComicRackMySql, _) => match self.settings.db_source.config().ok().flatten() {
+                    Some(c) => RecordSource::ComicRackMySql(c),
+                    None => RecordSource::None,
+                },
+                (_, Some(db)) => RecordSource::Loaded(db),
+                (_, None) => RecordSource::None,
+            };
+            self.file_job = Some(FileJob::start(d.action, d.targets, source, d.move_original, ctx));
             self.show_file_job = true;
         } else if cancel {
             self.file_dialog = None;
@@ -259,7 +313,7 @@ impl ComicRustApp {
                     ui.label(RichText::new(summary).strong());
                 }
                 if let Some(e) = job.db_error.lock().unwrap().as_deref() {
-                    ui.label(RichText::new(format!("Base ComicRack : {e}")).color(crate::ui::theme::warning(ui)));
+                    ui.label(RichText::new(format!("Bibliothèque : {e}")).color(crate::ui::theme::warning(ui)));
                 }
                 let errors: Vec<_> = job.results.iter().filter(|r| r.outcome.is_err()).collect();
                 if !errors.is_empty() {

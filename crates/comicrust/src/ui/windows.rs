@@ -121,6 +121,7 @@ impl ComicRustApp {
         let Some(p) = &mut self.resume_prompt else { return };
         let name = p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let mut choice: Option<(usize, Option<crate::settings::ResumeChoice>)> = None;
+        let base = if self.library.standalone().is_some() { "La bibliothèque" } else { "ComicRack" };
         let mut cancel = false;
         egui::Window::new("Reprendre la lecture")
             .collapsible(false)
@@ -128,13 +129,13 @@ impl ComicRustApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(egui::RichText::new(&name).strong());
-                ui.label("ComicRack et ComicRust n'ont pas retenu la même page :");
+                ui.label(format!("{base} et ce poste n'ont pas retenu la même page :"));
                 ui.add_space(6.0);
                 let (crack, crust) = (p.comicrack, p.comicrust);
-                if ui.button(format!("📖 Page {} — lue dans ComicRack", crack + 1)).clicked() {
+                if ui.button(format!("📖 Page {} — lue dans {base}", crack + 1)).clicked() {
                     choice = Some((crack, Some(crate::settings::ResumeChoice::ComicRack)));
                 }
-                if ui.button(format!("📖 Page {} — lue dans ComicRust", crust + 1)).clicked() {
+                if ui.button(format!("📖 Page {} — lue dans ComicRust (ce poste)", crust + 1)).clicked() {
                     choice = Some((crust, Some(crate::settings::ResumeChoice::ComicRust)));
                 }
                 if ui.button("⏮ Depuis le début").clicked() {
@@ -160,6 +161,48 @@ impl ComicRustApp {
             self.open_book_at(ctx, p.path, crate::app::Start::Page(page));
         } else if cancel {
             self.resume_prompt = None;
+        }
+    }
+
+    /// Bilan de la dernière analyse des dossiers (mode autonome).
+    pub(crate) fn scan_window(&mut self, ctx: &Context) {
+        if !self.show_last_scan {
+            return;
+        }
+        let Some(done) = &self.last_scan else { return };
+        let mut open = true;
+        let mut copy = false;
+        egui::Window::new("Analyse des dossiers").open(&mut open).collapsible(false).default_width(560.0).show(
+            ctx,
+            |ui| {
+                ui.label(egui::RichText::new(done.report.summary()).strong());
+                ui.label(format!("{} dossier(s) analysé(s).", done.folders));
+                if !done.report.errors.is_empty() {
+                    ui.separator();
+                    ui.label(egui::RichText::new("Fichiers non lus").strong());
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for (p, e) in &done.report.errors {
+                            ui.label(egui::RichText::new(p.display().to_string()).small());
+                            ui.label(egui::RichText::new(e).color(crate::ui::theme::error(ui)).small());
+                        }
+                    });
+                }
+                ui.separator();
+                if ui.button("📋 Copier le bilan").clicked() {
+                    copy = true;
+                }
+            },
+        );
+        if copy {
+            let mut t =
+                format!("ComicRust v{} — analyse des dossiers\n{}\n", env!("CARGO_PKG_VERSION"), done.report.summary());
+            for (p, e) in &done.report.errors {
+                t.push_str(&format!("- {} : {e}\n", p.display()));
+            }
+            ctx.copy_text(t);
+        }
+        if !open {
+            self.show_last_scan = false;
         }
     }
 }

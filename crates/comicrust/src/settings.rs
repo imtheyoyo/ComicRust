@@ -82,6 +82,26 @@ impl ResumeChoice {
     }
 }
 
+/// Bibliothèque utilisée (choisie au premier démarrage, modifiable par l'assistant).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LibraryMode {
+    /// Pas encore choisi : l'assistant de premier démarrage s'ouvre.
+    #[default]
+    Unset,
+    /// ComicRust seul : sa propre base (`Settings::store`) et ses dossiers de BD.
+    Standalone,
+    /// Lié à ComicRack, base MySQL de ComicRack (`Settings::db_source`).
+    ComicRackMySql,
+    /// Lié à ComicRack, bibliothèque `ComicDb.xml` de ComicRack (`Settings::library_db`).
+    ComicRackXml,
+}
+
+impl LibraryMode {
+    pub fn is_comicrack(self) -> bool {
+        matches!(self, LibraryMode::ComicRackMySql | LibraryMode::ComicRackXml)
+    }
+}
+
 /// Où trouver la base MySQL de ComicRack.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum DbSource {
@@ -164,6 +184,15 @@ pub struct Settings {
     pub converted: HashMap<PathBuf, PathBuf>,
     /// Conversion : ranger l'original dans le sous-dossier `_originaux`.
     pub move_converted_original: bool,
+    /// Bibliothèque utilisée.
+    pub library_mode: LibraryMode,
+    /// Mode autonome : base propre à ComicRust (SQLite dans `data\` ou MySQL).
+    pub store: Option<comicrust_core::store::StoreConfig>,
+    /// Mode lié : fichiers de ComicRack retrouvés ou choisis dans l'assistant.
+    pub comicrack_ini: Option<PathBuf>,
+    pub comicrack_config: Option<PathBuf>,
+    /// Mode lié : écrire dans la base de ComicRack (pas encore disponible : lecture seule).
+    pub comicrack_write: bool,
 }
 
 impl Default for Settings {
@@ -199,6 +228,11 @@ impl Default for Settings {
             info_written: HashMap::new(),
             converted: HashMap::new(),
             move_converted_original: false,
+            library_mode: LibraryMode::Unset,
+            store: None,
+            comicrack_ini: None,
+            comicrack_config: None,
+            comicrack_write: false,
         }
     }
 }
@@ -227,6 +261,16 @@ impl Settings {
         ViewOptions { sort: self.library_sort, descending: self.library_descending, group: self.library_group }
     }
 
+    /// Réglages d'une version précédente (base MySQL déjà configurée) : mode lié à ComicRack.
+    pub fn migrate(&mut self) {
+        if self.library_mode == LibraryMode::Unset && self.db_source != DbSource::None {
+            self.library_mode = LibraryMode::ComicRackMySql;
+            if let DbSource::ComicRackIni(ini) = &self.db_source {
+                self.comicrack_ini.get_or_insert_with(|| ini.clone());
+            }
+        }
+    }
+
     /// Fichier à ouvrir pour un chemin de la base : le CBZ converti si l'original n'est plus là.
     pub fn effective_path(&self, path: &std::path::Path) -> PathBuf {
         match self.converted.get(path) {
@@ -245,6 +289,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn previous_version_settings_stay_linked_to_comicrack() {
+        let mut s = Settings { db_source: DbSource::ComicRackIni("C:/CR/ComicRack.ini".into()), ..Default::default() };
+        s.migrate();
+        assert_eq!(s.library_mode, LibraryMode::ComicRackMySql);
+        assert_eq!(s.comicrack_ini.as_deref(), Some(std::path::Path::new("C:/CR/ComicRack.ini")));
+        let mut fresh = Settings::default();
+        fresh.migrate();
+        assert_eq!(fresh.library_mode, LibraryMode::Unset, "premier démarrage : assistant");
+    }
 
     #[test]
     fn comicrust_read_percent_like_comicrack() {

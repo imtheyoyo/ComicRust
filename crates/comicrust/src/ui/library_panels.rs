@@ -27,7 +27,8 @@ impl ComicRustApp {
                 ui.spinner().on_hover_text("Calcul des listes…");
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("…").on_hover_text("Choisir le ComicDb.xml de ComicRack").clicked() {
+                let mysql = self.settings.library_mode == crate::settings::LibraryMode::ComicRackMySql;
+                if mysql && ui.small_button("…").on_hover_text("Choisir le ComicDb.xml de ComicRack").clicked() {
                     if let Some(p) = rfd::FileDialog::new()
                         .set_title("ComicDb.xml de ComicRack (listes)")
                         .add_filter("Base ComicRack", &["xml"])
@@ -61,7 +62,9 @@ impl ComicRustApp {
             ui.add_space(8.0);
             if let Some(e) = &self.library.lists.error {
                 ui.label(RichText::new(format!("⚠ {e}")).small().color(crate::ui::theme::warning(ui)));
-                ui.label(RichText::new("« … » en haut du panneau pour choisir le fichier.").small().weak());
+                if self.settings.library_mode == crate::settings::LibraryMode::ComicRackMySql {
+                    ui.label(RichText::new("« … » en haut du panneau pour choisir le fichier.").small().weak());
+                }
             } else if let Some(p) = &self.library.lists.path {
                 ui.label(RichText::new(p.display().to_string()).small().weak());
                 if ui
@@ -197,7 +200,8 @@ impl ComicRustApp {
                 }
             });
             ui.separator();
-            details_grid(ui, &book, self.comicrust_progress(&book));
+            let standalone = self.library.standalone().is_some();
+            details_grid(ui, &book, if standalone { None } else { self.comicrust_progress(&book) }, standalone);
             for (title, text) in [("Résumé", &book.summary), ("Annotations", &book.notes), ("Critique", &book.review)]
             {
                 if let Some(t) = text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
@@ -275,7 +279,7 @@ fn section(ui: &mut Ui, id: &str, title: &str, fields: Vec<Field>) {
 }
 
 /// Fiche du livre, avec les libellés de la fenêtre « Informations » de ComicRack.
-fn details_grid(ui: &mut Ui, b: &LibraryBook, comicrust: Option<(u32, usize)>) {
+fn details_grid(ui: &mut Ui, b: &LibraryBook, comicrust: Option<(u32, usize)>, standalone: bool) {
     let s = |v: &Option<String>| v.clone();
     let num = |n: Option<i32>| n.filter(|v| *v > 0).map(|v| v.to_string());
     let number = b.number.clone().map(|n| match b.count.filter(|c| *c > 0) {
@@ -352,7 +356,7 @@ fn details_grid(ui: &mut Ui, b: &LibraryBook, comicrust: Option<(u32, usize)>) {
             f("Évaluation communautaire :", rating(b.community_rating)),
             always("Pages :", b.page_count.map(|p| p.to_string())),
             f(
-                "Lu dans ComicRack :",
+                if standalone { "Lu :" } else { "Lu dans ComicRack :" },
                 b.read_percent().map(|p| match b.current_page {
                     Some(c) if p > 0 => format!("{p} % (page {})", c + 1),
                     _ => format!("{p} %"),
