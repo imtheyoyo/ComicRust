@@ -7,8 +7,7 @@ Décision proposée : GO possible (bloquants tous OK).
 
 VALEURS NOTÉES ET REMARQUES
 - W-06 : 3 livres traités sur 3 : 1 écrits, 2 déjà à jour, 0 erreur(s) (bilan du 22/10 18:17, voir v0.6.0-2026-10-22.txt)
-- H-02 : oui (extensions Windows HEIF et HEVC installées)
+- H-02 : oui
 - K-04 : 6
 
-W-01 et W-05 rejoués le 23/10 (option « Les Livres sont automatiquement mis à jour » de ComicRack
-décochée pendant le test) : OK.
+W-01 et W-05 (en échec le 22/10, faute de livre « à mettre à jour ») : OK le 23/10.
