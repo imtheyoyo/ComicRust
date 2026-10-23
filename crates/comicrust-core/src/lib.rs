@@ -6,6 +6,7 @@
 //! - [`cbl`]        ↔ import/export des listes de lecture `.cbl`
 //! - [`library`]    ↔ `ComicLibrary` / `ComicDatabase` (ComicDB.xml)
 //! - [`store`]      : base propre à ComicRust (SQLite ou MySQL, une colonne par champ)
+//! - [`scanner`]    ↔ `ComicScanner` (dossiers surveillés : ajout, mise à jour, manquants)
 
 pub mod cbl;
 pub mod comic_info;
@@ -15,6 +16,7 @@ pub mod index;
 pub mod library;
 pub mod name_info;
 pub mod providers;
+pub mod scanner;
 pub mod smart;
 pub mod store;
 pub mod writer;
