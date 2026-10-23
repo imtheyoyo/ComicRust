@@ -224,7 +224,7 @@ fn db_err(e: impl std::fmt::Display) -> Error {
     Error::Database(e.to_string())
 }
 
-fn connect(cfg: &DbConfig) -> Result<Conn, Error> {
+pub(crate) fn connect(cfg: &DbConfig) -> Result<Conn, Error> {
     let opts = OptsBuilder::new()
         .ip_or_hostname(Some(cfg.host.clone()))
         .tcp_port(cfg.port)

@@ -5,6 +5,7 @@
 //! - [`providers`]  ↔ fournisseurs de pages (`ComicProvider`, `ComicBookFactory`)
 //! - [`cbl`]        ↔ import/export des listes de lecture `.cbl`
 //! - [`library`]    ↔ `ComicLibrary` / `ComicDatabase` (ComicDB.xml)
+//! - [`store`]      : base propre à ComicRust (SQLite ou MySQL, une colonne par champ)
 
 pub mod cbl;
 pub mod comic_info;
@@ -15,6 +16,7 @@ pub mod library;
 pub mod name_info;
 pub mod providers;
 pub mod smart;
+pub mod store;
 pub mod writer;
 
 pub use cbl::ReadingList;
