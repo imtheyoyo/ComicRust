@@ -246,15 +246,15 @@ impl ComicList {
     }
 }
 
-fn xml_err(e: impl std::fmt::Display) -> Error {
+pub(crate) fn xml_err(e: impl std::fmt::Display) -> Error {
     Error::Database(format!("ComicDb.xml illisible : {e}"))
 }
 
-fn attr(e: &BytesStart, name: &[u8]) -> Option<String> {
+pub(crate) fn attr(e: &BytesStart, name: &[u8]) -> Option<String> {
     e.attributes().flatten().find(|a| a.key.as_ref() == name).and_then(|a| a.unescape_value().ok()).map(|v| v.into())
 }
 
-fn local(name: &[u8]) -> &[u8] {
+pub(crate) fn local(name: &[u8]) -> &[u8] {
     name.rsplit(|&c| c == b':').next().unwrap_or(name)
 }
 

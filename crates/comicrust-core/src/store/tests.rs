@@ -1,14 +1,14 @@
 //! Tests du module `store` : SQLite dans un dossier temporaire ; MySQL seulement si
 //! `COMICRUST_TEST_MYSQL` est définie (même convention que `db::tests::mysql_server`).
 
-use super::schema::META;
+use super::schema::{LISTS, META};
 use super::*;
 use crate::db::Applied;
 use crate::library::{PageInfo, PageList};
 
 /// Livre dont **tous** les champs sont remplis (littéral sans `..Default::default()` :
 /// un champ ajouté à `LibraryBook` oblige à compléter ce test).
-fn full_book(id: &str) -> LibraryBook {
+pub(super) fn full_book(id: &str) -> LibraryBook {
     LibraryBook {
         id: id.into(),
         file: Some(r"Z:\BD\Thanos Rising 1-5 (Jason Aaron)(2013) — édition « spéciale » 🦸.cbz".into()),
@@ -92,11 +92,11 @@ fn full_book(id: &str) -> LibraryBook {
 
 /// `LibraryBook` n'a pas `PartialEq` : comparaison par le `Debug` (tous les champs,
 /// f32 exacts ; le cache `proposed_cache` reste non initialisé des deux côtés).
-fn same(a: &LibraryBook, b: &LibraryBook) {
+pub(super) fn same(a: &LibraryBook, b: &LibraryBook) {
     assert_eq!(format!("{a:#?}"), format!("{b:#?}"));
 }
 
-fn simple(i: usize) -> LibraryBook {
+pub(super) fn simple(i: usize) -> LibraryBook {
     LibraryBook {
         id: format!("bbbbbbbb-0000-0000-0000-{i:012}"),
         file: Some(format!(r"Z:\BD\Série {i:05}.cbz")),
@@ -108,7 +108,7 @@ fn simple(i: usize) -> LibraryBook {
     }
 }
 
-fn temp_cfg() -> (tempfile::TempDir, StoreConfig) {
+pub(super) fn temp_cfg() -> (tempfile::TempDir, StoreConfig) {
     let dir = tempfile::tempdir().unwrap();
     let cfg = StoreConfig::Sqlite(dir.path().join("data").join(SQLITE_FILE_NAME));
     (dir, cfg)
@@ -573,9 +573,9 @@ fn newer_schema_is_refused() {
     assert!(err.contains("plus récente"), "{err}");
 }
 
-fn drop_tables(db_cfg: &DbConfig) {
+pub(super) fn drop_tables(db_cfg: &DbConfig) {
     let mut c = Conn::open_mysql(db_cfg).unwrap();
-    for t in [BOOKS, FOLDERS, META] {
+    for t in [BOOKS, FOLDERS, META, LISTS] {
         c.batch(&format!("DROP TABLE IF EXISTS {t}")).unwrap();
     }
 }
@@ -592,7 +592,7 @@ fn mysql_store() {
     let cfg = StoreConfig::MySql(db_cfg.clone());
     {
         let mut c = Conn::open_mysql(&db_cfg).unwrap();
-        for t in [BOOKS, FOLDERS, META] {
+        for t in [BOOKS, FOLDERS, META, LISTS] {
             c.batch(&format!("DROP TABLE IF EXISTS {t}")).unwrap();
         }
     }
@@ -633,7 +633,7 @@ fn mysql_store() {
     drop(s);
 
     let mut c = Conn::open_mysql(&db_cfg).unwrap();
-    for t in [BOOKS, FOLDERS, META] {
+    for t in [BOOKS, FOLDERS, META, LISTS] {
         c.batch(&format!("DROP TABLE IF EXISTS {t}")).unwrap();
     }
     shared_base_scenario(&cfg);
@@ -685,10 +685,13 @@ fn mysql_store() {
             let sql = sql.replace("comicrust_", "zz_cr_") + " ROW_FORMAT=COMPACT";
             c.batch(&sql).unwrap_or_else(|e| panic!("{e}\n{sql}"));
         }
-        for t in ["zz_cr_books", "zz_cr_folders", "zz_cr_meta"] {
+        for t in ["zz_cr_books", "zz_cr_folders", "zz_cr_meta", "zz_cr_lists"] {
             c.batch(&format!("DROP TABLE IF EXISTS {t}")).unwrap();
         }
     }
+
+    // Transfert ComicRack → ComicRust (v0.8.0).
+    super::import_tests::mysql_import(&db_cfg);
 
     let mut bad = db_cfg;
     bad.password = "mauvais-mdp".into();

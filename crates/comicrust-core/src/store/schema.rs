@@ -13,12 +13,15 @@ use crate::Error;
 ///
 /// - 1 : v0.7.0 ;
 /// - 2 : MySQL, `comicrust_folders` indexée par `path_hash` (SHA-256 du chemin) au lieu
-///   d'une clé `VARCHAR(700)` refusée par les anciens serveurs.
-pub const SCHEMA_VERSION: i64 = 2;
+///   d'une clé `VARCHAR(700)` refusée par les anciens serveurs ;
+/// - 3 : v0.8.0, table `comicrust_lists` (listes transférées de ComicRack, puis gérées
+///   par ComicRust) et compteur `lists_counter`.
+pub const SCHEMA_VERSION: i64 = 3;
 
 pub(crate) const BOOKS: &str = "comicrust_books";
 pub(crate) const FOLDERS: &str = "comicrust_folders";
 pub(crate) const META: &str = "comicrust_meta";
+pub(crate) const LISTS: &str = "comicrust_lists";
 
 /// Nature d'une colonne (le type SQL en dépend selon le moteur).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +301,12 @@ pub(crate) fn create_statements(engine: Engine) -> Vec<String> {
             format!("CREATE INDEX IF NOT EXISTS {BOOKS}_counter ON {BOOKS}(`update_counter`)"),
             format!("CREATE TABLE IF NOT EXISTS {FOLDERS} (`path` TEXT NOT NULL PRIMARY KEY)"),
             format!("CREATE TABLE IF NOT EXISTS {META} (`key` TEXT NOT NULL PRIMARY KEY, `value` TEXT)"),
+            format!(
+                "CREATE TABLE IF NOT EXISTS {LISTS} (\n  `id` TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,\n  \
+                 `parent` TEXT COLLATE NOCASE,\n  `position` INTEGER NOT NULL DEFAULT 0,\n  `name` TEXT,\n  \
+                 `kind` TEXT,\n  `xml` TEXT NOT NULL\n)"
+            ),
+            format!("CREATE INDEX IF NOT EXISTS {LISTS}_parent ON {LISTS}(`parent`)"),
         ],
         // MySQL : pas d'index sur un TEXT sans longueur → index préfixe (non unique)
         // sur `file`, qui peut dépasser 255 caractères.
@@ -321,6 +330,14 @@ pub(crate) fn create_statements(engine: Engine) -> Vec<String> {
             ),
             format!(
                 "CREATE TABLE IF NOT EXISTS {META} (`key` VARCHAR(64) NOT NULL PRIMARY KEY, `value` TEXT) \
+                 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ),
+            // `xml` : MEDIUMTEXT (16 Mio) — une liste de lecture de 5 000 identifiants ou
+            // une liste intelligente avec son cache fait plusieurs centaines de Ko.
+            format!(
+                "CREATE TABLE IF NOT EXISTS {LISTS} (\n  `id` VARCHAR(64) NOT NULL PRIMARY KEY,\n  \
+                 `parent` VARCHAR(64) NULL,\n  `position` BIGINT NOT NULL DEFAULT 0,\n  `name` TEXT,\n  \
+                 `kind` VARCHAR(64),\n  `xml` MEDIUMTEXT NOT NULL,\n  INDEX {LISTS}_parent (`parent`)\n) \
                  ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             ),
         ],
@@ -353,7 +370,9 @@ pub(crate) fn ensure(conn: &mut Conn) -> Result<(), Error> {
         }
     }
     let ins = engine.insert_ignore();
-    for (key, value) in [("schema_version", SCHEMA_VERSION), ("update_counter", 0), ("delete_counter", 0)] {
+    for (key, value) in
+        [("schema_version", SCHEMA_VERSION), ("update_counter", 0), ("delete_counter", 0), ("lists_counter", 0)]
+    {
         conn.exec(
             &format!("{ins} INTO {META} (`key`, `value`) VALUES (?, ?)"),
             &[Val::Text(key.into()), Val::Text(value.to_string())],
@@ -405,6 +424,9 @@ fn migrate(conn: &mut Conn, from: i64) -> Result<(), Error> {
             conn.batch(&format!("RENAME TABLE {new} TO {FOLDERS}"))?;
             Ok(())
         }
+        // 2 → 3 : la table `comicrust_lists` et la clé `lists_counter` sont créées par
+        // `ensure` (CREATE TABLE IF NOT EXISTS / INSERT IGNORE) avant les migrations.
+        2 => Ok(()),
         _ => Err(Error::Database(format!("migration du schéma {from} inconnue"))),
     }
 }

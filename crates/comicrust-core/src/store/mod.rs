@@ -14,7 +14,8 @@
 //! |---------------------|----------------------------------------------------------------|
 //! | `comicrust_books`   | `id` (GUID, clé), `update_counter`, `pages` (JSON), un champ par colonne |
 //! | `comicrust_folders` | `path` : dossiers de BD surveillés (MySQL : + `path_hash`, clé) |
-//! | `comicrust_meta`    | `key` / `value` : `schema_version`, `update_counter`, `delete_counter` |
+//! | `comicrust_lists`   | listes (une ligne par liste, tous niveaux : `id`, `parent`, `position`, `name`, `kind`, `xml`), voir [`import`] |
+//! | `comicrust_meta`    | `key` / `value` : `schema_version`, `update_counter`, `delete_counter`, `lists_counter` |
 //!
 //! **Suivi des modifications** — même principe que ComicRack : chaque écriture incrémente
 //! `update_counter` de `comicrust_meta` et donne la nouvelle valeur aux lignes écrites ;
@@ -30,6 +31,9 @@
 //! [`Store::scan_into`], [`Store::replace_file`], [`Store::set_comic_info_written`].
 
 mod conn;
+pub mod import;
+#[cfg(test)]
+mod import_tests;
 mod schema;
 #[cfg(test)]
 mod tests;
@@ -48,6 +52,7 @@ use crate::Error;
 use conn::{Conn, Engine, Val};
 use schema::{BOOKS, FOLDERS};
 
+pub use import::{read_watch_folders, ComicRackSource, ImportOptions, ImportReport};
 pub use schema::SCHEMA_VERSION;
 
 /// Nom du fichier SQLite dans le dossier `data` (mode portable).
