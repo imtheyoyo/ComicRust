@@ -10,7 +10,11 @@ use crate::library::{LibraryBook, PageInfo, PageList};
 use crate::Error;
 
 /// Version du schéma écrite dans `comicrust_meta.schema_version`.
-pub const SCHEMA_VERSION: i64 = 1;
+///
+/// - 1 : v0.7.0 ;
+/// - 2 : MySQL, `comicrust_folders` indexée par `path_hash` (SHA-256 du chemin) au lieu
+///   d'une clé `VARCHAR(700)` refusée par les anciens serveurs.
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub(crate) const BOOKS: &str = "comicrust_books";
 pub(crate) const FOLDERS: &str = "comicrust_folders";
@@ -251,6 +255,18 @@ pub(crate) fn book_to_row(b: &LibraryBook, counter: i64, out: &mut Vec<Val>) {
     fields_to_vals(b, out);
 }
 
+/// Valeurs des colonnes « champ » de `b`, avec leur nom (ordre de `FIELD_COLUMNS`).
+pub(crate) fn field_values(b: &LibraryBook) -> Vec<(&'static str, Val)> {
+    let mut vals = Vec::with_capacity(FIELD_COLUMNS.len());
+    fields_to_vals(b, &mut vals);
+    FIELD_COLUMNS.iter().map(|(n, _)| *n).zip(vals).collect()
+}
+
+/// Valeur de la colonne `pages` de `b`.
+pub(crate) fn pages_value(b: &LibraryBook) -> Val {
+    pages_to_val(&b.pages)
+}
+
 /// Livre lu depuis une ligne (ordre de [`all_columns`]) ; renvoie aussi son `update_counter`.
 pub(crate) fn book_from_row(row: Vec<Val>) -> (LibraryBook, i64) {
     let mut it = row.into_iter();
@@ -261,8 +277,16 @@ pub(crate) fn book_from_row(row: Vec<Val>) -> (LibraryBook, i64) {
     (b, counter)
 }
 
+/// Longueur de l'index préfixe sur `file` en MySQL : 191 × 4 octets (utf8mb4) = 764,
+/// sous la limite de 767 octets des anciens MySQL / MariaDB.
+pub(crate) const MYSQL_FILE_INDEX_CHARS: usize = 191;
+
+/// Colonnes de `comicrust_folders` en MySQL (schéma 2).
+const MYSQL_FOLDERS_COLUMNS: &str = "`path_hash` CHAR(64) CHARACTER SET ascii NOT NULL PRIMARY KEY, \
+     `path` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL";
+
 /// Instructions de création des tables (si absentes).
-fn create_statements(engine: Engine) -> Vec<String> {
+pub(crate) fn create_statements(engine: Engine) -> Vec<String> {
     let fields: String = FIELD_COLUMNS.iter().map(|(n, k)| format!(",\n  `{n}` {}", k.sql_type(engine))).collect();
     match engine {
         Engine::Sqlite => vec![
@@ -277,17 +301,23 @@ fn create_statements(engine: Engine) -> Vec<String> {
         ],
         // MySQL : pas d'index sur un TEXT sans longueur → index préfixe (non unique)
         // sur `file`, qui peut dépasser 255 caractères.
+        //
+        // Compatibilité avec les anciens serveurs (MySQL 5.5 / 5.6, MariaDB < 10.2 : clé
+        // d'index InnoDB limitée à 767 octets, soit 191 caractères utf8mb4 de 4 octets) :
+        // - index préfixe `file`(191) (764 octets) ;
+        // - `comicrust_folders` : un chemin peut dépasser 191 caractères, la clé primaire
+        //   est donc `path_hash` = SHA-256 du chemin en hexadécimal (64 octets ASCII),
+        //   calculé par le serveur (`SHA2(?, 256)`) ; `path` est un `TEXT` en
+        //   `utf8mb4_bin` (deux chemins qui ne diffèrent que par un accent restent distincts).
         Engine::MySql => vec![
             format!(
                 "CREATE TABLE IF NOT EXISTS {BOOKS} (\n  `id` VARCHAR(64) NOT NULL PRIMARY KEY,\n  \
                  `update_counter` BIGINT NOT NULL DEFAULT 0,\n  `pages` MEDIUMTEXT{fields},\n  \
-                 INDEX {BOOKS}_file (`file`(255)),\n  INDEX {BOOKS}_counter (`update_counter`)\n) \
-                 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                 INDEX {BOOKS}_file (`file`({MYSQL_FILE_INDEX_CHARS})),\n  \
+                 INDEX {BOOKS}_counter (`update_counter`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             ),
-            // Comparaison binaire : deux chemins qui ne diffèrent que par un accent restent distincts.
             format!(
-                "CREATE TABLE IF NOT EXISTS {FOLDERS} (`path` VARCHAR(700) CHARACTER SET utf8mb4 \
-                 COLLATE utf8mb4_bin NOT NULL PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                "CREATE TABLE IF NOT EXISTS {FOLDERS} ({MYSQL_FOLDERS_COLUMNS}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             ),
             format!(
                 "CREATE TABLE IF NOT EXISTS {META} (`key` VARCHAR(64) NOT NULL PRIMARY KEY, `value` TEXT) \
@@ -345,10 +375,38 @@ pub(crate) fn ensure(conn: &mut Conn) -> Result<(), Error> {
     Ok(())
 }
 
-/// Passage du schéma `from` au schéma `from + 1`. Aucune migration pour l'instant
-/// (schéma 1) ; les suivantes s'ajouteront ici (`1 => …`).
-fn migrate(_conn: &mut Conn, from: i64) -> Result<(), Error> {
-    Err(Error::Database(format!("migration du schéma {from} inconnue")))
+/// Passage du schéma `from` au schéma `from + 1`.
+fn migrate(conn: &mut Conn, from: i64) -> Result<(), Error> {
+    match from {
+        // 1 → 2 : MySQL, `comicrust_folders` recréée avec la clé `path_hash` en gardant
+        // les chemins. SQLite : rien à faire (`path TEXT PRIMARY KEY` y est sans limite).
+        // Attention : en MySQL, CREATE / DROP / RENAME valident la transaction en cours ;
+        // chaque étape est donc faite pour pouvoir être rejouée après une interruption.
+        1 => {
+            if conn.engine() == Engine::Sqlite {
+                return Ok(());
+            }
+            let cols = conn.query(
+                "SELECT column_name FROM information_schema.columns \
+                 WHERE table_schema = DATABASE() AND table_name = ?",
+                &[Val::Text(FOLDERS.into())],
+            )?;
+            let has_hash = cols.into_iter().filter_map(|r| r.into_iter().next()?.into_text()).any(|c| c == "path_hash");
+            if has_hash {
+                return Ok(());
+            }
+            let new = format!("{FOLDERS}_v2");
+            conn.batch(&format!("DROP TABLE IF EXISTS {new}"))?;
+            conn.batch(&format!("CREATE TABLE {new} ({MYSQL_FOLDERS_COLUMNS}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"))?;
+            conn.batch(&format!(
+                "INSERT IGNORE INTO {new} (`path_hash`, `path`) SELECT SHA2(`path`, 256), `path` FROM {FOLDERS}"
+            ))?;
+            conn.batch(&format!("DROP TABLE {FOLDERS}"))?;
+            conn.batch(&format!("RENAME TABLE {new} TO {FOLDERS}"))?;
+            Ok(())
+        }
+        _ => Err(Error::Database(format!("migration du schéma {from} inconnue"))),
+    }
 }
 
 /// Valeur entière de `comicrust_meta` (0 si absente).

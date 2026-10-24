@@ -4,7 +4,7 @@
 //! le schéma de ComicRust a **une colonne par champ** de [`LibraryBook`]. Deux moteurs :
 //!
 //! - **SQLite** : un fichier local (par défaut `data\comicrust.db` à côté de l'exécutable,
-//!   voir [`StoreConfig::portable_sqlite`]) ;
+//!   chemin recalculé à chaque ouverture, voir [`StoreConfig::PortableSqlite`]) ;
 //! - **MySQL / MariaDB** : une base partagée, éventuellement la même que ComicRack — les
 //!   tables sont préfixées `comicrust_` et ne touchent pas à `comics` / `changes`.
 //!
@@ -13,7 +13,7 @@
 //! | table               | contenu                                                        |
 //! |---------------------|----------------------------------------------------------------|
 //! | `comicrust_books`   | `id` (GUID, clé), `update_counter`, `pages` (JSON), un champ par colonne |
-//! | `comicrust_folders` | `path` : dossiers de BD surveillés                             |
+//! | `comicrust_folders` | `path` : dossiers de BD surveillés (MySQL : + `path_hash`, clé) |
 //! | `comicrust_meta`    | `key` / `value` : `schema_version`, `update_counter`, `delete_counter` |
 //!
 //! **Suivi des modifications** — même principe que ComicRack : chaque écriture incrémente
@@ -21,6 +21,13 @@
 //! chaque suppression incrémente `delete_counter`. Un [`StoreWatcher`] relit donc les
 //! lignes dont le compteur dépasse le dernier vu et produit un [`Changes`] applicable
 //! avec [`ComicDatabase::apply`] : deux ComicRust peuvent partager une base.
+//!
+//! **Écritures** — [`Store::upsert`] remplace des fiches **complètes** : à réserver aux
+//! modifications faites par l'utilisateur sur une fiche à jour. Les écritures venant d'une
+//! analyse ou d'une opération sur les fichiers passent par des écritures **ciblées**, qui
+//! ne touchent qu'aux colonnes concernées et ne peuvent donc pas écraser une lecture
+//! enregistrée entre-temps ([`Store::set_progress`]) : [`Store::apply_scan`],
+//! [`Store::scan_into`], [`Store::replace_file`], [`Store::set_comic_info_written`].
 
 mod conn;
 mod schema;
@@ -29,15 +36,16 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
 use crate::db::{Changes, ComicDatabase, Counters, DbConfig, LoadProgress, FULL_CHECK};
 use crate::library::LibraryBook;
+use crate::scanner::{self, ScanProgress, ScanReport};
 use crate::Error;
-use conn::{Conn, Val};
+use conn::{Conn, Engine, Val};
 use schema::{BOOKS, FOLDERS};
 
 pub use schema::SCHEMA_VERSION;
@@ -49,24 +57,48 @@ pub const SQLITE_FILE_NAME: &str = "comicrust.db";
 /// (celui de [`DbConfig`] le masque).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StoreConfig {
-    /// Fichier SQLite (créé s'il n'existe pas, dossier compris).
+    /// Fichier SQLite à un chemin fixe (créé par [`Store::open`] s'il n'existe pas).
+    /// Gardé pour la compatibilité : préférer [`StoreConfig::PortableSqlite`] pour la base
+    /// installée à côté de ComicRust.
     Sqlite(PathBuf),
+    /// `data\comicrust.db` dans le dossier de l'exécutable, **recalculé à chaque
+    /// ouverture** : la base suit ComicRust si son dossier est déplacé (clé USB…).
+    PortableSqlite,
     /// Base MySQL / MariaDB (doit exister ; les tables sont créées).
     MySql(DbConfig),
 }
 
 impl StoreConfig {
-    /// `data\comicrust.db` dans le dossier de l'exécutable (installation portable).
+    /// Base SQLite portable ([`StoreConfig::PortableSqlite`]). Ne peut plus échouer ; le
+    /// `Result` est gardé pour la compatibilité.
     pub fn portable_sqlite() -> Result<Self, Error> {
+        Ok(StoreConfig::PortableSqlite)
+    }
+
+    /// Chemin actuel de la base portable : `<dossier de l'exécutable>\data\comicrust.db`.
+    pub fn portable_sqlite_path() -> Result<PathBuf, Error> {
         let exe = std::env::current_exe()?;
         let dir = exe.parent().unwrap_or(Path::new("."));
-        Ok(StoreConfig::Sqlite(dir.join("data").join(SQLITE_FILE_NAME)))
+        Ok(dir.join("data").join(SQLITE_FILE_NAME))
+    }
+
+    /// Fichier SQLite visé (`None` pour MySQL).
+    pub fn sqlite_path(&self) -> Result<Option<PathBuf>, Error> {
+        match self {
+            StoreConfig::Sqlite(p) => Ok(Some(p.clone())),
+            StoreConfig::PortableSqlite => Ok(Some(Self::portable_sqlite_path()?)),
+            StoreConfig::MySql(_) => Ok(None),
+        }
     }
 
     /// Description lisible, sans mot de passe.
     pub fn describe(&self) -> String {
         match self {
             StoreConfig::Sqlite(p) => format!("SQLite {}", p.display()),
+            StoreConfig::PortableSqlite => match Self::portable_sqlite_path() {
+                Ok(p) => format!("SQLite portable {}", p.display()),
+                Err(_) => "SQLite portable (dossier de ComicRust)".into(),
+            },
             StoreConfig::MySql(c) => format!("MySQL {}", c.describe()),
         }
     }
@@ -78,9 +110,45 @@ pub fn new_book_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// Nombre de lignes par `REPLACE` multiple en MySQL (moins d'allers-retours réseau ;
-/// 200 × 71 paramètres reste loin de la limite de 65 535).
+/// Nombre maximal de lignes par `REPLACE` multiple en MySQL (moins d'allers-retours
+/// réseau ; 200 × 71 paramètres reste loin de la limite de 65 535).
 const MYSQL_ROWS_PER_STATEMENT: usize = 200;
+
+/// Taille maximale (estimée) des valeurs d'un `REPLACE` multiple en MySQL : 1 Mio, bien
+/// sous le `max_allowed_packet` de 4 Mio des anciens serveurs (MySQL 5.5 / 5.6), en
+/// laissant de la marge pour l'encodage du protocole. Une fiche seule plus grosse part
+/// dans sa propre requête.
+const MYSQL_BYTES_PER_STATEMENT: usize = 1024 * 1024;
+
+/// Taille approximative d'une ligne dans le paquet envoyé au serveur.
+fn row_bytes(row: &[Val]) -> usize {
+    row.iter()
+        .map(|v| match v {
+            Val::Text(t) => t.len() + 9,
+            _ => 9,
+        })
+        .sum()
+}
+
+/// Découpe des lignes en lots d'au plus `max_rows` lignes et `max_bytes` octets estimés
+/// (au moins une ligne par lot).
+fn statement_batches(rows: &[Vec<Val>], max_rows: usize, max_bytes: usize) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let (mut start, mut bytes) = (0, 0);
+    for (i, row) in rows.iter().enumerate() {
+        let n = row_bytes(row);
+        if i > start && (i - start >= max_rows || bytes + n > max_bytes) {
+            out.push(start..i);
+            start = i;
+            bytes = 0;
+        }
+        bytes += n;
+    }
+    if start < rows.len() {
+        out.push(start..rows.len());
+    }
+    out
+}
 
 /// Connexion à la base ComicRust. `Send` : utilisable depuis un fil d'arrière-plan.
 pub struct Store {
@@ -91,11 +159,27 @@ impl Store {
     /// Ouvre la base et crée le schéma s'il est absent (ou le complète / migre).
     pub fn open(cfg: &StoreConfig) -> Result<Store, Error> {
         let mut conn = match cfg {
-            StoreConfig::Sqlite(p) => Conn::open_sqlite(p)?,
             StoreConfig::MySql(c) => Conn::open_mysql(c)?,
+            _ => Conn::open_sqlite(&cfg.sqlite_path()?.unwrap_or_default())?,
         };
         conn.write_tx(schema::ensure)?;
         Ok(Store { conn })
+    }
+
+    /// Ouvre une base **qui doit déjà exister** (démarrage normal, surveillance, fils
+    /// d'arrière-plan — tout sauf l'assistant de premier démarrage, qui utilise
+    /// [`open`](Self::open)) : pour SQLite, refuse un fichier absent (« base ComicRust
+    /// introuvable : … ») au lieu de créer une base vide — dossier de ComicRust déplacé
+    /// avec un chemin fixe, disque non monté… ; le schéma est ensuite complété / migré
+    /// comme par `open`. Pour MySQL, identique à `open` (la base doit exister sur le
+    /// serveur dans les deux cas).
+    pub fn open_existing(cfg: &StoreConfig) -> Result<Store, Error> {
+        if let Some(p) = cfg.sqlite_path()? {
+            if !p.is_file() {
+                return Err(Error::Database(format!("base ComicRust introuvable : {}", p.display())));
+            }
+        }
+        Store::open(cfg)
     }
 
     /// Vérifie l'accès à la base (en créant le schéma si besoin) et renvoie le nombre de livres.
@@ -166,25 +250,156 @@ impl Store {
         if let Some(b) = books.iter().find(|b| b.id.trim().is_empty()) {
             return Err(Error::Database(format!("livre sans identifiant : {}", b.caption())));
         }
-        let mysql = matches!(self.conn, Conn::MySql(_));
         self.conn.write_tx(|conn| {
             let counter = schema::bump(conn, "update_counter")?;
-            if books.is_empty() {
-                return Ok(counter);
-            }
-            let cols = schema::all_columns();
-            let one = format!("({})", vec!["?"; cols.len()].join(","));
-            let head = format!("REPLACE INTO {BOOKS} ({}) VALUES ", schema::column_list());
-            let per = if mysql { MYSQL_ROWS_PER_STATEMENT } else { 1 };
-            let mut params = Vec::with_capacity(cols.len() * per);
-            for chunk in books.chunks(per) {
-                params.clear();
-                for b in chunk {
-                    schema::book_to_row(b, counter, &mut params);
+            let refs: Vec<&LibraryBook> = books.iter().collect();
+            write_rows(conn, &refs, counter, "REPLACE")?;
+            Ok(counter)
+        })
+    }
+
+    /// Applique le rapport d'une analyse ([`scanner::scan`]) par des écritures **ciblées**,
+    /// en une transaction (compteur incrémenté une fois, comme [`upsert`](Self::upsert)) :
+    ///
+    /// - `added` : insérés, sauf si la base contient déjà un livre de même identifiant ou
+    ///   de même fichier (clé [`scanner::path_key`] : sans casse ni différence `\` / `/`) —
+    ///   cas de deux postes qui analysent le même partage, ou d'un lot déjà enregistré par
+    ///   [`scan_into`](Self::scan_into). Ces livres non insérés sont rendus dans `skipped`.
+    /// - `updated` déplacé (`moved`) : seuls `file`, `file_size`, `file_modified_time`,
+    ///   `file_creation_time` sont écrits ;
+    /// - `updated` relu : ces colonnes + `page_count`, et — si la fiche **en base** n'a ni
+    ///   `comic_info_is_dirty` ni `comic_book_is_dirty` — les champs ComicInfo
+    ///   ([`scanner::COMIC_INFO_FIELDS`]) et `pages` ;
+    /// - `updated` et `back` : `missing` à NULL ; `missing` : `missing` à vrai.
+    ///
+    /// Les autres colonnes (lecture : `current_page`, `last_page_read`, `opened`,
+    /// `open_count` ; bibliothèque : `rating`, `checked`, `added`, `book_*`…) gardent la
+    /// valeur **de la base**, même si les fiches du rapport ont été construites à partir
+    /// d'une copie plus ancienne. Un identifiant absent de la base est ignoré.
+    ///
+    /// Rend les fiches écrites, **relues** après écriture (à mettre dans la bibliothèque
+    /// en mémoire, et à signaler au [`StoreWatcher`] avec `counter`).
+    pub fn apply_scan(&mut self, report: &ScanReport) -> Result<StoreWrite, Error> {
+        if let Some(b) = report.added.iter().chain(&report.updated).find(|b| b.id.trim().is_empty()) {
+            return Err(Error::Database(format!("livre sans identifiant : {}", b.caption())));
+        }
+        let moved: HashSet<String> = report.moved.iter().map(|i| i.to_ascii_lowercase()).collect();
+        self.conn.write_tx(|conn| {
+            let counter = schema::bump(conn, "update_counter")?;
+            let c = Val::Int(counter);
+            for u in &report.updated {
+                if moved.contains(&u.id.to_ascii_lowercase()) {
+                    update_columns(conn, u, MOVE_COLUMNS, false, counter, "")?;
+                } else {
+                    update_columns(conn, u, FILE_COLUMNS, false, counter, "")?;
+                    update_columns(conn, u, scanner::COMIC_INFO_FIELDS, true, counter, NOT_DIRTY)?;
                 }
-                let sql = format!("{head}{}", vec![one.as_str(); chunk.len()].join(","));
-                conn.exec(&sql, &params)?;
             }
+            for (ids, sql) in [
+                (&report.missing, "`missing` = 1, `update_counter` = ? WHERE COALESCE(`missing`, 0) = 0 AND"),
+                (&report.back, "`missing` = NULL, `update_counter` = ? WHERE `missing` IS NOT NULL AND"),
+            ] {
+                for chunk in ids.chunks(200) {
+                    let marks = vec!["?"; chunk.len()].join(",");
+                    let mut params = vec![c.clone()];
+                    params.extend(chunk.iter().map(|i| Val::Text(i.clone())));
+                    conn.exec(&format!("UPDATE {BOOKS} SET {sql} `id` IN ({marks})"), &params)?;
+                }
+            }
+            let (insert, skipped) = new_books(conn, &report.added)?;
+            write_rows(conn, &insert, counter, "INSERT")?;
+            let mut books = Vec::new();
+            conn.query_each(
+                &format!("SELECT {} FROM {BOOKS} WHERE `update_counter` = ?", schema::column_list()),
+                &[c],
+                |row| {
+                    books.push(schema::book_from_row(row).0);
+                    Ok(())
+                },
+            )?;
+            Ok(StoreWrite { counter, books, skipped })
+        })
+    }
+
+    /// Analyse les dossiers ([`scanner::scan_batched`]) et enregistre le résultat **au fil
+    /// de l'eau** : les nouveaux livres par lots de [`scanner::ADD_BATCH`] (une
+    /// transaction par lot, voir [`apply_scan`](Self::apply_scan)), puis le reste du
+    /// rapport (mis à jour, manquants, revenus) à la fin. Une fermeture pendant la première
+    /// analyse d'une grosse bibliothèque ne perd donc que le lot en cours ; l'analyse
+    /// suivante reprend là où elle s'est arrêtée (les fichiers enregistrés sont connus).
+    ///
+    /// Rend le rapport complet (pour le résumé et les erreurs) et la liste des écritures
+    /// faites, dans l'ordre (chacune avec son compteur, pour le [`StoreWatcher`]). Si un
+    /// lot échoue, ses livres sont retentés à la fin ; si l'écriture finale échoue,
+    /// l'erreur est rendue (les lots déjà écrits restent en base).
+    pub fn scan_into(
+        &mut self,
+        folders: &[PathBuf],
+        known: &[LibraryBook],
+        progress: &ScanProgress,
+        cancel: &AtomicBool,
+        new_id: impl Fn() -> String + Sync,
+    ) -> Result<(ScanReport, Vec<StoreWrite>), Error> {
+        let mut writes = Vec::new();
+        let mut flushed: HashSet<String> = HashSet::new();
+        let mut failed = false;
+        let mut report = scanner::scan_batched(folders, known, progress, cancel, new_id, |batch| {
+            if failed {
+                return;
+            }
+            let part = ScanReport { added: batch.to_vec(), ..Default::default() };
+            match self.apply_scan(&part) {
+                Ok(w) => {
+                    flushed.extend(batch.iter().map(|b| b.id.clone()));
+                    writes.push(w);
+                }
+                // Base momentanément indisponible : on retentera tout à la fin.
+                Err(_) => failed = true,
+            }
+        });
+        let all = std::mem::take(&mut report.added);
+        report.added = all.iter().filter(|b| !flushed.contains(&b.id)).cloned().collect();
+        let last = self.apply_scan(&report);
+        report.added = all;
+        writes.push(last?);
+        Ok((report, writes))
+    }
+
+    /// Marque des livres comme écrits dans leur fichier (`comic_info_is_dirty` à NULL),
+    /// en une transaction ; rien d'autre ne change. Renvoie le nouveau compteur.
+    pub fn set_comic_info_written(&mut self, ids: &[String]) -> Result<i64, Error> {
+        self.conn.write_tx(|conn| {
+            let counter = schema::bump(conn, "update_counter")?;
+            for chunk in ids.chunks(200) {
+                let marks = vec!["?"; chunk.len()].join(",");
+                let mut params = vec![Val::Int(counter)];
+                params.extend(chunk.iter().map(|i| Val::Text(i.clone())));
+                conn.exec(
+                    &format!(
+                        "UPDATE {BOOKS} SET `comic_info_is_dirty` = NULL, `update_counter` = ? WHERE `id` IN ({marks})"
+                    ),
+                    &params,
+                )?;
+            }
+            Ok(counter)
+        })
+    }
+
+    /// Remplace le fichier d'un livre (après conversion en CBZ…) : colonnes du fichier
+    /// (`file`, `file_size`, dates, `page_count`), champs ComicInfo et `pages` pris dans
+    /// `fresh` (typiquement [`scanner::book_from_file`] du nouveau fichier), `missing` à
+    /// NULL ; tout le reste (lecture, note, `book_*`…) garde la valeur de la base.
+    /// Renvoie le nouveau compteur ; erreur si le livre n'existe pas.
+    pub fn replace_file(&mut self, id: &str, fresh: &LibraryBook) -> Result<i64, Error> {
+        let mut fresh = fresh.clone();
+        fresh.id = id.to_string();
+        self.conn.write_tx(|conn| {
+            let counter = schema::bump(conn, "update_counter")?;
+            let n = update_columns(conn, &fresh, FILE_COLUMNS, false, counter, "")?;
+            if n == 0 {
+                return Err(Error::Database(format!("livre {id} absent de la base")));
+            }
+            update_columns(conn, &fresh, scanner::COMIC_INFO_FIELDS, true, counter, "")?;
             Ok(counter)
         })
     }
@@ -240,22 +455,34 @@ impl Store {
         })
     }
 
-    /// Dossiers de BD surveillés, triés.
+    /// Dossiers de BD surveillés, triés (ordre des octets, le même pour les deux moteurs),
+    /// sans doublon.
     pub fn folders(&mut self) -> Result<Vec<PathBuf>, Error> {
-        let rows = self.conn.query(&format!("SELECT `path` FROM {FOLDERS} ORDER BY `path`"), &[])?;
-        Ok(rows.into_iter().filter_map(|r| r.into_iter().next()?.into_text()).map(PathBuf::from).collect())
+        let rows = self.conn.query(&format!("SELECT `path` FROM {FOLDERS}"), &[])?;
+        let mut paths: Vec<String> = rows.into_iter().filter_map(|r| r.into_iter().next()?.into_text()).collect();
+        paths.sort();
+        paths.dedup();
+        Ok(paths.into_iter().map(PathBuf::from).collect())
     }
 
-    /// Remplace la liste des dossiers surveillés (doublons ignorés).
+    /// Remplace la liste des dossiers surveillés (doublons exacts ignorés ; en MySQL, la
+    /// clé est le SHA-256 du chemin, calculé par le serveur, voir `schema`).
     pub fn set_folders(&mut self, folders: &[PathBuf]) -> Result<(), Error> {
+        let mut seen = HashSet::new();
+        let paths: Vec<String> =
+            folders.iter().map(|f| f.to_string_lossy().into_owned()).filter(|p| seen.insert(p.clone())).collect();
         self.conn.write_tx(|conn| {
             conn.exec(&format!("DELETE FROM {FOLDERS}"), &[])?;
-            let ins = conn.engine().insert_ignore();
-            for f in folders {
-                conn.exec(
-                    &format!("{ins} INTO {FOLDERS} (`path`) VALUES (?)"),
-                    &[Val::Text(f.to_string_lossy().into_owned())],
-                )?;
+            let sql = match conn.engine() {
+                Engine::Sqlite => format!("INSERT OR IGNORE INTO {FOLDERS} (`path`) VALUES (?)"),
+                Engine::MySql => {
+                    format!("INSERT IGNORE INTO {FOLDERS} (`path_hash`, `path`) VALUES (SHA2(?, 256), ?)")
+                }
+            };
+            let mysql = conn.engine() == Engine::MySql;
+            for p in &paths {
+                let v = Val::Text(p.clone());
+                conn.exec(&sql, &if mysql { vec![v.clone(), v] } else { vec![v] })?;
             }
             Ok(())
         })
@@ -316,6 +543,161 @@ impl Store {
             Ok(ch)
         })
     }
+}
+
+/// Résultat d'une écriture ciblée ([`Store::apply_scan`]…).
+#[derive(Debug, Default)]
+pub struct StoreWrite {
+    /// Compteur donné aux lignes écrites (pour [`StoreWatcher::note_written`]).
+    pub counter: i64,
+    /// Fiches écrites, telles qu'elles sont en base après l'écriture.
+    pub books: Vec<LibraryBook>,
+    /// Identifiants des livres de `added` non insérés : déjà présents en base (même
+    /// identifiant ou même fichier).
+    pub skipped: Vec<String>,
+}
+
+/// Colonnes qui décrivent le fichier d'un livre déplacé (contenu identique).
+const MOVE_COLUMNS: &[&str] = &["file", "file_size", "file_modified_time", "file_creation_time"];
+
+/// Colonnes qui décrivent le fichier d'un livre relu.
+const FILE_COLUMNS: &[&str] = &["file", "file_size", "file_modified_time", "file_creation_time", "page_count"];
+
+/// Condition : fiche sans modification en attente d'écriture dans le fichier (comme
+/// `ComicBook.RefreshInfoFromFile` de ComicRack, qui ne relit pas les infos sinon).
+const NOT_DIRTY: &str = "AND COALESCE(`comic_info_is_dirty`, 0) = 0 AND COALESCE(`comic_book_is_dirty`, 0) = 0";
+
+/// `UPDATE` des seules colonnes `cols` (+ `pages` si `with_pages`) de la fiche `b`, avec
+/// `missing` à NULL et `update_counter` = `counter`, pour la ligne `b.id` (+ `cond`).
+/// Renvoie le nombre de lignes touchées.
+fn update_columns(
+    conn: &mut Conn,
+    b: &LibraryBook,
+    cols: &[&str],
+    with_pages: bool,
+    counter: i64,
+    cond: &str,
+) -> Result<u64, Error> {
+    let mut set = Vec::new();
+    let mut params = Vec::new();
+    for (name, v) in schema::field_values(b) {
+        if cols.contains(&name) {
+            set.push(format!("`{name}` = ?"));
+            params.push(v);
+        }
+    }
+    if with_pages {
+        set.push("`pages` = ?".into());
+        params.push(schema::pages_value(b));
+    }
+    params.push(Val::Int(counter));
+    params.push(Val::Text(b.id.clone()));
+    let sql =
+        format!("UPDATE {BOOKS} SET {}, `missing` = NULL, `update_counter` = ? WHERE `id` = ? {cond}", set.join(", "));
+    conn.exec(&sql, &params)
+}
+
+/// Écrit des fiches complètes (`verb` = `REPLACE` ou `INSERT`) avec le compteur `counter`.
+fn write_rows(conn: &mut Conn, books: &[&LibraryBook], counter: i64, verb: &str) -> Result<(), Error> {
+    if books.is_empty() {
+        return Ok(());
+    }
+    let cols = schema::all_columns();
+    let one = format!("({})", vec!["?"; cols.len()].join(","));
+    let head = format!("{verb} INTO {BOOKS} ({}) VALUES ", schema::column_list());
+    if conn.engine() == Engine::Sqlite {
+        let sql = format!("{head}{one}");
+        let mut params = Vec::with_capacity(cols.len());
+        for b in books {
+            params.clear();
+            schema::book_to_row(b, counter, &mut params);
+            conn.exec(&sql, &params)?;
+        }
+        return Ok(());
+    }
+    let rows: Vec<Vec<Val>> = books
+        .iter()
+        .map(|b| {
+            let mut row = Vec::with_capacity(cols.len());
+            schema::book_to_row(b, counter, &mut row);
+            row
+        })
+        .collect();
+    for range in statement_batches(&rows, MYSQL_ROWS_PER_STATEMENT, MYSQL_BYTES_PER_STATEMENT) {
+        let sql = format!("{head}{}", vec![one.as_str(); range.len()].join(","));
+        let params: Vec<Val> = rows[range].iter().flatten().cloned().collect();
+        conn.exec(&sql, &params)?;
+    }
+    Ok(())
+}
+
+/// Sépare les livres `added` à insérer de ceux déjà présents en base (même identifiant,
+/// ou même fichier au sens de [`scanner::path_key`] : sans casse, `\\` = `/`) ou en double
+/// dans la liste.
+///
+/// Recherche des fichiers déjà connus :
+/// - SQLite (base locale) : tous les chemins sont relus (un parcours de table, quelques
+///   dizaines de millisecondes pour 50 000 livres) et comparés par `path_key`, ce qui
+///   traite aussi la casse des lettres accentuées (que `COLLATE NOCASE` ignore) ;
+/// - MySQL : chaque chemin est cherché tel quel et avec les séparateurs `/` et `\\`,
+///   par l'index `file`(191) ; l'interclassement de la colonne (insensible à la casse et
+///   aux accents) ramène les candidats, `path_key` tranche ensuite.
+fn new_books<'a>(conn: &mut Conn, added: &'a [LibraryBook]) -> Result<(Vec<&'a LibraryBook>, Vec<String>), Error> {
+    let mut known_ids: HashSet<String> = HashSet::new();
+    let mut known_keys: HashSet<String> = HashSet::new();
+    if added.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let mysql = conn.engine() == Engine::MySql;
+    if !mysql {
+        conn.query_each(&format!("SELECT `file` FROM {BOOKS} WHERE `file` IS NOT NULL"), &[], |r| {
+            if let Some(f) = r.into_iter().next().and_then(Val::into_text) {
+                known_keys.insert(scanner::path_key(&f));
+            }
+            Ok(())
+        })?;
+    }
+    for chunk in added.chunks(200) {
+        let marks = vec!["?"; chunk.len()].join(",");
+        let ids: Vec<Val> = chunk.iter().map(|b| Val::Text(b.id.clone())).collect();
+        for r in conn.query(&format!("SELECT `id` FROM {BOOKS} WHERE `id` IN ({marks})"), &ids)? {
+            if let Some(id) = r.into_iter().next().and_then(Val::into_text) {
+                known_ids.insert(id.to_ascii_lowercase());
+            }
+        }
+        if !mysql {
+            continue;
+        }
+        let mut files: Vec<Val> = Vec::new();
+        for f in chunk.iter().filter_map(|b| b.file.as_deref()) {
+            for v in [f.to_string(), f.replace('\\', "/"), f.replace('/', "\\")] {
+                let v = Val::Text(v);
+                if !files.contains(&v) {
+                    files.push(v);
+                }
+            }
+        }
+        if files.is_empty() {
+            continue;
+        }
+        let marks = vec!["?"; files.len()].join(",");
+        for r in conn.query(&format!("SELECT `file` FROM {BOOKS} WHERE `file` IN ({marks})"), &files)? {
+            if let Some(f) = r.into_iter().next().and_then(Val::into_text) {
+                known_keys.insert(scanner::path_key(&f));
+            }
+        }
+    }
+    let (mut insert, mut skipped) = (Vec::new(), Vec::new());
+    for b in added {
+        let new_id = known_ids.insert(b.id.to_ascii_lowercase());
+        let new_file = b.file.as_deref().is_none_or(|f| known_keys.insert(scanner::path_key(f)));
+        if new_id && new_file {
+            insert.push(b);
+        } else {
+            skipped.push(b.id.clone());
+        }
+    }
+    Ok((insert, skipped))
 }
 
 fn read_counters(conn: &mut Conn) -> Result<Counters, Error> {
@@ -379,7 +761,8 @@ impl StoreWatcher {
     /// Interroge la base ; `None` si rien n'a changé (hors écritures signalées).
     pub fn poll(&mut self) -> Result<Option<Changes>, Error> {
         if self.store.is_none() {
-            self.store = Some(Store::open(&self.cfg)?);
+            // Jamais de création ici : une base SQLite disparue est une erreur.
+            self.store = Some(Store::open_existing(&self.cfg)?);
         }
         let full = self.last_full.elapsed() >= FULL_CHECK;
         let res = self.store.as_mut().unwrap().changes_since(self.seen, full.then_some(&self.rows));

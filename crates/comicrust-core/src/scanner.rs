@@ -6,7 +6,9 @@
 //! - [`book_from_file`] : fiche d'un fichier (ComicInfo.xml, nombre de pages, taille, dates) ;
 //! - [`scan`] : parcours incrémental de dossiers comparé aux livres déjà connus, qui
 //!   produit un [`ScanReport`] (ajoutés, mis à jour, déplacés, manquants, revenus, erreurs).
-//!   Le module n'écrit rien : c'est l'appelant (le `store`) qui applique le rapport.
+//!   Le module n'écrit rien : c'est l'appelant qui applique le rapport, avec
+//!   [`crate::store::Store::apply_scan`] (écritures ciblées, la lecture en cours est gardée)
+//!   ou [`crate::store::Store::scan_into`] (analyse + enregistrement par lots).
 //!
 //! ## Ce qui est lu dans un fichier
 //!
@@ -82,6 +84,15 @@ pub const SCAN_THREADS: usize = 4;
 /// Sous-dossier où la conversion en CBZ de ComicRust range les originaux (ignoré).
 pub const ORIGINALS_DIR: &str = "_originaux";
 
+/// Sécurité contre un partage partiellement monté : si, sous un dossier choisi, au moins
+/// ce nombre de livres **et** plus de la moitié des livres présents disparaissent d'un
+/// coup, aucun n'est marqué manquant (voir [`scan`]).
+pub const MASS_MISSING_MIN: usize = 20;
+
+/// Nombre de livres ajoutés transmis à la fois au rappel de [`scan_batched`] (le dernier
+/// lot peut être plus petit).
+pub const ADD_BATCH: usize = 200;
+
 /// Taille maximale lue pour un ComicInfo.xml (protection contre une entrée aberrante).
 const MAX_INFO_SIZE: u64 = 8 * 1024 * 1024;
 
@@ -90,8 +101,10 @@ const MAX_INFO_SIZE: u64 = 8 * 1024 * 1024;
 pub struct ScanReport {
     /// Nouveaux livres (fiche complète, identifiant donné par `new_id`).
     pub added: Vec<LibraryBook>,
-    /// Livres connus dont le fichier a changé (relu) ou a été déplacé : fiche complète à
-    /// enregistrer à la place de l'ancienne (même `id`).
+    /// Livres connus dont le fichier a changé (relu) ou a été déplacé (même `id`). Fiche
+    /// complète construite à partir de `known`, qui peut être ancienne : l'enregistrer
+    /// avec [`crate::store::Store::apply_scan`], qui n'écrit que les colonnes venant du
+    /// fichier, et non avec `upsert` (qui écraserait une lecture faite entre-temps).
     pub updated: Vec<LibraryBook>,
     /// Identifiants des livres de `updated` qui ont été retrouvés sous un autre chemin
     /// (même nom de fichier et même taille, ancien fichier absent — comme ComicRack).
@@ -465,6 +478,17 @@ fn is_ignored_name(name: &str) -> bool {
     lower.ends_with(".tmp") || lower.starts_with("._")
 }
 
+/// Dossier technique à ne pas parcourir : nom commençant par `.`, `#`, `@` ou `$`
+/// (corbeilles Samba `.recycle` / `#recycle`, `@eaDir` de Synology, `$RECYCLE.BIN` de
+/// Windows, `.Trash-1000`, `.git`…) et `System Volume Information` (sans casse).
+/// Sans cela, une BD supprimée vers la corbeille du partage serait prise pour un
+/// déplacement (même nom, même taille) au lieu d'être signalée manquante.
+pub fn is_ignored_dir(name: &str) -> bool {
+    name.starts_with(['.', '#', '@', '$'])
+        || name.eq_ignore_ascii_case("System Volume Information")
+        || name.eq_ignore_ascii_case(ORIGINALS_DIR)
+}
+
 /// Résultat du parcours d'un ensemble de dossiers.
 #[derive(Default)]
 struct Walk {
@@ -506,9 +530,18 @@ fn walk(roots: &[PathBuf], progress: &ScanProgress, cancel: &AtomicBool) -> Opti
                 };
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let Ok(ft) = entry.file_type() else { continue };
+                let ft = match entry.file_type() {
+                    Ok(ft) => ft,
+                    Err(e) => {
+                        // Nature inconnue (dossier ou fichier ?) : zone illisible, ses
+                        // livres éventuels ne sont pas déclarés manquants.
+                        w.unreadable.push(path_key(&path.to_string_lossy()));
+                        w.errors.push((path, format!("entrée illisible : {e}")));
+                        continue;
+                    }
+                };
                 if ft.is_dir() {
-                    if !name.eq_ignore_ascii_case(ORIGINALS_DIR) {
+                    if !is_ignored_dir(&name) {
                         stack.push(path);
                     }
                     continue;
@@ -523,6 +556,9 @@ fn walk(roots: &[PathBuf], progress: &ScanProgress, cancel: &AtomicBool) -> Opti
                     Ok(m) if m.is_file() => m,
                     Ok(_) => continue,
                     Err(e) => {
+                        // Comme une entrée illisible : le livre connu à ce chemin n'est
+                        // pas déclaré manquant.
+                        w.unreadable.push(path_key(&path.to_string_lossy()));
                         w.errors.push((path, format!("fichier inaccessible : {e}")));
                         continue;
                     }
@@ -578,7 +614,19 @@ enum Outcome {
 /// - Fichier connu dont la taille ou la date de modification a changé → relu, `updated`
 ///   (fusion par [`refresh_book`]).
 /// - Livre connu situé dans un des dossiers scannés dont le fichier n'est plus là →
-///   `missing` (s'il ne l'était pas déjà). Pas pour un dossier inaccessible.
+///   `missing` (s'il ne l'était pas déjà). Pas pour un dossier inaccessible ni une entrée
+///   illisible (`file_type`/`metadata` en échec).
+/// - Sécurités pour un NAS (partage Samba d'un pool mergerfs) : un point de montage non
+///   monté est **lisible mais vide**, ce qui ferait passer toute la bibliothèque en
+///   « manquante ». Donc, par dossier choisi (le plus précis en cas d'imbrication) :
+///   - aucun fichier trouvé alors que des livres y sont connus → aucun n'est marqué
+///     manquant ni déplacé, erreur « dossier vide : … » dans `errors` ;
+///   - au moins [`MASS_MISSING_MIN`] livres et plus de la moitié des livres présents
+///     disparaîtraient d'un coup → aucun n'est marqué manquant, erreur dans `errors`.
+///     Les déplacements reconnus ne comptent pas comme disparitions (une réorganisation
+///     des dossiers n'est donc pas bloquée). Une vraie suppression massive reste possible
+///     en retirant les livres de la bibliothèque à la main.
+/// - Dossiers techniques ignorés : voir [`is_ignored_dir`] (corbeilles, `@eaDir`…).
 /// - Livre manquant dont le fichier est revenu → `back`.
 /// - Fichier illisible → `errors`, et il **n'est pas ajouté** : ComicRack non plus (son
 ///   scanner avale l'exception levée par l'ouverture de l'archive et passe au suivant) ;
@@ -590,12 +638,31 @@ enum Outcome {
 /// tôt : interrompu pendant le parcours, le rapport est vide ; pendant la lecture, il
 /// contient ce qui a été lu, et les manquants (le parcours étant complet).
 /// `new_id` donne l'identifiant de chaque nouveau livre (appelé depuis les fils de lecture).
+///
+/// Voir aussi [`scan_batched`] pour enregistrer les ajouts au fil de l'eau.
 pub fn scan(
     folders: &[PathBuf],
     known: &[LibraryBook],
     progress: &ScanProgress,
     cancel: &AtomicBool,
     new_id: impl Fn() -> String + Sync,
+) -> ScanReport {
+    scan_batched(folders, known, progress, cancel, new_id, |_| {})
+}
+
+/// Comme [`scan`], mais `on_added` reçoit les nouveaux livres **pendant** la lecture, par
+/// lots d'environ [`ADD_BATCH`] (chaque livre ajouté exactement une fois, le dernier lot
+/// avant le retour). Sert à enregistrer la première analyse d'une grosse bibliothèque
+/// au fil de l'eau : une fermeture en cours de route ne perd que le lot en cours (voir
+/// [`crate::store::Store::scan_into`]). Le rapport rendu contient quand même tous les
+/// ajouts dans `added`. `on_added` est appelé depuis le fil qui appelle cette fonction.
+pub fn scan_batched(
+    folders: &[PathBuf],
+    known: &[LibraryBook],
+    progress: &ScanProgress,
+    cancel: &AtomicBool,
+    new_id: impl Fn() -> String + Sync,
+    mut on_added: impl FnMut(&[LibraryBook]),
 ) -> ScanReport {
     progress.total.store(0, Ordering::Relaxed);
     progress.done.store(0, Ordering::Relaxed);
@@ -641,12 +708,46 @@ pub fn scan(
         }
     }
 
+    // Racine la plus précise contenant une clé (dossiers choisis imbriqués).
+    let root_of = |key: &str| -> Option<usize> {
+        roots.iter().enumerate().filter(|(_, r)| is_under(key, r)).max_by_key(|(_, r)| r.len()).map(|(i, _)| i)
+    };
+    // Livres connus « présents » (non manquants) par racine, avant ce scan.
+    let mut present_before = vec![0usize; roots.len()];
+    for b in known {
+        if let Some(i) = b.file.as_deref().filter(|_| b.missing != Some(true)).and_then(|f| root_of(&path_key(f))) {
+            present_before[i] += 1;
+        }
+    }
+    // Sécurité n° 1 : racine lisible mais vide alors que des livres y sont connus (pool
+    // mergerfs non monté, Samba qui sert le point de montage vide…) → racine « suspecte » :
+    // ses livres ne sont ni manquants ni candidats à un déplacement.
+    let mut suspect = vec![false; roots.len()];
+    for (i, root) in roots.iter().enumerate() {
+        if present_before[i] == 0 || walk.unreadable.iter().any(|d| is_under(root, d)) {
+            continue;
+        }
+        let empty = !walk.found.iter().any(|f| is_under(&f.key, root)) && !walk.busy.iter().any(|k| is_under(k, root));
+        if empty {
+            suspect[i] = true;
+            report.errors.push((
+                folders[i].clone(),
+                format!(
+                    "dossier vide : {} ; {} livres non marqués manquants (partage non monté ?)",
+                    folders[i].display(),
+                    present_before[i]
+                ),
+            ));
+        }
+    }
+    let is_suspect = |key: &str| root_of(key).is_some_and(|i| suspect[i]);
+
     // 2. Déplacements : livre connu non retrouvé, même nom de fichier et même taille.
     let mut gone: HashMap<(String, u64), Vec<&LibraryBook>> = HashMap::new();
     for b in known {
         if let (Some(file), Some(size)) = (b.file.as_deref(), b.file_size) {
             let key = path_key(file);
-            if !seen_ids.contains(b.id.as_str()) && !walk.busy.contains(&key) {
+            if !seen_ids.contains(b.id.as_str()) && !walk.busy.contains(&key) && !is_suspect(&key) {
                 gone.entry((file_name_key(file), size)).or_default().push(b);
             }
         }
@@ -679,6 +780,7 @@ pub fn scan(
     }
 
     // 3. Manquants : connus, dans un dossier scanné lisible, pas retrouvés ni déplacés.
+    let mut candidates: Vec<(Option<usize>, &str)> = Vec::new();
     for b in known {
         let Some(file) = b.file.as_deref() else { continue };
         let key = path_key(file);
@@ -687,26 +789,71 @@ pub fn scan(
             && !claimed.contains(b.id.as_str())
             && !walk.busy.contains(&key)
             && in_scope(&key)
+            && !is_suspect(&key)
             // Original renommé en `.tmp` par ComicRack le temps de l'enregistrer.
             && !providers::is_being_rewritten(Path::new(file))
         {
-            report.missing.push(b.id.clone());
+            candidates.push((root_of(&key), b.id.as_str()));
         }
     }
+    // Sécurité n° 2 : disparition massive sous une racine (partage partiellement monté,
+    // branche mergerfs absente…) → rien n'est marqué manquant pour cette racine.
+    let mut gone_per_root = vec![0usize; roots.len()];
+    for (i, _) in &candidates {
+        if let Some(i) = i {
+            gone_per_root[*i] += 1;
+        }
+    }
+    let blocked: Vec<bool> = (0..roots.len())
+        .map(|i| gone_per_root[i] >= MASS_MISSING_MIN && gone_per_root[i] * 2 > present_before[i])
+        .collect();
+    for (i, root) in folders.iter().enumerate().filter(|(i, _)| blocked[*i]) {
+        report.errors.push((
+            root.clone(),
+            format!(
+                "{} livres sur {} auraient disparu d'un coup sous {} (partage partiellement monté ?) ; \
+                 livres non marqués manquants",
+                gone_per_root[i],
+                present_before[i],
+                root.display()
+            ),
+        ));
+    }
+    report.missing =
+        candidates.into_iter().filter(|(i, _)| !i.is_some_and(|i| blocked[i])).map(|(_, id)| id.to_string()).collect();
 
-    // 4. Lecture des fichiers nouveaux ou modifiés, en parallèle limité.
-    for r in run_jobs(&jobs, progress, cancel, &new_id) {
-        match r {
-            None => report.cancelled = true,
-            Some(Err(e)) => report.errors.push(e),
-            Some(Ok((outcome, warning))) => {
-                report.errors.extend(warning);
-                match outcome {
-                    Outcome::Added(b) => report.added.push(b),
-                    Outcome::Updated(b) => report.updated.push(b),
+    // 4. Lecture des fichiers nouveaux ou modifiés, en parallèle limité, par tranches de
+    //    `ADD_BATCH` fichiers pour transmettre les ajouts au fil de l'eau.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(SCAN_THREADS)
+        .thread_name(|i| format!("comicrust-scan-{i}"))
+        .build()
+        .ok();
+    let mut flushed = 0;
+    for chunk in jobs.chunks(ADD_BATCH) {
+        for r in run_jobs(chunk, pool.as_ref(), progress, cancel, &new_id) {
+            match r {
+                None => report.cancelled = true,
+                Some(Err(e)) => report.errors.push(e),
+                Some(Ok((outcome, warning))) => {
+                    report.errors.extend(warning);
+                    match outcome {
+                        Outcome::Added(b) => report.added.push(b),
+                        Outcome::Updated(b) => report.updated.push(b),
+                    }
                 }
             }
         }
+        if report.added.len() - flushed >= ADD_BATCH {
+            on_added(&report.added[flushed..]);
+            flushed = report.added.len();
+        }
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+    }
+    if report.added.len() > flushed {
+        on_added(&report.added[flushed..]);
     }
     report.cancelled |= cancel.load(Ordering::Relaxed);
     report
@@ -718,6 +865,7 @@ type JobResult = Option<Result<(Outcome, Option<(PathBuf, String)>), (PathBuf, S
 
 fn run_jobs(
     jobs: &[Job],
+    pool: Option<&rayon::ThreadPool>,
     progress: &ScanProgress,
     cancel: &AtomicBool,
     new_id: &(impl Fn() -> String + Sync),
@@ -747,14 +895,10 @@ fn run_jobs(
             })
             .collect()
     };
-    match rayon::ThreadPoolBuilder::new()
-        .num_threads(SCAN_THREADS)
-        .thread_name(|i| format!("comicrust-scan-{i}"))
-        .build()
-    {
-        Ok(pool) => pool.install(work),
+    match pool {
+        Some(pool) => pool.install(work),
         // Création du pool impossible (ressources) : pool global de rayon.
-        Err(_) => work(),
+        None => work(),
     }
 }
 
@@ -1086,6 +1230,126 @@ mod tests {
         let r = run(&[root.to_path_buf()], &known);
         assert!(r.updated.is_empty() && r.missing.is_empty());
         assert!(r.errors.iter().any(|(p, _)| p.ends_with("Bon.cbz")));
+    }
+
+    #[test]
+    fn empty_root_does_not_make_the_library_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("BD");
+        for i in 0..3 {
+            cbz(&root.join(format!("S/Livre {i}.cbz")), 1, None);
+        }
+        let folders = [root.clone()];
+        let known = run(&folders, &[]).added;
+        assert_eq!(known.len(), 3);
+        // Pool mergerfs non monté : le point de montage existe mais il est vide.
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let r = run(&folders, &known);
+        assert!(r.missing.is_empty() && r.updated.is_empty(), "{}", r.summary());
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert_eq!(r.errors[0].0, root);
+        assert!(r.errors[0].1.starts_with("dossier vide : "), "{}", r.errors[0].1);
+        assert!(r.errors[0].1.contains("non marqués manquants"));
+        // Un autre dossier choisi, lui monté, garde son comportement normal.
+        let other = dir.path().join("Autre");
+        cbz(&other.join("Seul.cbz"), 1, None);
+        let mut known2 = known.clone();
+        known2.extend(run(std::slice::from_ref(&other), &[]).added);
+        std::fs::remove_file(other.join("Seul.cbz")).unwrap();
+        cbz(&other.join("Reste.cbz"), 1, None);
+        let r = run(&[root.clone(), other.clone()], &known2);
+        assert_eq!(r.missing.len(), 1, "{}", r.summary());
+        assert!(r.errors.iter().any(|(p, m)| p == &root && m.starts_with("dossier vide")));
+    }
+
+    #[test]
+    fn mass_disappearance_is_not_marked_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("BD");
+        for i in 0..40 {
+            cbz(&root.join(format!("Livre {i:02}.cbz")), 1, None);
+        }
+        let folders = [root.clone()];
+        let known = run(&folders, &[]).added;
+        // 21 sur 40 (≥ 20 et plus de la moitié) : partage partiellement monté supposé.
+        for i in 0..21 {
+            std::fs::remove_file(root.join(format!("Livre {i:02}.cbz"))).unwrap();
+        }
+        let r = run(&folders, &known);
+        assert!(r.missing.is_empty(), "{}", r.summary());
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert!(r.errors[0].1.starts_with("21 livres sur 40"), "{}", r.errors[0].1);
+        // 15 sur 40 : vraies suppressions, marquées manquantes.
+        let dir2 = tempfile::tempdir().unwrap();
+        let root2 = dir2.path().join("BD");
+        for i in 0..40 {
+            cbz(&root2.join(format!("Livre {i:02}.cbz")), 1, None);
+        }
+        let known2 = run(std::slice::from_ref(&root2), &[]).added;
+        for i in 0..15 {
+            std::fs::remove_file(root2.join(format!("Livre {i:02}.cbz"))).unwrap();
+        }
+        let r = run(std::slice::from_ref(&root2), &known2);
+        assert_eq!(r.missing.len(), 15);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        // Réorganisation complète (déplacements) : pas bloquée, ce ne sont pas des disparitions.
+        for i in 15..40 {
+            let from = root2.join(format!("Livre {i:02}.cbz"));
+            let to = root2.join(format!("Rangé/Livre {i:02}.cbz"));
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::rename(from, to).unwrap();
+        }
+        let r = run(std::slice::from_ref(&root2), &known2);
+        assert_eq!(r.moved.len(), 25, "{}", r.summary());
+        assert_eq!(r.missing.len(), 15);
+    }
+
+    #[test]
+    fn technical_and_recycle_folders_are_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("BD");
+        cbz(&root.join("Série/Un.cbz"), 1, None);
+        cbz(&root.join("Série/Deux.cbz"), 2, None);
+        for d in [".recycle", "#recycle", "@eaDir", "$RECYCLE.BIN", "system volume information", "Série/.Trash-1000"] {
+            cbz(&root.join(d).join("Caché.cbz"), 1, None);
+        }
+        let folders = [root.clone()];
+        let r = run(&folders, &[]);
+        assert_eq!(r.added.len(), 2, "{:?}", r.added.iter().map(|b| &b.file).collect::<Vec<_>>());
+        // Supprimé vers la corbeille Samba : manquant, pas « déplacé » dans la corbeille.
+        let known = r.added;
+        let id = by_name(&known, "Un.cbz").id.clone();
+        std::fs::create_dir_all(root.join(".recycle/Série")).unwrap();
+        std::fs::rename(root.join("Série/Un.cbz"), root.join(".recycle/Série/Un.cbz")).unwrap();
+        let r = run(&folders, &known);
+        assert!(r.moved.is_empty() && r.added.is_empty(), "{}", r.summary());
+        assert_eq!(r.missing, [id]);
+        assert!(is_ignored_dir("#recycle") && is_ignored_dir("@eaDir") && is_ignored_dir("$RECYCLE.BIN"));
+        assert!(is_ignored_dir("SYSTEM VOLUME INFORMATION") && is_ignored_dir("_Originaux"));
+        assert!(!is_ignored_dir("Thanos") && !is_ignored_dir("2001 l'odyssée"));
+    }
+
+    /// Entrée dont les métadonnées sont illisibles (lien symbolique cassé, ou fichier
+    /// refusé par Samba) : pas de « manquant » pour le livre connu à ce chemin.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_entry_is_not_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("BD");
+        cbz(&root.join("Un.cbz"), 1, None);
+        cbz(&root.join("Deux.cbz"), 1, None);
+        let folders = [root.clone()];
+        let known = run(&folders, &[]).added;
+        let target = dir.path().join("ailleurs.cbz");
+        cbz(&target, 1, None);
+        std::fs::remove_file(root.join("Deux.cbz")).unwrap();
+        std::os::unix::fs::symlink(&target, root.join("Deux.cbz")).unwrap();
+        std::fs::remove_file(&target).unwrap();
+        let r = run(&folders, &known);
+        assert!(r.missing.is_empty() && r.added.is_empty(), "{}", r.summary());
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert!(r.errors[0].0.ends_with("Deux.cbz") && r.errors[0].1.starts_with("fichier inaccessible"));
     }
 
     #[test]
