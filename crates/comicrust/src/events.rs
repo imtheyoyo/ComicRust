@@ -55,6 +55,10 @@ impl ComicRustApp {
         }
         self.poll_scan();
         self.poll_files();
+        let errs: Vec<String> = std::mem::take(&mut *self.bg_errors.lock().unwrap());
+        if !errs.is_empty() && self.error.is_none() {
+            self.error = Some(errs.join("\n\n"));
+        }
         self.poll_watch();
         // Base ComicRack disponible : une liste résolue sans elle l'est à nouveau, par identifiant.
         if self.library.database().is_some()

@@ -75,6 +75,30 @@ impl MySqlForm {
     }
 }
 
+/// Vérifications des fichiers de ComicRack, faites dans un fil (un chemin réseau
+/// `\\SERVEUR\…` en cours de saisie peut bloquer plusieurs secondes).
+#[derive(Default, Clone)]
+struct Checks {
+    ini: String,
+    comicdb: String,
+    ini_found: bool,
+    db_found: bool,
+    /// Paramètres MySQL lus dans ComicRack.ini (description) ou erreur.
+    ini_cfg: Option<Result<String, String>>,
+    /// ComicDb.xml et Config.xml retrouvés d'après ComicRack.ini.
+    located: (Option<PathBuf>, Option<PathBuf>),
+}
+
+fn run_checks(ini: String, comicdb: String) -> Checks {
+    let ini_p = path_of(&ini);
+    let ini_found = ini_p.as_ref().is_some_and(|p| p.is_file());
+    let ini_cfg =
+        ini_p.as_ref().map(|p| DbConfig::from_comicrack_ini(p).map(|c| c.describe()).map_err(|e| e.to_string()));
+    let located = if ini_found { locate_from_ini(ini_p.as_deref()) } else { (None, None) };
+    let db_found = path_of(&comicdb).is_some_and(|p| p.is_file());
+    Checks { ini, comicdb, ini_found, db_found, ini_cfg, located }
+}
+
 /// Réglages validés par l'assistant (après vérification dans un fil).
 enum Finish {
     Standalone(StoreConfig),
@@ -97,6 +121,11 @@ pub struct SetupWindow {
     use_xml: bool,
     manual_mysql: bool,
     cr_form: MySqlForm,
+    // Vérification des fichiers (dans un fil)
+    checks: Checks,
+    checks_rx: Option<Receiver<Checks>>,
+    /// ComicRack.ini pour lequel ComicDb.xml / Config.xml ont déjà été proposés.
+    located_for: String,
     // Vérification en cours / résultat
     pending: Option<Receiver<Result<(Finish, String), String>>>,
     message: Option<Result<String, String>>,
@@ -184,9 +213,13 @@ impl SetupWindow {
                     && ini.as_deref().is_some_and(|i| DbConfig::from_comicrack_ini(i).is_err())),
             manual_mysql: manual.is_some(),
             cr_form: MySqlForm::new(manual.as_ref()),
+            checks: Checks::default(),
+            checks_rx: None,
+            located_for: String::new(),
             pending: None,
             message: None,
         };
+        w.located_for = w.ini.clone();
         // Dossiers déjà enregistrés dans la base ComicRust (relus dans un fil : MySQL peut tarder).
         if let Some(cfg) = s.store.clone() {
             let (tx, rx) = mpsc::channel();
@@ -216,6 +249,13 @@ impl SetupWindow {
                     Ok(c) => c,
                     Err(e) => return self.message = Some(Err(e)),
                 };
+                // Chemin tapé sans « Ajouter » : ajouté quand même.
+                if let Some(d) = path_of(&self.new_folder) {
+                    if !self.folders.contains(&d) {
+                        self.folders.push(d);
+                    }
+                    self.new_folder.clear();
+                }
                 if self.folders.is_empty() {
                     return self.message = Some(Err("ajoute au moins un dossier de BD".into()));
                 }
@@ -323,6 +363,36 @@ impl ComicRustApp {
                 }
                 w.folders_rx = None;
             }
+        }
+        if let Some(rx) = &w.checks_rx {
+            if let Ok(c) = rx.try_recv() {
+                w.checks_rx = None;
+                // Nouveau ComicRack.ini : ComicDb.xml et Config.xml retrouvés d'après lui, et
+                // pas de ligne « DataSource=mysql » : ComicRack utilise ComicDb.xml.
+                if c.ini == w.ini && c.ini_found && w.located_for != c.ini {
+                    w.located_for = c.ini.clone();
+                    if let Some(db) = &c.located.0 {
+                        w.comicdb = db.display().to_string();
+                    }
+                    if let Some(cf) = &c.located.1 {
+                        w.config = cf.display().to_string();
+                    }
+                    w.use_xml = matches!(c.ini_cfg, Some(Err(_)));
+                }
+                w.checks = c;
+            }
+        }
+        if w.page == Page::ComicRack
+            && w.checks_rx.is_none()
+            && (w.checks.ini != w.ini || w.checks.comicdb != w.comicdb)
+        {
+            let (tx, rx) = mpsc::channel();
+            let (ini, db, c) = (w.ini.clone(), w.comicdb.clone(), ctx.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(run_checks(ini, db));
+                c.request_repaint();
+            });
+            w.checks_rx = Some(rx);
         }
         let mut done: Option<Finish> = None;
         if let Some(rx) = &w.pending {
@@ -459,33 +529,20 @@ impl ComicRustApp {
                     egui::Grid::new("assistant-fichiers").num_columns(1).spacing([0.0, 4.0]).show(ui, |ui| {
                         ui.label(RichText::new("ComicRack.ini (à côté de ComicRack.exe)").strong());
                         ui.end_row();
-                        let before = w.ini.clone();
                         browse_file(ui, &mut w.ini, "ComicRack.ini", ("ComicRack.ini", &["ini"]));
                         ui.end_row();
-                        if w.ini != before {
-                            // Nouveau ComicRack.ini : ComicDb.xml et Config.xml retrouvés d'après lui.
-                            let (db, cfg) = locate_from_ini(path_of(&w.ini).as_deref());
-                            if let Some(db) = db {
-                                w.comicdb = db.display().to_string();
-                            }
-                            if let Some(c) = cfg {
-                                w.config = c.display().to_string();
-                            }
-                            // Pas de ligne « DataSource=mysql » : ComicRack utilise ComicDb.xml.
-                            if let Some(p) = path_of(&w.ini).filter(|p| p.is_file()) {
-                                w.use_xml = DbConfig::from_comicrack_ini(&p).is_err();
-                            }
-                        }
-                        if let Some(p) = path_of(&w.ini) {
-                            status(ui, p.is_file(), if p.is_file() { "trouvé" } else { "introuvable" });
+                        if path_of(&w.ini).is_some() && w.checks.ini == w.ini {
+                            let ok = w.checks.ini_found;
+                            status(ui, ok, if ok { "trouvé" } else { "introuvable" });
                             ui.end_row();
                         }
                         ui.label(RichText::new("ComicDb.xml (bibliothèque et listes)").strong());
                         ui.end_row();
                         browse_file(ui, &mut w.comicdb, "ComicDb.xml", ("ComicDb.xml", &["xml"]));
                         ui.end_row();
-                        if let Some(p) = path_of(&w.comicdb) {
-                            status(ui, p.is_file(), if p.is_file() { "trouvé" } else { "introuvable" });
+                        if path_of(&w.comicdb).is_some() && w.checks.comicdb == w.comicdb {
+                            let ok = w.checks.db_found;
+                            status(ui, ok, if ok { "trouvé" } else { "introuvable" });
                             ui.end_row();
                         }
                         ui.label(RichText::new("Config.xml (réglages de ComicRack)").strong());
@@ -495,7 +552,7 @@ impl ComicRustApp {
                     });
                     ui.add_space(8.0);
                     ui.label(RichText::new("Base de ComicRack").strong());
-                    let ini_cfg = path_of(&w.ini).map(|p| DbConfig::from_comicrack_ini(&p));
+                    let ini_cfg = if w.checks.ini == w.ini { w.checks.ini_cfg.clone() } else { None };
                     ui.radio_value(&mut w.use_xml, false, "MySQL");
                     if !w.use_xml {
                         ui.indent("mysql", |ui| {
@@ -506,9 +563,12 @@ impl ComicRustApp {
                             );
                             if !w.manual_mysql {
                                 match &ini_cfg {
-                                    Some(Ok(c)) => status(ui, true, &c.describe()),
-                                    Some(Err(e)) => status(ui, false, &e.to_string()),
-                                    None => status(ui, false, "ComicRack.ini non indiqué"),
+                                    Some(Ok(c)) => status(ui, true, c),
+                                    Some(Err(e)) => status(ui, false, e),
+                                    None if w.ini.trim().is_empty() => status(ui, false, "ComicRack.ini non indiqué"),
+                                    None => {
+                                        ui.spinner();
+                                    }
                                 }
                             }
                             ui.radio_value(&mut w.manual_mysql, true, "Saisir les paramètres");
@@ -540,7 +600,7 @@ impl ComicRustApp {
                         w.page = Page::Choice;
                         w.message = None;
                     }
-                    let busy = w.pending.is_some();
+                    let busy = w.pending.is_some() || w.folders_rx.is_some();
                     if ui.add_enabled(!busy, egui::Button::new(RichText::new("Terminer").strong())).clicked() {
                         finish = true;
                     }

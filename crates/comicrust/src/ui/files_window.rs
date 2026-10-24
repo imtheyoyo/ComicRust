@@ -135,29 +135,31 @@ impl ComicRustApp {
         if written {
             self.library.apply_info_written(&mut self.settings.info_written);
         }
-        if let (Some(cfg), Some(db), false) = (standalone, self.library.database(), store_updates.is_empty()) {
-            // Fiches modifiées en arrière-plan ; la surveillance de la base les ramène à l'écran.
+        if let (Some(cfg), false) = (standalone, store_updates.is_empty()) {
+            // Fiches modifiées en arrière-plan (colonnes ciblées : la lecture n'est jamais
+            // écrasée) ; la surveillance de la base les ramène à l'écran.
+            let errors = self.bg_errors.clone();
             std::thread::spawn(move || {
-                let mut books = Vec::new();
-                for (id, done) in store_updates {
-                    let Some(existing) = db.get(&id) else { continue };
-                    match done {
-                        Done::Info { .. } => {
-                            let mut b = existing.clone();
-                            b.comic_info_is_dirty = None;
-                            books.push(b);
-                        }
-                        Done::Converted { cbz, .. } => {
-                            match comicrust_core::scanner::book_from_file(&cbz, id.clone()) {
-                                Ok(fresh) => books.push(comicrust_core::scanner::refresh_book(existing, fresh)),
-                                Err(e) => eprintln!("{} : {e}", cbz.display()),
+                let run = || -> Result<(), String> {
+                    let mut st = comicrust_core::store::Store::open_existing(&cfg).map_err(|e| e.to_string())?;
+                    let mut written = Vec::new();
+                    for (id, done) in store_updates {
+                        match done {
+                            Done::Info { .. } => written.push(id),
+                            Done::Converted { cbz, .. } => {
+                                let fresh = comicrust_core::scanner::book_from_file(&cbz, id.clone())
+                                    .map_err(|e| format!("{} : {e}", cbz.display()))?;
+                                st.replace_file(&id, &fresh).map_err(|e| e.to_string())?;
                             }
                         }
                     }
-                }
-                if let Err(e) = comicrust_core::store::Store::open(&cfg).and_then(|mut s| s.upsert(&books).map(|_| ()))
-                {
-                    eprintln!("base ComicRust non mise à jour : {e}");
+                    if !written.is_empty() {
+                        st.set_comic_info_written(&written).map_err(|e| e.to_string())?;
+                    }
+                    Ok(())
+                };
+                if let Err(e) = run() {
+                    errors.lock().unwrap().push(format!("Base ComicRust non mise à jour :\n{e}"));
                 }
             });
         }

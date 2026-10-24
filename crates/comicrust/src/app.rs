@@ -79,6 +79,8 @@ pub struct ComicRustApp {
     /// Analyser les dossiers dès que la bibliothèque est chargée (démarrage, assistant).
     pub(crate) scan_after_load: bool,
     pub(crate) scan_manual: bool,
+    /// Erreurs des écritures faites en arrière-plan (lecture, fiches), affichées ensuite.
+    pub(crate) bg_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl ComicRustApp {
@@ -119,6 +121,7 @@ impl ComicRustApp {
             show_last_scan: false,
             scan_after_load: true,
             scan_manual: false,
+            bg_errors: Default::default(),
         };
         crate::update::cleanup_previous_install();
         if app.settings.library_mode == crate::settings::LibraryMode::Unset {
@@ -438,12 +441,13 @@ impl ComicRustApp {
         if let Some(b) = &mut self.book {
             b.stored = true;
         }
+        let errors = self.bg_errors.clone();
         Some(std::thread::spawn(move || {
             let opened = comicrust_core::scanner::now_iso();
-            if let Err(e) =
-                comicrust_core::store::Store::open(&cfg).and_then(|mut s| s.set_progress(&id, current, last, &opened))
+            if let Err(e) = comicrust_core::store::Store::open_existing(&cfg)
+                .and_then(|mut s| s.set_progress(&id, current, last, &opened))
             {
-                eprintln!("lecture non enregistrée : {e}");
+                errors.lock().unwrap().push(format!("Lecture non enregistrée dans la base ComicRust :\n{e}"));
             }
         }))
     }

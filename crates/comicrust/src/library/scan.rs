@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
 use comicrust_core::db::{Changes, ComicDatabase};
-use comicrust_core::scanner::{self, ScanProgress, ScanReport};
+use comicrust_core::scanner::{ScanProgress, ScanReport};
 use comicrust_core::store::{new_book_id, Store, StoreConfig};
 use eframe::egui;
 
@@ -24,39 +24,6 @@ pub struct ScanJob {
     rx: Receiver<Result<ScanDone, String>>,
 }
 
-/// Applique un rapport d'analyse à la base ; renvoie les fiches écrites.
-fn apply(store: &mut Store, db: &ComicDatabase, report: &ScanReport) -> Result<Changes, String> {
-    let err = |e: comicrust_core::Error| e.to_string();
-    let mut written: Vec<comicrust_core::library::LibraryBook> = Vec::new();
-    written.extend(report.added.iter().cloned());
-    written.extend(report.updated.iter().cloned());
-    // Manquants / revenus : seul l'indicateur change (sauf si la fiche vient d'être relue).
-    let flag = |ids: &[String], missing: bool, written: &mut Vec<_>| {
-        for id in ids {
-            if written.iter().any(|b: &comicrust_core::library::LibraryBook| b.id.eq_ignore_ascii_case(id)) {
-                continue;
-            }
-            if let Some(b) = db.get(id) {
-                let mut b = b.clone();
-                b.missing = missing.then_some(true);
-                written.push(b);
-            }
-        }
-    };
-    flag(&report.missing, true, &mut written);
-    flag(&report.back, false, &mut written);
-    for b in written.iter_mut().filter(|b| report.back.iter().any(|id| id.eq_ignore_ascii_case(&b.id))) {
-        b.missing = None;
-    }
-    if written.is_empty() {
-        return Ok(Changes::default());
-    }
-    let counter = store.upsert(&written).map_err(err)?;
-    let counters = store.counters().map_err(err)?;
-    let rows = written.iter().map(|b| (b.id.to_ascii_lowercase(), counter)).collect();
-    Ok(Changes { updated: written, present: None, counters, rows })
-}
-
 impl ScanJob {
     /// Lance l'analyse des dossiers enregistrés dans la base `cfg`.
     pub fn start(cfg: StoreConfig, db: Arc<ComicDatabase>, ctx: &egui::Context) -> Self {
@@ -68,10 +35,18 @@ impl ScanJob {
             .name("comicrust-analyse".into())
             .spawn(move || {
                 let run = || -> Result<ScanDone, String> {
-                    let mut store = Store::open(&cfg).map_err(|e| e.to_string())?;
+                    let mut store = Store::open_existing(&cfg).map_err(|e| e.to_string())?;
                     let folders = store.folders().map_err(|e| e.to_string())?;
-                    let report = scanner::scan(&folders, &db.books, &p, &c, new_book_id);
-                    let changes = apply(&mut store, &db, &report)?;
+                    // Enregistré au fil de l'eau (lots de 200) ; seules les colonnes venant des
+                    // fichiers sont écrites : une lecture faite pendant l'analyse est gardée.
+                    let (report, writes) =
+                        store.scan_into(&folders, &db.books, &p, &c, new_book_id).map_err(|e| e.to_string())?;
+                    let mut changes =
+                        Changes { counters: store.counters().map_err(|e| e.to_string())?, ..Default::default() };
+                    for w in writes {
+                        changes.rows.extend(w.books.iter().map(|b| (b.id.to_ascii_lowercase(), w.counter)));
+                        changes.updated.extend(w.books);
+                    }
                     Ok(ScanDone { report, changes, folders: folders.len() })
                 };
                 let _ = tx.send(run());

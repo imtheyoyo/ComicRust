@@ -57,7 +57,7 @@ impl LibrarySource {
             LibrarySource::ComicRackMySql(c) => ComicDatabase::load(c, progress).map_err(|e| e.to_string()),
             LibrarySource::ComicRackXml(p) => load_comicdb_xml(p),
             LibrarySource::Standalone(c) => {
-                Store::open(c).and_then(|mut s| s.load(progress)).map_err(|e| e.to_string())
+                Store::open_existing(c).and_then(|mut s| s.load(progress)).map_err(|e| e.to_string())
             }
         }
     }
@@ -225,6 +225,10 @@ impl Default for LibraryState {
 impl LibraryState {
     /// Lance le chargement de la bibliothèque dans un fil.
     pub fn start_loading(&mut self, source: LibrarySource, ctx: &egui::Context) {
+        // Une analyse en cours concerne l'ancienne bibliothèque : arrêtée et oubliée.
+        if let Some(job) = self.scan.take() {
+            job.stop();
+        }
         let (tx, rx) = mpsc::channel();
         let progress = Arc::new(LoadProgress::default());
         let p = progress.clone();
@@ -298,7 +302,10 @@ impl LibraryState {
     /// oubliée). Renvoie `true` si un livre a changé d'état.
     pub fn apply_info_written(&mut self, written: &mut HashMap<String, i64>) -> bool {
         let Status::Loaded(db) = &mut self.status else { return false };
-        written.retain(|id, counter| db.rows.get(id) == Some(counter));
+        // ComicDb.xml (pas de compteurs) : l'entrée reste jusqu'à ce que ComicRack réécrive la fiche.
+        if !db.rows.is_empty() {
+            written.retain(|id, counter| db.rows.get(id) == Some(counter));
+        }
         let to_clear: Vec<String> = written
             .keys()
             .filter(|id| db.get(id).is_some_and(|b| b.comic_info_is_dirty == Some(true)))

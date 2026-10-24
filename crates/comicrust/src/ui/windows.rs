@@ -179,7 +179,7 @@ impl ComicRustApp {
                 ui.label(format!("{} dossier(s) analysé(s).", done.folders));
                 if !done.report.errors.is_empty() {
                     ui.separator();
-                    ui.label(egui::RichText::new("Fichiers non lus").strong());
+                    ui.label(egui::RichText::new("Erreurs et avertissements").strong());
                     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                         for (p, e) in &done.report.errors {
                             ui.label(egui::RichText::new(p.display().to_string()).small());
