@@ -243,6 +243,7 @@ impl LibraryState {
             })
             .expect("fil de chargement de la base");
         self.status = Status::Loading { rx, progress, what: what.clone() };
+        self.forget_view();
         self.source = Some(source);
         self.watcher = None;
         self.last_loaded_from = Some(what);
@@ -254,8 +255,21 @@ impl LibraryState {
         if matches!(self.status, Status::Loaded(_)) {
             self.status = Status::Loaded(Arc::new(db));
             self.generation += 1;
+            // Même bibliothèque relue : la sélection est gardée, seuls les rangs sont oubliés.
+            self.view.clear();
+            self.positions.clear();
             self.view_key = None;
         }
+    }
+
+    /// Vue calculée sur une autre base : les rangs de livres n'y ont plus de sens.
+    fn forget_view(&mut self) {
+        self.view.clear();
+        self.positions.clear();
+        self.view_key = None;
+        self.selected_book = None;
+        self.open_stack = None;
+        self.selected_stack = None;
     }
 
     /// Mode autonome ?
@@ -274,7 +288,7 @@ impl LibraryState {
                     Ok(db) => Status::Loaded(Arc::new(db)),
                     Err(e) => Status::Failed(e),
                 };
-                self.view_key = None;
+                self.forget_view();
                 return matches!(self.status, Status::Loaded(_));
             }
         }
@@ -328,7 +342,13 @@ impl LibraryState {
     /// Nombre de séries (piles) parmi les livres affichés.
     pub fn stacks_shown(&self) -> usize {
         let Some(db) = self.database() else { return 0 };
-        self.view.iter().map(|&i| GroupKey::Series.label(&db.books[i])).collect::<std::collections::HashSet<_>>().len()
+        // `view` peut dater d'une autre base (changement de bibliothèque) : rangs vérifiés.
+        self.view
+            .iter()
+            .filter_map(|&i| db.books.get(i))
+            .map(|b| GroupKey::Series.label(b))
+            .collect::<std::collections::HashSet<_>>()
+            .len()
     }
 
     /// Nombre de livres affichés lors du dernier calcul de la vue.
@@ -540,6 +560,25 @@ mod tests {
             book("e", "Thanos", "1", "Jim Starlin"),
         ]);
         LibraryState { status: Status::Loaded(Arc::new(db)), ..Default::default() }
+    }
+
+    #[test]
+    fn switching_to_an_empty_library_forgets_the_old_view() {
+        let mut s = state();
+        let o = series();
+        assert_eq!(s.view(&o).len(), 5);
+        // Nouvelle bibliothèque vide (assistant → base MySQL neuve).
+        let (tx, rx) = mpsc::channel();
+        s.status = Status::Loading { rx, progress: Default::default(), what: String::new() };
+        tx.send(Ok(ComicDatabase::default())).unwrap();
+        assert!(s.poll());
+        assert_eq!(s.stacks_shown(), 0, "pas de rang périmé");
+        assert_eq!(s.shown(), 0);
+        assert!(s.view(&o).is_empty());
+        let mut s = state();
+        s.view(&o);
+        s.replace(ComicDatabase::default());
+        assert_eq!(s.stacks_shown(), 0);
     }
 
     #[test]

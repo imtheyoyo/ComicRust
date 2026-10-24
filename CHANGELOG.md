@@ -5,6 +5,19 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.7.2] — 2026-10-24
+
+Correctif de la v0.7.1 (recette NO-GO, A-03).
+
+### Corrections
+- **Changement de bibliothèque** (assistant) vers une bibliothèque plus petite, par exemple une
+  base MySQL neuve : ComicRust se fermait. La présentation calculée pour l'ancienne
+  bibliothèque était relue dans la nouvelle. Elle est maintenant oubliée à chaque changement
+  (A-03, cause trouvée grâce au rapport de plantage de la v0.7.1).
+
+### Recette
+[recette/v0.7.2.md](recette/v0.7.2.md) — en cours.
+
 ## [v0.7.1] — 2026-10-24
 
 Correctif de la v0.7.0 (recette : 21/22, A-03).
@@ -21,7 +34,7 @@ Correctif de la v0.7.0 (recette : 21/22, A-03).
   `plantage-<date>.txt`, à joindre au rapport de recette).
 
 ### Recette
-[recette/v0.7.1.md](recette/v0.7.1.md) — en cours.
+[recette/v0.7.1.md](recette/v0.7.1.md) — NO-GO (A-03 : plantage localisé par le nouveau rapport, corrigé en v0.7.2).
 
 ## [v0.7.0] — 2026-10-24
 

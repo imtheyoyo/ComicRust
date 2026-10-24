@@ -1,0 +1,22 @@
+Rapport de recette ComicRust v0.7.1 — 24/10/2026 14:04
+Résultat : 5 OK, 2 échec(s), 1 non testé(s) sur 8.
+Décision proposée : NO-GO (1 bloquant(s) en échec).
+
+ÉCHECS (2)
+- A-03 [Bloquant] Autonome + MySQL → « Terminer » : fermeture.
+  Note : ComicRust s'est fermé de façon inattendue lors de la dernière utilisation.
+         ComicRust v0.7.1 — 2026-10-24 14:00:37
+         Fil : main
+         panicked at crates\comicrust\src\library\mod.rs:331:67:
+         index out of bounds: the len is 0 but the index is 18
+- A-04 [Majeur] Rapport de plantage : même texte (pile d'appels sans symboles).
+
+NON TESTÉS (1) : A-05
+
+ANALYSE (Claude)
+Le rapport de plantage a donné la cause exacte : en passant d'une bibliothèque (4 941 livres) à une
+base MySQL neuve (0 livre), la barre d'état comptait les séries de la vue encore calculée sur
+l'ancienne bibliothèque (rangs 0..4940) dans la nouvelle, vide → accès hors limites dans le fil
+principal. Dans l'atelier, l'ancienne et la nouvelle bibliothèque avaient le même nombre de livres :
+pas de plantage. Corrigé en v0.7.2 (vue oubliée à chaque changement de bibliothèque, rangs
+vérifiés), reproduit puis vérifié : bibliothèque de 13 livres → base MySQL vide, sans plantage.

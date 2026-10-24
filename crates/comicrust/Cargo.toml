@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-comicrust-core = { version = "0.7.1", path = "../comicrust-core" }
+comicrust-core = { version = "0.7.2", path = "../comicrust-core" }
 eframe = { version = "0.37", features = ["persistence"] }
 egui_extras = { version = "0.37", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
