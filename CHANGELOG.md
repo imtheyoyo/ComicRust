@@ -5,6 +5,38 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.7.0] — 2026-10-24
+
+Première étape vers un ComicRust qui peut se passer de ComicRack : assistant de premier
+démarrage et mode autonome.
+
+### Nouveautés
+- **Assistant de premier démarrage** (et menu ⚙ → « Assistant de configuration… ») :
+  - **ComicRust autonome** : sa propre base, en fichier local portable (`data\comicrust.db`,
+    SQLite) ou sur un serveur MySQL / MariaDB (tables `comicrust_…`, qui peuvent partager la
+    base de ComicRack sans la toucher), et un ou plusieurs **dossiers de BD** ;
+  - **avec ComicRack** : `ComicRack.ini` cherché à son emplacement habituel, `ComicDb.xml` et
+    `Config.xml` retrouvés d'après lui ; bibliothèque lue dans la base **MySQL** de ComicRack
+    ou dans son **`ComicDb.xml`** (ComicRack sans MySQL) ; lecture seule (l'écriture viendra
+    en v0.9.0).
+  - Une version précédente déjà reliée à la base MySQL de ComicRack garde ses réglages sans
+    passer par l'assistant.
+- **Analyse des dossiers de BD** (mode autonome, au démarrage et bouton « 🔍 Analyser les
+  dossiers ») : nouveaux fichiers ajoutés avec les infos de leur `ComicInfo.xml`, fichiers
+  modifiés relus, fichiers déplacés suivis, fichiers disparus marqués « manquants » ; bilan
+  avec les fichiers illisibles. Les ajouts sont enregistrés au fil de l'analyse.
+  - Un dossier vide (partage du NAS non monté) ou une disparition massive ne marque aucun
+    livre manquant ; la corbeille du NAS (`.recycle`, `#recycle`, `@eaDir`, `$RECYCLE.BIN`…)
+    et `_originaux` sont ignorés.
+- **Lecture enregistrée dans la base de ComicRust** (mode autonome) : page, dernière page lue,
+  date et nombre d'ouvertures, à la fermeture du livre ou de ComicRust.
+- Bibliothèque `ComicDb.xml` relue automatiquement quand ComicRack l'enregistre.
+- Écrire les infos dans les CBZ et convertir en CBZ fonctionnent avec les trois bibliothèques ;
+  en mode autonome, la fiche du livre est mise à jour (sans toucher à sa lecture).
+
+### Recette
+[recette/v0.7.0.md](recette/v0.7.0.md) — en cours.
+
 ## [v0.6.0] — 2026-10-22
 
 Piste « Fichiers BD » : ComicRust peut modifier des fichiers BD ; la base ComicRack reste en

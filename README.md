@@ -20,10 +20,23 @@ dossier doit donc être accessible en écriture : éviter `C:\Program Files`). C
 suffit pour emporter ComicRust et ses réglages. Les réglages d'une version précédente
 (`%APPDATA%\ComicRust`) sont repris au premier lancement.
 
+## Premier démarrage : autonome ou avec ComicRack
+
+Au premier lancement, un assistant (aussi dans le menu ⚙) propose :
+
+- **ComicRust autonome** : sa propre base — fichier local portable `data\comicrust.db`
+  (SQLite) ou serveur MySQL / MariaDB (tables `comicrust_…`) — et un ou plusieurs dossiers
+  de BD, analysés au démarrage (« 🔍 Analyser les dossiers ») : nouveaux fichiers ajoutés
+  d'après leur `ComicInfo.xml`, fichiers modifiés relus, disparus marqués manquants. La
+  lecture (page, date) est enregistrée dans cette base.
+- **Avec ComicRack** : `ComicRack.ini`, `ComicDb.xml` et `Config.xml` retrouvés
+  automatiquement ; bibliothèque lue dans la base MySQL de ComicRack ou dans son
+  `ComicDb.xml`, en lecture seule (détails ci-dessous).
+
 ## Bibliothèque (base MySQL de ComicRack)
 
 ComicRust lit la base **MySQL** de ComicRack CE, **en lecture seule** (uniquement des `SELECT`) :
-menu ⚙ → *Base ComicRack (MySQL)…*, puis soit choisir le `ComicRack.ini` (ligne
+assistant de configuration (menu ⚙), puis soit choisir le `ComicRack.ini` (ligne
 `DataSource=mysql:Server=…; Port=…; Uid=…; Pwd=…; Database=…;`, relue à chaque connexion — le
 mot de passe n'est pas recopié dans ComicRust), soit saisir les paramètres. *Tester la
 connexion* affiche le nombre de livres.
@@ -148,7 +161,7 @@ comicrust-cli missing "F:\BD" Thanos.cbl            # ou un ComicDB.xml à la pl
 
 | Crate | Rôle |
 |---|---|
-| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, écriture dans les fichiers (`writer`), listes `.cbl`, `ComicDB.xml` et ses listes (`comic_lists`), listes intelligentes (`smart`), index de fichiers, base MySQL et suivi des modifications (`db/`) |
+| `comicrust-core` | formats (`providers/`), `ComicInfo.xml`, écriture dans les fichiers (`writer`), base propre (`store`), analyse des dossiers (`scanner`), listes `.cbl`, `ComicDB.xml` et ses listes (`comic_lists`), listes intelligentes (`smart`), index de fichiers, base MySQL et suivi des modifications (`db/`) |
 | `comicrust` | l'application `ComicRust.exe` (egui) : `app`, `book/`, `library/`, `reading_list`, `update/`, `ui/`… |
 | `comicrust-cli` | outil en ligne de commande |
 
@@ -161,7 +174,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.6.0](recette/v0.6.0.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.7.0](recette/v0.7.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -199,10 +212,13 @@ journal dans les releases déjà publiées.
 3. ~~**Listes intelligentes** calculées par ComicRust, thème clair/sombre, choix de la page
    de reprise~~ (v0.5.0).
 4. ~~Écriture de `ComicInfo.xml`, conversion CBR→CBZ, HEIF/AVIF, scrapers WebComic~~ (v0.6.0).
-5. Associations de fichiers Windows, serveur HTTP/OPDS, scripts ; plus tard, un **mode
-   serveur sous Docker** (bibliothèque et lecture depuis un navigateur ou une application OPDS).
-6. Version majeure : **enregistrer la lecture dans ComicRack** (page lue, « lu ») — ComicRust
-   cessera alors d'être en lecture seule.
+5. ~~Premier démarrage : ComicRust autonome (base SQLite ou MySQL, dossiers de BD) ou avec
+   ComicRack (MySQL ou ComicDb.xml)~~ (v0.7.0).
+6. Transfert de la base ComicRack vers la base de ComicRust (v0.8.0).
+7. Gestion complète des listes ; écriture dans la base de ComicRack (v0.9.0).
+8. Scripts Python (v0.10.0), serveur OPDS / HTTP (v0.11.0) ; plus tard, associations de
+   fichiers Windows et un **mode serveur sous Docker**.
+
 
 ## Licences
 
