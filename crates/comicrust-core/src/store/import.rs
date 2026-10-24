@@ -21,7 +21,27 @@
 //!      l'identifiant de ComicRack), sa lecture étant fusionnée de la même façon ; compté
 //!      dans `books_replaced`. Un livre de la base dont l'identifiant existe aussi dans
 //!      ComicRack n'est jamais supprimé de cette façon (doublons de fichier dans ComicRack) ;
-//!    - les livres de la base absents de ComicRack ne sont pas touchés.
+//!    - les livres de la base absents de ComicRack ne sont pas touchés ;
+//!    - livre de même identifiant dont le **fichier a changé dans ComicRust** depuis le
+//!      transfert précédent (conversion CBR → CBZ, déplacement) : si le fichier de la base
+//!      existe et que celui de ComicRack n'existe plus, les colonnes « fichier » de la base
+//!      sont gardées (`file`, `file_size`, `file_modified_time`, `file_creation_time`,
+//!      `page_count`, `pages`) ; compté dans `files_kept` (avertissement récapitulatif).
+//!
+//!    **Chemins d'un même partage écrits autrement** (`Z:\BD\…` et `\\SERVEURNAS\BD\…`,
+//!    ou lien symbolique) : avant tout, la liste finale des dossiers surveillés est établie
+//!    (ceux de la base, plus ceux de ComicRack avec [`ImportOptions::folders`]). Une fiche
+//!    dont le fichier n'est sous aucun de ces dossiers (comparaison de [`scanner::path_key`])
+//!    voit ses dossiers parents comparés **physiquement** aux dossiers surveillés (crate
+//!    `same-file` : volume + index de fichier sous Windows, périphérique + inode ailleurs ;
+//!    une fois par dossier, résultat mis en cache ; dossier inexistant = différent). Si un
+//!    parent `A` est le dossier surveillé `W`, le chemin devient `W` + la suite relative à
+//!    `A` (séparateur `\` gardé pour un chemin Windows) : l'analyse de ComicRust
+//!    reconnaît alors le fichier, et le remplacement « même fichier » fonctionne. Seules
+//!    les copies en mémoire sont modifiées (jamais ComicRack) ; compté dans
+//!    `paths_rewritten`, un avertissement par correspondance `A → W`. Les fiches restées
+//!    hors de tout dossier surveillé font l'objet d'un avertissement (elles ne seront pas
+//!    suivies par l'analyse).
 //!
 //!    Chaque lot incrémente `update_counter` (et `delete_counter` s'il a supprimé des
 //!    livres remplacés), comme toute écriture : un autre ComicRust connecté à la même base
@@ -38,6 +58,10 @@
 //!    réécrire tout le bloc). [`Store::comic_lists`] reconstruit le document et le relit
 //!    avec [`parse_comic_lists`] ; [`Store::comic_lists_xml`] rend le document lui-même.
 //!
+//!    Liste sans `Id` ou dont l'`Id` est déjà pris : identifiant **calculé** (UUID v5 de
+//!    parent, position, nom et rang d'occurrence), le même à chaque transfert du même
+//!    `ComicDb.xml` (avertissement) ; le XML garde l'original.
+//!
 //!    Transfert relancé : les listes de même identifiant sont remplacées ; les listes de
 //!    la base absentes de ComicRack (créées dans ComicRust) sont gardées, placées après
 //!    celles de ComicRack dans leur dossier (au premier niveau si leur dossier a disparu).
@@ -45,7 +69,8 @@
 //!
 //! 3. **Dossiers** — [`read_watch_folders`] lit `<WatchFolders>` ; avec
 //!    [`ImportOptions::folders`], ils sont ajoutés aux dossiers de la base (sans doublon au
-//!    sens de `path_key`). Tous les dossiers sont repris, `Watch="false"` compris :
+//!    sens de `path_key`, ni dossier physiquement identique à un dossier déjà présent :
+//!    avertissement « dossier X déjà présent sous la forme Y »). Tous les dossiers sont repris, `Watch="false"` compris :
 //!    ComicRack les analyse tous (`MainForm` : `ScanFilesOrFolders(WatchFolders.Folders…)`),
 //!    `Watch` ne règle que la surveillance en direct.
 //!
@@ -61,14 +86,30 @@
 //! Une lecture faite dans ComicRust depuis le premier transfert est donc conservée ; une
 //! lecture faite ensuite dans ComicRack aussi. Limite : « marquer comme non lu » dans
 //! ComicRust (pages remises à zéro) est annulé par un nouveau transfert si ComicRack a la
-//! lecture. Tous les autres champs (note, `checked`, `book_*`, pages…) viennent de ComicRack.
+//! lecture. Tous les autres champs (note, `checked`, `book_*`, pages…) viennent de ComicRack
+//! (sauf les colonnes « fichier » gardées, voir plus haut).
+//!
+//! ## Ce qui est repris de chaque fiche, et ce qui ne l'est pas
+//!
+//! Repris : tous les champs de [`LibraryBook`], dont les éléments propres à la
+//! bibliothèque `CustomValuesStore`, `CustomThumbnailKey`, `LastOpenedFromListId`,
+//! `NewPages`, et pour chaque page tous les attributs de `ComicPageInfo` (`Image`, `Type`,
+//! `Bookmark` — signets —, `ImageSize`, `ImageWidth`, `ImageHeight`, `Rotation`,
+//! `PagePosition`, `Key`), en texte brut.
+//!
+//! Non repris : `ColorAdjustment` (réglages de couleur par livre, élément complexe que
+//! ComicRust n'applique pas), les éléments de fiche que [`LibraryBook`] ne modélise pas
+//! (ignorés à la lecture, par exemple `EnableDynamicUpdate`), et le reste de `ComicDb.xml`
+//! hors livres, listes et dossiers.
 
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use same_file::Handle;
 
 use super::conn::{Conn, Val};
 use super::schema::{self, BOOKS, LISTS};
@@ -129,6 +170,13 @@ pub struct ImportReport {
     pub books_updated: usize,
     /// Fiches ComicRack écartées (sans identifiant, ou identifiant en double).
     pub books_skipped: usize,
+    /// Chemins de fichiers de ComicRack réécrits sous un dossier surveillé qui est
+    /// physiquement le même dossier (`Z:\BD\…` → `\\SERVEURNAS\BD\…`, voir le module).
+    pub paths_rewritten: usize,
+    /// Livres de même identifiant dont le fichier de la base est gardé : converti ou
+    /// déplacé dans ComicRust depuis le transfert précédent (celui de ComicRack n'existe
+    /// plus, celui de la base existe).
+    pub files_kept: usize,
     /// Nombre de listes enregistrées (tous niveaux : dossiers et leurs listes compris).
     pub lists: usize,
     /// Dossiers **ajoutés** à ceux de la base.
@@ -211,9 +259,28 @@ pub(crate) struct ListRow {
     pub xml: String,
 }
 
+/// Espace de noms des identifiants de liste calculés ([`stable_list_id`], UUID v5).
+const LIST_ID_NAMESPACE: uuid::Uuid = uuid::Uuid::from_u128(0x8c1f_4a52_6d3e_4b0a_9e57_c0b1_c5a7_0001);
+
+/// Identifiant **stable** d'une liste sans identifiant (ou dont l'identifiant est déjà
+/// pris) : UUID v5 de (parent, position, nom, rang d'occurrence). Le même `ComicDb.xml`
+/// donne donc les mêmes identifiants à chaque transfert (sinon un transfert relancé
+/// ajouterait une copie de ces listes). Le rang d'occurrence départage deux calculs
+/// identiques (identifiant déjà vu).
+fn stable_list_id(parent: Option<&str>, position: i64, name: &str, seen: &HashSet<String>) -> String {
+    (0u32..)
+        .map(|n| {
+            let key = format!("{}\u{1f}{position}\u{1f}{name}\u{1f}{n}", parent.unwrap_or(""));
+            uuid::Uuid::new_v5(&LIST_ID_NAMESPACE, key.as_bytes()).to_string()
+        })
+        .find(|id| !seen.contains(id))
+        .unwrap_or_default()
+}
+
 /// Découpe `<ComicLists>` d'un `ComicDb.xml` en lignes (une par `<Item>`, tous niveaux).
-/// Identifiant absent ou en double : remplacé par un nouveau GUID **pour la ligne**
-/// seulement (le XML garde l'original), avec un avertissement.
+/// Identifiant absent ou en double : remplacé par un identifiant calculé, stable d'un
+/// transfert à l'autre ([`stable_list_id`]), **pour la ligne** seulement (le XML garde
+/// l'original), avec un avertissement.
 pub(crate) fn split_lists(comicdb_xml: &str, warnings: &mut Vec<String>) -> Result<Vec<ListRow>, Error> {
     let text = comicdb_xml.trim_start_matches('\u{feff}');
     let mut r = Reader::from_str(text);
@@ -291,7 +358,7 @@ impl Splitter<'_, '_> {
         let kind = attr(e, b"xsi:type").unwrap_or_default();
         let mut id = attr(e, b"Id").unwrap_or_default().trim().to_ascii_lowercase();
         if id.is_empty() || !self.seen.insert(id.clone()) {
-            let new = super::new_book_id();
+            let new = stable_list_id(parent, position, &name, self.seen);
             self.warnings.push(format!(
                 "liste « {name} » : identifiant {} — enregistrée sous {new}",
                 if id.is_empty() { "absent".to_string() } else { format!("{id} en double") }
@@ -421,6 +488,172 @@ pub(crate) fn assemble_lists(rows: &[ListRow]) -> String {
     children.get(&None).map(|top| top.iter().map(|r| render(r, &children, &mut visiting)).collect()).unwrap_or_default()
 }
 
+/// Séparateur de chemin (Windows ou Unix).
+fn is_sep(c: char) -> bool {
+    c == '/' || c == '\\'
+}
+
+/// Dossier parent d'un chemin, **sur le texte** (le chemin peut être un chemin Windows
+/// lu sous un autre système) : `Z:\BD\x.cbz` → `Z:\BD` → `Z:\` → aucun ;
+/// `/srv/bd` → `/srv` → `/` → aucun ; `\\NAS\BD\x` → `\\NAS\BD` → `\\NAS` → `\\` → aucun.
+pub(crate) fn parent_dir(p: &str) -> Option<String> {
+    let t = p.trim_end_matches(is_sep);
+    let i = t.rfind(is_sep)?;
+    let head = &t[..i];
+    // Racine (`/`, `Z:\`, `\\`) : on garde le séparateur.
+    let parent = if head.is_empty() || head.ends_with(':') || head.chars().all(is_sep) { &t[..=i] } else { head };
+    (parent != p).then(|| parent.to_string())
+}
+
+/// `rest` (chemin relatif, tiré de `orig`) placé sous le dossier `dir` ; séparateur
+/// ajouté : `\` si le chemin d'origine est un chemin Windows, `/` sinon.
+pub(crate) fn join_under(dir: &str, rest: &str, orig: &str) -> String {
+    let rest = rest.trim_start_matches(is_sep);
+    let base = dir.trim_end_matches(is_sep);
+    if rest.is_empty() {
+        return dir.to_string();
+    }
+    if base.is_empty() {
+        // `dir` est la racine `/` (ou `\`).
+        return format!("{dir}{rest}");
+    }
+    let sep = if orig.contains('\\') { '\\' } else { '/' };
+    format!("{base}{sep}{rest}")
+}
+
+/// Dossiers de ComicRack à ajouter à ceux de la base (`existing`) : sans doublon au sens
+/// de `path_key`, ni dossier **physiquement identique** à un dossier déjà présent ou déjà
+/// retenu (`Z:\BD` et `\\SERVEURNAS\BD` : avertissement « déjà présent sous la forme… »).
+fn plan_folders(existing: &[PathBuf], from_cr: Vec<PathBuf>, warnings: &mut Vec<String>) -> Vec<PathBuf> {
+    let mut keys: HashSet<String> = existing.iter().map(|f| scanner::path_key(&f.to_string_lossy())).collect();
+    // Identités ouvertes au premier besoin (accès disque, éventuellement réseau).
+    let mut known: Vec<(PathBuf, Option<Option<Handle>>)> = existing.iter().map(|f| (f.clone(), None)).collect();
+    let mut added = Vec::new();
+    for f in from_cr {
+        if !keys.insert(scanner::path_key(&f.to_string_lossy())) {
+            continue;
+        }
+        let me = Handle::from_path(&f).ok();
+        let twin = me.as_ref().and_then(|me| {
+            known.iter_mut().find_map(|(k, h)| {
+                let h = h.get_or_insert_with(|| Handle::from_path(&*k).ok());
+                (h.as_ref() == Some(me)).then(|| k.clone())
+            })
+        });
+        if let Some(twin) = twin {
+            warnings.push(format!("dossier {} déjà présent sous la forme {}", f.display(), twin.display()));
+            continue;
+        }
+        known.push((f.clone(), Some(me)));
+        added.push(f);
+    }
+    added
+}
+
+/// Un dossier surveillé, pour [`rewrite_paths`].
+struct Watched {
+    text: String,
+    key: String,
+}
+
+/// Recherche, pour un dossier (texte), de l'ancêtre (lui compris) physiquement identique
+/// à un dossier surveillé ; résultats mis en cache par dossier (texte) pour n'interroger
+/// le disque qu'une fois par dossier (5 000 livres sur un NAS).
+struct Resolver<'a> {
+    watched: &'a [Watched],
+    /// Identités des dossiers surveillés (ouvertes au premier besoin ; `None` : inaccessible).
+    handles: Option<Vec<Option<Handle>>>,
+    /// Dossier → (ancêtre identique à un dossier surveillé, rang de ce dossier).
+    cache: HashMap<String, Option<(String, usize)>>,
+}
+
+impl Resolver<'_> {
+    /// Rang du dossier surveillé physiquement identique à `dir` (inexistant : aucun).
+    fn same_as_watched(&mut self, dir: &str) -> Option<usize> {
+        let watched = self.watched;
+        let handles =
+            self.handles.get_or_insert_with(|| watched.iter().map(|w| Handle::from_path(&w.text).ok()).collect());
+        if handles.iter().all(Option::is_none) {
+            return None;
+        }
+        let h = Handle::from_path(dir).ok()?;
+        handles.iter().position(|w| w.as_ref() == Some(&h))
+    }
+
+    fn resolve(&mut self, dir: &str) -> Option<(String, usize)> {
+        let mut chain: Vec<String> = Vec::new();
+        let mut cur = Some(dir.to_string());
+        let mut found = None;
+        while let Some(d) = cur {
+            if let Some(r) = self.cache.get(&d) {
+                found = r.clone();
+                break;
+            }
+            if let Some(i) = self.same_as_watched(&d) {
+                found = Some((d.clone(), i));
+                chain.push(d);
+                break;
+            }
+            cur = parent_dir(&d);
+            chain.push(d);
+        }
+        for d in chain {
+            self.cache.insert(d, found.clone());
+        }
+        found
+    }
+}
+
+/// Réécrit (copies en mémoire seulement) les chemins des fiches qui ne sont sous aucun
+/// dossier surveillé mais dont un dossier parent est physiquement un dossier surveillé
+/// (voir le module). Renvoie le nombre de chemins réécrits ; avertissements ajoutés.
+fn rewrite_paths(books: &mut [Cow<'_, LibraryBook>], watched: &[PathBuf], warnings: &mut Vec<String>) -> usize {
+    let watched: Vec<Watched> = watched
+        .iter()
+        .map(|w| {
+            let text = w.to_string_lossy().into_owned();
+            Watched { key: scanner::path_key(&text), text }
+        })
+        .collect();
+    let mut resolver = Resolver { watched: &watched, handles: None, cache: HashMap::new() };
+    // (ancêtre, dossier surveillé) → nombre de chemins réécrits ; ordre stable.
+    let mut rewrites: BTreeMap<(String, usize), usize> = BTreeMap::new();
+    let mut outside = 0usize;
+    let mut example: Option<String> = None;
+    for b in books.iter_mut() {
+        let Some(file) = b.file.as_deref() else { continue };
+        let key = scanner::path_key(file);
+        if watched.iter().any(|w| scanner::is_under(&key, &w.key)) {
+            continue;
+        }
+        let file = file.to_string();
+        let found = if watched.is_empty() { None } else { parent_dir(&file).and_then(|d| resolver.resolve(&d)) };
+        match found {
+            Some((a, i)) => {
+                let new = join_under(&watched[i].text, &file[a.len()..], &file);
+                b.to_mut().file = Some(new);
+                *rewrites.entry((a, i)).or_default() += 1;
+            }
+            None => {
+                outside += 1;
+                example.get_or_insert(file);
+            }
+        }
+    }
+    let mut total = 0;
+    for ((a, i), n) in rewrites {
+        let w = &watched[i].text;
+        warnings.push(format!("{n} chemins de ComicRack réécrits sous le dossier surveillé {w} ({a} → {w})"));
+        total += n;
+    }
+    if let Some(ex) = example {
+        warnings.push(format!(
+            "{outside} livres de ComicRack hors de tout dossier surveillé (ex. {ex}) : ils ne seront pas suivis par l'analyse"
+        ));
+    }
+    total
+}
+
 /// Lecture (`current_page`, `last_page_read`, `opened`, `open_count`) d'une fiche en base.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Reading {
@@ -506,6 +739,8 @@ struct BatchCounts {
     added: usize,
     replaced: usize,
     updated: usize,
+    /// Livres de même identifiant dont le fichier de la base est gardé.
+    kept: usize,
     /// Identifiants (minuscules) supprimés car remplacés.
     deleted: Vec<String>,
 }
@@ -534,7 +769,7 @@ impl Store {
 
         // Fiches valides, sans doublon d'identifiant (la première est gardée).
         let mut cr_ids: HashSet<String> = HashSet::new();
-        let mut books: Vec<&LibraryBook> = Vec::with_capacity(src.books.len());
+        let mut books: Vec<Cow<'_, LibraryBook>> = Vec::with_capacity(src.books.len());
         for b in &src.books {
             if b.id.trim().is_empty() {
                 report.books_skipped += 1;
@@ -543,9 +778,24 @@ impl Store {
                 report.books_skipped += 1;
                 report.warnings.push(format!("identifiant {} en double, fiche écartée : {}", b.id, b.caption()));
             } else {
-                books.push(b);
+                books.push(Cow::Borrowed(b));
             }
         }
+
+        // Dossiers surveillés après le transfert (ceux de la base, plus ceux de ComicRack
+        // si demandé ; enregistrés à la fin), puis chemins de ComicRack ramenés sous ces
+        // dossiers quand ils y sont physiquement (`Z:\BD` = `\\SERVEURNAS\BD`), avant la
+        // recherche des fichiers déjà en base : remplacement et fusion en tiennent compte.
+        let xml = src.comicdb_xml.as_deref();
+        let existing = self.folders()?;
+        let new_folders = match (opts.folders, xml) {
+            (true, Some(xml)) => plan_folders(&existing, read_watch_folders(xml), &mut report.warnings),
+            _ => Vec::new(),
+        };
+        let watched: Vec<PathBuf> = existing.iter().chain(&new_folders).cloned().collect();
+        report.paths_rewritten = rewrite_paths(&mut books, &watched, &mut report.warnings);
+        let books: Vec<&LibraryBook> = books.iter().map(|b| b.as_ref()).collect();
+
         if let Some(p) = progress {
             p.total.store(books.len(), Ordering::Relaxed);
             p.done.store(0, Ordering::Relaxed);
@@ -573,6 +823,7 @@ impl Store {
             report.books_added += counts.added;
             report.books_replaced += counts.replaced;
             report.books_updated += counts.updated;
+            report.files_kept += counts.kept;
             if !counts.deleted.is_empty() {
                 let gone: HashSet<&String> = counts.deleted.iter().collect();
                 for v in by_path.values_mut() {
@@ -583,12 +834,18 @@ impl Store {
                 p.done.fetch_add(chunk.len(), Ordering::Relaxed);
             }
         }
+        if report.files_kept > 0 {
+            report.warnings.push(format!(
+                "{} livres gardent leur fichier de ComicRust (converti ou déplacé depuis le transfert précédent : \
+                 le fichier indiqué par ComicRack n'existe plus)",
+                report.files_kept
+            ));
+        }
         if cancelled() {
             report.cancelled = true;
             return Ok(report);
         }
 
-        let xml = src.comicdb_xml.as_deref();
         if xml.is_none() && (opts.lists || opts.folders) {
             report.warnings.push("ComicDb.xml absent : ni listes ni dossiers transférés".into());
         }
@@ -601,20 +858,17 @@ impl Store {
                 Err(e) => report.warnings.push(format!("listes non transférées : {e}")),
             }
         }
-        if let (true, Some(xml)) = (opts.folders, xml) {
-            let mut current = self.folders()?;
-            let mut keys: HashSet<String> = current.iter().map(|f| scanner::path_key(&f.to_string_lossy())).collect();
-            for f in read_watch_folders(xml) {
-                if keys.insert(scanner::path_key(&f.to_string_lossy())) {
-                    report.folders.push(f);
-                }
-            }
-            if !report.folders.is_empty() {
-                current.extend(report.folders.iter().cloned());
-                self.set_folders(&current)?;
-            }
+        if !new_folders.is_empty() {
+            self.set_folders(&watched)?;
+            report.folders = new_folders;
         }
         Ok(report)
+    }
+
+    /// Compteur des modifications de listes (`lists_counter`) : change à chaque transfert
+    /// (et, à partir de la v0.9.0, à chaque modification de liste). Sert à la surveillance.
+    pub fn lists_counter(&mut self) -> Result<i64, Error> {
+        schema::meta_int(&mut self.conn, "lists_counter")
     }
 
     /// Listes enregistrées dans la base (transférées de ComicRack ou, à partir de la
@@ -722,8 +976,37 @@ fn import_batch(
     let mut counts = BatchCounts::default();
 
     let ids: Vec<String> = chunk.iter().map(|b| b.id.clone()).collect();
-    let same_id: HashMap<String, Reading> =
-        readings_by_id(conn, &ids)?.into_iter().map(|(id, _, r)| (id.to_ascii_lowercase(), r)).collect();
+    let mut same_id: HashMap<String, Reading> = HashMap::new();
+    // Même identifiant, fichier différent : converti (CBR → CBZ) ou déplacé dans ComicRust
+    // depuis le transfert précédent si le fichier de la base existe et pas celui de
+    // ComicRack. On garde alors les colonnes « fichier » de la base (sinon le livre
+    // deviendrait manquant et le nouveau fichier reviendrait comme un autre livre).
+    let cr_files: HashMap<String, Option<&str>> =
+        chunk.iter().map(|b| (b.id.to_ascii_lowercase(), b.file.as_deref())).collect();
+    let mut keep_ids: Vec<String> = Vec::new();
+    for (id, file, r) in readings_by_id(conn, &ids)? {
+        let id = id.to_ascii_lowercase();
+        if let (Some(db_file), Some(Some(cr_file))) = (file.as_deref(), cr_files.get(&id)) {
+            if scanner::path_key(db_file) != scanner::path_key(cr_file)
+                && Path::new(db_file).exists()
+                && !Path::new(cr_file).exists()
+            {
+                keep_ids.push(id.clone());
+            }
+        }
+        same_id.insert(id, r);
+    }
+    let mut kept_files: HashMap<String, LibraryBook> = HashMap::new();
+    for part in keep_ids.chunks(200) {
+        let marks = vec!["?"; part.len()].join(",");
+        let params: Vec<Val> = part.iter().map(|i| Val::Text(i.clone())).collect();
+        let sql = format!("SELECT {} FROM {BOOKS} WHERE `id` IN ({marks})", schema::column_list());
+        conn.query_each(&sql, &params, |row| {
+            let b = schema::book_from_row(row).0;
+            kept_files.insert(b.id.to_ascii_lowercase(), b);
+            Ok(())
+        })?;
+    }
 
     // Candidats « même fichier, autre identifiant », relus dans la transaction.
     let mut candidates: Vec<String> = Vec::new();
@@ -748,6 +1031,15 @@ fn import_batch(
         if let Some(r) = same_id.get(&b.id.to_ascii_lowercase()) {
             merge_reading(&mut book, r);
             counts.updated += 1;
+        }
+        if let Some(db) = kept_files.get(&b.id.to_ascii_lowercase()) {
+            book.file = db.file.clone();
+            book.file_size = db.file_size;
+            book.file_modified_time = db.file_modified_time.clone();
+            book.file_creation_time = db.file_creation_time.clone();
+            book.page_count = db.page_count;
+            book.pages = db.pages.clone();
+            counts.kept += 1;
         }
         // Chaque livre remplacé ne sert qu'une fois (doublons de fichier dans ComicRack).
         if let Some(list) = b.file.as_deref().and_then(|f| others.get_mut(&scanner::path_key(f))) {

@@ -80,11 +80,25 @@ pub(super) fn full_book(id: &str) -> LibraryBook {
         series_complete: Some("Yes".into()),
         scan_information: Some("scan HD".into()),
         preferred_front_cover: Some(1),
+        custom_values_store: Some("cle1=valeur 1,cle2=deux \"guillemets\"".into()),
+        custom_thumbnail_key: Some("custom:thanos.jpg".into()),
+        last_opened_from_list_id: Some("11111111-0000-0000-0000-0000000000b1".into()),
+        new_pages: Some(2),
         pages: PageList {
             page: vec![
-                PageInfo { image: 0, kind: Some("FrontCover".into()) },
-                PageInfo { image: 1, kind: None },
-                PageInfo { image: 7, kind: Some("FrontCover, InnerCover".into()) },
+                PageInfo { image: 0, kind: Some("FrontCover".into()), ..Default::default() },
+                PageInfo {
+                    image: 1,
+                    kind: None,
+                    bookmark: Some("Mort & « Thanos »".into()),
+                    image_size: Some("1048576".into()),
+                    image_width: Some("1988".into()),
+                    image_height: Some("3056".into()),
+                    rotation: Some("Rotate90".into()),
+                    page_position: Some("Near".into()),
+                    key: Some("Z:\\BD\\x.cbz:1".into()),
+                },
+                PageInfo { image: 7, kind: Some("FrontCover, InnerCover".into()), ..Default::default() },
             ],
         },
     }
@@ -103,7 +117,7 @@ pub(super) fn simple(i: usize) -> LibraryBook {
         series: Some("Série é".into()),
         number: Some(i.to_string()),
         page_count: Some(24),
-        pages: PageList { page: vec![PageInfo { image: 0, kind: Some("FrontCover".into()) }] },
+        pages: PageList { page: vec![PageInfo { image: 0, kind: Some("FrontCover".into()), ..Default::default() }] },
         ..Default::default()
     }
 }

@@ -30,7 +30,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 rayon = "1"
 mysql = { version = "28", default-features = false, features = ["default-rust", "client_ed25519"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v5"] }
+# Identité physique d'un fichier ou dossier (volume + index sous Windows, dev + inode
+# ailleurs) : reconnaître `Z:\BD` et `\\SERVEURNAS\BD` comme le même dossier.
+same-file = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Imaging", "Win32_Security_Cryptography", "Win32_System_Com"] }

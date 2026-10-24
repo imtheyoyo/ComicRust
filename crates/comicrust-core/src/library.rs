@@ -167,6 +167,19 @@ pub struct LibraryBook {
     /// Rang de la couverture préférée parmi les pages de type « FrontCover ».
     #[serde(rename = "PreferredFrontCover", default, skip_serializing_if = "Option::is_none")]
     pub preferred_front_cover: Option<i32>,
+    /// Valeurs personnalisées de ComicRack (`CustomValuesStore` : paires `clé=valeur`
+    /// encodées par ComicRack, gardées telles quelles ; utilisées par les scripts).
+    #[serde(rename = "CustomValuesStore", default, skip_serializing_if = "Option::is_none")]
+    pub custom_values_store: Option<String>,
+    /// Clé de la vignette personnalisée choisie dans ComicRack.
+    #[serde(rename = "CustomThumbnailKey", default, skip_serializing_if = "Option::is_none")]
+    pub custom_thumbnail_key: Option<String>,
+    /// Identifiant (GUID) de la liste depuis laquelle le livre a été ouvert la dernière fois.
+    #[serde(rename = "LastOpenedFromListId", default, skip_serializing_if = "Option::is_none")]
+    pub last_opened_from_list_id: Option<String>,
+    /// Nombre de pages ajoutées depuis la dernière lecture (`NewPages`).
+    #[serde(rename = "NewPages", default, skip_serializing_if = "Option::is_none")]
+    pub new_pages: Option<i32>,
     #[serde(rename = "Pages", default, skip_serializing_if = "PageList::is_empty")]
     pub pages: PageList,
 }
@@ -186,6 +199,27 @@ pub struct PageInfo {
     /// Type de page (`FrontCover`, `Story`, `Other`, `Deleted`…), éventuellement combinés.
     #[serde(rename = "@Type", default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    // Autres attributs de `ComicPageInfo` (ComicRack), gardés en **texte brut** tels que
+    // ComicRack les écrit (absents = valeur par défaut de ComicRack).
+    /// Signet posé sur la page (texte du signet).
+    #[serde(rename = "@Bookmark", default, skip_serializing_if = "Option::is_none")]
+    pub bookmark: Option<String>,
+    /// Taille du fichier image, en octets.
+    #[serde(rename = "@ImageSize", default, skip_serializing_if = "Option::is_none")]
+    pub image_size: Option<String>,
+    #[serde(rename = "@ImageWidth", default, skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<String>,
+    #[serde(rename = "@ImageHeight", default, skip_serializing_if = "Option::is_none")]
+    pub image_height: Option<String>,
+    /// Rotation (`None`, `Rotate90`, `Rotate180`, `Rotate270`).
+    #[serde(rename = "@Rotation", default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<String>,
+    /// Position en double page (`Default`, `Near`, `Far`).
+    #[serde(rename = "@PagePosition", default, skip_serializing_if = "Option::is_none")]
+    pub page_position: Option<String>,
+    /// Clé de l'image (cache de ComicRack).
+    #[serde(rename = "@Key", default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 impl PageList {
@@ -423,6 +457,44 @@ mod tests {
         assert_eq!(again.pages.page[0].kind.as_deref(), Some("FrontCover"));
         let info = crate::writer::comic_info_from_record(&xml, None).unwrap();
         assert!(info.contains("<Series>Thanos &amp; Cie</Series>"));
+    }
+
+    /// Données propres à la bibliothèque : relues, réécrites dans la fiche, mais jamais
+    /// dans le `ComicInfo.xml` d'un fichier ; les attributs de page suivent `<Pages>`
+    /// (ComicRack les écrit aussi dans `ComicInfo.xml`).
+    #[test]
+    fn library_only_fields_and_page_attributes() {
+        let b = LibraryBook::from_xml(
+            r#"<ComicBook Id="x"><Series>S</Series><CustomValuesStore>a=1,b=deux</CustomValuesStore><CustomThumbnailKey>t</CustomThumbnailKey><LastOpenedFromListId>11111111-0000-0000-0000-000000000001</LastOpenedFromListId><NewPages>3</NewPages><ColorAdjustment Contrast="0.2"/><Pages><Page Image="0" Type="FrontCover" ImageSize="100" ImageWidth="10" ImageHeight="20" Key="k"/><Page Image="1" Bookmark="Ici" Rotation="Rotate180" PagePosition="Far"/></Pages></ComicBook>"#,
+        )
+        .unwrap();
+        assert_eq!(b.custom_values_store.as_deref(), Some("a=1,b=deux"));
+        assert_eq!(b.custom_thumbnail_key.as_deref(), Some("t"));
+        assert_eq!(b.last_opened_from_list_id.as_deref(), Some("11111111-0000-0000-0000-000000000001"));
+        assert_eq!(b.new_pages, Some(3));
+        let p = &b.pages.page;
+        assert_eq!(
+            (
+                p[0].image_size.as_deref(),
+                p[0].image_width.as_deref(),
+                p[0].image_height.as_deref(),
+                p[0].key.as_deref()
+            ),
+            (Some("100"), Some("10"), Some("20"), Some("k"))
+        );
+        assert_eq!(
+            (p[1].bookmark.as_deref(), p[1].rotation.as_deref(), p[1].page_position.as_deref(), p[1].kind.as_deref()),
+            (Some("Ici"), Some("Rotate180"), Some("Far"), None)
+        );
+        let xml = b.to_record_xml().unwrap();
+        let again = LibraryBook::from_xml(&xml).unwrap();
+        assert_eq!(format!("{again:?}"), format!("{b:?}"));
+        let info = crate::writer::comic_info_from_record(&xml, None).unwrap();
+        for absent in ["CustomValuesStore", "CustomThumbnailKey", "LastOpenedFromListId", "NewPages", "ColorAdjustment"]
+        {
+            assert!(!info.contains(absent), "{absent} écrit dans ComicInfo.xml : {info}");
+        }
+        assert!(info.contains(r#"Bookmark="Ici""#), "{info}");
     }
 
     #[test]

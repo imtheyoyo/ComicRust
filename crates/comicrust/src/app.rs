@@ -359,7 +359,9 @@ impl ComicRustApp {
     /// Mode autonome : analyse des dossiers de BD (ajouts, modifications, manquants).
     /// `manual` : lancée par l'utilisateur (le bilan s'affiche s'il y a des erreurs).
     pub(crate) fn start_scan(&mut self, ctx: &Context, manual: bool) {
-        if self.library.scan.is_some() {
+        // Pas pendant un transfert : les fichiers vus par l'analyse seraient ajoutés une
+        // seconde fois sous un autre identifiant que celui de leur fiche ComicRack.
+        if self.library.scan.is_some() || self.transfer_busy() {
             return;
         }
         self.scan_manual = manual;

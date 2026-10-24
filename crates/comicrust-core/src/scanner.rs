@@ -154,7 +154,7 @@ pub fn path_key(path: &str) -> String {
 }
 
 /// `key` est-il dans le dossier de clé `dir` (ou est-ce `dir` lui-même) ?
-fn is_under(key: &str, dir: &str) -> bool {
+pub(crate) fn is_under(key: &str, dir: &str) -> bool {
     key.strip_prefix(dir).is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || dir.ends_with('/'))
 }
 
@@ -362,6 +362,7 @@ fn apply_comic_info(b: &mut LibraryBook, ci: Option<&ComicInfo>) {
                         image: p.image as i32,
                         // Comme dans ComicDB.xml, « Story » (valeur par défaut) n'est pas écrit.
                         kind: (p.page_type != crate::comic_info::PageType::Story).then(|| format!("{:?}", p.page_type)),
+                        ..Default::default()
                     })
                     .collect()
             })

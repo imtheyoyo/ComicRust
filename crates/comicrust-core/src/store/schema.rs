@@ -185,6 +185,11 @@ macro_rules! book_columns {
             series_complete: Text,
             scan_information: Long,
             preferred_front_cover: Int,
+            // v0.8.0 (transfert ComicRack) : ajoutées par `ensure` aux bases existantes.
+            custom_values_store: Long,
+            custom_thumbnail_key: Text,
+            last_opened_from_list_id: Text,
+            new_pages: Int,
         }
     };
 }
@@ -225,16 +230,71 @@ pub(crate) fn column_list() -> String {
     all_columns().iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
 }
 
-/// Pages en JSON : `[{"image":0,"type":"FrontCover"}, …]` ; aucune page → NULL.
+/// Attributs facultatifs d'une page, avec leur clé JSON (texte brut de ComicRack).
+macro_rules! page_extras {
+    ($m:ident) => {
+        $m! {
+            bookmark: "bookmark",
+            image_size: "image_size",
+            image_width: "image_width",
+            image_height: "image_height",
+            rotation: "rotation",
+            page_position: "page_position",
+            key: "key",
+        }
+    };
+}
+
+macro_rules! all_page_fields {
+    ($($f:ident: $k:literal,)*) => {
+        /// Ne sert qu'à la compilation : échoue si `PageInfo` gagne un attribut absent de
+        /// `page_extras!` (il serait perdu dans la colonne `pages`).
+        #[allow(dead_code)]
+        fn all_page_fields_listed(p: PageInfo) {
+            let PageInfo { image: _, kind: _, $($f: _,)* } = p;
+        }
+    };
+}
+page_extras!(all_page_fields);
+
+/// Pages en JSON : `[{"image":0,"type":"FrontCover","bookmark":"…"}, …]` (clés des
+/// attributs absents omises) ; aucune page → NULL.
 fn pages_to_val(p: &PageList) -> Val {
     if p.page.is_empty() {
         return Val::Null;
     }
-    let list: Vec<serde_json::Value> =
-        p.page.iter().map(|pg| serde_json::json!({ "image": pg.image, "type": pg.kind })).collect();
+    let list: Vec<serde_json::Value> = p
+        .page
+        .iter()
+        .map(|pg| {
+            let mut o = serde_json::Map::new();
+            o.insert("image".into(), pg.image.into());
+            o.insert("type".into(), pg.kind.clone().into());
+            macro_rules! put {
+                ($($f:ident: $k:literal,)*) => {$(
+                    if let Some(v) = &pg.$f {
+                        o.insert($k.into(), v.clone().into());
+                    }
+                )*};
+            }
+            page_extras!(put);
+            serde_json::Value::Object(o)
+        })
+        .collect();
     Val::Text(serde_json::Value::Array(list).to_string())
 }
 
+/// Texte d'une valeur JSON de page (tolérant : un nombre écrit à la main est accepté).
+fn json_text(v: Option<&serde_json::Value>) -> Option<String> {
+    match v? {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// Lecture tolérante : les lignes écrites avant la v0.8.0 n'ont que `image` et `type`.
 fn pages_from_val(v: Val) -> PageList {
     let Some(text) = v.into_text() else { return PageList::default() };
     let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(&text) else {
@@ -242,9 +302,17 @@ fn pages_from_val(v: Val) -> PageList {
     };
     let page = items
         .iter()
-        .map(|it| PageInfo {
-            image: it.get("image").and_then(|i| i.as_i64()).and_then(|i| i32::try_from(i).ok()).unwrap_or(0),
-            kind: it.get("type").and_then(|t| t.as_str()).map(str::to_string),
+        .map(|it| {
+            let mut pg = PageInfo {
+                image: it.get("image").and_then(|i| i.as_i64()).and_then(|i| i32::try_from(i).ok()).unwrap_or(0),
+                kind: it.get("type").and_then(|t| t.as_str()).map(str::to_string),
+                ..Default::default()
+            };
+            macro_rules! get {
+                ($($f:ident: $k:literal,)*) => {$( pg.$f = json_text(it.get($k)); )*};
+            }
+            page_extras!(get);
+            pg
         })
         .collect();
     PageList { page }

@@ -91,14 +91,27 @@ impl TransferWindow {
         let (progress, phase, cancel, ctx2) =
             (self.progress.clone(), self.phase.clone(), self.cancel.clone(), ctx.clone());
         self.cancel.store(false, Ordering::Relaxed);
+        self.progress.total.store(0, Ordering::Relaxed);
+        self.progress.done.store(0, Ordering::Relaxed);
+        *self.phase.lock().unwrap() = "préparation…".into();
         std::thread::Builder::new()
             .name("comicrust-transfert".into())
             .spawn(move || {
                 let set = |t: &str| *phase.lock().unwrap() = t.to_string();
                 let run = || -> Result<Done, String> {
                     // 1. Lecture de ComicRack (seulement des lectures).
+                    let mut read_warning = None;
                     let xml = match &comicdb {
-                        Some(p) => Some(std::fs::read_to_string(p).map_err(|e| format!("{} : {e}", p.display()))?),
+                        Some(p) => match std::fs::read_to_string(p) {
+                            Ok(x) => Some(x),
+                            // Avec MySQL, ComicDb.xml ne sert qu'aux listes et aux dossiers :
+                            // les livres sont transférés quand même.
+                            Err(e) if mysql.is_some() => {
+                                read_warning = Some(format!("{} illisible ({e}) : ni listes ni dossiers", p.display()));
+                                None
+                            }
+                            Err(e) => return Err(format!("{} : {e}", p.display())),
+                        },
                         None => None,
                     };
                     let src = match &mysql {
@@ -113,14 +126,22 @@ impl TransferWindow {
                         }
                     };
                     if src.books.is_empty() {
-                        return Err("ComicRack ne contient aucun livre (ComicDb.xml d'une bibliothèque MySQL ?)".into());
+                        return Err(if mysql.is_some() {
+                            "la base MySQL de ComicRack ne contient aucun livre".into()
+                        } else {
+                            "ce ComicDb.xml ne contient aucun livre : ComicRack range sans doute ses livres dans \
+                             MySQL. Passe d'abord par ⚙ → « Assistant de configuration… » → « Avec ComicRack » → \
+                             MySQL, puis reviens ici : la base MySQL de ComicRack sera proposée."
+                                .into()
+                        });
                     }
                     // 2. Écriture dans la base de ComicRust.
-                    set("écriture dans la base de ComicRust…");
+                    set("écriture dans la base de ComicRust (livres, puis listes et dossiers)…");
                     let mut store = Store::open(&dest).map_err(|e| e.to_string())?;
-                    let report = store
+                    let mut report = store
                         .import_comicrack(&src, &opts, Some(&progress), Some(&cancel))
                         .map_err(|e| e.to_string())?;
+                    report.warnings.splice(0..0, read_warning);
                     Ok(Done { report, dest, total: src.books.len() })
                 };
                 let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run))
@@ -144,18 +165,33 @@ fn summary(d: &Done) -> (String, Vec<String>) {
         s.push_str(&format!(", {} écartés", r.books_skipped));
     }
     s.push_str(&format!(" ; {} listes ; {} dossiers ajoutés.", r.lists, r.folders.len()));
+    if r.paths_rewritten > 0 {
+        s.push_str(&format!(" {} chemins ramenés sous un dossier surveillé.", r.paths_rewritten));
+    }
+    if r.files_kept > 0 {
+        s.push_str(&format!(" {} fichiers convertis ou déplacés dans ComicRust gardés.", r.files_kept));
+    }
     if r.cancelled {
-        s.push_str(" Interrompu : les lots déjà écrits sont gardés.");
+        s.push_str(" Interrompu : les lots déjà écrits sont gardés, ComicRust n'a pas changé de bibliothèque. Relance le transfert pour le terminer.");
     }
     (s, r.warnings.clone())
 }
 
 impl ComicRustApp {
+    /// Transfert en cours (l'analyse des dossiers attend qu'il soit fini).
+    pub(crate) fn transfer_busy(&self) -> bool {
+        self.transfer.as_ref().is_some_and(|t| t.rx.is_some())
+    }
+
     pub(crate) fn open_transfer(&mut self) {
+        if self.transfer.is_some() {
+            return; // déjà ouverte (et peut-être en cours) : ne pas lancer un second transfert
+        }
         self.transfer = Some(TransferWindow::new(self));
     }
 
     pub(crate) fn transfer_window(&mut self, ctx: &Context) {
+        let scanning = self.library.scan.is_some();
         let Some(w) = &mut self.transfer else { return };
         let mut finished: Option<Done> = None;
         if let Some(rx) = &w.rx {
@@ -224,8 +260,9 @@ impl ComicRustApp {
                     ui.checkbox(&mut w.switch, "Ensuite, utiliser ComicRust en autonome (sans ComicRack)");
                     ui.label(
                         RichText::new(
-                            "Un transfert peut être relancé : les fiches sont mises à jour, la lecture faite dans \
-                             ComicRust entre-temps est gardée.",
+                            "Un transfert peut être relancé : les fiches sont reprises de ComicRack, mais la lecture \
+                             faite dans ComicRust entre-temps et les fichiers convertis ou déplacés sont gardés. \
+                             Les modifications de fiches faites dans ComicRust seront remplacées.",
                         )
                         .weak()
                         .small(),
@@ -241,6 +278,14 @@ impl ComicRustApp {
                         w.cancel.store(true, Ordering::Relaxed);
                     }
                     ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                } else if scanning {
+                    ui.add_enabled(false, egui::Button::new(RichText::new("Transférer").strong()));
+                    ui.label(
+                        RichText::new(
+                            "Analyse des dossiers en cours : attendre sa fin (ou l'arrêter) avant de transférer.",
+                        )
+                        .color(crate::ui::theme::warning(ui)),
+                    );
                 } else if ui.button(RichText::new("Transférer").strong()).clicked() {
                     go = true;
                 }
@@ -262,7 +307,13 @@ impl ComicRustApp {
         }
         let switch = w.switch;
         if let Some(d) = finished {
-            if switch || self.library.standalone() == Some(&d.dest) {
+            if d.report.cancelled {
+                // Bibliothèque incomplète : on ne bascule pas ; on recharge seulement si c'est
+                // la base affichée, pour voir les livres déjà écrits.
+                if self.library.standalone() == Some(&d.dest) {
+                    self.load_library(ctx);
+                }
+            } else if switch || self.library.standalone() == Some(&d.dest) {
                 self.settings.library_mode = LibraryMode::Standalone;
                 self.settings.store = Some(d.dest);
                 self.save_now = true;

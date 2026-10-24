@@ -4,12 +4,12 @@
 
 use std::sync::atomic::AtomicBool;
 
-use super::import::{assemble_lists, split_lists};
+use super::import::{assemble_lists, join_under, parent_dir, split_lists};
 use super::schema::{LISTS, META};
 use super::tests::{full_book, same, simple, temp_cfg};
 use super::*;
 use crate::comic_lists::{parse_comic_lists, ListKind};
-use crate::library::Library;
+use crate::library::{Library, PageInfo, PageList};
 
 const B1: &str = "aaaaaaaa-0000-0000-0000-000000000001";
 const B2: &str = "aaaaaaaa-0000-0000-0000-000000000002";
@@ -33,7 +33,12 @@ const COMICDB: &str = r#"<?xml version="1.0"?>
       <Added>2019-10-01T12:58:00.1234567+02:00</Added>
       <Opened>2026-01-10T20:00:00+01:00</Opened>
       <OpenCount>2</OpenCount>
-      <Pages><Page Image="0" Type="FrontCover" /><Page Image="1" /><Page Image="47" Type="BackCover" /></Pages>
+      <CustomValuesStore>note_perso=à relire,arc=Infinity</CustomValuesStore>
+      <CustomThumbnailKey>custom:thanos-quest.jpg</CustomThumbnailKey>
+      <LastOpenedFromListId>11111111-0000-0000-0000-0000000000b1</LastOpenedFromListId>
+      <NewPages>2</NewPages>
+      <ColorAdjustment Saturation="0.5" />
+      <Pages><Page Image="0" Type="FrontCover" ImageSize="512000" ImageWidth="1988" ImageHeight="3056" Key="k0" /><Page Image="1" Bookmark="Mort &amp; Thanos" Rotation="Rotate90" PagePosition="Near" /><Page Image="47" Type="BackCover" /></Pages>
     </Book>
     <Book Id="aaaaaaaa-0000-0000-0000-000000000002" File="Z:\BD\Thanos\Thanos Quest 02.cbz" Checked="false">
       <Series>Thanos Quest</Series>
@@ -209,7 +214,19 @@ pub(super) fn import_scenario(cfg: &StoreConfig) {
     same(&one(&mut s, B1), &lib.books.book[0]);
     same(&one(&mut s, B2), &lib.books.book[1]);
     assert_eq!(one(&mut s, B2).checked, Some(false));
-    assert_eq!(one(&mut s, B1).pages.page.len(), 3);
+    // Données propres à la bibliothèque et attributs de page (signets…) relus tels quels.
+    let b1 = one(&mut s, B1);
+    assert_eq!(b1.pages.page.len(), 3);
+    assert_eq!(b1.pages.page[1].bookmark.as_deref(), Some("Mort & Thanos"));
+    assert_eq!(b1.pages.page[1].rotation.as_deref(), Some("Rotate90"));
+    assert_eq!(b1.pages.page[1].page_position.as_deref(), Some("Near"));
+    assert_eq!(b1.pages.page[0].image_width.as_deref(), Some("1988"));
+    assert_eq!(b1.pages.page[0].key.as_deref(), Some("k0"));
+    assert_eq!(b1.pages.page[2].bookmark, None);
+    assert_eq!(b1.custom_values_store.as_deref(), Some("note_perso=à relire,arc=Infinity"));
+    assert_eq!(b1.custom_thumbnail_key.as_deref(), Some("custom:thanos-quest.jpg"));
+    assert_eq!(b1.last_opened_from_list_id.as_deref(), Some("11111111-0000-0000-0000-0000000000b1"));
+    assert_eq!(b1.new_pages, Some(2));
     // B3 : fiche ComicRack + lecture de l'analyse (plus récente).
     let b3 = one(&mut s, B3);
     assert_eq!(b3.book_owner.as_deref(), Some("Yoyo"));
@@ -365,6 +382,242 @@ fn sqlite_schema_2_is_migrated() {
     assert_eq!(schema::meta_int(&mut s.conn, "lists_counter").unwrap(), 1);
 }
 
+/// Nouvelles colonnes de la v0.8.0 retirées d'une base existante (schéma 3) : `ensure`
+/// doit les rajouter, puis une fiche complète doit se relire à l'identique.
+pub(super) fn new_columns_added(cfg: &StoreConfig) {
+    let mut s = Store::open(cfg).unwrap();
+    for c in ["custom_values_store", "custom_thumbnail_key", "last_opened_from_list_id", "new_pages"] {
+        s.conn.batch(&format!("ALTER TABLE {BOOKS} DROP COLUMN `{c}`")).unwrap();
+    }
+    s.upsert(&[simple(1)]).unwrap_err();
+    drop(s);
+    let mut s = Store::open_existing(cfg).unwrap();
+    assert_eq!(schema::meta_int(&mut s.conn, "schema_version").unwrap(), SCHEMA_VERSION);
+    let full = super::tests::full_book("dddddddd-0000-0000-0000-000000000001");
+    s.upsert(std::slice::from_ref(&full)).unwrap();
+    same(&one(&mut s, &full.id), &full);
+}
+
+#[test]
+fn sqlite_new_columns_added() {
+    let (_dir, cfg) = temp_cfg();
+    new_columns_added(&cfg);
+}
+
+#[test]
+fn path_text_helpers() {
+    assert_eq!(parent_dir(r"Z:\BD\Thanos\x.cbz").as_deref(), Some(r"Z:\BD\Thanos"));
+    assert_eq!(parent_dir(r"Z:\BD").as_deref(), Some(r"Z:\"));
+    assert_eq!(parent_dir(r"Z:\"), None);
+    assert_eq!(parent_dir(r"\\SERVEURNAS\BD\x.cbz").as_deref(), Some(r"\\SERVEURNAS\BD"));
+    assert_eq!(parent_dir(r"\\SERVEURNAS\BD").as_deref(), Some(r"\\SERVEURNAS"));
+    assert_eq!(parent_dir(r"\\SERVEURNAS").as_deref(), Some(r"\\"));
+    assert_eq!(parent_dir(r"\\"), None);
+    assert_eq!(parent_dir("/srv/bd/").as_deref(), Some("/srv"));
+    assert_eq!(parent_dir("/srv").as_deref(), Some("/"));
+    assert_eq!(parent_dir("/"), None);
+    assert_eq!(parent_dir("x.cbz"), None);
+    let f = r"Z:\BD\Thanos\x.cbz";
+    assert_eq!(join_under(r"\\SERVEURNAS\BD", &f[r"Z:\BD".len()..], f), r"\\SERVEURNAS\BD\Thanos\x.cbz");
+    assert_eq!(join_under(r"\\SERVEURNAS\BD\", &f[r"Z:\".len()..], f), r"\\SERVEURNAS\BD\BD\Thanos\x.cbz");
+    let f = r"\\SERVEURNAS\BD\Thanos\x.cbz";
+    assert_eq!(join_under("z:/bd/", &f[r"\\SERVEURNAS\BD".len()..], f), r"z:/bd\Thanos\x.cbz");
+    assert_eq!(join_under("/", "a/b.cbz", "/mnt/a/b.cbz"), "/a/b.cbz");
+    assert_eq!(join_under("/srv/bd", "/a/b.cbz", "/mnt/a/b.cbz"), "/srv/bd/a/b.cbz");
+}
+
+/// `ComicDb.xml` minimal : livres (`id`, `file`) et dossiers surveillés.
+fn small_comicdb(books: &[(&str, String)], folders: &[String]) -> String {
+    let esc = |t: &str| t.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+    let mut xml = String::from("<?xml version=\"1.0\"?>\n<ComicDatabase>\n<Books>\n");
+    for (id, file) in books {
+        xml.push_str(&format!(
+            "<Book Id=\"{id}\" File=\"{}\"><Series>S</Series><PageCount>40</PageCount></Book>\n",
+            esc(file)
+        ));
+    }
+    xml.push_str("</Books>\n<WatchFolders>\n");
+    for f in folders {
+        xml.push_str(&format!("<WatchFolder Folder=\"{}\" Watch=\"true\" />\n", esc(f)));
+    }
+    xml.push_str("</WatchFolders>\n</ComicDatabase>");
+    xml
+}
+
+/// Même partage sous deux noms : un dossier réel (`\\SERVEURNAS\BD`) et un lien
+/// symbolique vers lui (`Z:\BD`).
+#[cfg(unix)]
+#[test]
+fn same_share_under_two_names() {
+    let (dir, cfg) = temp_cfg();
+    let real = dir.path().join("SERVEURNAS-BD");
+    std::fs::create_dir_all(real.join("Thanos")).unwrap();
+    std::fs::write(real.join("Thanos/Quest 01.cbz"), b"x").unwrap();
+    std::fs::write(real.join("Thanos/Quest 02.cbz"), b"x").unwrap();
+    let alias = dir.path().join("Z-BD");
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let (real_s, alias_s) = (real.display().to_string(), alias.display().to_string());
+
+    // 1. La base surveille le dossier réel et a déjà analysé Quest 01 (autre identifiant,
+    //    avec une lecture) ; ComicRack surveille le lien et y range ses livres.
+    let mut s = Store::open(&cfg).unwrap();
+    s.set_folders(std::slice::from_ref(&real)).unwrap();
+    let mut scanned = simple(1);
+    scanned.id = "cccccccc-0000-0000-0000-000000000001".into();
+    scanned.file = Some(format!("{real_s}/Thanos/Quest 01.cbz"));
+    scanned.last_page_read = Some(7);
+    s.upsert(&[scanned.clone()]).unwrap();
+    let src = ComicRackSource::from_comicdb_xml(small_comicdb(
+        &[
+            (B1, format!("{alias_s}/Thanos/Quest 01.cbz")),
+            (B2, format!("{alias_s}/Thanos/Quest 02.cbz")),
+            (B3, "/ailleurs/inexistant/Warlock 09.cbz".to_string()),
+        ],
+        std::slice::from_ref(&alias_s),
+    ))
+    .unwrap();
+    let r = s.import_comicrack(&src, &ImportOptions::default(), None, None).unwrap();
+    assert!(r.folders.is_empty(), "{r:?}");
+    assert_eq!(s.folders().unwrap(), std::slice::from_ref(&real));
+    assert!(r.warnings.iter().any(|w| w == &format!("dossier {alias_s} déjà présent sous la forme {real_s}")), "{r:?}");
+    assert_eq!(r.paths_rewritten, 2);
+    assert!(
+        r.warnings.contains(&format!(
+            "2 chemins de ComicRack réécrits sous le dossier surveillé {real_s} ({alias_s} → {real_s})"
+        )),
+        "{r:?}"
+    );
+    assert!(
+        r.warnings
+            .iter()
+            .any(|w| w.starts_with("1 livres de ComicRack hors de tout dossier surveillé (ex. /ailleurs/")),
+        "{r:?}"
+    );
+    // Réécriture faite avant la recherche des fichiers déjà en base : remplacement.
+    assert_eq!((r.books_added, r.books_replaced, r.books_updated), (2, 1, 0), "{r:?}");
+    assert!(s.get(&[scanned.id.clone()]).unwrap().is_empty());
+    let b1 = one(&mut s, B1);
+    assert_eq!(b1.file.as_deref(), Some(format!("{real_s}/Thanos/Quest 01.cbz").as_str()));
+    assert_eq!(b1.last_page_read, Some(7), "lecture de l'analyse fusionnée");
+    assert_eq!(one(&mut s, B2).file.as_deref(), Some(format!("{real_s}/Thanos/Quest 02.cbz").as_str()));
+    assert_eq!(one(&mut s, B3).file.as_deref(), Some("/ailleurs/inexistant/Warlock 09.cbz"));
+    // ComicRack n'est pas touché (copies en mémoire seulement).
+    assert_eq!(src.books[0].file.as_deref(), Some(format!("{alias_s}/Thanos/Quest 01.cbz").as_str()));
+    // Relancé : rien à remplacer, même résultat.
+    let r = s.import_comicrack(&src, &ImportOptions::default(), None, None).unwrap();
+    assert_eq!((r.books_added, r.books_replaced, r.books_updated, r.paths_rewritten), (0, 0, 3, 2), "{r:?}");
+    assert_eq!(s.count().unwrap(), 3);
+
+    // 2. Base vide ; ComicRack surveille les deux formes (dossier réel d'abord) et range
+    //    ses livres sous le lien : un seul dossier ajouté, chemins ramenés sous lui.
+    let (_dir2, cfg2) = temp_cfg();
+    let mut s = Store::open(&cfg2).unwrap();
+    let src = ComicRackSource::from_comicdb_xml(small_comicdb(
+        &[(B1, format!("{alias_s}/Thanos/Quest 01.cbz"))],
+        &[real_s.clone(), alias_s.clone()],
+    ))
+    .unwrap();
+    let r = s.import_comicrack(&src, &ImportOptions::default(), None, None).unwrap();
+    assert_eq!(r.folders, std::slice::from_ref(&real));
+    assert_eq!(s.folders().unwrap(), std::slice::from_ref(&real));
+    assert_eq!(r.paths_rewritten, 1);
+    assert_eq!(one(&mut s, B1).file.as_deref(), Some(format!("{real_s}/Thanos/Quest 01.cbz").as_str()));
+
+    // 3. Sans reprendre les dossiers de ComicRack ni dossier en base : aucun accès
+    //    disque, rien de réécrit, livres signalés hors dossier.
+    let (_dir3, cfg3) = temp_cfg();
+    let mut s = Store::open(&cfg3).unwrap();
+    let r = s.import_comicrack(&src, &ImportOptions { folders: false, lists: false }, None, None).unwrap();
+    assert_eq!(r.paths_rewritten, 0);
+    assert!(r.warnings.iter().any(|w| w.starts_with("1 livres de ComicRack hors de tout dossier surveillé")), "{r:?}");
+    assert!(s.folders().unwrap().is_empty());
+}
+
+/// Transfert relancé après une conversion CBR → CBZ faite dans ComicRust.
+#[test]
+fn converted_file_is_kept() {
+    let (dir, cfg) = temp_cfg();
+    let bd = dir.path().join("BD");
+    std::fs::create_dir_all(&bd).unwrap();
+    let cbr = format!("{}/Thanos 01.cbr", bd.display());
+    let cbz = format!("{}/Thanos 01.cbz", bd.display());
+    let mut s = Store::open(&cfg).unwrap();
+    s.set_folders(std::slice::from_ref(&bd)).unwrap();
+    let src = ComicRackSource::from_comicdb_xml(small_comicdb(&[(B1, cbr.clone())], &[])).unwrap();
+    s.import_comicrack(&src, &ImportOptions::default(), None, None).unwrap();
+    assert_eq!(one(&mut s, B1).file.as_deref(), Some(cbr.as_str()));
+
+    // Conversion dans ComicRust : le CBR a disparu, le CBZ existe ; fiche mise à jour.
+    std::fs::write(&cbz, b"cbz").unwrap();
+    let mut b = one(&mut s, B1);
+    b.file = Some(cbz.clone());
+    b.file_size = Some(3);
+    b.file_modified_time = Some("2026-10-24T10:00:00Z".into());
+    b.file_creation_time = Some("2026-10-24T09:00:00Z".into());
+    b.page_count = Some(41);
+    b.pages = PageList { page: vec![PageInfo { image: 0, kind: Some("FrontCover".into()), ..Default::default() }] };
+    s.upsert(&[b]).unwrap();
+
+    let r = s.import_comicrack(&src, &ImportOptions::default(), None, None).unwrap();
+    assert_eq!((r.books_updated, r.files_kept), (1, 1), "{r:?}");
+    assert!(r.warnings.iter().any(|w| w.starts_with("1 livres gardent leur fichier de ComicRust")), "{r:?}");
+    let b = one(&mut s, B1);
+    assert_eq!(b.file.as_deref(), Some(cbz.as_str()));
+    assert_eq!(b.file_size, Some(3));
+    assert_eq!(b.file_modified_time.as_deref(), Some("2026-10-24T10:00:00Z"));
+    assert_eq!(b.file_creation_time.as_deref(), Some("2026-10-24T09:00:00Z"));
+    assert_eq!((b.page_count, b.pages.page.len()), (Some(41), 1));
+    assert_eq!(b.series.as_deref(), Some("S"), "le reste vient de ComicRack");
+
+    // Le fichier de ComicRack existe de nouveau : c'est lui qui fait foi.
+    std::fs::write(&cbr, b"cbr").unwrap();
+    let r = s.import_comicrack(&src, &ImportOptions::default(), None, None).unwrap();
+    assert_eq!(r.files_kept, 0, "{r:?}");
+    let b = one(&mut s, B1);
+    assert_eq!((b.file.as_deref(), b.page_count), (Some(cbr.as_str()), Some(40)));
+}
+
+/// Listes sans identifiant ou à identifiant en double : identifiants calculés stables.
+#[test]
+fn list_ids_are_stable() {
+    let xml = r#"<?xml version="1.0"?>
+<ComicDatabase xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Books />
+  <ComicLists>
+    <Item xsi:type="ComicIdListItem" Name="Sans id"><BookIds /></Item>
+    <Item xsi:type="ComicIdListItem" Id="11111111-0000-0000-0000-000000000001" Name="A"><BookIds /></Item>
+    <Item xsi:type="ComicListItemFolder" Id="11111111-0000-0000-0000-0000000000f1" Name="Dossier">
+      <Items>
+        <Item xsi:type="ComicIdListItem" Id="11111111-0000-0000-0000-000000000001" Name="A bis"><BookIds /></Item>
+        <Item xsi:type="ComicIdListItem" Name="Sans id"><BookIds /></Item>
+        <Item xsi:type="ComicIdListItem" Name="Sans id"><BookIds /></Item>
+      </Items>
+    </Item>
+  </ComicLists>
+</ComicDatabase>"#;
+    let mut w1 = Vec::new();
+    let mut w2 = Vec::new();
+    let a = split_lists(xml, &mut w1).unwrap();
+    let b = split_lists(xml, &mut w2).unwrap();
+    assert_eq!(a, b);
+    assert_eq!(w1.len(), 4, "{w1:?}");
+    let ids: HashSet<&str> = a.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids.len(), 6, "identifiants distincts : {a:?}");
+
+    let (_dir, cfg) = temp_cfg();
+    let mut s = Store::open(&cfg).unwrap();
+    let src = ComicRackSource::from_comicdb_xml(xml.to_string()).unwrap();
+    for _ in 0..3 {
+        let r = s.import_comicrack(&src, &ImportOptions::default(), None, None).unwrap();
+        assert_eq!(r.lists, 6);
+        let n = s.conn.query(&format!("SELECT COUNT(*) FROM {LISTS}"), &[]).unwrap()[0][0].as_i64();
+        assert_eq!(n, Some(6));
+        let lists = s.comic_lists().unwrap();
+        assert_eq!(lists.len(), 3);
+        let ListKind::Folder { children, .. } = &lists[2].kind else { panic!("{lists:?}") };
+        assert_eq!(children.len(), 3);
+    }
+}
+
 /// Partie MySQL, appelée par `tests::mysql_store` (tables recréées à chaque étape).
 pub(super) fn mysql_import(db_cfg: &DbConfig) {
     let cfg = StoreConfig::MySql(db_cfg.clone());
@@ -383,5 +636,7 @@ pub(super) fn mysql_import(db_cfg: &DbConfig) {
     assert!(s.comic_lists().unwrap().is_empty());
     assert_eq!(s.count().unwrap(), 5000);
     drop(s);
+    super::tests::drop_tables(db_cfg);
+    new_columns_added(&cfg);
     super::tests::drop_tables(db_cfg);
 }

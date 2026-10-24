@@ -5,6 +5,42 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.8.0] — 2026-10-24
+
+Se passer de ComicRack : sa bibliothèque peut être transférée dans la base de ComicRust.
+
+### Nouveautés
+- **⚙ → « Transférer la bibliothèque ComicRack… »** : copie dans la base de ComicRust (fichier
+  local portable `data\comicrust.db` ou base MySQL configurée dans l'assistant) :
+  - les **livres** avec toutes leurs infos : lecture (page, date, nombre d'ouvertures), notes,
+    champs « Book… », signets et attributs de page, valeurs personnalisées ;
+  - les **listes** : dossiers, listes de lecture, listes intelligentes, avec leurs
+    identifiants d'origine ;
+  - les **dossiers** de BD surveillés par ComicRack.
+  - Source : la base MySQL de ComicRack (avec `ComicDb.xml` pour les listes et les dossiers) ou
+    un `ComicDb.xml` seul.
+  - Ensuite, ComicRust passe en autonome (case cochée par défaut).
+- **ComicRack n'est jamais modifié** : sa base et `ComicDb.xml` sont seulement lus.
+- **Livres déjà ajoutés par l'analyse des dossiers** : remplacés par leur fiche ComicRack (même
+  identifiant), la lecture la plus récente est gardée.
+- **Transfert relancé** : pas de doublon de livres ni de listes. La lecture faite dans ComicRust
+  et les fichiers convertis ou déplacés dans ComicRust sont gardés.
+- **Même partage sous deux noms** (`Z:\…` et `\\SERVEURNAS\…`) : le dossier n'est pas ajouté
+  deux fois, les chemins des livres sont ramenés sous le dossier surveillé ; les livres hors de
+  tout dossier surveillé sont signalés.
+- **Mode autonome : les listes s'affichent** (relues dans la base de ComicRust quand elles
+  changent) et les listes intelligentes sont calculées.
+
+### Corrections (relecture avant publication)
+- Transfert interrompu : ComicRust ne bascule plus sur une bibliothèque incomplète.
+- Pas de transfert pendant une analyse des dossiers, ni d'analyse pendant un transfert
+  (doublons évités) ; la fenêtre ne peut plus lancer deux transferts à la fois.
+- `ComicDb.xml` illisible avec MySQL : les livres sont transférés, un avertissement le signale.
+- Message clair quand un `ComicDb.xml` ne contient aucun livre (bibliothèque MySQL).
+
+### Recette
+[recette/v0.8.0.md](recette/v0.8.0.md).
+
 ## [v0.7.3] — 2026-10-24
 
 Correctif de sécurité signalé pendant la recette de la v0.7.2.

@@ -33,6 +33,11 @@ Au premier lancement, un assistant (aussi dans le menu ⚙) propose :
   automatiquement ; bibliothèque lue dans la base MySQL de ComicRack ou dans son
   `ComicDb.xml`, en lecture seule (détails ci-dessous).
 
+**Se passer de ComicRack** (v0.8.0) : ⚙ → « Transférer la bibliothèque ComicRack… » copie ses
+livres (infos, lecture, notes, signets), ses listes et ses dossiers dans la base de ComicRust,
+puis ComicRust passe en autonome. ComicRack n'est que lu ; le transfert peut être relancé sans
+créer de doublons.
+
 ## Bibliothèque (base MySQL de ComicRack)
 
 ComicRust lit la base **MySQL** de ComicRack CE, **en lecture seule** (uniquement des `SELECT`) :
@@ -175,7 +180,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.7.3](recette/v0.7.3.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.8.0](recette/v0.8.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -215,7 +220,8 @@ journal dans les releases déjà publiées.
 4. ~~Écriture de `ComicInfo.xml`, conversion CBR→CBZ, HEIF/AVIF, scrapers WebComic~~ (v0.6.0).
 5. ~~Premier démarrage : ComicRust autonome (base SQLite ou MySQL, dossiers de BD) ou avec
    ComicRack (MySQL ou ComicDb.xml)~~ (v0.7.0).
-6. Transfert de la base ComicRack vers la base de ComicRust (v0.8.0).
+6. ~~Transfert de la bibliothèque ComicRack (livres, lecture, listes, dossiers) vers la base
+   de ComicRust~~ (v0.8.0).
 7. Gestion complète des listes ; écriture dans la base de ComicRack (v0.9.0).
 8. Scripts Python (v0.10.0), serveur OPDS / HTTP (v0.11.0) ; plus tard, associations de
    fichiers Windows et un **mode serveur sous Docker**.

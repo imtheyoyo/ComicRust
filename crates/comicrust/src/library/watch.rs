@@ -127,21 +127,39 @@ pub fn spawn(
             let mut watcher = db.map(|(src, db)| DbWatch::new(src, &db));
             let mut failing = false;
             let mut lists_seen: Option<(Option<PathBuf>, Option<SystemTime>)> = None;
+            let mut store_lists_seen: Option<i64> = None;
             let mut next_db = Instant::now() + DB_INTERVAL;
             let mut next_lists = Instant::now();
             while !s.load(Ordering::Relaxed) {
                 let now = Instant::now();
-                if let Some(ListsSource::Store(cfg)) = lists.as_ref().filter(|_| lists_seen.is_none()) {
-                    // Base de ComicRust : lues une fois (elles ne changent qu'au transfert, qui
-                    // relance la surveillance).
-                    lists_seen = Some((None, None));
-                    let result = comicrust_core::store::Store::open_existing(cfg)
-                        .and_then(|mut st| st.comic_lists())
-                        .map_err(|e| e.to_string());
-                    if tx.send(WatchEvent::Lists { path: None, result }).is_err() {
-                        return;
+                if let Some(ListsSource::Store(cfg)) = lists.as_ref().filter(|_| now >= next_lists) {
+                    // Base de ComicRust : relues quand `lists_counter` change (transfert fait
+                    // ici ou sur un autre poste) ou après une erreur (MySQL momentanément absent).
+                    next_lists = now + LISTS_INTERVAL;
+                    let read = comicrust_core::store::Store::open_existing(cfg).and_then(|mut st| {
+                        let counter = st.lists_counter()?;
+                        if store_lists_seen == Some(counter) {
+                            return Ok(None);
+                        }
+                        Ok(Some((counter, st.comic_lists()?)))
+                    });
+                    let result = match read {
+                        Ok(None) => None,
+                        Ok(Some((counter, lists))) => {
+                            store_lists_seen = Some(counter);
+                            Some(Ok(lists))
+                        }
+                        Err(e) => {
+                            store_lists_seen = None;
+                            Some(Err(e.to_string()))
+                        }
+                    };
+                    if let Some(result) = result {
+                        if tx.send(WatchEvent::Lists { path: None, result }).is_err() {
+                            return;
+                        }
+                        ctx.request_repaint();
                     }
-                    ctx.request_repaint();
                 }
                 if let Some(src) = lists.as_ref().filter(|l| now >= next_lists && !matches!(l, ListsSource::Store(_))) {
                     next_lists = now + LISTS_INTERVAL;
