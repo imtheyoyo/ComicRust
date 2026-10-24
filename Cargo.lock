@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "comicrust-core",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "comicrust-core",
@@ -979,7 +979,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "djvu-rs",
