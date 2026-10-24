@@ -1139,7 +1139,7 @@ mod tests {
         known.iter_mut().find(|b| b.id == warlock_id).unwrap().missing = Some(false);
 
         // 6. Déplacé dans un autre sous-dossier : même fiche, nouveau chemin.
-        let moved_to = root.join("Rangement/Warlock 09.cbz");
+        let moved_to = root.join("Rangement").join("Warlock 09.cbz");
         std::fs::create_dir_all(moved_to.parent().unwrap()).unwrap();
         std::fs::rename(&warlock_path, &moved_to).unwrap();
         let r = run(&folders, &known);
