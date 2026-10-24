@@ -17,6 +17,7 @@ pub mod library;
 pub mod name_info;
 pub mod providers;
 pub mod scanner;
+pub mod secret;
 pub mod smart;
 pub mod store;
 pub mod writer;

@@ -53,6 +53,25 @@ impl LibrarySource {
 
     /// Lit toute la bibliothèque (dans un fil d'arrière-plan).
     pub fn load(&self, progress: Option<&LoadProgress>) -> Result<ComicDatabase, String> {
+        let no_password = match self {
+            LibrarySource::ComicRackMySql(c) | LibrarySource::Standalone(StoreConfig::MySql(c)) => {
+                c.password.is_empty()
+            }
+            _ => false,
+        };
+        self.load_inner(progress).map_err(|e| {
+            if no_password {
+                format!(
+                    "{e}\n\nAucun mot de passe enregistré pour cette base (ComicRust copié sur un autre PC ou \
+                     ouvert par un autre compte Windows) : le saisir à nouveau dans l'assistant de configuration (⚙)."
+                )
+            } else {
+                e
+            }
+        })
+    }
+
+    fn load_inner(&self, progress: Option<&LoadProgress>) -> Result<ComicDatabase, String> {
         match self {
             LibrarySource::ComicRackMySql(c) => ComicDatabase::load(c, progress).map_err(|e| e.to_string()),
             LibrarySource::ComicRackXml(p) => load_comicdb_xml(p),

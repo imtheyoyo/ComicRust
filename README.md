@@ -38,7 +38,8 @@ Au premier lancement, un assistant (aussi dans le menu ⚙) propose :
 ComicRust lit la base **MySQL** de ComicRack CE, **en lecture seule** (uniquement des `SELECT`) :
 assistant de configuration (menu ⚙), puis soit choisir le `ComicRack.ini` (ligne
 `DataSource=mysql:Server=…; Port=…; Uid=…; Pwd=…; Database=…;`, relue à chaque connexion — le
-mot de passe n'est pas recopié dans ComicRust), soit saisir les paramètres. *Tester la
+mot de passe n'est pas recopié dans ComicRust), soit saisir les paramètres (mot de passe enregistré chiffré
+pour le compte Windows, jamais en clair). *Tester la
 connexion* affiche le nombre de livres.
 
 L'onglet **Bibliothèque** affiche alors toutes les BD de la base, en **couvertures** (la page
@@ -174,7 +175,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.7.2](recette/v0.7.2.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.7.3](recette/v0.7.3.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release

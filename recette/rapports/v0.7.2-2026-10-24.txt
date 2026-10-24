@@ -1,0 +1,14 @@
+Rapport de recette ComicRust v0.7.2 — 24/10/2026 20:39
+Résultat : 7 OK, 0 échec(s), 0 non testé(s) sur 7.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+Attention : Le fichier 'comicrust.ron' contient le password de la base de données en clair. Cela représente un problème de sécurité majeure !
+
+ANALYSE (Claude)
+Mot de passe MySQL saisi dans l'assistant (ComicRack « Saisir les paramètres » ou base autonome
+MySQL) enregistré en clair dans data\comicrust.ron. Corrigé en v0.7.3 : chiffré avec la protection
+de données de Windows (DPAPI, liée au compte Windows), jamais écrit en clair ; les réglages
+existants sont réécrits chiffrés au premier enregistrement.

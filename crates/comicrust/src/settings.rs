@@ -110,7 +110,7 @@ pub enum DbSource {
     None,
     /// Paramètres relus à chaque connexion dans ce `ComicRack.ini` (rien n'est recopié).
     ComicRackIni(PathBuf),
-    /// Paramètres saisis dans ComicRust (gardés dans `data\comicrust.ron`).
+    /// Paramètres saisis dans ComicRust (gardés dans `data\comicrust.ron`, mot de passe chiffré).
     Manual(DbConfig),
 }
 

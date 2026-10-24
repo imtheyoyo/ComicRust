@@ -5,6 +5,25 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.7.3] — 2026-10-24
+
+Correctif de sécurité signalé pendant la recette de la v0.7.2.
+
+### Corrections
+- **Mot de passe MySQL plus jamais en clair** dans `data\comicrust.ron`. Cela concerne celui
+  saisi dans l'assistant (base de ComicRack « Saisir les paramètres », ou base autonome
+  MySQL).
+  - Il est chiffré avec la protection de données de Windows (DPAPI), liée à ton compte
+    Windows : seul ce compte, sur ce PC, peut le relire.
+  - ComicRust copié sur un autre PC ou ouvert par un autre compte garde tous ses réglages,
+    sauf ce mot de passe, à saisir à nouveau dans l'assistant (le message d'erreur le dit).
+  - Les réglages existants sont réécrits chiffrés au premier enregistrement.
+  - Rappel : avec « Paramètres lus dans ComicRack.ini », le mot de passe n'est jamais recopié
+    dans ComicRust.
+
+### Recette
+[recette/v0.7.3.md](recette/v0.7.3.md) — en cours.
+
 ## [v0.7.2] — 2026-10-24
 
 Correctif de la v0.7.1 (recette NO-GO, A-03).
@@ -16,7 +35,7 @@ Correctif de la v0.7.1 (recette NO-GO, A-03).
   (A-03, cause trouvée grâce au rapport de plantage de la v0.7.1).
 
 ### Recette
-[recette/v0.7.2.md](recette/v0.7.2.md) — en cours.
+[recette/v0.7.2.md](recette/v0.7.2.md) — GO (7/7 OK).
 
 ## [v0.7.1] — 2026-10-24
 

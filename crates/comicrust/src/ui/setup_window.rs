@@ -477,8 +477,8 @@ impl ComicRustApp {
                         ui.label(
                             RichText::new(
                                 "Les tables de ComicRust (préfixe comicrust_) peuvent aller dans la même base que \
-                                 celles de ComicRack sans les toucher. Le mot de passe est gardé dans \
-                                 data\\comicrust.ron.",
+                                 celles de ComicRack sans les toucher. Le mot de passe est enregistré chiffré pour \
+                                 ton compte Windows (jamais en clair).",
                             )
                             .weak()
                             .small(),
@@ -587,6 +587,13 @@ impl ComicRustApp {
                             ui.radio_value(&mut w.manual_mysql, true, "Saisir les paramètres");
                             if w.manual_mysql {
                                 w.cr_form.ui(ui, "assistant-mysql-comicrack");
+                                ui.label(
+                                    RichText::new(
+                                        "Mot de passe enregistré chiffré pour ton compte Windows (jamais en clair).",
+                                    )
+                                    .weak()
+                                    .small(),
+                                );
                             }
                         });
                     }

@@ -21,6 +21,8 @@ pub struct DbConfig {
     pub host: String,
     pub port: u16,
     pub user: String,
+    /// Jamais enregistré en clair (voir [`crate::secret`]).
+    #[serde(serialize_with = "crate::secret::serialize", deserialize_with = "crate::secret::deserialize")]
     pub password: String,
     pub database: String,
 }
