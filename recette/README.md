@@ -16,7 +16,7 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.6.0 | [v0.6.0.md](v0.6.0.md) — [page à cocher](https://claude.ai/artifact/UKA82YSL9ATVfgRcFwnmkh) — rapports [1](rapports/v0.6.0-2026-10-22.txt), [2](rapports/v0.6.0-2026-10-23.txt) | **GO** (23/10/2026) : 28/28 OK ; écriture des infos, conversion CBZ, HEIF/AVIF et WebComic validés sur le NAS |
 | v0.7.0 | [v0.7.0.md](v0.7.0.md) — [page à cocher](https://claude.ai/artifact/WGxsZ9FPK4rfLdTN3sHnjL) — [rapport](rapports/v0.7.0-2026-10-24.txt) | **GO** (24/10/2026) : 21/22 OK ; 4 941 livres analysés en 120 s ; A-03 (autonome + MySQL, fermeture) → v0.7.1 |
 | v0.7.1 | [v0.7.1.md](v0.7.1.md) — [page à cocher](https://claude.ai/artifact/5vKobnHjkLK7GiM1rtNEGL) — [rapport](rapports/v0.7.1-2026-10-24.txt) | **NO-GO** (24/10/2026) : A-03, plantage localisé par le rapport → corrigé en v0.7.2 |
-| v0.7.2 | [v0.7.2.md](v0.7.2.md) | en cours |
+| v0.7.2 | [v0.7.2.md](v0.7.2.md) — [page à cocher](https://claude.ai/artifact/Q45DAwc61hJLLRe9ePuEU3) | en cours |
 
 ## Déroulé
 
