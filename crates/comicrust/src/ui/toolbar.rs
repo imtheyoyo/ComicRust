@@ -110,6 +110,16 @@ impl ComicRustApp {
                         self.open_setup();
                         ui.close();
                     }
+                    if ui
+                        .button("Transférer la bibliothèque ComicRack…")
+                        .on_hover_text(
+                            "Copier livres, lectures, listes et dossiers de ComicRack dans la base de ComicRust",
+                        )
+                        .clicked()
+                    {
+                        self.open_transfer();
+                        ui.close();
+                    }
                     if ui.button("Rechercher une mise à jour…").clicked() {
                         self.update.check(&ctx, true);
                         ui.close();

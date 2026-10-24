@@ -75,6 +75,14 @@ impl ComicRustApp {
                     let text = self.lists_report();
                     ui.ctx().copy_text(text);
                 }
+            } else if self.library.standalone().is_some() {
+                if self.library.lists.items.is_empty() {
+                    ui.label(
+                        RichText::new("Pas encore de listes (⚙ → « Transférer la bibliothèque ComicRack… »).")
+                            .small()
+                            .weak(),
+                    );
+                }
             } else {
                 ui.label(RichText::new("Recherche du ComicDb.xml…").small().weak());
             }

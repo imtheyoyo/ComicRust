@@ -10,6 +10,7 @@ mod status_bar;
 pub mod theme;
 mod thumbnails;
 mod toolbar;
+pub mod transfer_window;
 mod update_ui;
 mod viewer;
 mod windows;

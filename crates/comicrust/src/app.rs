@@ -83,6 +83,8 @@ pub struct ComicRustApp {
     pub(crate) bg_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     /// Enregistrer les réglages tout de suite (après l'assistant de configuration).
     pub(crate) save_now: bool,
+    /// Transfert de la bibliothèque ComicRack vers la base de ComicRust.
+    pub(crate) transfer: Option<crate::ui::transfer_window::TransferWindow>,
 }
 
 impl ComicRustApp {
@@ -125,6 +127,7 @@ impl ComicRustApp {
             scan_manual: false,
             bg_errors: Default::default(),
             save_now: false,
+            transfer: None,
         };
         crate::update::cleanup_previous_install();
         if app.settings.library_mode == crate::settings::LibraryMode::Unset {
@@ -317,7 +320,7 @@ impl ComicRustApp {
             _ => None,
         });
         let lists = if standalone {
-            None
+            self.library.standalone().cloned().map(ListsSource::Store)
         } else {
             match (&self.settings.library_db, ini) {
                 (Some(p), _) => Some(ListsSource::File(p.clone())),
@@ -325,9 +328,7 @@ impl ComicRustApp {
                 _ => None,
             }
         };
-        if standalone {
-            self.library.lists.set(None, Err("Listes propres à ComicRust : prévues en v0.9.0".into()));
-        } else if lists.is_none() {
+        if lists.is_none() {
             self.library.lists.set(None, Err("ComicDb.xml non indiqué (base saisie à la main)".into()));
         }
         self.library.watch_error = None;
@@ -566,6 +567,7 @@ impl eframe::App for ComicRustApp {
         self.resume_window(&ctx);
         self.files_windows(&ctx);
         self.setup_window(&ctx);
+        self.transfer_window(&ctx);
         self.scan_window(&ctx);
         self.update_window(&ctx);
         self.info_window(&ctx);

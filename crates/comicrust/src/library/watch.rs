@@ -38,6 +38,8 @@ pub enum ListsSource {
     File(PathBuf),
     /// À chercher d'après ce `ComicRack.ini`.
     FromIni(PathBuf),
+    /// Listes enregistrées dans la base de ComicRust (mode autonome, après transfert).
+    Store(comicrust_core::store::StoreConfig),
 }
 
 impl ListsSource {
@@ -45,6 +47,7 @@ impl ListsSource {
         match self {
             ListsSource::File(p) => Some(p.clone()),
             ListsSource::FromIni(ini) => find_comicdb(ini),
+            ListsSource::Store(_) => None,
         }
     }
 }
@@ -128,7 +131,19 @@ pub fn spawn(
             let mut next_lists = Instant::now();
             while !s.load(Ordering::Relaxed) {
                 let now = Instant::now();
-                if let Some(src) = lists.as_ref().filter(|_| now >= next_lists) {
+                if let Some(ListsSource::Store(cfg)) = lists.as_ref().filter(|_| lists_seen.is_none()) {
+                    // Base de ComicRust : lues une fois (elles ne changent qu'au transfert, qui
+                    // relance la surveillance).
+                    lists_seen = Some((None, None));
+                    let result = comicrust_core::store::Store::open_existing(cfg)
+                        .and_then(|mut st| st.comic_lists())
+                        .map_err(|e| e.to_string());
+                    if tx.send(WatchEvent::Lists { path: None, result }).is_err() {
+                        return;
+                    }
+                    ctx.request_repaint();
+                }
+                if let Some(src) = lists.as_ref().filter(|l| now >= next_lists && !matches!(l, ListsSource::Store(_))) {
                     next_lists = now + LISTS_INTERVAL;
                     let path = src.resolve();
                     let m = path.as_ref().and_then(mtime);
