@@ -22,7 +22,7 @@ Correctif de sécurité signalé pendant la recette de la v0.7.2.
     dans ComicRust.
 
 ### Recette
-[recette/v0.7.3.md](recette/v0.7.3.md) — en cours.
+[recette/v0.7.3.md](recette/v0.7.3.md) — GO (8/8 OK).
 
 ## [v0.7.2] — 2026-10-24
 
