@@ -1,4 +1,5 @@
-//! Base de livres ComicRack sur MySQL — **lecture seule**.
+//! Base de livres ComicRack sur MySQL — lecture (ce module) et, sur demande explicite
+//! de l'interface seulement, écriture de fiches ([`write`]).
 //!
 //! Schéma créé par ComicRack CE (`ComicStorageMySql.CreateTables`) :
 //!
@@ -9,7 +10,8 @@
 //!
 //! `comics.id` est l'identifiant du livre (le même que les `<Id>` des listes `.cbl`) et
 //! `comics.data` sa fiche XML complète (`<ComicBook Id=".." File="..">…`), identique à un
-//! `<Book>` de `ComicDB.xml`. ComicRust ne fait que des `SELECT`.
+//! `<Book>` de `ComicDB.xml`. Hors de [`write::update_books`], ComicRust ne fait que
+//! des `SELECT`.
 //!
 //! **Suivi des modifications** (comme `ComicStorageBaseSql.Refresh`) : la table `changes`
 //! a une seule ligne dont `update_counter` augmente à chaque écriture d'un livre (le
@@ -20,6 +22,7 @@
 //! comparée à celle connue : un livre écrit sans que le compteur bouge est rattrapé.
 
 mod config;
+pub mod write;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,6 +32,9 @@ use mysql::prelude::Queryable;
 use mysql::{Conn, OptsBuilder};
 
 pub use config::DbConfig;
+pub use write::{
+    net_datetime, patch_comic_book_xml, update_books, BookEdit, Change, FileState, Value, WriteReport, Written,
+};
 
 use crate::cbl::ReadingList;
 use crate::library::LibraryBook;
@@ -153,8 +159,19 @@ impl Watcher {
             self.last_full = Instant::now();
         }
         match res {
-            Ok(Some(ch)) => {
+            Ok(Some(mut ch)) => {
                 self.seen = ch.counters;
+                // Lignes relues avec le compteur déjà connu : écritures de ce ComicRust
+                // (signalées par `note_written`), pas des modifications extérieures.
+                let own: HashSet<String> =
+                    ch.rows.iter().filter(|(id, c)| self.rows.get(id) == Some(c)).map(|(id, _)| id.clone()).collect();
+                if !own.is_empty() {
+                    ch.rows.retain(|(id, _)| !own.contains(id));
+                    ch.updated.retain(|b| !own.contains(&b.id.to_ascii_lowercase()));
+                    if ch.rows.is_empty() && ch.updated.is_empty() && ch.present.is_none() {
+                        return Ok(None);
+                    }
+                }
                 for (id, c) in &ch.rows {
                     self.rows.insert(id.clone(), *c);
                 }
@@ -385,6 +402,13 @@ impl ComicDatabase {
 mod tests {
     use super::*;
 
+    /// Les tests MySQL de `db` recréent les mêmes tables `comics` / `changes` de la base
+    /// de test : ils passent l'un après l'autre.
+    pub(crate) fn mysql_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Fiche au format exact de ComicRack CE (`XmlUtility.ToString(ComicBook)`).
     pub const SAMPLE: &str = r#"<?xml version="1.0"?>
 <ComicBook xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Id="30815f16-abb9-4c38-8c24-ecae11e25b1b" File="Z:\04_2011_2016\COSMIC COLLECTION #224 2012_05 - Thanos Rising 1-5 (Jason Aaron)(2013).cbz">
@@ -425,6 +449,7 @@ mod tests {
             eprintln!("COMICRUST_TEST_MYSQL absent : test MySQL ignoré");
             return;
         };
+        let _lock = mysql_lock();
         let cfg = DbConfig::from_connection_string(&url).unwrap();
         let mut conn = connect(&cfg).unwrap();
         conn.query_drop("DROP TABLE IF EXISTS comics").unwrap();

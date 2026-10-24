@@ -246,6 +246,88 @@ fn getter(kind: &str) -> Option<Getter> {
     })
 }
 
+/// Types de critères (`xsi:type`) que ComicRust sait évaluer.
+const SUPPORTED: &[&str] = &[
+    "ComicBookAgeRatingMatcher",
+    "ComicBookAlternateSeriesMatcher",
+    "ComicBookBookAgeMatcher",
+    "ComicBookBookCollectionStatusMatcher",
+    "ComicBookBookConditionMatcher",
+    "ComicBookBookLocationMatcher",
+    "ComicBookBookNotesMatcher",
+    "ComicBookBookOwnerMatcher",
+    "ComicBookBookStoreMatcher",
+    "ComicBookCharactersMatcher",
+    "ComicBookColoristMatcher",
+    "ComicBookCoverArtistMatcher",
+    "ComicBookDirectoryMatcher",
+    "ComicBookEditorMatcher",
+    "ComicBookFileMatcher",
+    "ComicBookFullPathMatcher",
+    "ComicBookFormatMatcher",
+    "ComicBookGenreMatcher",
+    "ComicBookISBNMatcher",
+    "ComicBookImprintMatcher",
+    "ComicBookInkerMatcher",
+    "ComicBookLettererMatcher",
+    "ComicBookLocationsMatcher",
+    "ComicBookMainCharacterOrTeamMatcher",
+    "ComicBookNotesMatcher",
+    "ComicBookPencillerMatcher",
+    "ComicBookPublisherMatcher",
+    "ComicBookReviewMatcher",
+    "ComicBookScanInformationMatcher",
+    "ComicBookSeriesGroupMatcher",
+    "ComicBookSeriesMatcher",
+    "ComicBookStoryArcMatcher",
+    "ComicBookSummaryMatcher",
+    "ComicBookTagsMatcher",
+    "ComicBookTeamsMatcher",
+    "ComicBookTitleMatcher",
+    "ComicBookTranslatorMatcher",
+    "ComicBookWebMatcher",
+    "ComicBookWriterMatcher",
+    "ComicBookAlternateCountMatcher",
+    "ComicBookAlternateNumberMatcher",
+    "ComicBookBookPriceMatcher",
+    "ComicBookCommunityRatingMatcher",
+    "ComicBookCountMatcher",
+    "ComicBookDayMatcher",
+    "ComicBookFileSizeMatcher",
+    "ComicBookMonthMatcher",
+    "ComicBookNumberMatcher",
+    "ComicBookPageCountMatcher",
+    "ComicBookRatingMatcher",
+    "ComicBookReadPercentageMatcher",
+    "ComicBookVolumeMatcher",
+    "ComicBookYearMatcher",
+    "ComicBookAddedMatcher",
+    "ComicBookOpenedMatcher",
+    "ComicBookReleasedMatcher",
+    "ComicBookPublishedMatcher",
+    "ComicBookBlackAndWhiteMatcher",
+    "ComicBookSeriesCompleteMatcher",
+    "ComicBookCheckedMatcher",
+    "ComicBookIsLinkedMatcher",
+    "ComicBookIsMissingMatcher",
+    "ComicBookModifiedInfoMatcher",
+    "ComicBookModifiedLibraryInfoMatcher",
+    "ComicBookMangaMatcher",
+    "ComicBookAllPropertiesMatcher",
+    "ComicBookDuplicateMatcher",
+    "SmartListSeriesAllCompleteMatcher",
+];
+
+/// ComicRust sait-il évaluer ce type de critère ?
+pub fn is_supported(kind: &str) -> bool {
+    getter(kind).is_some()
+}
+
+/// Types de critères (`xsi:type`) que ComicRust sait évaluer.
+pub fn supported_kinds() -> Vec<String> {
+    SUPPORTED.iter().map(|k| k.to_string()).collect()
+}
+
 /// Libellé français d'un type de critère (pour les messages).
 pub fn describe_kind(kind: &str) -> String {
     let name = kind
@@ -733,6 +815,13 @@ mod tests {
 <BlackAndWhite>No</BlackAndWhite><FileSize>52428800</FileSize></ComicBook>"#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn supported_list_matches_getter() {
+        for k in SUPPORTED {
+            assert!(is_supported(k), "{k}");
+        }
     }
 
     #[test]

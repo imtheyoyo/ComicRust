@@ -10,6 +10,15 @@
 //! | `ComicListItemFolder` | dossier : `<Items>` + `CombineMode` (`Or`, `And`, `Empty`) |
 //! | `ComicIdListItem` | liste de lecture : `<BookIds>` (identifiants, dans l'ordre) |
 //! | `ComicSmartListItem` | liste intelligente : `<Matchers>`, et parfois `<CacheStorage>` (identifiants séparés par des virgules, résultat mémorisé par ComicRack) |
+//!
+//! Ce module **lit** les listes. Leur modification (création, renommage, suppression,
+//! copie, déplacement, livres d'une liste de lecture, critères d'une liste intelligente)
+//! se fait sur les lignes de [`crate::lists_edit`], qui réécrit le XML au format de
+//! ComicRack ; l'enregistrement va dans la base de ComicRust
+//! ([`crate::store::Store::save_list_rows`]) ou dans `ComicDb.xml`
+//! ([`crate::lists_edit::ComicDbLists`], seulement ComicRack fermé : il réécrit ce fichier
+//! en se fermant et toutes les 10 minutes). Libellés et opérateurs des critères pour
+//! l'éditeur : [`crate::matcher_catalog`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

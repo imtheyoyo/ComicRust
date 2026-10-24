@@ -7,6 +7,8 @@
 //! - [`library`]    ↔ `ComicLibrary` / `ComicDatabase` (ComicDB.xml)
 //! - [`store`]      : base propre à ComicRust (SQLite ou MySQL, une colonne par champ)
 //! - [`scanner`]    ↔ `ComicScanner` (dossiers surveillés : ajout, mise à jour, manquants)
+//! - [`comic_lists`], [`smart`] ↔ listes (`ComicListItem…`, `ComicBook…Matcher`) ; modification :
+//!   [`lists_edit`] ; critères pour l'éditeur : [`matcher_catalog`]
 
 pub mod cbl;
 pub mod comic_info;
@@ -14,6 +16,8 @@ pub mod comic_lists;
 pub mod db;
 pub mod index;
 pub mod library;
+pub mod lists_edit;
+pub mod matcher_catalog;
 pub mod name_info;
 pub mod providers;
 pub mod scanner;
@@ -51,6 +55,10 @@ pub enum Error {
     Network(String),
     #[error("base de données : {0}")]
     Database(String),
+    /// Écriture refusée : données modifiées ailleurs depuis leur lecture, ou ComicRack
+    /// lancé (le message, en français, est destiné à l'utilisateur).
+    #[error("{0}")]
+    Conflict(String),
     #[error("page {0} hors limites")]
     PageOutOfRange(usize),
     #[error("format non pris en charge : .{0}")]

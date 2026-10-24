@@ -706,6 +706,8 @@ fn mysql_store() {
 
     // Transfert ComicRack → ComicRust (v0.8.0).
     super::import_tests::mysql_import(&db_cfg);
+    // Enregistrement des listes modifiées (v0.9.0).
+    super::lists_tests::mysql_lists(&db_cfg);
 
     let mut bad = db_cfg;
     bad.password = "mauvais-mdp".into();
