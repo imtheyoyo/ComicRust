@@ -1,0 +1,19 @@
+Rapport de recette ComicRust v0.7.0 — 24/10/2026 13:39
+Résultat : 21 OK, 1 échec(s), 0 non testé(s) sur 22.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (1)
+- A-03 [Mineur] (si tu veux tester MySQL) Assistant → autonome → « Serveur MySQL / MariaDB » avec ta base (ou une base vide) : tables comicrust_… créées à côté de celles de ComicRack, qui ne sont pas touchées ; ComicRack fonctionne toujours. Version de MySQL / MariaDB : ………
+  Note : Après avoir rempli tous les champs, lorsque on appuie sur le bouton terminer, ComicRust se ferme. A la réouverture, la configuration n'a pas été sauvegardée.
+
+VALEURS NOTÉES ET REMARQUES
+- A-01 : 4941 / 120s
+- X-01 : \\SERVEURNAS\Disque_DATA_1\_BDZ\ComicRack\Data\ComicDb.xml ne contient aucun livre : ComicRack utilise sans doute une base MySQL
+
+ANALYSE (Claude)
+- A-03 non reproduit dans l'atelier : assistant → autonome → MariaDB 10.11 (base vide) → « Terminer » :
+  tables créées, 13 échantillons analysés, configuration gardée. ComicRust se fermant sans message,
+  il s'agit d'un arrêt brutal du programme (sans doute un débordement de pile sous Windows, qui ne
+  laisse aucune trace). v0.7.1 : piles agrandies (16 Mio pour les fils, 8 Mio pour le fil
+  principal), rapport de plantage dans data\plantage.txt montré au lancement suivant, réglages
+  enregistrés dès la fin de l'assistant.

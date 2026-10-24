@@ -267,7 +267,7 @@ impl SetupWindow {
                         let n = st.count().map_err(|e| e.to_string())?;
                         Ok((Finish::Standalone(cfg), format!("Base prête ({n} livres déjà enregistrés).")))
                     };
-                    let _ = tx.send(run());
+                    let _ = tx.send(catch(run));
                     ctx2.request_repaint();
                 });
             }
@@ -313,7 +313,7 @@ impl SetupWindow {
                             ))
                         }
                     };
-                    let _ = tx.send(run());
+                    let _ = tx.send(catch(run));
                     ctx2.request_repaint();
                 });
             }
@@ -322,6 +322,19 @@ impl SetupWindow {
         self.pending = Some(rx);
         self.message = None;
     }
+}
+
+/// Vérification protégée : un plantage devient un message dans l'assistant (le détail est
+/// dans `data\plantage.txt`) au lieu d'une attente sans fin.
+fn catch<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|p| {
+        let why = p
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        Err(format!("erreur interne : {why} (détails dans data\\plantage.txt)"))
+    })
 }
 
 fn browse_file(ui: &mut Ui, value: &mut String, title: &str, filter: (&str, &[&str])) {
@@ -638,6 +651,7 @@ impl ComicRustApp {
                 }
             }
             self.setup = None;
+            self.save_now = true;
             self.select_list(None);
             self.scan_after_load = true;
             self.load_library(ctx);

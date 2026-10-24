@@ -11,6 +11,9 @@ pub const INDEX_CACHE_FILE: &str = "index-bd.json";
 /// Dossier des couvertures en cache (vue Bibliothèque).
 pub const COVERS_DIR: &str = "couvertures";
 
+/// Rapport du dernier plantage (affiché au lancement suivant, puis renommé).
+pub const CRASH_FILE: &str = "plantage.txt";
+
 /// Dossier de l'exécutable.
 pub fn exe_dir() -> PathBuf {
     std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."))

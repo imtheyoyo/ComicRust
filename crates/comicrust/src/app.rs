@@ -81,6 +81,8 @@ pub struct ComicRustApp {
     pub(crate) scan_manual: bool,
     /// Erreurs des écritures faites en arrière-plan (lecture, fiches), affichées ensuite.
     pub(crate) bg_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Enregistrer les réglages tout de suite (après l'assistant de configuration).
+    pub(crate) save_now: bool,
 }
 
 impl ComicRustApp {
@@ -122,6 +124,7 @@ impl ComicRustApp {
             scan_after_load: true,
             scan_manual: false,
             bg_errors: Default::default(),
+            save_now: false,
         };
         crate::update::cleanup_previous_install();
         if app.settings.library_mode == crate::settings::LibraryMode::Unset {
@@ -142,6 +145,24 @@ impl ComicRustApp {
                  soient gardés.",
                 crate::paths::exe_dir().display()
             ));
+        }
+        // Recette : vérifier le rapport de plantage.
+        if std::env::var_os("COMICRUST_SIMULER_PLANTAGE").is_some() {
+            panic!("plantage simulé (COMICRUST_SIMULER_PLANTAGE)");
+        }
+        // Plantage lors de la session précédente : rapport montré une fois, puis renommé.
+        if let Some(dir) = &app.data_dir {
+            let crash = dir.join(crate::paths::CRASH_FILE);
+            if let Ok(text) = std::fs::read_to_string(&crash) {
+                let seen = dir.join(format!("plantage-{}.txt", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+                let _ = std::fs::rename(&crash, &seen);
+                let first: String = text.lines().take(4).collect::<Vec<_>>().join("\n");
+                app.error = Some(format!(
+                    "ComicRust s'est fermé de façon inattendue lors de la dernière utilisation.\n\n{first}\n\n\
+                     Rapport complet : {}\n(à joindre au rapport de recette)",
+                    seen.display()
+                ));
+            }
         }
         if let Some(p) = initial {
             app.open_path(&cc.egui_ctx, p);
@@ -484,8 +505,14 @@ impl eframe::App for ComicRustApp {
         self.update_title(ctx);
     }
 
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if std::mem::take(&mut self.save_now) {
+            if let Some(storage) = frame.storage_mut() {
+                eframe::App::save(self, storage);
+                storage.flush();
+            }
+        }
 
         if !self.fullscreen {
             egui::Panel::top("toolbar").show(ui, |ui| {

@@ -5,6 +5,24 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.7.1] — 2026-10-24
+
+Correctif de la v0.7.0 (recette : 21/22, A-03).
+
+### Corrections
+- **Assistant, ComicRust autonome avec MySQL** : ComicRust se fermait au clic sur
+  « Terminer » sans garder la configuration (A-03, non reproduit dans l'atelier).
+  - Piles agrandies pour tous les fils (16 Mio) et pour le fil principal (8 Mio) : un
+    débordement de pile fermait le programme sans message.
+  - Les réglages sont enregistrés dès la fin de l'assistant.
+  - Une erreur inattendue pendant la vérification s'affiche dans l'assistant.
+- **Rapport de plantage** : si ComicRust se ferme de façon inattendue, le détail est écrit
+  dans `data\plantage.txt` et montré au lancement suivant (fichier gardé sous
+  `plantage-<date>.txt`, à joindre au rapport de recette).
+
+### Recette
+[recette/v0.7.1.md](recette/v0.7.1.md) — en cours.
+
 ## [v0.7.0] — 2026-10-24
 
 Première étape vers un ComicRust qui peut se passer de ComicRack : assistant de premier
@@ -35,7 +53,7 @@ démarrage et mode autonome.
   en mode autonome, la fiche du livre est mise à jour (sans toucher à sa lecture).
 
 ### Recette
-[recette/v0.7.0.md](recette/v0.7.0.md) — en cours.
+[recette/v0.7.0.md](recette/v0.7.0.md) — GO (21/22 OK ; A-03 → v0.7.1).
 
 ## [v0.6.0] — 2026-10-22
 
