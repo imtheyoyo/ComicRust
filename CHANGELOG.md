@@ -39,7 +39,7 @@ Se passer de ComicRack : sa bibliothèque peut être transférée dans la base d
 - Message clair quand un `ComicDb.xml` ne contient aucun livre (bibliothèque MySQL).
 
 ### Recette
-[recette/v0.8.0.md](recette/v0.8.0.md).
+[recette/v0.8.0.md](recette/v0.8.0.md) — GO (17/17 OK).
 
 ## [v0.7.3] — 2026-10-24
 

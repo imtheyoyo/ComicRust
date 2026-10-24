@@ -1,0 +1,11 @@
+Rapport de recette ComicRust v0.8.0 — 24/10/2026 22:23
+Résultat : 17 OK, 0 échec(s), 0 non testé(s) sur 17.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- T-02 : 5323 livres de ComicRack : 383 ajoutés, 4940 remplacés (déjà ajoutés par l'analyse des dossiers), 0 mis à jour ; 47 listes ; 0 dossiers ajoutés
+- T-06 : ComicRust v0.8.0 — analyse des dossiers / 4941 fichiers : 0 ajoutés, 1 mis à jour (0 déplacés), 1 manquants, 0 retrouvés, 0 erreurs
+- T-08 : 5324 livres de ComicRack : 1 ajoutés, 0 remplacés (déjà ajoutés par l'analyse des dossiers), 5323 mis à jour ; 47 listes ; 0 dossiers ajoutés
