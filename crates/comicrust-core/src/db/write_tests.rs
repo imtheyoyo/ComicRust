@@ -40,6 +40,9 @@ fn dates_like_dotnet() {
     assert_eq!(net_datetime(&date("2026-01-02T03:04:05.5-05:00")), "2026-01-02T03:04:05.5-05:00");
     // Précision de .NET : le tick (100 ns).
     assert_eq!(net_datetime(&date("2026-01-02T03:04:05.000000099Z")), "2026-01-02T03:04:05+00:00");
+    let utc = |s: &str| date(s).with_timezone(&chrono::Utc);
+    assert_eq!(net_datetime_utc(&utc("2026-10-24T21:05:00.25+02:00")), "2026-10-24T19:05:00.25Z");
+    assert_eq!(net_datetime_utc(&utc("2026-01-02T03:04:05Z")), "2026-01-02T03:04:05Z");
 }
 
 #[test]
@@ -264,15 +267,18 @@ fn file_after_conversion() {
     };
     let out = patch(DEMO, edit().file(&f).comic_info_dirty(false));
     let expected = DEMO
-        .replace("/home/claude/comicrust/recette/echantillons/Thanos Quest 01 (1990).cbz", "/bd/Thanos Quest 01 (1990).cbz")
+        .replace(
+            "/home/claude/comicrust/recette/echantillons/Thanos Quest 01 (1990).cbz",
+            "/bd/Thanos Quest 01 (1990).cbz",
+        )
         .replace(
             "</LastPageRead>",
-            "</LastPageRead><FileSize>48173972</FileSize><FileModifiedTime>2026-10-24T21:05:00.25+02:00</FileModifiedTime>",
+            "</LastPageRead><FileSize>48173972</FileSize><FileModifiedTime>2026-10-24T19:05:00.25Z</FileModifiedTime>",
         );
     assert_eq!(out, expected);
     let b = LibraryBook::from_xml(&out).unwrap();
     assert_eq!(b.file_size, Some(48_173_972));
-    assert_eq!(b.file_modified_time.as_deref(), Some("2026-10-24T21:05:00.25+02:00"));
+    assert_eq!(b.file_modified_time.as_deref(), Some("2026-10-24T19:05:00.25Z"), "UTC, comme ComicRack");
 }
 
 #[test]

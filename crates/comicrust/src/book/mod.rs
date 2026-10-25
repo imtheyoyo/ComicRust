@@ -36,8 +36,11 @@ pub struct Book {
     pub thumbs_requested: HashSet<usize>,
     pub current: usize,
     pub opened: bool,
-    /// Lecture déjà enregistrée dans la base de ComicRust (mode autonome).
+    /// Lecture déjà enregistrée (base de ComicRust en mode autonome, base de ComicRack en
+    /// mode écriture) : une fois par livre ouvert.
     pub stored: bool,
+    /// Heure d'ouverture (`Opened` de ComicRack, qui la note à l'ouverture du livre).
+    pub opened_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
 impl Book {
@@ -59,6 +62,7 @@ impl Book {
             current,
             opened: false,
             stored: false,
+            opened_at: comicrust_core::db::write::now(),
         }
     }
 

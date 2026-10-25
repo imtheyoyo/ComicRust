@@ -64,7 +64,12 @@ impl ComicRustApp {
         let busy = self.file_job.as_ref().is_some_and(|j| !j.is_finished());
         ui.add_enabled_ui(!busy, |ui| {
             ui.menu_button("🛠 Fichiers", |ui| {
-                ui.label(RichText::new("Seuls les fichiers BD sont modifiés.").weak().small());
+                let note = if self.comicrack_write_config().is_some() {
+                    "Fichiers BD modifiés ; leur fiche ComicRack est mise à jour."
+                } else {
+                    "Seuls les fichiers BD sont modifiés."
+                };
+                ui.label(RichText::new(note).weak().small());
                 let selected = self.library.selected_book.clone();
                 let n_shown = self.library.shown();
                 ui.label(RichText::new("Livre sélectionné").strong());
@@ -106,14 +111,21 @@ impl ComicRustApp {
         let Some(job) = &mut self.file_job else { return };
         let new = job.poll();
         let standalone = self.library.standalone().cloned();
+        let comicrack_write = self.comicrack_write_config().is_some();
         let mut written = false;
         let mut store_updates: Vec<(String, Done)> = Vec::new();
+        let mut comicrack_updates: Vec<(String, Done, std::path::PathBuf)> = Vec::new();
         for r in new {
             let Ok(done) = r.outcome else { continue };
             if standalone.is_some() {
                 // Base de ComicRust : la fiche elle-même est mise à jour (pas d'astuce d'affichage).
                 store_updates.push((r.target.id.clone(), done));
                 continue;
+            }
+            if comicrack_write {
+                // Base de ComicRack en écriture : la fiche est mise à jour (voir plus bas) ; les
+                // réglages ci-dessous servent encore si l'écriture échoue.
+                comicrack_updates.push((r.target.id.clone(), done.clone(), r.target.path.clone()));
             }
             match done {
                 Done::Info { counter, .. } => {
@@ -134,6 +146,9 @@ impl ComicRustApp {
         }
         if written {
             self.library.apply_info_written(&mut self.settings.info_written);
+        }
+        if !comicrack_updates.is_empty() {
+            self.write_files_to_comicrack(comicrack_updates);
         }
         if let (Some(cfg), false) = (standalone, store_updates.is_empty()) {
             // Fiches modifiées en arrière-plan (colonnes ciblées : la lecture n'est jamais
@@ -172,6 +187,7 @@ impl ComicRustApp {
 
     fn file_dialog_window(&mut self, ctx: &Context) {
         let standalone = self.library.standalone().is_some();
+        let comicrack_write = self.comicrack_write_config().is_some();
         let Some(d) = &mut self.file_dialog else { return };
         let mut go = false;
         let mut cancel = false;
@@ -190,6 +206,10 @@ impl ComicRustApp {
                     let note = if standalone {
                         "Les pages ne sont pas recompressées ; un fichier déjà à jour n'est pas touché. Les livres \
                          écrits sortent de « Fichiers à mettre à jour »."
+                    } else if comicrack_write {
+                        "Les pages ne sont pas recompressées ; un fichier déjà à jour n'est pas touché. La fiche \
+                         ComicRack de chaque livre est mise à jour (« Fichiers à mettre à jour » décoché, taille et \
+                         date du fichier)."
                     } else {
                         "Les pages ne sont pas recompressées ; un fichier déjà à jour n'est pas touché. La base \
                          ComicRack n'est pas modifiée : ComicRack garde ces livres dans « Fichiers à mettre à jour », \
@@ -216,6 +236,15 @@ impl ComicRustApp {
                             RichText::new(
                                 "La fiche du livre indiquera le CBZ (lecture et infos gardées). Un original gardé à sa \
                                  place sera vu comme un nouveau livre à la prochaine analyse des dossiers.",
+                            )
+                            .weak(),
+                        );
+                    } else if comicrack_write {
+                        ui.label(
+                            RichText::new(
+                                "La fiche ComicRack du livre indiquera le CBZ (lecture et infos gardées). Un original \
+                                 gardé à sa place pourra être ajouté comme nouveau livre par ComicRack s'il analyse \
+                                 ce dossier.",
                             )
                             .weak(),
                         );

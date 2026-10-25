@@ -28,7 +28,10 @@ impl ComicRustApp {
                     }
                     if let Some(w) = &self.library.last_loaded_from {
                         ui.separator();
-                        ui.label(RichText::new(w).weak());
+                        match self.library_mode_label() {
+                            Some(mode) => ui.label(RichText::new(mode).weak()).on_hover_text(w),
+                            None => ui.label(RichText::new(w).weak()),
+                        };
                     }
                     if let Some(e) = &self.library.watch_error {
                         ui.separator();

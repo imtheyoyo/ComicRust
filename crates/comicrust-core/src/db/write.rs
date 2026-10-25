@@ -71,7 +71,7 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, FixedOffset, Local, Timelike};
+use chrono::{DateTime, FixedOffset, Local, Timelike, Utc};
 use mysql::prelude::Queryable;
 use mysql::{Conn, TxOpts};
 use quick_xml::events::Event;
@@ -101,6 +101,9 @@ pub enum Value {
     Bool(bool),
     /// Date (écrite au format aller-retour de .NET, voir [`net_datetime`]).
     Date(DateTime<FixedOffset>),
+    /// Date UTC, écrite avec `Z` comme un `DateTime` de genre `Utc` (`FileModifiedTime`,
+    /// `FileCreationTime` : ComicRack y met `LastWriteTimeUtc` / `CreationTimeUtc`).
+    UtcDate(DateTime<Utc>),
     /// Liste `<Pages>` complète.
     Pages(Vec<PageInfo>),
     /// Ajoute à la valeur entière actuelle (ou à la valeur par défaut si l'élément est
@@ -138,6 +141,7 @@ pub struct FileState {
     /// Chemin complet, tel que ComicRack le voit (attribut `File`).
     pub path: String,
     pub size: u64,
+    /// Dates du fichier (écrites en UTC, comme ComicRack).
     pub modified: Option<DateTime<FixedOffset>>,
     pub created: Option<DateTime<FixedOffset>>,
     /// `None` : inchangé.
@@ -196,7 +200,8 @@ impl BookEdit {
     pub fn file(mut self, f: &FileState) -> Self {
         self = self.set("File", Value::Text(f.path.clone())).set("FileSize", Value::Int(f.size as i64));
         for (name, date) in [("FileModifiedTime", f.modified), ("FileCreationTime", f.created)] {
-            self.changes.push(Change { element: name.into(), value: date.map(Value::Date) });
+            self.changes
+                .push(Change { element: name.into(), value: date.map(|d| Value::UtcDate(d.with_timezone(&Utc))) });
         }
         if let Some(n) = f.page_count {
             self = self.set("PageCount", Value::Int(n.into()));
@@ -225,6 +230,13 @@ pub fn net_datetime(dt: &DateTime<FixedOffset>) -> String {
     }
     s.push_str(&dt.format("%:z").to_string());
     s
+}
+
+/// Date UTC au format de `XmlConvert.ToString(DateTime, RoundtripKind)` pour un
+/// `DateTime` de genre `Utc` : `yyyy-MM-ddTHH:mm:ss.FFFFFFFZ`.
+pub fn net_datetime_utc(dt: &DateTime<Utc>) -> String {
+    let s = net_datetime(&dt.fixed_offset());
+    format!("{}Z", s.trim_end_matches("+00:00"))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -449,7 +461,7 @@ fn type_mismatch(name: &str, v: &Value) -> Error {
         Value::Int(_) => "entier",
         Value::Float(_) => "réel",
         Value::Bool(_) => "booléen",
-        Value::Date(_) => "date",
+        Value::Date(_) | Value::UtcDate(_) => "date",
         Value::Pages(_) => "liste de pages",
         Value::Add(_) | Value::Max(_) => "opération entière",
     };
@@ -498,10 +510,11 @@ fn scalar(name: &str, kind: Kind, value: &Value, current: Option<&str>) -> Resul
             let Value::Bool(b) = *value else { return Err(mismatch()) };
             (b != def).then(|| b.to_string())
         }
-        Kind::Date => {
-            let Value::Date(d) = value else { return Err(mismatch()) };
-            Some(net_datetime(d))
-        }
+        Kind::Date => match value {
+            Value::Date(d) => Some(net_datetime(d)),
+            Value::UtcDate(d) => Some(net_datetime_utc(d)),
+            _ => return Err(mismatch()),
+        },
         Kind::Choice(list) => {
             let Value::Text(s) = value else { return Err(mismatch()) };
             if !list.contains(&s.as_str()) {

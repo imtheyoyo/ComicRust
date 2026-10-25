@@ -124,6 +124,10 @@ impl ComicRustApp {
                         self.update.check(&ctx, true);
                         ui.close();
                     }
+                    if let Some(mode) = self.library_mode_label() {
+                        ui.label(egui::RichText::new(mode).weak().small())
+                            .on_hover_text("Assistant de configuration pour changer");
+                    }
                     if self.settings.library_mode.is_comicrack()
                         && ui
                             .checkbox(&mut self.settings.auto_refresh, "Suivre les modifications faites dans ComicRack")

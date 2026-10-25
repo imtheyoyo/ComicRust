@@ -1,8 +1,10 @@
 //! Bibliothèque : livres de la base MySQL de ComicRack, chargés en arrière-plan puis
 //! tenus à jour (voir `watch`), filtrés, triés et regroupés pour la vue Bibliothèque.
 
+pub mod comicrack_write;
 pub mod covers;
 pub mod files;
+pub mod lists_ops;
 pub mod scan;
 pub mod sorting;
 pub mod watch;
@@ -34,7 +36,8 @@ pub enum Status {
 /// D'où vient la bibliothèque affichée.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LibrarySource {
-    /// Base MySQL de ComicRack (lecture seule).
+    /// Base MySQL de ComicRack (lecture seule, ou écriture ciblée si
+    /// `Settings::comicrack_write`, voir `comicrack_write`).
     ComicRackMySql(DbConfig),
     /// Bibliothèque `ComicDb.xml` de ComicRack (lecture seule, relue quand elle change).
     ComicRackXml(PathBuf),
@@ -45,7 +48,7 @@ pub enum LibrarySource {
 impl LibrarySource {
     pub fn describe(&self) -> String {
         match self {
-            LibrarySource::ComicRackMySql(c) => format!("base ComicRack {} (lecture seule)", c.describe()),
+            LibrarySource::ComicRackMySql(c) => format!("base ComicRack {}", c.describe()),
             LibrarySource::ComicRackXml(p) => format!("ComicRack {} (lecture seule)", p.display()),
             LibrarySource::Standalone(c) => format!("base ComicRust {}", c.describe()),
         }
@@ -194,6 +197,9 @@ pub struct LibraryState {
     pub selected_list: Option<String>,
     /// Livre sélectionné (panneau de détails).
     pub selected_book: Option<String>,
+    /// Sélection multiple (Ctrl+clic, Maj+clic) : comptée seulement si elle contient
+    /// `selected_book` (sinon la sélection est `selected_book` seul).
+    pub selected_books: std::collections::HashSet<String>,
     /// Pile ouverte (série) dans la vue empilée.
     pub open_stack: Option<String>,
     /// Pile sélectionnée (un clic) dans la vue empilée.
@@ -224,6 +230,7 @@ impl Default for LibraryState {
             search: String::new(),
             selected_list: None,
             selected_book: None,
+            selected_books: Default::default(),
             open_stack: None,
             selected_stack: None,
             lists: Lists::default(),
@@ -330,6 +337,19 @@ impl LibraryState {
         applied
     }
 
+    /// Reporte les livres écrits par ComicRust dans la base MySQL de ComicRack (fiches
+    /// relues après l'écriture). Renvoie le nombre de livres remplacés.
+    pub fn apply_written(&mut self, report: &comicrust_core::db::WriteReport) -> usize {
+        let Status::Loaded(db) = &mut self.status else { return 0 };
+        if report.written.is_empty() {
+            return 0;
+        }
+        let n = Arc::make_mut(db).apply_written(report);
+        self.generation += 1;
+        self.view_key = None;
+        n
+    }
+
     /// Livres dont ComicRust a écrit les infos dans le fichier : ils ne sont plus « à mettre
     /// à jour » tant que leur fiche n'a pas changé dans ComicRack (sinon l'entrée est
     /// oubliée). Renvoie `true` si un livre a changé d'état.
@@ -368,6 +388,74 @@ impl LibraryState {
             .map(|b| GroupKey::Series.label(b))
             .collect::<std::collections::HashSet<_>>()
             .len()
+    }
+
+    /// Clic sur un livre : seul (clic), ajouté ou retiré (Ctrl), ou plage depuis le livre
+    /// sélectionné jusqu'à lui dans l'ordre de la vue (Maj).
+    pub fn click_book(&mut self, id: &str, ctrl: bool, shift: bool) {
+        let id = id.to_string();
+        if shift {
+            if let (Some(anchor), Some(db)) = (self.selected_book.clone(), self.database()) {
+                let pos = |x: &str| self.view.iter().position(|&i| db.books.get(i).is_some_and(|b| b.id == x));
+                if let (Some(a), Some(b)) = (pos(&anchor), pos(&id)) {
+                    let (lo, hi) = (a.min(b), a.max(b));
+                    self.selected_books = self.view[lo..=hi].iter().map(|&i| db.books[i].id.clone()).collect();
+                    // L'ancre reste le livre de départ (Maj+clic suivant depuis lui).
+                    return;
+                }
+            }
+        }
+        if ctrl {
+            if let Some(cur) = self.selected_book.clone() {
+                if !self.selected_books.contains(&cur) {
+                    self.selected_books = [cur].into();
+                }
+            }
+            if self.selected_books.remove(&id) {
+                if self.selected_book.as_deref() == Some(id.as_str()) {
+                    let set = &self.selected_books;
+                    self.selected_book = self.database().and_then(|db| {
+                        self.view
+                            .iter()
+                            .filter_map(|&i| db.books.get(i))
+                            .find(|b| set.contains(&b.id))
+                            .map(|b| b.id.clone())
+                    });
+                }
+            } else {
+                self.selected_books.insert(id.clone());
+                self.selected_book = Some(id);
+            }
+            return;
+        }
+        self.selected_books = [id.clone()].into();
+        self.selected_book = Some(id);
+    }
+
+    /// Le livre fait-il partie de la sélection ?
+    pub fn is_selected(&self, id: &str) -> bool {
+        match &self.selected_book {
+            None => false,
+            Some(b) if self.selected_books.contains(b) => self.selected_books.contains(id),
+            Some(b) => b == id,
+        }
+    }
+
+    /// Livres sélectionnés, dans l'ordre de la vue.
+    pub fn selection(&self) -> Vec<String> {
+        let Some(db) = self.database() else { return Vec::new() };
+        let v: Vec<String> = self
+            .view
+            .iter()
+            .filter_map(|&i| db.books.get(i))
+            .filter(|b| self.is_selected(&b.id))
+            .map(|b| b.id.clone())
+            .collect();
+        if v.is_empty() {
+            self.selected_book.iter().cloned().collect()
+        } else {
+            v
+        }
     }
 
     /// Nombre de livres affichés lors du dernier calcul de la vue.
@@ -684,6 +772,28 @@ mod tests {
         assert_eq!(ids(&mut s, &o), ["d", "a", "c"], "identifiant absent de la base ignoré");
         let db = s.database().unwrap();
         assert_eq!(s.position(db.index_of("c").unwrap()), Some(2));
+    }
+
+    #[test]
+    fn multiple_selection() {
+        let mut s = state();
+        assert_eq!(ids(&mut s, &series()), ["c", "e", "b", "a", "d"]);
+        s.click_book("e", false, false);
+        assert_eq!(s.selection(), ["e"]);
+        s.click_book("a", false, true);
+        assert_eq!(s.selection(), ["e", "b", "a"], "Maj : plage dans l'ordre de la vue");
+        s.click_book("b", true, false);
+        assert_eq!(s.selection(), ["e", "a"], "Ctrl : retiré");
+        s.click_book("c", true, false);
+        assert_eq!(s.selection(), ["c", "e", "a"]);
+        assert!(s.is_selected("c") && !s.is_selected("d"));
+        s.click_book("c", true, false);
+        assert_eq!(s.selected_book.as_deref(), Some("e"), "livre courant retiré : le suivant sélectionné");
+        // Autre code qui change le livre courant (Échap, fiche) : sélection simple.
+        s.selected_book = Some("d".into());
+        assert_eq!(s.selection(), ["d"]);
+        s.selected_book = None;
+        assert!(s.selection().is_empty() && !s.is_selected("e"));
     }
 
     #[test]

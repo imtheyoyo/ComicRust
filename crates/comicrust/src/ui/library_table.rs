@@ -7,6 +7,7 @@ use egui_extras::{Column, TableBuilder};
 
 use crate::app::ComicRustApp;
 use crate::library::SortKey;
+use crate::ui::lists_ui::{book_lists_menu, BookListAction};
 
 /// `2019-10-01T12:58:00.123+02:00` → `01/10/2019`.
 pub(crate) fn short_date(iso: Option<&str>) -> String {
@@ -118,6 +119,12 @@ impl ComicRustApp {
         let mut select = None;
         let mut file_request: Option<(crate::library::files::FileAction, String)> = None;
         let mut sort_by = None;
+        // Listes de lecture : menu des livres, sélection multiple (Ctrl, Maj).
+        let lists_menu = self.book_menu_data(ui.ctx());
+        let selection = self.library.selection();
+        let mods = ui.input(|i| i.modifiers);
+        let mut select_plain: Option<String> = None;
+        let mut list_request: Option<(BookListAction, Vec<String>)> = None;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         // Colonnes plus larges que la fenêtre : défilement horizontal.
         egui::ScrollArea::horizontal().id_salt("tableau-h").auto_shrink(false).show(ui, |ui| {
@@ -165,7 +172,8 @@ impl ComicRustApp {
                 body.rows(row_h, view.len(), |mut row| {
                     let bi = view[row.index()];
                     let book = &db.books[bi];
-                    row.set_selected(self.library.selected_book.as_deref() == Some(book.id.as_str()));
+                    let selected = self.library.is_selected(&book.id);
+                    row.set_selected(selected);
                     if in_list {
                         row.col(|ui| {
                             ui.label(self.library.position(bi).map(|p| (p + 1).to_string()).unwrap_or_default());
@@ -183,8 +191,13 @@ impl ComicRustApp {
                         });
                     }
                     let resp = row.response();
+                    if resp.secondary_clicked() && !selected {
+                        select_plain = Some(book.id.clone());
+                    }
                     resp.context_menu(|ui| {
-                        Self::book_file_menu(ui, &self.settings, &book.id, book.file.as_deref(), &mut file_request)
+                        Self::book_file_menu(ui, &self.settings, &book.id, book.file.as_deref(), &mut file_request);
+                        let books = if selected { selection.clone() } else { vec![book.id.clone()] };
+                        book_lists_menu(ui, &lists_menu, &books, &mut list_request);
                     });
                     if resp.double_clicked() {
                         open = Some(book.id.clone());
@@ -207,7 +220,13 @@ impl ComicRustApp {
             self.ask_file_action(action, &[id]);
         }
         if let Some(id) = select {
-            self.library.selected_book = Some(id);
+            self.library.click_book(&id, mods.command, mods.shift);
+        }
+        if let Some(id) = select_plain {
+            self.library.click_book(&id, false, false);
+        }
+        if let Some((action, books)) = list_request {
+            self.book_list_request(ui.ctx(), action, books);
         }
         if let Some(id) = open {
             self.library.selected_book = Some(id.clone());

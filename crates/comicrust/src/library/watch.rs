@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use comicrust_core::comic_lists::{find_comicdb, load_comic_lists, ComicList};
@@ -52,10 +52,17 @@ impl ListsSource {
     }
 }
 
+/// Livres écrits par ComicRust dans la base MySQL de ComicRack (`id`, nouveau
+/// `comics.update_counter`), à signaler à la surveillance pour qu'elle ne les prenne pas
+/// pour des modifications faites dans ComicRack (`Watcher::note_written`).
+pub type WrittenSink = Arc<Mutex<Vec<(String, i64)>>>;
+
 /// Arrête le fil quand elle est libérée.
 pub struct WatchHandle {
     pub rx: Receiver<WatchEvent>,
     stop: Arc<AtomicBool>,
+    /// Écritures de ComicRust à signaler (prises en compte avant chaque interrogation).
+    pub written: WrittenSink,
 }
 
 impl Drop for WatchHandle {
@@ -85,6 +92,14 @@ impl DbWatch {
                 let m = mtime(&p);
                 DbWatch::Xml(p, m)
             }
+        }
+    }
+
+    /// Écritures faites par ComicRust (base MySQL de ComicRack seulement).
+    fn note_written(&mut self, sink: &WrittenSink) {
+        let written: Vec<(String, i64)> = std::mem::take(&mut *sink.lock().unwrap());
+        if let DbWatch::MySql(w) = self {
+            w.note_written(written.iter().map(|(id, c)| (id.as_str(), *c)));
         }
     }
 
@@ -120,6 +135,8 @@ pub fn spawn(
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
+    let written: WrittenSink = Default::default();
+    let sink = written.clone();
     let ctx = ctx.clone();
     std::thread::Builder::new()
         .name("comicrust-surveillance".into())
@@ -178,6 +195,9 @@ pub fn spawn(
                         ctx.request_repaint();
                     }
                 }
+                if let Some(w) = watcher.as_mut() {
+                    w.note_written(&sink);
+                }
                 if let Some(w) = watcher.as_mut().filter(|_| now >= next_db) {
                     next_db = now + DB_INTERVAL;
                     let ev = match w.poll() {
@@ -208,5 +228,5 @@ pub fn spawn(
             }
         })
         .expect("fil de surveillance");
-    WatchHandle { rx, stop }
+    WatchHandle { rx, stop, written }
 }

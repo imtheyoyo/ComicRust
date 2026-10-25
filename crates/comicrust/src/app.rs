@@ -85,6 +85,10 @@ pub struct ComicRustApp {
     pub(crate) save_now: bool,
     /// Transfert de la bibliothèque ComicRack vers la base de ComicRust.
     pub(crate) transfer: Option<crate::ui::transfer_window::TransferWindow>,
+    /// Gestion des listes (v0.9.0) : opérations, éditeur, dialogues.
+    pub(crate) lists_ui: crate::ui::lists_ui::ListsUi,
+    /// Écritures dans la base MySQL de ComicRack (mode écriture).
+    pub(crate) cr_writes: crate::library::comicrack_write::ComicRackWrites,
 }
 
 impl ComicRustApp {
@@ -128,6 +132,8 @@ impl ComicRustApp {
             bg_errors: Default::default(),
             save_now: false,
             transfer: None,
+            lists_ui: Default::default(),
+            cr_writes: Default::default(),
         };
         crate::update::cleanup_previous_install();
         if app.settings.library_mode == crate::settings::LibraryMode::Unset {
@@ -446,7 +452,11 @@ impl ComicRustApp {
 
     /// Mode autonome : enregistre dans la base de ComicRust la lecture du livre ouvert
     /// (page courante, page la plus loin, date ; une fois par livre fermé ou quitté).
+    /// Avec ComicRack en mode écriture : dans la base de ComicRack (`comicrack_write`).
     pub(crate) fn store_progress(&mut self) -> Option<std::thread::JoinHandle<()>> {
+        if self.comicrack_write_config().is_some() {
+            return self.write_reading_to_comicrack();
+        }
         let b = self.book.as_ref()?;
         if !b.opened || b.stored {
             return None;
@@ -569,7 +579,9 @@ impl eframe::App for ComicRustApp {
         self.resume_window(&ctx);
         self.files_windows(&ctx);
         self.setup_window(&ctx);
+        self.comicrack_write_window(&ctx);
         self.transfer_window(&ctx);
+        self.lists_windows(&ctx);
         self.scan_window(&ctx);
         self.update_window(&ctx);
         self.info_window(&ctx);

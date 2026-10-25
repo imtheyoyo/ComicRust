@@ -7,6 +7,7 @@ use eframe::egui::{self, vec2, Rect, RichText, Ui};
 
 use super::library_table::{human_size, long_date, short_date};
 use super::library_view::{paint_cover, ACCENT, COVER_RATIO};
+use super::lists_ui::{handle_drop, list_menu, new_menu, rename_field, NodeCtx, PanelAction};
 use crate::app::ComicRustApp;
 
 fn icon(l: &ComicList) -> &'static str {
@@ -20,6 +21,15 @@ fn icon(l: &ComicList) -> &'static str {
 
 impl ComicRustApp {
     pub(crate) fn comic_lists_panel(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        let target = self.lists_target(&ctx);
+        let busy = self.lists_ui.ops.busy();
+        let reason = match (&target, busy) {
+            (Err(r), _) => Some(r.clone()),
+            (_, true) => Some("Enregistrement en cours…".to_string()),
+            _ => None,
+        };
+        let mut acts: Vec<PanelAction> = Vec::new();
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.heading("Listes");
@@ -38,10 +48,36 @@ impl ComicRustApp {
                         self.restart_watch(ui.ctx());
                     }
                 }
+                let (parent, position) = self.new_list_place();
+                let plus = ui.add_enabled_ui(reason.is_none(), |ui| {
+                    ui.menu_button(RichText::new("＋").strong(), |ui| {
+                        new_menu(ui, &None, parent, position, &mut acts);
+                    })
+                    .response
+                    .on_hover_text("Nouvelle liste de lecture, liste intelligente ou dossier")
+                });
+                if let Some(r) = &reason {
+                    plus.response.on_disabled_hover_text(r);
+                }
+                if let Err(r) = &target {
+                    ui.label(RichText::new("🔒").color(crate::ui::theme::warning(ui)))
+                        .on_hover_text(format!("Listes en lecture seule : {r}"));
+                }
             });
         });
         ui.separator();
         self.library.poll_lists(ui.ctx());
+        // F2 : renommer la liste affichée.
+        if reason.is_none()
+            && self.lists_ui.renaming.is_none()
+            && !ctx.egui_wants_keyboard_input()
+            && ctx.input(|i| i.key_pressed(egui::Key::F2))
+        {
+            if let Some(id) = self.library.selected_list().filter(|l| l.kind != ListKind::Library).map(|l| l.id.clone())
+            {
+                acts.push(PanelAction::Rename(id));
+            }
+        }
         let db = self.library.database();
         let mut chosen: Option<Option<String>> = None;
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -52,14 +88,41 @@ impl ComicRustApp {
             }
             ui.add_space(4.0);
             let items = std::mem::take(&mut self.library.lists.items);
+            let mut nc = NodeCtx {
+                items: &items,
+                editable: target.as_ref().map(|_| ()).map_err(Clone::clone),
+                busy,
+                renaming: self.lists_ui.renaming.take(),
+                expand: std::mem::take(&mut self.lists_ui.expand),
+                acts: std::mem::take(&mut acts),
+            };
             for l in &items {
                 // La « Bibliothèque » de ComicRack fait doublon avec la ligne ci-dessus.
                 if l.kind != ListKind::Library {
-                    self.list_node(ui, l, &mut chosen);
+                    self.list_node(ui, l, &mut chosen, &mut nc);
                 }
             }
+            self.lists_ui.renaming = nc.renaming;
+            self.lists_ui.expand = nc.expand;
+            acts = nc.acts;
             self.library.lists.items = items;
             ui.add_space(8.0);
+            if let Some(what) = self.lists_ui.ops.current() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new(format!("{what}…")).small());
+                });
+            } else if let Some(info) = self.lists_ui.info.clone() {
+                let r = ui.add(egui::Label::new(RichText::new(info).small().weak()).wrap().sense(egui::Sense::click()));
+                if r.on_hover_text("Clic : effacer ce message").clicked() {
+                    self.lists_ui.info = None;
+                }
+            }
+            if let Err(r) = &target {
+                if self.library.lists.error.is_none() {
+                    ui.label(RichText::new(format!("🔒 {r}")).small().color(crate::ui::theme::warning(ui)));
+                }
+            }
             if let Some(e) = &self.library.lists.error {
                 ui.label(RichText::new(format!("⚠ {e}")).small().color(crate::ui::theme::warning(ui)));
                 if self.settings.library_mode == crate::settings::LibraryMode::ComicRackMySql {
@@ -78,9 +141,12 @@ impl ComicRustApp {
             } else if self.library.standalone().is_some() {
                 if self.library.lists.items.is_empty() {
                     ui.label(
-                        RichText::new("Pas encore de listes (⚙ → « Transférer la bibliothèque ComicRack… »).")
-                            .small()
-                            .weak(),
+                        RichText::new(
+                            "Pas encore de listes : « ＋ » pour en créer, ou ⚙ → « Transférer la bibliothèque \
+                             ComicRack… ».",
+                        )
+                        .small()
+                        .weak(),
                     );
                 }
             } else {
@@ -89,6 +155,9 @@ impl ComicRustApp {
         });
         if let Some(c) = chosen {
             self.select_list(c);
+        }
+        for a in acts {
+            self.handle_panel_action(&ctx, a);
         }
     }
 
@@ -104,32 +173,39 @@ impl ComicRustApp {
         ui.label(RichText::new(format!("ComicRack (dernier enregistrement) : {} livres", l.comicrack_count)).weak());
     }
 
-    fn list_node(&self, ui: &mut Ui, l: &ComicList, chosen: &mut Option<Option<String>>) {
+    /// Ligne d'une liste : sélection, menu contextuel, renommage, glisser-déposer.
+    fn list_label(&self, ui: &mut Ui, l: &ComicList, chosen: &mut Option<Option<String>>, nc: &mut NodeCtx) {
+        if rename_field(ui, l, nc) {
+            return;
+        }
         let selected = self.library.selected_list.as_deref() == Some(l.id.as_str());
         let count = self.library.lists.count(&l.id).map(|n| format!(" ({n})")).unwrap_or_default();
         let text = format!("{} {}{count}", icon(l), l.name);
+        let r = ui
+            .add(egui::Button::selectable(selected, text).sense(egui::Sense::click_and_drag()))
+            .on_hover_ui(|ui| self.list_tooltip(ui, l));
+        if r.clicked() {
+            *chosen = Some(Some(l.id.clone()));
+        }
+        handle_drop(ui, &r, l, nc);
+        r.context_menu(|ui| list_menu(ui, l, nc));
+    }
+
+    fn list_node(&self, ui: &mut Ui, l: &ComicList, chosen: &mut Option<Option<String>>, nc: &mut NodeCtx) {
         match &l.kind {
             ListKind::Folder { children, .. } => {
                 let id = ui.make_persistent_id(("dossier", &l.id));
-                egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-                    .show_header(ui, |ui| {
-                        let r = ui.selectable_label(selected, text).on_hover_ui(|ui| self.list_tooltip(ui, l));
-                        if r.clicked() {
-                            *chosen = Some(Some(l.id.clone()));
-                        }
-                    })
-                    .body(|ui| {
-                        for c in children {
-                            self.list_node(ui, c, chosen);
-                        }
-                    });
-            }
-            _ => {
-                let r = ui.selectable_label(selected, text).on_hover_ui(|ui| self.list_tooltip(ui, l));
-                if r.clicked() {
-                    *chosen = Some(Some(l.id.clone()));
+                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
+                if nc.expand.remove(&l.id.to_ascii_lowercase()) || nc.expand.remove(&l.id) {
+                    state.set_open(true);
                 }
+                state.show_header(ui, |ui| self.list_label(ui, l, chosen, nc)).body(|ui| {
+                    for c in children {
+                        self.list_node(ui, c, chosen, nc);
+                    }
+                });
             }
+            _ => self.list_label(ui, l, chosen, nc),
         }
     }
 

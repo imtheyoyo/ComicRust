@@ -45,7 +45,8 @@ pub struct ListView {
 /// Clé de la présentation de toute la bibliothèque dans `Settings::list_views`.
 pub const LIBRARY_VIEW_KEY: &str = "";
 
-/// Lecture faite dans ComicRust (la base ComicRack n'est pas modifiée).
+/// Lecture faite dans ComicRust et gardée dans ses réglages (base ComicRack en lecture
+/// seule, ou écriture dans ComicRack pas encore faite / échouée).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ReadProgress {
     /// Page la plus loin atteinte (à partir de 0).
@@ -191,8 +192,13 @@ pub struct Settings {
     /// Mode lié : fichiers de ComicRack retrouvés ou choisis dans l'assistant.
     pub comicrack_ini: Option<PathBuf>,
     pub comicrack_config: Option<PathBuf>,
-    /// Mode lié : écrire dans la base de ComicRack (pas encore disponible : lecture seule).
+    /// Mode lié (base MySQL) : écrire dans la base de ComicRack la lecture, les fichiers
+    /// convertis et les infos écrites dans les fichiers. Faux par défaut (lecture seule) :
+    /// une configuration existante garde son comportement.
     pub comicrack_write: bool,
+    /// Mode écriture : ne plus proposer de reporter dans ComicRack la lecture gardée dans
+    /// ComicRust par les versions précédentes (« Ne plus demander »).
+    pub comicrack_write_migration_declined: bool,
 }
 
 impl Default for Settings {
@@ -233,6 +239,7 @@ impl Default for Settings {
             comicrack_ini: None,
             comicrack_config: None,
             comicrack_write: false,
+            comicrack_write_migration_declined: false,
         }
     }
 }

@@ -33,7 +33,8 @@ use mysql::{Conn, OptsBuilder};
 
 pub use config::DbConfig;
 pub use write::{
-    net_datetime, patch_comic_book_xml, update_books, BookEdit, Change, FileState, Value, WriteReport, Written,
+    net_datetime, net_datetime_utc, patch_comic_book_xml, update_books, BookEdit, Change, FileState, Value,
+    WriteReport, Written,
 };
 
 use crate::cbl::ReadingList;

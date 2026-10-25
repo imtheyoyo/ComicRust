@@ -11,7 +11,7 @@ use crate::library::watch::WatchEvent;
 
 impl ComicRustApp {
     /// Modifications faites dans ComicRack et listes relues.
-    fn poll_watch(&mut self) {
+    pub(crate) fn poll_watch(&mut self) {
         let events: Vec<WatchEvent> =
             self.library.watcher.as_ref().map(|w| w.rx.try_iter().collect()).unwrap_or_default();
         for ev in events {
@@ -36,6 +36,14 @@ impl ComicRustApp {
                 }
                 WatchEvent::DbError(e) => self.library.watch_error = e,
                 WatchEvent::Lists { path, result } => {
+                    // Listes relues après un enregistrement fait ici : déjà affichées,
+                    // inutile de tout recalculer.
+                    let same = matches!(&result, Ok(items) if *items == self.library.lists.items)
+                        && path == self.library.lists.path
+                        && self.library.lists.error.is_none();
+                    if same {
+                        continue;
+                    }
                     self.library.lists.set(path, result);
                     if self.library.selected_list.is_some() && self.library.selected_list().is_none() {
                         self.select_list(None);
@@ -47,6 +55,7 @@ impl ComicRustApp {
 
     pub(crate) fn poll_loader(&mut self, ctx: &Context) {
         if self.library.poll() {
+            self.cr_writes.library_loaded();
             self.library.apply_info_written(&mut self.settings.info_written);
             self.restart_watch(ctx);
             if std::mem::take(&mut self.scan_after_load) {
@@ -55,6 +64,7 @@ impl ComicRustApp {
         }
         self.poll_scan();
         self.poll_files();
+        self.poll_comicrack_writes(ctx);
         let errs: Vec<String> = std::mem::take(&mut *self.bg_errors.lock().unwrap());
         if !errs.is_empty() && self.error.is_none() {
             self.error = Some(errs.join("\n\n"));

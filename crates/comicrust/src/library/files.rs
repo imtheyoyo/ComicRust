@@ -1,5 +1,6 @@
 //! Travaux sur les fichiers BD, faits dans un fil : écrire les infos de la base dans les
-//! CBZ, convertir les CBR / CB7 / CBT en CBZ. La base ComicRack n'est jamais modifiée.
+//! CBZ, convertir les CBR / CB7 / CBT en CBZ. La base ComicRack n'est pas modifiée ici
+//! (en mode écriture, `comicrack_write` y reporte ensuite le résultat).
 //! Les fiches viennent de la base MySQL de ComicRack (relues à l'instant) ou, pour les
 //! autres bibliothèques (base ComicRust, ComicDb.xml), de la bibliothèque chargée.
 
