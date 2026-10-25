@@ -61,7 +61,7 @@ impl ComicRustApp {
                 }
                 if let Err(r) = &target {
                     ui.label(RichText::new("🔒").color(crate::ui::theme::warning(ui)))
-                        .on_hover_text(format!("Listes en lecture seule : {r}"));
+                        .on_hover_text(format!("Listes non modifiables : {r}"));
                 }
             });
         });

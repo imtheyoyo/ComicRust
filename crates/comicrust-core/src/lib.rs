@@ -17,6 +17,7 @@ pub mod db;
 pub mod index;
 pub mod library;
 pub mod lists_edit;
+pub mod locale;
 pub mod matcher_catalog;
 pub mod name_info;
 pub mod providers;

@@ -9,7 +9,8 @@
 //!
 //! Une modification faite pendant que ComicRack tourne serait donc écrasée (et ComicRack
 //! ne la verrait pas) : [`ComicDbLists::save`] **refuse d'écrire si ComicRack est lancé**
-//! ([`comicrack_running`]).
+//! ([`comicrack_running`]), ou si cela ne peut pas être vérifié. La vérification est faite
+//! au début **et juste avant le remplacement du fichier**.
 //!
 //! # Sécurité de l'écriture
 //!
@@ -20,10 +21,16 @@
 //!    octet pour octet.
 //! 3. Le nouveau texte est relu avec [`parse_comic_lists`] et comparé aux listes attendues
 //!    avant toute écriture : en cas d'écart ou d'erreur, rien n'est écrit.
+//!    Contrôle aussi qu'aucun caractère interdit en XML 1.0 n'est écrit
+//!    (`XmlSerializer` refuserait tout le fichier).
 //! 4. Sauvegarde du fichier d'origine à côté de lui :
-//!    `ComicDb.comicrust-AAAAMMJJ-HHMMSS.xml.bak` (les 10 plus récentes sont gardées).
-//! 5. Écriture dans un fichier temporaire du même dossier, puis remplacement atomique
-//!    (`rename`).
+//!    `ComicDb.comicrust-AAAAMMJJ-HHMMSS.xml.bak` (les 10 plus récentes sont gardées), et
+//!    la toute première sauvegarde faite par ComicRust, gardée à part et jamais supprimée :
+//!    `ComicDb.comicrust-origine-AAAAMMJJ-HHMMSS.xml.bak`. Une sauvegarde impossible
+//!    empêche l'écriture ; une ancienne sauvegarde impossible à supprimer est signalée
+//!    ([`SaveReport::warnings`]).
+//! 5. Nouvelle vérification que ComicRack n'est pas lancé, écriture dans un fichier
+//!    temporaire du même dossier, puis remplacement atomique (`rename`).
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -43,21 +50,36 @@ pub const COMICRACK_RUNNING: &str =
     "Ferme ComicRack pour modifier ses listes : il réécrit ComicDb.xml en se fermant (et toutes les 10 minutes) \
      et effacerait les modifications.";
 
-/// ComicRack est-il lancé sur ce poste (processus `ComicRack.exe`) ? Toujours `false`
-/// hors de Windows.
-pub fn comicrack_running() -> bool {
+/// Début du message quand la présence de ComicRack ne peut pas être vérifiée.
+pub const COMICRACK_UNKNOWN: &str = "Impossible de vérifier si ComicRack est lancé";
+
+/// ComicRack est-il lancé sur ce poste (processus `ComicRack.exe`) ? `Err` : impossible
+/// de le savoir (liste des processus illisible) ; l'appelant doit alors faire comme s'il
+/// l'était. Toujours `Ok(false)` hors de Windows.
+pub fn comicrack_running() -> Result<bool, String> {
     #[cfg(windows)]
     {
         windows_process_running("comicrack.exe")
     }
     #[cfg(not(windows))]
     {
-        false
+        Ok(false)
+    }
+}
+
+/// Refus d'écrire si ComicRack est lancé, ou si on ne peut pas le savoir.
+pub fn ensure_comicrack_closed(running: &dyn Fn() -> Result<bool, String>) -> Result<(), Error> {
+    match running() {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(Error::Conflict(COMICRACK_RUNNING.into())),
+        Err(e) => {
+            Err(Error::Conflict(format!("{COMICRACK_UNKNOWN} ({e}) : par prudence, ses listes ne sont pas modifiées.")))
+        }
     }
 }
 
 #[cfg(windows)]
-fn windows_process_running(exe: &str) -> bool {
+fn windows_process_running(exe: &str) -> Result<bool, String> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
@@ -65,10 +87,15 @@ fn windows_process_running(exe: &str) -> bool {
     // SAFETY : instantané des processus, parcouru avec une structure dont `dwSize` est
     // renseigné, puis fermé.
     unsafe {
-        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).map_err(|e| format!("liste des processus : {e}"))?;
         let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
         let mut found = false;
-        let mut ok = Process32FirstW(snap, &mut entry).is_ok();
+        // Premier processus illisible : liste inutilisable, rien n'est affirmé.
+        if let Err(e) = Process32FirstW(snap, &mut entry) {
+            let _ = CloseHandle(snap);
+            return Err(format!("liste des processus illisible : {e}"));
+        }
+        let mut ok = true;
         while ok {
             let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
             let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
@@ -79,7 +106,7 @@ fn windows_process_running(exe: &str) -> bool {
             ok = Process32NextW(snap, &mut entry).is_ok();
         }
         let _ = CloseHandle(snap);
-        found
+        Ok(found)
     }
 }
 
@@ -174,6 +201,9 @@ pub struct ComicDbLists {
 pub struct SaveReport {
     /// Sauvegarde du fichier d'origine.
     pub backup: PathBuf,
+    /// Problèmes sans conséquence sur l'écriture (ancienne sauvegarde impossible à
+    /// supprimer…), à montrer.
+    pub warnings: Vec<String>,
 }
 
 impl ComicDbLists {
@@ -192,10 +222,12 @@ impl ComicDbLists {
     }
 
     /// Comme [`ComicDbLists::save`], avec la détection de ComicRack fournie (tests).
-    pub fn save_checked(&self, rows: &[ListRow], running: impl Fn() -> bool) -> Result<SaveReport, Error> {
-        if running() {
-            return Err(Error::Conflict(COMICRACK_RUNNING.into()));
-        }
+    pub fn save_checked(
+        &self,
+        rows: &[ListRow],
+        running: impl Fn() -> Result<bool, String>,
+    ) -> Result<SaveReport, Error> {
+        ensure_comicrack_closed(&running)?;
         let bytes = std::fs::read(&self.path)?;
         if Stamp::of(&bytes) != self.stamp {
             return Err(Error::Conflict(format!(
@@ -216,9 +248,11 @@ impl ComicDbLists {
                 "listes non enregistrées : la relecture ne donne pas les listes attendues".into(),
             ));
         }
-        let backup = backup(&self.path, &bytes)?;
-        write_atomic(&self.path, new_text.as_bytes())?;
-        Ok(SaveReport { backup })
+        super::xml::check_xml_document(&new_text, "ComicDb.xml")?;
+        let (backup, warnings) = backup(&self.path, &bytes)?;
+        // ComicRack a pu être lancé pendant la préparation : dernière vérification.
+        write_atomic(&self.path, new_text.as_bytes(), &|| ensure_comicrack_closed(&running))?;
+        Ok(SaveReport { backup, warnings })
     }
 }
 
@@ -226,24 +260,58 @@ fn file_stem(path: &Path) -> String {
     path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "ComicDb".into())
 }
 
+/// Préfixe (en minuscules) de la première sauvegarde, jamais supprimée.
+const ORIGIN: &str = "origine-";
+
 /// Copie `bytes` (contenu de `path`) dans `<nom>.comicrust-AAAAMMJJ-HHMMSS.xml.bak` et
-/// ne garde que les [`BACKUPS_KEPT`] plus récentes.
-fn backup(path: &Path, bytes: &[u8]) -> Result<PathBuf, Error> {
+/// ne garde que les [`BACKUPS_KEPT`] plus récentes ; la première sauvegarde de ComicRust
+/// est gardée à part ([`origin_backup`]). Renvoie la sauvegarde et les avertissements.
+fn backup(path: &Path, bytes: &[u8]) -> Result<(PathBuf, Vec<String>), Error> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let stem = file_stem(path);
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut warnings = Vec::new();
+    let write = |target: &Path| -> Result<(), Error> {
+        std::fs::write(target, bytes).map_err(|e| {
+            Error::Database(format!(
+                "sauvegarde de {} impossible ({}) : {e} — rien n'a été modifié",
+                path.display(),
+                target.display()
+            ))
+        })
+    };
+    if origin_backup(dir, &stem).is_none() {
+        // Première sauvegarde de ComicRust : la plus ancienne existante (versions
+        // précédentes) devient l'origine, sinon une copie du fichier actuel.
+        match backups(dir, &stem).first() {
+            Some(oldest) => {
+                let name = oldest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let rest = name.get(format!("{stem}.comicrust-").len()..).unwrap_or("").to_string();
+                let target = dir.join(format!("{stem}.comicrust-{ORIGIN}{rest}"));
+                if let Err(e) = std::fs::rename(oldest, &target) {
+                    warnings.push(format!("sauvegarde d'origine non créée ({}) : {e}", target.display()));
+                }
+            }
+            None => write(&dir.join(format!("{stem}.comicrust-{ORIGIN}{stamp}.xml.bak")))?,
+        }
+    }
     let mut target = dir.join(format!("{stem}.comicrust-{stamp}.xml.bak"));
     let mut n = 1;
     while target.exists() {
         target = dir.join(format!("{stem}.comicrust-{stamp}-{n}.xml.bak"));
         n += 1;
     }
-    std::fs::write(&target, bytes)?;
-    prune_backups(dir, &stem, BACKUPS_KEPT);
-    Ok(target)
+    write(&target)?;
+    warnings.extend(prune_backups(dir, &stem, BACKUPS_KEPT));
+    Ok((target, warnings))
 }
 
-/// Sauvegardes de `stem` dans `dir`, de la plus ancienne à la plus récente.
+fn backup_name(p: &Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// Sauvegardes de `stem` dans `dir` (hors sauvegarde d'origine), de la plus ancienne à la
+/// plus récente.
 pub(crate) fn backups(dir: &Path, stem: &str) -> Vec<PathBuf> {
     let prefix = format!("{stem}.comicrust-").to_lowercase();
     let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -251,41 +319,64 @@ pub(crate) fn backups(dir: &Path, stem: &str) -> Vec<PathBuf> {
             rd.flatten()
                 .map(|e| e.path())
                 .filter(|p| {
-                    let n = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-                    n.starts_with(&prefix) && n.ends_with(".xml.bak")
+                    let n = backup_name(p);
+                    n.strip_prefix(&prefix).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+                        && n.ends_with(".xml.bak")
                 })
                 .collect()
         })
         .unwrap_or_default();
     // Le nom porte la date (AAAAMMJJ-HHMMSS) : l'ordre alphabétique est chronologique.
-    v.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    v.sort_by_key(|p| backup_name(p));
     v
 }
 
-fn prune_backups(dir: &Path, stem: &str, keep: usize) {
+/// Sauvegarde d'origine (la plus ancienne s'il y en a plusieurs).
+pub(crate) fn origin_backup(dir: &Path, stem: &str) -> Option<PathBuf> {
+    let prefix = format!("{stem}.comicrust-{ORIGIN}").to_lowercase();
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let n = backup_name(p);
+            n.starts_with(&prefix) && n.ends_with(".xml.bak")
+        })
+        .min_by_key(|p| backup_name(p))
+}
+
+/// Supprime les sauvegardes au-delà des `keep` plus récentes ; renvoie les échecs.
+fn prune_backups(dir: &Path, stem: &str, keep: usize) -> Vec<String> {
     let all = backups(dir, stem);
+    let mut warnings = Vec::new();
     if all.len() > keep {
         for p in &all[..all.len() - keep] {
-            let _ = std::fs::remove_file(p);
+            if let Err(e) = std::fs::remove_file(p) {
+                warnings.push(format!("ancienne sauvegarde non supprimée ({}) : {e}", p.display()));
+            }
         }
     }
+    warnings
 }
 
 /// Écrit dans un fichier temporaire du même dossier puis remplace `path` (`rename` :
 /// atomique sur un même volume, `MoveFileEx` avec remplacement sous Windows).
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+/// `before_replace` est appelé juste avant le remplacement : une erreur l'annule.
+fn write_atomic(path: &Path, bytes: &[u8], before_replace: &dyn Fn() -> Result<(), Error>) -> Result<(), Error> {
     use std::io::Write;
     let dir = path.parent().unwrap_or(Path::new("."));
     let tmp = dir.join(format!(".{}.comicrust-tmp", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
-    let res = (|| -> std::io::Result<()> {
+    let res = (|| -> Result<(), Error> {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, path)
+        before_replace()?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
     })();
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
-    Ok(res?)
+    res
 }

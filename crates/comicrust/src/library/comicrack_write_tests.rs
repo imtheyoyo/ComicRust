@@ -47,7 +47,9 @@ fn converted_file() {
     std::fs::write(&cbz, vec![0u8; 4321]).unwrap();
     let done = Done::Converted { cbz: cbz.clone(), pages: 22, moved: None };
     let e = file_edit(ID, &done, &dir.path().join("Batman 01.cbr")).unwrap();
-    let out = patch_comic_book_xml(CE, &e.changes).unwrap();
+    assert_eq!(e.len(), 1);
+    assert_eq!(e[0].expected_counter, None, "fichier converti : écrit sans condition");
+    let out = patch_comic_book_xml(CE, &e[0].changes).unwrap();
     let b = LibraryBook::from_xml(&out).unwrap();
     assert_eq!(b.file.as_deref(), Some(cbz.to_string_lossy().as_ref()));
     assert_eq!((b.file_size, b.page_count), (Some(4321), Some(22)));
@@ -66,12 +68,16 @@ fn info_written_to_file() {
     std::fs::write(&f, vec![0u8; 999]).unwrap();
     // Déjà à jour : seul l'indicateur « à mettre à jour » change.
     let e = file_edit(ID, &Done::Info { written: false, counter: 1 }, &f).unwrap();
-    assert_eq!(e.changes.len(), 1);
-    let b = apply(CE, &e);
+    assert_eq!(e.len(), 1);
+    assert_eq!(e[0].changes.len(), 1);
+    assert_eq!(e[0].expected_counter, Some(1), "indicateur écrit seulement si la fiche n'a pas changé");
+    let b = apply(CE, &e[0]);
     assert_eq!((b.comic_info_is_dirty, b.file_size), (None, Some(1234)), "ComicInfoIsDirty=false (défaut)");
-    // Fichier réécrit : taille et date relues, comme RefreshFileProperties.
-    let e = file_edit(ID, &Done::Info { written: true, counter: 1 }, &f).unwrap();
-    let out = patch_comic_book_xml(CE, &e.changes).unwrap();
+    // Fichier réécrit : taille et date relues, comme RefreshFileProperties (sans condition).
+    let e = file_edit(ID, &Done::Info { written: true, counter: 7 }, &f).unwrap();
+    assert_eq!((e.len(), e[0].expected_counter, e[1].expected_counter), (2, Some(7), None));
+    let changes: Vec<_> = e.iter().flat_map(|x| x.changes.clone()).collect();
+    let out = patch_comic_book_xml(CE, &changes).unwrap();
     let b = LibraryBook::from_xml(&out).unwrap();
     assert_eq!((b.comic_info_is_dirty, b.file_size), (None, Some(999)));
     assert!(b.file_modified_time.is_some());
@@ -131,6 +137,10 @@ fn local_progress_sorted_out() {
     let xml = r#"<ComicBook Id="b" File="Z:\BD\B.cbz"><PageCount>20</PageCount><OpenCount>2</OpenCount><CurrentPage>2</CurrentPage><LastPageRead>9</LastPageRead></ComicBook>"#;
     let b = apply(xml, &pending[0].edit(db.get("b").unwrap()));
     assert_eq!((b.current_page, b.last_page_read, b.open_count), (Some(15), Some(15), Some(2)));
+    // ComicRack est allé plus loin depuis : la page courante n'est pas reculée.
+    let further = xml.replace("<CurrentPage>2</CurrentPage>", "<CurrentPage>18</CurrentPage>");
+    let b2 = apply(&further, &pending[0].edit(db.get("b").unwrap()));
+    assert_eq!(b2.current_page, Some(18));
     assert!(forget_if_synced(&mut s, &pending[0].path, &b));
     assert!(!s.read_progress.contains_key(&pending[0].path));
     // Lecture continuée entre-temps (page plus loin) : gardée.
@@ -146,10 +156,57 @@ fn problems_message() {
     r.conflicts.push("a".into());
     r.missing.push("b".into());
     r.failed.push(("c".into(), "erreur SQL".into()));
+    r.stale.push("a".into());
     let m = problems(&r, &captions, "Lecture", "Elle reste gardée dans ComicRust.").unwrap();
     assert!(m.contains("Batman #1 : fiche modifiée en même temps"), "{m}");
     assert!(m.contains("b : livre absent de la base"), "{m}");
     assert!(m.contains("c : erreur SQL") && m.ends_with("Elle reste gardée dans ComicRust."), "{m}");
+    assert!(m.contains("Batman #1 : fiche modifiée dans ComicRack depuis l'écriture du fichier"), "{m}");
+}
+
+#[test]
+fn file_writes_kept_until_done() {
+    let w = |id: &str, done: Done| PendingFileWrite { id: id.into(), done, target: PathBuf::from(format!("/bd/{id}")) };
+    let info = |c| Done::Info { written: true, counter: c };
+    let conv = Done::Converted { cbz: "/bd/a.cbz".into(), pages: 3, moved: None };
+    let mut pending = Vec::new();
+    remember_file_write(&mut pending, w("a", info(1)));
+    remember_file_write(&mut pending, w("a", info(2)));
+    remember_file_write(&mut pending, w("a", conv.clone()));
+    remember_file_write(&mut pending, w("b", info(1)));
+    remember_file_write(&mut pending, w("c", info(1)));
+    remember_file_write(&mut pending, w("z", info(1)));
+    assert_eq!(pending.len(), 5, "même livre, même action : remplacée");
+    assert!(pending.contains(&w("a", info(2))) && !pending.contains(&w("a", info(1))));
+    // Bilan : a écrit, b en conflit, c en erreur ; z ne faisait pas partie de l'écriture.
+    let report =
+        WriteReport { conflicts: vec!["B".into()], failed: vec![("c".into(), "erreur".into())], ..Default::default() };
+    let ids: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+    settle_file_writes(&mut pending, &ids, &report);
+    let left: Vec<&str> = pending.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(left, ["b", "c", "z"]);
+    // Réglages : gardés d'un lancement à l'autre.
+    let s = Settings { comicrack_files_pending: pending.clone(), ..Default::default() };
+    let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(back.comicrack_files_pending, pending);
+}
+
+#[test]
+fn close_waits_for_writes_without_open_book() {
+    let mut w = ComicRackWrites::default();
+    assert!(w.wait_idle(Duration::from_millis(1)), "rien en cours");
+    let cfg =
+        DbConfig { host: "127.0.0.1".into(), port: 1, user: "x".into(), database: "x".into(), ..Default::default() };
+    w.submit(Job {
+        cfg,
+        edits: vec![BookEdit::new("a").comic_info_dirty(false)],
+        kind: WriteKind::Files { ids: vec!["a".into()] },
+        captions: HashMap::new(),
+        sink: None,
+    });
+    assert!(w.wait_idle(CLOSE_WAIT));
+    assert_eq!(w.pending(), 0);
+    assert_eq!(w.poll().len(), 1, "bilan disponible pour les réglages");
 }
 
 #[test]

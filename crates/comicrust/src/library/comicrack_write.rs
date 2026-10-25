@@ -23,7 +23,15 @@
 //! **Fichiers** : après « Convertir en CBZ », le nouveau fichier (chemin, taille, dates,
 //! `PageCount`) ; après « Écrire les infos dans le fichier », `ComicInfoIsDirty = false` et
 //! la taille et les dates du fichier (comme `QueueManager.WriteInfoToFileWithCacheUpdate` :
-//! `RefreshFileProperties` puis `ComicInfoIsDirty = false`).
+//! `RefreshFileProperties` puis `ComicInfoIsDirty = false`). L'indicateur n'est écrit que
+//! si la fiche n'a pas changé depuis l'écriture du fichier (même compteur
+//! `update_counter`) : sinon le fichier n'a pas les dernières infos, l'indicateur reste et
+//! c'est signalé. Les écritures « Fichiers » non abouties sont gardées dans les réglages
+//! (`comicrack_files_pending`) et refaites au lancement suivant.
+//!
+//! **Fermeture** : les écritures en cours sont toujours attendues (au plus
+//! [`CLOSE_WAIT`]), même sans livre ouvert, et leur bilan est appliqué aux réglages avant
+//! leur enregistrement.
 //!
 //! **Lecture des versions précédentes** : à l'ouverture de la bibliothèque en mode
 //! écriture, la lecture gardée dans les réglages et plus avancée que celle de ComicRack est
@@ -96,28 +104,65 @@ pub fn file_state(as_seen: &str, real: &Path, page_count: Option<u32>) -> std::i
     })
 }
 
-/// Fiche à écrire après une action sur les fichiers ; `target` : fichier traité (celui
+/// Fiches à écrire après une action sur les fichiers ; `target` : fichier traité (celui
 /// de la fiche, ou le CBZ qui le remplace).
-pub fn file_edit(id: &str, done: &Done, target: &Path) -> Result<BookEdit, String> {
+///
+/// Infos écrites : d'abord `ComicInfoIsDirty = false`, **seulement si la fiche a encore le
+/// compteur lu au moment d'écrire le fichier** (`counter`, voir
+/// [`BookEdit::if_counter`]) ; puis, si le fichier a été réécrit, sa taille et ses dates
+/// (toujours : elles décrivent le fichier sur le disque).
+pub fn file_edit(id: &str, done: &Done, target: &Path) -> Result<Vec<BookEdit>, String> {
     match done {
         Done::Converted { cbz, pages, .. } => {
             // Les pages sont recopiées dans le même ordre : la liste <Pages> reste valable.
             let f = file_state(&cbz.to_string_lossy(), cbz, Some(*pages as u32))
                 .map_err(|e| format!("{} : {e}", cbz.display()))?;
-            Ok(BookEdit::new(id).file(&f))
+            Ok(vec![BookEdit::new(id).file(&f)])
         }
-        Done::Info { written, .. } => {
-            let mut e = BookEdit::new(id).comic_info_dirty(false);
+        Done::Info { written, counter } => {
+            let mut edits = vec![BookEdit::new(id).comic_info_dirty(false).if_counter(*counter)];
             if *written {
                 let f = file_state(&target.to_string_lossy(), target, None)
                     .map_err(|e| format!("{} : {e}", target.display()))?;
-                e = e.file(&f);
+                let mut e = BookEdit::new(id).file(&f);
                 // Même fichier : une date que le système ne donne pas reste celle de la fiche.
                 e.changes.retain(|c| c.value.is_some());
+                edits.push(e);
             }
-            Ok(e)
+            Ok(edits)
         }
     }
+}
+
+/// Écriture « Fichiers » en attente (gardée dans les réglages jusqu'à ce qu'elle aboutisse).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PendingFileWrite {
+    /// Identifiant du livre (minuscules).
+    pub id: String,
+    pub done: Done,
+    /// Fichier traité.
+    pub target: PathBuf,
+}
+
+/// Ajoute (ou remplace : même livre, même action) une écriture en attente.
+pub fn remember_file_write(pending: &mut Vec<PendingFileWrite>, w: PendingFileWrite) {
+    let same =
+        |p: &PendingFileWrite| p.id == w.id && std::mem::discriminant(&p.done) == std::mem::discriminant(&w.done);
+    pending.retain(|p| !same(p));
+    pending.push(w);
+}
+
+/// Après un bilan d'écriture « Fichiers » (`ids` : livres de l'écriture) : oublie les
+/// écritures abouties (ou sans objet : livre absent, fiche modifiée entre-temps) et garde
+/// celles en conflit ou en erreur, refaites au lancement suivant.
+pub fn settle_file_writes(pending: &mut Vec<PendingFileWrite>, ids: &[String], report: &WriteReport) {
+    let retry: std::collections::HashSet<String> = report
+        .conflicts
+        .iter()
+        .chain(report.failed.iter().map(|(id, _)| id))
+        .map(|id| id.to_ascii_lowercase())
+        .collect();
+    pending.retain(|p| !ids.contains(&p.id) || retry.contains(&p.id));
 }
 
 /// Lecture gardée dans les réglages de ComicRust, plus avancée que celle de ComicRack.
@@ -136,8 +181,9 @@ impl Pending {
     /// Rien n'est reculé : `LastPageRead` garde le maximum, `OpenCount` au moins 1. La date
     /// d'ouverture n'est pas connue (elle n'était pas gardée) : `Opened` n'est pas écrit.
     pub fn edit(&self, book: &LibraryBook) -> BookEdit {
+        // Page courante comprise : jamais reculée si ComicRack est allé plus loin depuis.
         let mut e = BookEdit::new(&self.id)
-            .set("CurrentPage", Value::Int(self.current as i64))
+            .set("CurrentPage", Value::Max(self.current as i64))
             .set("LastPageRead", Value::Max(self.max_page as i64))
             .set("OpenCount", Value::Max(1));
         if self.pages > 0 && book.page_count.unwrap_or(0) == 0 {
@@ -215,6 +261,13 @@ pub fn problems(report: &WriteReport, captions: &HashMap<String, String>, what: 
     for id in &report.conflicts {
         lines.push(format!("• {} : fiche modifiée en même temps dans ComicRack (plusieurs essais)", name(id)));
     }
+    for id in &report.stale {
+        lines.push(format!(
+            "• {} : fiche modifiée dans ComicRack depuis l'écriture du fichier, il reste « à mettre à jour » \
+             (le fichier n'a peut-être pas les dernières infos)",
+            name(id)
+        ));
+    }
     for (id, e) in &report.failed {
         lines.push(format!("• {} : {e}", name(id)));
     }
@@ -233,8 +286,8 @@ pub enum WriteKind {
     Reading { path: PathBuf },
     /// Report de la lecture gardée dans les réglages.
     Migration { paths: Vec<(String, PathBuf)> },
-    /// Fichiers convertis ou infos écrites.
-    Files,
+    /// Fichiers convertis ou infos écrites (identifiants des livres, en minuscules).
+    Files { ids: Vec<String> },
 }
 
 struct Job {
@@ -287,16 +340,33 @@ impl ComicRackWrites {
     fn waiter(&self) -> std::thread::JoinHandle<()> {
         let busy = self.busy.clone();
         std::thread::spawn(move || {
-            let (lock, cv) = &*busy;
-            let guard = lock.lock().unwrap();
-            let _ = cv.wait_timeout_while(guard, CLOSE_WAIT, |n| *n > 0);
+            wait_idle(&busy, CLOSE_WAIT);
         })
+    }
+
+    /// Attend la fin des écritures en cours, au plus `max` ; `true` si tout est fini.
+    pub fn wait_idle(&self, max: Duration) -> bool {
+        wait_idle(&self.busy, max)
+    }
+
+    /// Écritures en cours (demandées et pas encore terminées).
+    pub fn pending(&self) -> usize {
+        *self.busy.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Bibliothèque (re)chargée : ménage et proposition à refaire.
     pub fn library_loaded(&mut self) {
         self.checked = false;
         self.prompt = None;
+    }
+}
+
+fn wait_idle(busy: &Busy, max: Duration) -> bool {
+    let (lock, cv) = &**busy;
+    let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    match cv.wait_timeout_while(guard, max, |n| *n > 0) {
+        Ok((n, _)) => *n == 0,
+        Err(e) => *e.into_inner().0 == 0,
     }
 }
 
@@ -349,6 +419,9 @@ impl ComicRustApp {
         match self.settings.library_mode {
             LibraryMode::ComicRackMySql if self.settings.comicrack_write => Some("ComicRack (MySQL) — écriture"),
             LibraryMode::ComicRackMySql => Some("ComicRack (MySQL) — lecture seule"),
+            LibraryMode::ComicRackXml if self.settings.comicrack_write => {
+                Some("ComicRack (ComicDb.xml) — listes modifiables (ComicRack fermé)")
+            }
             LibraryMode::ComicRackXml => Some("ComicRack (ComicDb.xml) — lecture seule"),
             _ => None,
         }
@@ -398,16 +471,31 @@ impl ComicRustApp {
     }
 
     /// Mode écriture : fichiers convertis et infos écrites (`id`, résultat, fichier traité).
+    /// Chaque écriture est gardée dans les réglages jusqu'à ce qu'elle aboutisse.
     pub(crate) fn write_files_to_comicrack(&mut self, done: Vec<(String, Done, PathBuf)>) {
         let Some(cfg) = self.comicrack_write_config() else { return };
         let mut edits = Vec::new();
         let mut errors = Vec::new();
+        let mut ids = Vec::new();
         for (id, d, target) in &done {
-            match file_edit(id, d, target) {
-                Ok(e) => edits.push(e),
-                Err(e) => errors.push(e),
+            let id = id.to_ascii_lowercase();
+            match file_edit(&id, d, target) {
+                Ok(e) => {
+                    edits.extend(e);
+                    remember_file_write(
+                        &mut self.settings.comicrack_files_pending,
+                        PendingFileWrite { id: id.clone(), done: d.clone(), target: target.clone() },
+                    );
+                    ids.push(id);
+                }
+                Err(e) => {
+                    // Fichier illisible : sans objet, même au prochain lancement.
+                    self.settings.comicrack_files_pending.retain(|p| p.id != id);
+                    errors.push(e);
+                }
             }
         }
+        self.save_now = true;
         if !errors.is_empty() {
             self.bg_errors.lock().unwrap().push(format!(
                 "Fichiers non enregistrés dans la base de ComicRack (fichier illisible) :\n{}",
@@ -415,7 +503,7 @@ impl ComicRustApp {
             ));
         }
         if !edits.is_empty() {
-            self.submit_comicrack(cfg, edits, WriteKind::Files);
+            self.submit_comicrack(cfg, edits, WriteKind::Files { ids });
         }
     }
 
@@ -432,7 +520,9 @@ impl ComicRustApp {
                         WriteKind::Reading { .. } | WriteKind::Migration { .. } => {
                             "Lecture non enregistrée dans la base de ComicRack (elle reste gardée dans ComicRust)"
                         }
-                        WriteKind::Files => "Fichiers non enregistrés dans la base de ComicRack",
+                        WriteKind::Files { .. } => {
+                            "Fichiers non enregistrés dans la base de ComicRack (nouvel essai au prochain lancement)"
+                        }
                     };
                     self.bg_errors.lock().unwrap().push(format!("{what} :\n{e}"));
                     continue;
@@ -469,10 +559,15 @@ impl ComicRustApp {
                     }
                     ("Lecture", "Elle reste gardée dans ComicRust (report proposé au prochain démarrage).")
                 }
-                WriteKind::Files => (
-                    "Fichier",
-                    "Le fichier est bien traité ; ComicRust l'utilise, mais ComicRack indique l'ancien état.",
-                ),
+                WriteKind::Files { ids } => {
+                    settle_file_writes(&mut self.settings.comicrack_files_pending, ids, &report);
+                    self.save_now = true;
+                    (
+                        "Fichier",
+                        "Le fichier est bien traité ; ComicRust l'utilise, mais ComicRack indique l'ancien état \
+                         (nouvel essai au prochain lancement pour les conflits et les erreurs).",
+                    )
+                }
             };
             if let Some(msg) = problems(&report, &done.captions, what, kept) {
                 self.bg_errors.lock().unwrap().push(msg);
@@ -486,6 +581,16 @@ impl ComicRustApp {
                 let pending = sort_local_progress(&mut self.settings, &db);
                 if !pending.is_empty() && !self.settings.comicrack_write_migration_declined {
                     self.cr_writes.prompt = Some(pending);
+                }
+                // Écritures « Fichiers » non abouties la dernière fois : refaites.
+                let files: Vec<(String, Done, PathBuf)> = self
+                    .settings
+                    .comicrack_files_pending
+                    .iter()
+                    .map(|p| (p.id.clone(), p.done.clone(), p.target.clone()))
+                    .collect();
+                if !files.is_empty() {
+                    self.write_files_to_comicrack(files);
                 }
             }
         }

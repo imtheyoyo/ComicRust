@@ -278,7 +278,7 @@ impl SetupWindow {
                 let ini = path_of(&self.ini);
                 let comicdb = path_of(&self.comicdb);
                 let use_xml = self.use_xml;
-                let write = self.write && !use_xml;
+                let write = self.write;
                 let db_source = if use_xml {
                     None
                 } else if self.manual_mysql {
@@ -304,7 +304,7 @@ impl SetupWindow {
                                 ));
                             }
                             Ok((
-                                Finish::ComicRack { mode: LibraryMode::ComicRackXml, db_source: None, write: false },
+                                Finish::ComicRack { mode: LibraryMode::ComicRackXml, db_source: None, write },
                                 format!("{} livres dans ComicDb.xml.", db.len()),
                             ))
                         } else {
@@ -330,6 +330,37 @@ impl SetupWindow {
 
 /// Vérification protégée : un plantage devient un message dans l'assistant (le détail est
 /// dans `data\plantage.txt`) au lieu d'une attente sans fin.
+/// Libellé de l'option d'écriture de l'assistant (`xml` : ComicDb.xml seul, sans MySQL).
+pub fn write_label(xml: bool) -> &'static str {
+    if xml {
+        "Lecture et écriture des listes (ComicRack fermé)"
+    } else {
+        "Lecture et écriture (lecture, fichiers convertis, infos écrites sont enregistrés dans la base de ComicRack ; \
+         listes modifiables, ComicRack fermé)"
+    }
+}
+
+/// Explication sous les options d'accès de l'assistant.
+pub fn setup_note(xml: bool, write: bool) -> &'static str {
+    match (xml, write) {
+        (true, true) => {
+            "Les listes sont enregistrées dans ComicDb.xml, seulement quand ComicRack est fermé (il réécrit ce \
+             fichier en se fermant), avec une sauvegarde à chaque modification. Les livres de ComicDb.xml, eux, ne \
+             sont pas modifiés."
+        }
+        (true, false) => "ComicDb.xml : lecture seule, ni les livres ni les listes ne sont modifiés.",
+        (false, true) => {
+            "ComicRack lancé voit les modifications en quelques secondes. ComicRust ne réécrit que les éléments \
+             concernés de la fiche (page lue, date d'ouverture, fichier…), jamais le reste. Les listes (dans \
+             ComicDb.xml) ne sont modifiables que ComicRack fermé."
+        }
+        (false, false) => {
+            "La lecture faite dans ComicRust est gardée dans ses réglages ; ni la base ni les listes de ComicRack ne \
+             sont modifiées."
+        }
+    }
+}
+
 fn catch<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|p| {
         let why = p
@@ -605,32 +636,9 @@ impl ComicRustApp {
                     ui.add_space(8.0);
                     ui.label(RichText::new("Accès à la base de ComicRack").strong());
                     let xml = w.use_xml;
-                    ui.add_enabled_ui(!xml, |ui| {
-                        let mut write = w.write && !xml;
-                        ui.radio_value(&mut write, false, "Lecture seule");
-                        ui.radio_value(
-                            &mut write,
-                            true,
-                            "Lecture et écriture (lecture, fichiers convertis, infos écrites sont enregistrés dans \
-                             la base de ComicRack)",
-                        );
-                        if !xml {
-                            w.write = write;
-                        }
-                    })
-                    .response
-                    .on_disabled_hover_text(
-                        "Les livres de ComicDb.xml ne sont pas modifiés : ComicRack réécrit ce fichier lui-même.",
-                    );
-                    let note = if xml {
-                        "ComicDb.xml : lecture seule (ComicRack réécrit ce fichier lui-même)."
-                    } else if w.write {
-                        "ComicRack lancé voit les modifications en quelques secondes. ComicRust ne réécrit que les \
-                         éléments concernés de la fiche (page lue, date d'ouverture, fichier…), jamais le reste."
-                    } else {
-                        "La lecture faite dans ComicRust est gardée dans ses réglages ; la base de ComicRack \
-                         n'est jamais modifiée."
-                    };
+                    ui.radio_value(&mut w.write, false, "Lecture seule");
+                    ui.radio_value(&mut w.write, true, write_label(xml));
+                    let note = setup_note(xml, w.write);
                     ui.label(RichText::new(note).weak().small());
                 }
             }

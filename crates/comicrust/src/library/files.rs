@@ -65,8 +65,9 @@ impl Target {
     }
 }
 
-/// Ce qui a été fait pour un livre.
-#[derive(Debug, Clone, PartialEq)]
+/// Ce qui a été fait pour un livre (gardé dans les réglages tant que son report dans
+/// ComicRack n'a pas abouti, voir `comicrack_write`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Done {
     /// Infos écrites (`written`) ou déjà à jour ; `counter` : compteur de la fiche lue.
     Info { written: bool, counter: i64 },

@@ -505,12 +505,23 @@ impl eframe::App for ComicRustApp {
     /// Appelé avant chaque `ui`, et aussi quand la fenêtre est masquée : le
     /// chargement continue donc même fenêtre réduite.
     fn logic(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Fermeture de la fenêtre : la lecture en cours est enregistrée avant de quitter.
+        // Fermeture de la fenêtre : la lecture en cours est enregistrée avant de quitter, et
+        // les écritures dans ComicRack en cours (lecture, fichiers) sont toujours attendues,
+        // même sans livre ouvert ; leur bilan est appliqué aux réglages (enregistrés ensuite
+        // par eframe) : une écriture non aboutie y reste gardée.
         if ctx.input(|i| i.viewport().close_requested()) {
             self.remember_position();
             if let Some(h) = self.store_progress() {
                 let _ = h.join();
             }
+            if !self.cr_writes.wait_idle(crate::library::comicrack_write::CLOSE_WAIT) {
+                eprintln!(
+                    "ComicRust : {} écriture(s) dans ComicRack encore en cours à la fermeture (gardées pour le \
+                     prochain lancement si elles n'aboutissent pas)",
+                    self.cr_writes.pending()
+                );
+            }
+            self.poll_comicrack_writes(ctx);
         }
         self.poll_loader(ctx);
         self.handle_input(ctx);

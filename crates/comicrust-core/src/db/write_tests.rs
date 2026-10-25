@@ -444,6 +444,22 @@ fn mysql_write() {
     let (_, data) = row(&mut conn, CE_ID);
     assert!(data.contains(&format!("(CR {MAX_ATTEMPTS})")) && data.contains("<Rating>4</Rating>"));
 
+    // Écriture conditionnelle (`if_counter`) : fiche modifiée depuis le compteur connu →
+    // rien d'écrit (`stale`) ; compteur attendu → écrite ; déjà dans l'état demandé → rien.
+    let (counter, _) = row(&mut conn, CE_ID);
+    let before = counters(&mut conn);
+    let report = update_books(&cfg, &[BookEdit::new(CE_ID).comic_info_dirty(false).if_counter(counter - 1)]).unwrap();
+    assert_eq!(report.stale, [CE_ID]);
+    assert!(report.written.is_empty() && !report.is_complete());
+    assert!(report.summary().contains("fiche modifiée entre-temps"), "{}", report.summary());
+    assert_eq!(counters(&mut conn), before);
+    assert!(row(&mut conn, CE_ID).1.contains("<ComicInfoIsDirty>true</ComicInfoIsDirty>"));
+    let report = update_books(&cfg, &[BookEdit::new(CE_ID).comic_info_dirty(false).if_counter(counter)]).unwrap();
+    assert_eq!(report.written.len(), 1);
+    assert!(!row(&mut conn, CE_ID).1.contains("ComicInfoIsDirty"));
+    let report = update_books(&cfg, &[BookEdit::new(CE_ID).comic_info_dirty(false).if_counter(counter)]).unwrap();
+    assert_eq!(report.unchanged, [CE_ID], "déjà à jour : pas un refus");
+
     // Sans ligne dans `changes` : créée comme le fait WriteCounter.
     conn.query_drop("DELETE FROM changes").unwrap();
     let report = update_books(&cfg, &[BookEdit::new("30815f16-abb9-4c38-8c24-ecae11e25b1b").progress(13)]).unwrap();

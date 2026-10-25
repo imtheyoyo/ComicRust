@@ -59,8 +59,9 @@ pub(crate) mod xml;
 
 use std::collections::HashSet;
 
-pub use comicdb::{comicrack_running, ComicDbLists};
+pub use comicdb::{comicrack_running, ensure_comicrack_closed, ComicDbLists, COMICRACK_UNKNOWN};
 pub use rows::{assemble_lists, split_lists, ListRow};
+pub use xml::xml_safe;
 
 use crate::comic_lists::{parse_comic_lists, Combine, ComicList};
 use crate::smart::SmartQuery;
@@ -427,7 +428,8 @@ impl ListsEditor {
     pub fn set_description(&mut self, id: &str, description: &str) -> Result<(), Error> {
         let i = self.index(id)?;
         let mut item = self.item(i)?;
-        item.set_text_child("Description", (!description.is_empty()).then_some(description));
+        let description = xml::xml_safe(description);
+        item.set_text_child("Description", (!description.is_empty()).then_some(&*description));
         self.store(i, item);
         Ok(())
     }
@@ -475,8 +477,11 @@ impl ListsEditor {
                 name = format!("Copie de {name}");
                 item.set_attr("Name", Some(&name));
             }
-            // ComicRack ne copie pas le résultat mémorisé (`ComicSmartListItem(…)`).
-            item.set_child("CacheStorage", None);
+            // ComicRack ne copie pas le résultat mémorisé (`ComicSmartListItem(…)`) ; les
+            // compteurs mémorisés (`BookCount`…) sont retirés aussi : ComicRack les recalcule.
+            for n in STALE {
+                item.set_child(n, None);
+            }
             if let Some(b) = item.child_text("BaseListId").and_then(|b| new_id(b.trim())) {
                 item.set_text_child("BaseListId", Some(&b));
             }
@@ -647,8 +652,10 @@ impl ListsEditor {
     }
 }
 
+/// Nom de liste : sans espaces autour ni caractère interdit en XML 1.0.
 fn clean_name(name: &str) -> Result<String, Error> {
-    let n = name.trim();
+    let safe = xml::xml_safe(name);
+    let n = safe.trim();
     if n.is_empty() {
         Err(err("le nom de la liste ne peut pas être vide"))
     } else {

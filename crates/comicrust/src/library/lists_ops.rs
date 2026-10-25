@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use comicrust_core::comic_lists::{ComicList, ListKind};
@@ -96,6 +96,8 @@ pub struct Applied {
     pub path: Option<PathBuf>,
     /// Sauvegarde du `ComicDb.xml` d'origine.
     pub backup: Option<PathBuf>,
+    /// Problèmes de sauvegarde sans conséquence sur l'enregistrement (à montrer).
+    pub warnings: Vec<String>,
 }
 
 /// Message d'erreur pour l'utilisateur (les refus du cœur sont montrés tels quels).
@@ -116,7 +118,7 @@ pub fn run_op(target: &ListsTarget, op: OpFn) -> Result<Applied, Error> {
             let outcome = op(&mut ed)?;
             let lists = ed.lists()?;
             store.save_list_rows(ed.rows(), snap.counter)?;
-            Ok(Applied { lists, outcome, path: None, backup: None })
+            Ok(Applied { lists, outcome, path: None, backup: None, warnings: Vec::new() })
         }
         ListsTarget::ComicDb(path) => {
             let file = ComicDbLists::read(path)?;
@@ -124,7 +126,13 @@ pub fn run_op(target: &ListsTarget, op: OpFn) -> Result<Applied, Error> {
             let outcome = op(&mut ed)?;
             let lists = ed.lists()?;
             let report = file.save(ed.rows())?;
-            Ok(Applied { lists, outcome, path: Some(path.clone()), backup: Some(report.backup) })
+            Ok(Applied {
+                lists,
+                outcome,
+                path: Some(path.clone()),
+                backup: Some(report.backup),
+                warnings: report.warnings,
+            })
         }
     }
 }
@@ -138,22 +146,43 @@ struct Job {
 /// Recherche du processus ComicRack dans un fil, au plus toutes les [`PROBE_INTERVAL`].
 #[derive(Default)]
 struct Probe {
-    running: Arc<AtomicBool>,
+    /// Raison du refus (ComicRack lancé, ou présence impossible à vérifier) ; `None` :
+    /// ComicRack fermé.
+    refusal: Arc<Mutex<Option<String>>>,
     checking: Arc<AtomicBool>,
     last: Option<Instant>,
 }
 
+/// Raison de refuser la modification des listes de ComicRack d'après la détection
+/// (`Err` : impossible de savoir s'il est lancé, ce qui compte comme lancé).
+pub fn refusal(detected: Result<bool, String>) -> Option<String> {
+    match detected {
+        Ok(false) => None,
+        Ok(true) => Some(crate::ui::lists_ui::COMICRACK_RUNNING.to_string()),
+        Err(e) => Some(format!(
+            "{} ({e}) : par prudence, ses listes ne sont pas modifiables.",
+            comicrust_core::lists_edit::COMICRACK_UNKNOWN
+        )),
+    }
+}
+
 impl Probe {
-    fn poll(&mut self, ctx: &egui::Context) -> bool {
+    fn poll(&mut self, ctx: &egui::Context) -> Option<String> {
         let due = self.last.is_none_or(|t| t.elapsed() >= PROBE_INTERVAL);
         if due && !self.checking.swap(true, Ordering::AcqRel) {
             self.last = Some(Instant::now());
-            let (running, checking, ctx) = (self.running.clone(), self.checking.clone(), ctx.clone());
+            let (state, checking, ctx) = (self.refusal.clone(), self.checking.clone(), ctx.clone());
             let spawned = std::thread::Builder::new().name("comicrust-comicrack".into()).spawn(move || {
                 // Recette hors Windows : variable d'environnement qui simule ComicRack lancé.
-                let now = std::env::var_os("COMICRUST_SIMULER_COMICRACK").is_some()
-                    || comicrust_core::lists_edit::comicrack_running();
-                if running.swap(now, Ordering::AcqRel) != now {
+                let detected = if std::env::var_os("COMICRUST_SIMULER_COMICRACK").is_some() {
+                    Ok(true)
+                } else {
+                    comicrust_core::lists_edit::comicrack_running()
+                };
+                let now = refusal(detected);
+                let mut cur = state.lock().unwrap_or_else(|e| e.into_inner());
+                if *cur != now {
+                    *cur = now;
                     ctx.request_repaint();
                 }
                 checking.store(false, Ordering::Release);
@@ -164,7 +193,7 @@ impl Probe {
         }
         // Nouvelle vérification dans quelques secondes, même sans mouvement de souris.
         ctx.request_repaint_after(PROBE_INTERVAL);
-        self.running.load(Ordering::Acquire)
+        self.refusal.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -186,8 +215,10 @@ impl ListsOps {
         self.job.as_ref().map(|j| j.what.as_str())
     }
 
-    /// ComicRack est-il lancé (dernière vérification faite en arrière-plan) ?
-    pub fn comicrack_running(&mut self, ctx: &egui::Context) -> bool {
+    /// Pourquoi les listes de ComicRack ne sont pas modifiables (ComicRack lancé, ou
+    /// présence impossible à vérifier), d'après la dernière vérification faite en
+    /// arrière-plan ; `None` : ComicRack fermé.
+    pub fn comicrack_refusal(&mut self, ctx: &egui::Context) -> Option<String> {
         self.probe.poll(ctx)
     }
 
@@ -450,6 +481,14 @@ mod tests {
     use super::*;
     use comicrust_core::comic_lists::Combine;
     use comicrust_core::smart::SmartQuery;
+
+    #[test]
+    fn comicrack_detection_failure_counts_as_running() {
+        assert_eq!(refusal(Ok(false)), None);
+        assert!(refusal(Ok(true)).unwrap().contains("Ferme ComicRack"));
+        let r = refusal(Err("accès refusé".into())).unwrap();
+        assert!(r.starts_with("Impossible de vérifier si ComicRack est lancé") && r.contains("accès refusé"), "{r}");
+    }
 
     fn list(id: &str, kind: ListKind) -> ComicList {
         ComicList { id: id.into(), name: id.to_uppercase(), description: String::new(), kind, comicrack_count: 0 }

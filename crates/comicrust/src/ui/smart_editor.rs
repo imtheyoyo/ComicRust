@@ -22,7 +22,7 @@ use chrono::NaiveDate;
 use comicrust_core::comic_lists::{ComicList, ListKind, Members};
 use comicrust_core::db::ComicDatabase;
 use comicrust_core::matcher_catalog::{matcher_catalog, matcher_info, MatcherInfo, ValueKind};
-use comicrust_core::smart::{describe_kind, Limit, LimitKind, Matcher, Mode, Selection, SmartQuery};
+use comicrust_core::smart::{describe_kind, Limit, LimitKind, Matcher, MatcherXml, Mode, Selection, SmartQuery};
 use eframe::egui::{self, RichText, Ui};
 
 use crate::library::lists_ops::{base_candidates, BaseChoice};
@@ -49,6 +49,10 @@ pub struct Rule {
     pub ignore_case: bool,
     /// Critère absent du catalogue : affiché sans pouvoir être modifié, gardé tel quel.
     pub raw: Option<Matcher>,
+    /// Critère d'origine (liste existante) : tant que la saisie n'est pas modifiée, il est
+    /// rendu tel quel (valeurs et XML d'origine, voir `comicrust_core::smart::MatcherXml`) ;
+    /// modifié, il garde ses attributs et sous-éléments inconnus de ComicRust.
+    pub orig: Option<Box<Matcher>>,
 }
 
 impl Rule {
@@ -61,7 +65,14 @@ impl Rule {
             v2: String::new(),
             ignore_case: true,
             raw: None,
+            orig: None,
         }
+    }
+
+    /// Même saisie (case « Non », champ, opérateur, valeurs, casse) ?
+    fn same_input(&self, other: &Rule) -> bool {
+        (self.not, &self.kind, self.op, &self.v1, &self.v2, self.ignore_case)
+            == (other.not, &other.kind, other.op, &other.v1, &other.v2, other.ignore_case)
     }
 
     pub fn info(&self) -> Option<&'static MatcherInfo> {
@@ -87,12 +98,18 @@ impl Rule {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Rule(Rule),
-    Group { not: bool, mode: Mode, items: Vec<Node> },
+    /// Groupe ; `xml` : XML d'origine (attributs inconnus, `Collapsed`… gardés).
+    Group {
+        not: bool,
+        mode: Mode,
+        items: Vec<Node>,
+        xml: MatcherXml,
+    },
 }
 
 impl Node {
     pub fn new_group() -> Self {
-        Node::Group { not: false, mode: Mode::And, items: vec![Node::Rule(Rule::new())] }
+        Node::Group { not: false, mode: Mode::And, items: vec![Node::Rule(Rule::new())], xml: MatcherXml::default() }
     }
 }
 
@@ -197,10 +214,13 @@ impl Draft {
 
 fn node_from_matcher(m: &Matcher) -> Node {
     match m {
-        Matcher::Group { mode, not, matchers } => {
-            Node::Group { not: *not, mode: *mode, items: matchers.iter().map(node_from_matcher).collect() }
-        }
-        Matcher::Value { kind, op, value, value2, not, ignore_case } => {
+        Matcher::Group { mode, not, matchers, xml } => Node::Group {
+            not: *not,
+            mode: *mode,
+            items: matchers.iter().map(node_from_matcher).collect(),
+            xml: xml.clone(),
+        },
+        Matcher::Value { kind, op, value, value2, not, ignore_case, .. } => {
             let Some(info) = matcher_info(kind).filter(|i| i.operator(*op).is_some()) else {
                 return Node::Rule(Rule {
                     not: *not,
@@ -210,6 +230,7 @@ fn node_from_matcher(m: &Matcher) -> Node {
                     v2: value2.clone(),
                     ignore_case: *ignore_case,
                     raw: Some(m.clone()),
+                    orig: None,
                 });
             };
             let days = info.operator(*op).is_some_and(|o| o.unit.is_some());
@@ -222,6 +243,7 @@ fn node_from_matcher(m: &Matcher) -> Node {
                 v2: show(value2),
                 ignore_case: *ignore_case,
                 raw: None,
+                orig: Some(Box::new(m.clone())),
             })
         }
     }
@@ -241,9 +263,12 @@ fn nodes_to_matchers(items: &[Node], counter: &mut usize, errors: &mut Vec<Strin
                     }
                 }
             }
-            Node::Group { not, mode, items } => {
-                out.push(Matcher::Group { mode: *mode, not: *not, matchers: nodes_to_matchers(items, counter, errors) })
-            }
+            Node::Group { not, mode, items, xml } => out.push(Matcher::Group {
+                mode: *mode,
+                not: *not,
+                matchers: nodes_to_matchers(items, counter, errors),
+                xml: xml.clone(),
+            }),
         }
     }
     out
@@ -260,13 +285,20 @@ pub fn rule_to_matcher(r: &Rule) -> Result<Matcher, String> {
     if let Some(raw) = &r.raw {
         return Ok(raw.clone());
     }
+    // Critère existant non modifié : rendu tel quel (valeur « 4,5 » ou date « 01/10/2019 »
+    // de ComicRack comprises), jamais réécrit.
+    if let Some(orig) = &r.orig {
+        if matches!(node_from_matcher(orig), Node::Rule(o) if o.same_input(r)) {
+            return Ok((**orig).clone());
+        }
+    }
     let info = r.info().ok_or_else(|| format!("critère inconnu ({})", r.kind))?;
     let op = info.operator(r.op).ok_or_else(|| format!("opérateur {} inconnu", r.op))?;
     let check = |v: &str| -> Result<String, String> {
         match info.value {
             ValueKind::Number => {
                 let n = parse_number(v)?;
-                if is_rating(&r.kind) && !(0.0..=5.0).contains(&n.parse::<f64>().unwrap_or(-1.0)) {
+                if is_rating(&r.kind) && !(0.0..=5.0).contains(&n.replace(',', ".").parse::<f64>().unwrap_or(-1.0)) {
                     return Err(format!("la note doit être entre 0 et 5 (« {} »)", v.trim()));
                 }
                 Ok(n)
@@ -295,7 +327,12 @@ pub fn rule_to_matcher(r: &Rule) -> Result<Matcher, String> {
         (_, 1) => (check(&r.v1)?, String::new()),
         _ => (check(&r.v1)?, check(&r.v2)?),
     };
-    Ok(Matcher::Value { kind: r.kind.clone(), op: r.op, value, value2, not: r.not, ignore_case: r.ignore_case })
+    let m = Matcher::value(&r.kind, r.op, &value, &value2, r.not, r.ignore_case);
+    // Critère modifié : ses attributs et sous-éléments inconnus (`Name`…) sont gardés.
+    Ok(match &r.orig {
+        Some(o) => m.with_xml(o.xml().clone()),
+        None => m,
+    })
 }
 
 fn regex_ok(v: &str) -> Result<(), String> {
@@ -336,10 +373,17 @@ fn regex_lite_check(v: &str) -> Result<(), String> {
     }
 }
 
-/// Nombre saisi (virgule ou point) → texte écrit dans la liste : entier tel quel, décimal
-/// avec un point (format lu par ComicRust ; ComicRack, en français, attend une virgule :
-/// préférer les entiers).
+/// Nombre saisi (virgule ou point acceptés) → texte écrit dans la liste : entier tel quel,
+/// décimal avec le séparateur décimal du poste
+/// ([`comicrust_core::locale::decimal_separator`]) : ComicRack relit la valeur avec la
+/// culture de Windows (`float.TryParse`), « 4,5 » sur un poste français. ComicRust, lui,
+/// lit les deux.
 pub fn parse_number(v: &str) -> Result<String, String> {
+    parse_number_with(v, comicrust_core::locale::decimal_separator())
+}
+
+/// [`parse_number`] avec le séparateur décimal donné.
+pub fn parse_number_with(v: &str, separator: char) -> Result<String, String> {
     let t = v.trim().replace(',', ".");
     if t.is_empty() {
         return Err("nombre manquant".into());
@@ -348,7 +392,7 @@ pub fn parse_number(v: &str) -> Result<String, String> {
         return Ok(i.to_string());
     }
     match t.parse::<f64>() {
-        Ok(f) if f.is_finite() => Ok(t),
+        Ok(f) if f.is_finite() && t.matches('.').count() == 1 => Ok(t.replace('.', &separator.to_string())),
         _ => Err(format!("« {} » n'est pas un nombre", v.trim())),
     }
 }
@@ -966,7 +1010,7 @@ fn nodes_ui(ui: &mut Ui, serial: u64, items: &mut [Node], path: &mut Vec<usize>,
         path.push(i);
         match node {
             Node::Rule(r) => rule_ui(ui, serial, r, path, i, count, actions),
-            Node::Group { not, mode, items } => {
+            Node::Group { not, mode, items, .. } => {
                 egui::Frame::group(ui.style()).inner_margin(6.0).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.checkbox(not, "Non").on_hover_text("Inverse le groupe (« ! » dans ComicRack)");
@@ -1108,13 +1152,16 @@ mod tests {
     use super::*;
 
     fn value(kind: &str, op: i32, v1: &str, v2: &str) -> Matcher {
-        Matcher::Value { kind: kind.into(), op, value: v1.into(), value2: v2.into(), not: false, ignore_case: true }
+        Matcher::value(kind, op, v1, v2, false, true)
     }
 
     #[test]
     fn values_are_checked_and_converted() {
         assert_eq!(parse_number(" 12 "), Ok("12".into()));
-        assert_eq!(parse_number("1,5"), Ok("1.5".into()));
+        assert_eq!(parse_number_with("1,5", '.'), Ok("1.5".into()));
+        assert_eq!(parse_number_with("1.5", ','), Ok("1,5".into()), "séparateur du poste");
+        assert_eq!(parse_number_with("4,5", ','), Ok("4,5".into()));
+        assert!(parse_number_with("1.000,5", ',').is_err());
         assert!(parse_number("douze").is_err());
         assert!(parse_number("").is_err());
         assert_eq!(parse_date("2024-02-29"), Ok("2024-02-29".into()));
@@ -1175,11 +1222,11 @@ mod tests {
             mode: Mode::Or,
             matchers: vec![
                 value("ComicBookWriterMatcher", 1, "Starlin", ""),
-                Matcher::Group {
-                    mode: Mode::And,
-                    not: true,
-                    matchers: vec![value("ComicBookAddedMatcher", 2, "01/01/2020", ""), unknown.clone()],
-                },
+                Matcher::group(
+                    Mode::And,
+                    true,
+                    vec![value("ComicBookAddedMatcher", 2, "01/01/2020", ""), unknown.clone()],
+                ),
             ],
             base_list: Some("ABC".into()),
             not_in_base: true,
@@ -1195,16 +1242,107 @@ mod tests {
         let back = d.to_query().unwrap();
         let mut expected = q.clone();
         expected.base_list = Some("abc".into());
-        if let Matcher::Group { matchers, .. } = &mut expected.matchers[1] {
-            matchers[0] = value("ComicBookAddedMatcher", 2, "2020-01-01", "");
+        assert_eq!(back, expected, "critères non modifiés : rendus tels quels (date de ComicRack comprise)");
+        // Date modifiée : écrite au format AAAA-MM-JJ.
+        let mut d3 = d.clone();
+        if let Node::Group { items, .. } = &mut d3.items[1] {
+            if let Node::Rule(r) = &mut items[0] {
+                r.v1 = "2021-02-03".into();
+            }
         }
-        assert_eq!(back, expected);
+        if let Matcher::Group { matchers, .. } = &mut expected.matchers[1] {
+            matchers[0] = value("ComicBookAddedMatcher", 2, "2021-02-03", "");
+        }
+        assert_eq!(d3.to_query().unwrap(), expected);
         // Sans liste de départ, « pas dans la liste » n'a pas de sens.
         let mut d2 = d.clone();
         d2.base = None;
         assert!(!d2.to_query().unwrap().not_in_base);
         d2.limit_value = "beaucoup".into();
         assert_eq!(d2.to_query().unwrap_err().len(), 1);
+    }
+
+    /// `ComicDb.xml` avec des membres de critères que ComicRust ne modélise pas.
+    const RICH: &str = "<?xml version=\"1.0\"?>
+<ComicDatabase xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">
+  <ComicLists>
+    <Item xsi:type=\"ComicSmartListItem\" Id=\"36e9430d-e7bd-4660-90bb-611380d042b5\" Name=\"Riche\">
+      <Matchers>
+        <ComicBookMatcher xsi:type=\"ComicBookSeriesMatcher\" Name=\"Ma série\" MatchOperator=\"1\">
+          <MatchValue>Thanos</MatchValue>
+        </ComicBookMatcher>
+        <ComicBookMatcher xsi:type=\"ComicBookPluginMatcher\" Name=\"Module\" PluginKey=\"cle-123\" MatchOperator=\"2\">
+          <MatchValue>a</MatchValue>
+        </ComicBookMatcher>
+        <ComicBookMatcher xsi:type=\"ComicBookAllPropertiesMatcher\" MatchOperator=\"1\">
+          <MatchValue>Starlin</MatchValue>
+          <Option>Writer</Option>
+        </ComicBookMatcher>
+        <ComicBookMatcher xsi:type=\"ComicBookGroupMatcher\" Collapsed=\"true\">
+          <Matchers>
+            <ComicBookMatcher xsi:type=\"ComicBookRatingMatcher\" MatchOperator=\"1\">
+              <MatchValue>4,5</MatchValue>
+            </ComicBookMatcher>
+            <ComicBookMatcher xsi:type=\"ComicBookAddedMatcher\" MatchOperator=\"2\">
+              <MatchValue>01/10/2019</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </ComicBookMatcher>
+      </Matchers>
+    </Item>
+  </ComicLists>
+</ComicDatabase>";
+    const RICH_ID: &str = "36e9430d-e7bd-4660-90bb-611380d042b5";
+
+    fn rich() -> (comicrust_core::lists_edit::ListsEditor, Draft) {
+        let mut w = Vec::new();
+        let e = comicrust_core::lists_edit::ListsEditor::from_comicdb_xml(RICH, &mut w).unwrap();
+        let lists = e.lists().unwrap();
+        let d = Draft::from_list(ComicList::find(&lists, RICH_ID).unwrap());
+        (e, d)
+    }
+
+    #[test]
+    fn untouched_editor_keeps_xml_identical() {
+        let (mut e, d) = rich();
+        let before = e.row(RICH_ID).unwrap().xml.clone();
+        e.set_query(RICH_ID, &d.to_query().unwrap()).unwrap();
+        assert_eq!(e.row(RICH_ID).unwrap().xml, before, "aller-retour par l'éditeur sans modification");
+    }
+
+    #[test]
+    fn edited_neighbour_keeps_unknown_members_and_values() {
+        let (mut e, mut d) = rich();
+        let before = e.row(RICH_ID).unwrap().xml.clone();
+        // Seul le premier critère change.
+        let Node::Rule(r) = &mut d.items[0] else { panic!() };
+        r.v1 = "Warlock".into();
+        e.set_query(RICH_ID, &d.to_query().unwrap()).unwrap();
+        let x = e.row(RICH_ID).unwrap().xml.clone();
+        assert!(
+            x.contains("<ComicBookMatcher xsi:type=\"ComicBookSeriesMatcher\" Name=\"Ma série\" MatchOperator=\"1\">"),
+            "critère modifié : Name gardé\n{x}"
+        );
+        assert!(x.contains("<MatchValue>Warlock</MatchValue>"));
+        // Les autres critères : recopiés octet pour octet (PluginKey, Option, Collapsed, « 4,5 »,
+        // date de ComicRack).
+        let tail = |t: &str| t[t.find("<ComicBookMatcher xsi:type=\"ComicBookPluginMatcher\"").unwrap()..].to_string();
+        assert_eq!(tail(&x), tail(&before));
+        // Valeur décimale modifiée : séparateur du poste, jamais la valeur d'origine réécrite.
+        let Node::Group { items, .. } = &mut d.items[3] else { panic!() };
+        let Node::Rule(rating) = &mut items[0] else { panic!() };
+        assert_eq!(rating.v1, "4,5", "affichée telle qu'écrite par ComicRack");
+        rating.v1 = "3.5".into();
+        let q = d.to_query().unwrap();
+        let Matcher::Group { matchers, .. } = &q.matchers[3] else { panic!() };
+        let Matcher::Value { value, .. } = &matchers[0] else { panic!() };
+        assert_eq!(*value, parse_number("3.5").unwrap());
+        let Matcher::Value { value: date, .. } = &matchers[1] else { panic!() };
+        assert_eq!(date, "01/10/2019", "critère voisin non modifié : date d'origine gardée");
+        e.set_query(RICH_ID, &q).unwrap();
+        let x = e.row(RICH_ID).unwrap().xml.clone();
+        assert!(x.contains("<ComicBookMatcher xsi:type=\"ComicBookGroupMatcher\" Collapsed=\"true\">"), "{x}");
+        assert!(x.contains("<Option>Writer</Option>") && x.contains("PluginKey=\"cle-123\""));
     }
 
     #[test]

@@ -23,6 +23,23 @@ use crate::ui::smart_editor::{EditorEnv, EditorRequest, SmartEditor};
 pub const COMICRACK_RUNNING: &str =
     "Ferme ComicRack pour modifier ses listes : il réécrit ComicDb.xml en se fermant et effacerait les modifications.";
 
+/// Commandes des listes grisées en mode « avec ComicRack » sans l'option d'écriture.
+pub const READ_ONLY: &str = "Lecture seule : active l'écriture dans ⚙ → Assistant de configuration";
+
+/// Les listes de ComicRack sont-elles modifiables d'après les réglages ? Mode autonome :
+/// toujours ; avec ComicRack (MySQL ou ComicDb.xml seul) : seulement avec l'option
+/// d'écriture de l'assistant (`comicrack_write`), sinon `ComicDb.xml` n'est jamais
+/// réécrit.
+pub fn lists_writable(mode: crate::settings::LibraryMode, comicrack_write: bool) -> Result<(), String> {
+    use crate::settings::LibraryMode;
+    match mode {
+        LibraryMode::Standalone => Ok(()),
+        LibraryMode::ComicRackMySql | LibraryMode::ComicRackXml if comicrack_write => Ok(()),
+        LibraryMode::ComicRackMySql | LibraryMode::ComicRackXml => Err(READ_ONLY.into()),
+        LibraryMode::Unset => Err("Bibliothèque non configurée".into()),
+    }
+}
+
 /// Renommage en cours dans l'arbre.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Renaming {
@@ -395,6 +412,7 @@ impl ComicRustApp {
     /// Où enregistrer les listes, ou pourquoi elles sont en lecture seule.
     pub(crate) fn lists_target(&mut self, ctx: &Context) -> Result<ListsTarget, String> {
         use crate::settings::LibraryMode;
+        lists_writable(self.settings.library_mode, self.settings.comicrack_write)?;
         match self.settings.library_mode {
             LibraryMode::Standalone => self
                 .library
@@ -403,8 +421,8 @@ impl ComicRustApp {
                 .map(ListsTarget::Store)
                 .ok_or_else(|| "Bibliothèque ComicRust non chargée".to_string()),
             LibraryMode::ComicRackMySql | LibraryMode::ComicRackXml => {
-                if self.lists_ui.ops.comicrack_running(ctx) {
-                    return Err(COMICRACK_RUNNING.into());
+                if let Some(why) = self.lists_ui.ops.comicrack_refusal(ctx) {
+                    return Err(why);
                 }
                 if let Some(e) = &self.library.lists.error {
                     return Err(format!("Listes de ComicRack illisibles : {e}"));
@@ -468,6 +486,12 @@ impl ComicRustApp {
                 let mut info = o.info.unwrap_or_else(|| format!("✔ {what}"));
                 if let Some(b) = a.backup.as_ref().and_then(|b| b.file_name()) {
                     info.push_str(&format!("\nSauvegarde : {}", b.to_string_lossy()));
+                }
+                if !a.warnings.is_empty() {
+                    self.bg_errors.lock().unwrap().push(format!(
+                        "Listes enregistrées, mais problème de sauvegarde de ComicDb.xml :\n{}",
+                        a.warnings.join("\n")
+                    ));
                 }
                 self.lists_ui.info = Some(info);
                 if tag == OpTag::Editor {
@@ -966,6 +990,25 @@ impl ComicRustApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lists_read_only_without_write_option() {
+        use crate::settings::LibraryMode;
+        assert_eq!(lists_writable(LibraryMode::Standalone, false), Ok(()), "mode autonome : toujours modifiable");
+        for mode in [LibraryMode::ComicRackMySql, LibraryMode::ComicRackXml] {
+            assert_eq!(lists_writable(mode, false), Err(READ_ONLY.to_string()), "{mode:?} en lecture seule");
+            assert_eq!(lists_writable(mode, true), Ok(()), "{mode:?} avec l'écriture");
+        }
+        assert!(lists_writable(LibraryMode::Unset, true).is_err());
+        assert!(READ_ONLY.contains("Assistant de configuration"));
+        // Textes de l'assistant : cohérents avec ce qui est réellement modifiable.
+        use crate::ui::setup_window::{setup_note, write_label};
+        assert_eq!(write_label(true), "Lecture et écriture des listes (ComicRack fermé)");
+        assert!(write_label(false).contains("listes"));
+        assert!(setup_note(true, false).contains("ni les listes"));
+        assert!(setup_note(false, false).contains("ni la base ni les listes"));
+        assert!(setup_note(true, true).contains("livres de ComicDb.xml, eux, ne sont pas modifiés"));
+    }
 
     fn l(id: &str, kind: ListKind) -> ComicList {
         ComicList { id: id.into(), name: id.into(), description: String::new(), kind, comicrack_count: 0 }

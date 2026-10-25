@@ -156,11 +156,20 @@ pub struct BookEdit {
     /// Identifiant (GUID, casse indifférente).
     pub id: String,
     pub changes: Vec<Change>,
+    /// Écrire seulement si la fiche a toujours ce compteur (`comics.update_counter`) :
+    /// sinon rien n'est écrit et le livre est rangé dans [`WriteReport::stale`].
+    pub expected_counter: Option<i64>,
 }
 
 impl BookEdit {
     pub fn new(id: &str) -> Self {
-        Self { id: id.to_string(), changes: Vec::new() }
+        Self { id: id.to_string(), changes: Vec::new(), expected_counter: None }
+    }
+
+    /// N'écrire que si la fiche n'a pas changé depuis la lecture de ce compteur.
+    pub fn if_counter(mut self, counter: i64) -> Self {
+        self.expected_counter = Some(counter);
+        self
     }
 
     /// Forme générique : élément → valeur.
@@ -419,7 +428,7 @@ fn bad(msg: impl std::fmt::Display) -> Error {
 
 /// Caractères interdits en XML 1.0 (ComicRack ne relirait pas la fiche).
 fn check_chars(s: &str, what: &str) -> Result<(), Error> {
-    match s.chars().find(|&c| (c < ' ' && !matches!(c, '\t' | '\n' | '\r')) || matches!(c, '\u{FFFE}' | '\u{FFFF}')) {
+    match s.chars().find(|&c| !crate::lists_edit::xml::is_xml_char(c)) {
         Some(c) => Err(bad(format!("caractère interdit en XML (U+{:04X}) dans {what}", c as u32))),
         None => Ok(()),
     }
@@ -916,6 +925,9 @@ pub struct WriteReport {
     pub missing: Vec<String>,
     /// Livres modifiés par ailleurs à chaque essai : non écrits.
     pub conflicts: Vec<String>,
+    /// Livres dont la fiche a changé depuis le compteur attendu
+    /// ([`BookEdit::if_counter`]) : non écrits.
+    pub stale: Vec<String>,
     /// Erreurs (valeur refusée, fiche illisible, erreur SQL) : identifiant, message.
     pub failed: Vec<(String, String)>,
 }
@@ -923,7 +935,7 @@ pub struct WriteReport {
 impl WriteReport {
     /// Tout a été écrit (ou était déjà à jour).
     pub fn is_complete(&self) -> bool {
-        self.missing.is_empty() && self.conflicts.is_empty() && self.failed.is_empty()
+        self.missing.is_empty() && self.conflicts.is_empty() && self.stale.is_empty() && self.failed.is_empty()
     }
 
     /// Résumé pour l'utilisateur.
@@ -938,6 +950,9 @@ impl WriteReport {
         if !self.conflicts.is_empty() {
             parts.push(format!("{} en conflit (modifié(s) en même temps dans ComicRack)", self.conflicts.len()));
         }
+        if !self.stale.is_empty() {
+            parts.push(format!("{} non écrit(s) : fiche modifiée entre-temps", self.stale.len()));
+        }
         if !self.failed.is_empty() {
             parts.push(format!("{} en erreur", self.failed.len()));
         }
@@ -950,6 +965,7 @@ enum Outcome {
     Unchanged,
     Missing,
     Conflict,
+    Stale,
 }
 
 /// Écrit les modifications dans la base MySQL de ComicRack (voir l'en-tête du module
@@ -973,7 +989,7 @@ fn update_books_with(
     let mut conn = connect(cfg)?;
     for edit in edits {
         let id = edit.id.trim().to_ascii_lowercase();
-        match write_one(&mut conn, &id, &edit.changes, before_write) {
+        match write_one(&mut conn, &id, &edit.changes, edit.expected_counter, before_write) {
             Ok(Outcome::Written(record, retries)) => match LibraryBook::from_xml(&record.data) {
                 Ok(mut book) => {
                     if book.id.is_empty() {
@@ -987,6 +1003,7 @@ fn update_books_with(
             Ok(Outcome::Unchanged) => report.unchanged.push(id),
             Ok(Outcome::Missing) => report.missing.push(id),
             Ok(Outcome::Conflict) => report.conflicts.push(id),
+            Ok(Outcome::Stale) => report.stale.push(id),
             Err(e) => report.failed.push((id, e.to_string())),
         }
     }
@@ -997,6 +1014,7 @@ fn write_one(
     conn: &mut Conn,
     id: &str,
     changes: &[Change],
+    expected: Option<i64>,
     before_write: &mut dyn FnMut(&str, usize),
 ) -> Result<Outcome, Error> {
     for attempt in 0..MAX_ATTEMPTS {
@@ -1007,6 +1025,11 @@ fn write_one(
         let new = patch_comic_book_xml(&data, changes)?;
         if new == data {
             return Ok(Outcome::Unchanged);
+        }
+        // Fiche modifiée depuis le compteur attendu : rien n'est écrit (déjà dans l'état
+        // demandé, voir ci-dessus, ce n'est pas un refus).
+        if expected.is_some_and(|e| counter != Some(e)) {
+            return Ok(Outcome::Stale);
         }
         before_write(id, attempt);
         let mut tx = conn.start_transaction(TxOpts::default()).map_err(db_err)?;
@@ -1061,18 +1084,16 @@ impl ComicDatabase {
     /// Reporte dans la base en mémoire les livres écrits (sans tout recharger). Renvoie
     /// le nombre de livres remplacés.
     pub fn apply_written(&mut self, report: &WriteReport) -> usize {
-        let mut n = 0;
         let mut seen = HashSet::new();
+        // Un livre écrit plusieurs fois : sa dernière fiche l'emporte.
         for w in &report.written {
             self.rows.insert(w.id.clone(), w.record.counter);
-            if seen.insert(w.id.clone()) {
-                if let Some(b) = self.get_mut(&w.id) {
-                    *b = w.book.clone();
-                    n += 1;
-                }
+            if let Some(b) = self.get_mut(&w.id) {
+                *b = w.book.clone();
+                seen.insert(w.id.clone());
             }
         }
-        n
+        seen.len()
     }
 }
 

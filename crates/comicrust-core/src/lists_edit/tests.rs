@@ -1,6 +1,6 @@
 //! Tests de la modification des listes (`lists_edit`) et de l'écriture dans `ComicDb.xml`.
 
-use super::comicdb::{backups, replace_comic_lists, BACKUPS_KEPT};
+use super::comicdb::{self, backups, replace_comic_lists, BACKUPS_KEPT};
 use super::xml::ItemXml;
 use super::*;
 use crate::comic_lists::ListKind;
@@ -122,7 +122,7 @@ fn find(lists: &[ComicList], id: &str) -> ComicList {
 }
 
 fn v(kind: &str, op: i32, value: &str) -> Matcher {
-    Matcher::Value { kind: kind.into(), op, value: value.into(), value2: String::new(), not: false, ignore_case: true }
+    Matcher::value(kind, op, value, "", false, true)
 }
 
 /// Les lignes non modifiées sont identiques octet pour octet à `before`.
@@ -181,28 +181,14 @@ fn create_lists_in_comicrack_format() {
         mode: Mode::Or,
         matchers: vec![
             v("ComicBookWriterMatcher", 1, "Starlin <Jim>"),
-            Matcher::Group {
-                mode: Mode::Or,
-                not: true,
-                matchers: vec![
-                    Matcher::Value {
-                        kind: "ComicBookSeriesMatcher".into(),
-                        op: 0,
-                        value: "Thanos".into(),
-                        value2: String::new(),
-                        not: false,
-                        ignore_case: false,
-                    },
-                    Matcher::Value {
-                        kind: "ComicBookYearMatcher".into(),
-                        op: 3,
-                        value: "1990".into(),
-                        value2: "1995".into(),
-                        not: true,
-                        ignore_case: true,
-                    },
+            Matcher::group(
+                Mode::Or,
+                true,
+                vec![
+                    Matcher::value("ComicBookSeriesMatcher", 0, "Thanos", "", false, false),
+                    Matcher::value("ComicBookYearMatcher", 3, "1990", "1995", true, true),
                 ],
-            },
+            ),
             v("ComicBookDuplicateMatcher", 0, ""),
         ],
         base_list: Some(L1.into()),
@@ -273,14 +259,7 @@ fn create_lists_in_comicrack_format() {
     unchanged_except(&before, &e, &[]);
 
     // Pas d'attribut IgnoreCase sur un critère numérique.
-    let year = Matcher::Value {
-        kind: "ComicBookYearMatcher".into(),
-        op: 0,
-        value: "1990".into(),
-        value2: String::new(),
-        not: false,
-        ignore_case: false,
-    };
+    let year = Matcher::value("ComicBookYearMatcher", 0, "1990", "", false, false);
     assert_eq!(
         xml::matcher_xml(&year, "", "\n"),
         "<ComicBookMatcher xsi:type=\"ComicBookYearMatcher\">\n  <MatchValue>1990</MatchValue>\n</ComicBookMatcher>"
@@ -360,6 +339,12 @@ fn copy_gets_new_ids_and_follows_internal_base_lists() {
     // Réglages d'affichage et éléments inconnus copiés.
     let cx = xml_of(&e, &children[1].id);
     assert!(cx.contains("<Futur>à garder</Futur>") && cx.contains("<View ItemViewMode=\"Details\" />"));
+    // Compteurs mémorisés par ComicRack retirés de la copie (et de ses sous-listes).
+    for id in [copy.as_str(), children[0].id.as_str(), children[1].id.as_str()] {
+        let x = xml_of(&e, id);
+        assert!(STALE.iter().all(|n| !x.contains(&format!("<{n}>"))), "{x}");
+    }
+    assert!(xml_of(&e, L1).contains("<BookCount>2</BookCount>"), "original intact");
     // L'original et la liste externe ne bougent pas.
     unchanged_except(&before, &e, &[]);
     assert_eq!(find(&lists, S2).kind, find(&before.lists().unwrap(), S2).kind);
@@ -498,11 +483,11 @@ fn comicdb_save() {
     let mut e = ListsEditor::new(db.rows.clone());
     e.rename(L1, "Renommée").unwrap();
 
-    let err = db.save_checked(e.rows(), || true).unwrap_err();
+    let err = db.save_checked(e.rows(), || Ok(true)).unwrap_err();
     assert!(err.to_string().contains("Ferme ComicRack"), "{err}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), COMICDB, "rien écrit");
 
-    let report = db.save_checked(e.rows(), || false).unwrap();
+    let report = db.save_checked(e.rows(), || Ok(false)).unwrap();
     assert_eq!(std::fs::read_to_string(&report.backup).unwrap(), COMICDB);
     let name = report.backup.file_name().unwrap().to_string_lossy().into_owned();
     assert!(name.starts_with("ComicDb.comicrust-") && name.ends_with(".xml.bak"), "{name}");
@@ -514,7 +499,7 @@ fn comicdb_save() {
     assert_eq!(parse_comic_lists(&text).unwrap(), e.lists().unwrap());
 
     // Fichier changé depuis la lecture : refus.
-    let err = db.save_checked(e.rows(), || false).unwrap_err();
+    let err = db.save_checked(e.rows(), || Ok(false)).unwrap_err();
     assert!(matches!(err, Error::Conflict(_)) && err.to_string().contains("modifié depuis sa lecture"), "{err}");
 
     // Les 10 sauvegardes les plus récentes sont gardées.
@@ -522,7 +507,7 @@ fn comicdb_save() {
         std::fs::write(dir.path().join(format!("ComicDb.comicrust-2020010{}-0000{n:02}.xml.bak", n % 3)), "x").unwrap();
     }
     let db = ComicDbLists::read(&path).unwrap();
-    let report = db.save_checked(db.rows.as_slice(), || false).unwrap();
+    let report = db.save_checked(db.rows.as_slice(), || Ok(false)).unwrap();
     let kept = backups(dir.path(), "ComicDb");
     assert_eq!(kept.len(), BACKUPS_KEPT);
     assert!(kept.contains(&report.backup));
@@ -583,4 +568,249 @@ fn windows_line_endings_are_followed() {
         assert!(x.contains("\r\n"));
         assert!(!x.replace("\r\n", "").contains('\n'), "{x:?}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Relecture v0.9.0 : caractères interdits, critères gardés, ComicRack, sauvegardes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn forbidden_xml_characters_are_never_written() {
+    let mut e = editor();
+    e.rename(L1, "A\u{1}B\u{B}C\u{FFFF}").unwrap();
+    e.set_description(L1, "x\u{0}y\u{C}z\tt").unwrap();
+    let q = SmartQuery { matchers: vec![v("ComicBookSeriesMatcher", 1, "Tha\u{1F}nos\u{8}")], ..Default::default() };
+    e.set_query(S1, &q).unwrap();
+    let id = e.create(None, None, "\u{2}Nouvelle", NewList::Folder { combine: Combine::Or }).unwrap();
+    assert_eq!(e.row(&id).unwrap().name, "Nouvelle");
+    assert_eq!(e.row(L1).unwrap().name, "AB C");
+    let doc = e.document();
+    xml::check_xml_document(&doc, "test").unwrap();
+    assert!(!doc.contains("&#x1") && !doc.contains("&#x0;") && !doc.contains("&#x8;"), "aucune référence interdite");
+    assert!(xml_of(&e, L1).contains("Name=\"AB C\"") && xml_of(&e, L1).contains("<Description>xy z\tt</Description>"));
+    assert!(xml_of(&e, S1).contains("<MatchValue>Thanos</MatchValue>"));
+    // Échappement direct : rien d'interdit ne sort.
+    assert_eq!(xml::escape_attr("a\u{1}\u{B}b\n"), "a b&#xA;");
+    assert_eq!(xml::escape_text("a\u{1F}\u{C}b\r"), "a b&#xD;");
+    // Contrôle final : caractère brut ou référence interdite refusés, références permises acceptées.
+    assert!(xml::check_xml_document("<a>\u{1}</a>", "x").is_err());
+    assert!(xml::check_xml_document("<a>&#x1;</a>", "x").is_err());
+    assert!(xml::check_xml_document("<a>&#11;</a>", "x").is_err());
+    assert!(xml::check_xml_document("<a>&#xFFFE;</a>", "x").is_err());
+    assert!(xml::check_xml_document("<a>&#xD800;</a>", "x").is_err(), "demi-codet");
+    assert!(xml::check_xml_document("\u{feff}<a b=\"&#xA;&#9;&#xD;\">&amp;&#x1F600;</a>", "x").is_ok());
+}
+
+#[test]
+fn comicdb_save_refuses_forbidden_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ComicDb.xml");
+    std::fs::write(&path, COMICDB).unwrap();
+    let db = ComicDbLists::read(&path).unwrap();
+    // Ligne fabriquée à la main (contournant l'éditeur) avec une référence interdite.
+    let mut rows = db.rows.clone();
+    let i = rows.iter().position(|r| r.id == L1).unwrap();
+    rows[i].xml = rows[i].xml.replace("Name=\"Test liste ComicRust\"", "Name=\"Test&#x1;\"");
+    rows[i].name = "Test\u{1}".into();
+    let err = db.save_checked(&rows, || Ok(false)).unwrap_err();
+    assert!(err.to_string().contains("caractère interdit"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), COMICDB, "rien écrit");
+    assert!(backups(dir.path(), "ComicDb").is_empty(), "pas même une sauvegarde");
+}
+
+/// Liste intelligente avec des membres de critères que ComicRust ne modélise pas.
+const RICH: &str = "\u{feff}<?xml version=\"1.0\"?>
+<ComicDatabase xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">
+  <ComicLists>
+    <Item xsi:type=\"ComicSmartListItem\" Id=\"36e9430d-e7bd-4660-90bb-611380d042b5\" Name=\"Riche\">
+      <Matchers>
+        <ComicBookMatcher xsi:type=\"ComicBookSeriesMatcher\" Name=\"Ma série\" MatchOperator=\"1\">
+          <MatchValue>Thanos</MatchValue>
+        </ComicBookMatcher>
+        <ComicBookMatcher xsi:type=\"ComicBookPluginMatcher\" Name=\"Module\" PluginKey=\"cle-123\" MatchOperator=\"2\">
+          <MatchValue>a</MatchValue>
+          <MatchValue2>b</MatchValue2>
+        </ComicBookMatcher>
+        <ComicBookMatcher xsi:type=\"ComicBookAllPropertiesMatcher\" MatchOperator=\"1\">
+          <MatchValue>Starlin</MatchValue>
+          <Option>Writer</Option>
+        </ComicBookMatcher>
+        <ComicBookMatcher xsi:type=\"ComicBookGroupMatcher\" MatcherMode=\"Or\" Collapsed=\"true\">
+          <Matchers>
+            <ComicBookMatcher xsi:type=\"ComicBookRatingMatcher\" MatchOperator=\"1\">
+              <MatchValue>4,5</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </ComicBookMatcher>
+      </Matchers>
+    </Item>
+  </ComicLists>
+</ComicDatabase>";
+
+fn rich_query(e: &ListsEditor) -> SmartQuery {
+    match find(&e.lists().unwrap(), S1).kind {
+        ListKind::Smart { query: Some(q), .. } => q,
+        k => panic!("{k:?}"),
+    }
+}
+
+#[test]
+fn unknown_matcher_members_survive_rewrites() {
+    let mut w = Vec::new();
+    let mut e = ListsEditor::from_comicdb_xml(RICH, &mut w).unwrap();
+    let original = xml_of(&e, S1);
+    let q = rich_query(&e);
+    assert_eq!(q.matchers[2].all_properties_option(), "Writer");
+
+    // Mêmes critères : élément identique octet pour octet.
+    e.set_query(S1, &q).unwrap();
+    assert_eq!(xml_of(&e, S1), original);
+
+    // Un critère voisin modifié : les autres recopiés tels quels, le modifié garde `Name`.
+    let mut q2 = q.clone();
+    if let Matcher::Value { value, .. } = &mut q2.matchers[0] {
+        *value = "Warlock".into();
+    }
+    if let Matcher::Group { mode, .. } = &mut q2.matchers[3] {
+        *mode = Mode::And;
+    }
+    e.set_query(S1, &q2).unwrap();
+    let x = xml_of(&e, S1);
+    assert!(
+        x.contains(
+            "<ComicBookMatcher xsi:type=\"ComicBookSeriesMatcher\" Name=\"Ma série\" MatchOperator=\"1\">\n          \
+             <MatchValue>Warlock</MatchValue>"
+        ),
+        "{x}"
+    );
+    for kept in [
+        "PluginKey=\"cle-123\"",
+        "<MatchValue2>b</MatchValue2>",
+        "<Option>Writer</Option>",
+        "<MatchValue>4,5</MatchValue>",
+    ] {
+        assert!(x.contains(kept), "{kept} perdu :\n{x}");
+    }
+    assert!(x.contains("<ComicBookMatcher xsi:type=\"ComicBookGroupMatcher\" Collapsed=\"true\">"), "{x}");
+    let plugin = original.find("<ComicBookMatcher xsi:type=\"ComicBookPluginMatcher\"").unwrap();
+    let end = original[plugin..].find("</ComicBookMatcher>").unwrap() + plugin + "</ComicBookMatcher>".len();
+    assert!(x.contains(&original[plugin..end]), "critère non modifié recopié octet pour octet");
+    // Relu : même sens, membres inconnus toujours là.
+    let back = rich_query(&e);
+    assert_eq!(back, q2);
+    assert_eq!(back.matchers[2].all_properties_option(), "Writer");
+
+    // Type changé : seul `Name` est gardé.
+    let mut q3 = back.clone();
+    if let Matcher::Value { kind, .. } = &mut q3.matchers[1] {
+        *kind = "ComicBookTitleMatcher".into();
+    }
+    e.set_query(S1, &q3).unwrap();
+    let x = xml_of(&e, S1);
+    assert!(
+        x.contains("xsi:type=\"ComicBookTitleMatcher\" Name=\"Module\" MatchOperator=\"2\"")
+            && !x.contains("PluginKey")
+    );
+}
+
+#[test]
+fn comicrack_detection_checked_twice_and_unknown_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ComicDb.xml");
+    std::fs::write(&path, COMICDB).unwrap();
+    let db = ComicDbLists::read(&path).unwrap();
+    let mut e = ListsEditor::new(db.rows.clone());
+    e.rename(L1, "Renommée").unwrap();
+
+    // Détection impossible : comme si ComicRack était lancé.
+    let err = db.save_checked(e.rows(), || Err("accès refusé".into())).unwrap_err();
+    assert!(err.to_string().starts_with(COMICRACK_UNKNOWN) && err.to_string().contains("accès refusé"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), COMICDB);
+
+    // ComicRack lancé pendant la préparation : vu juste avant le remplacement.
+    let calls = std::cell::Cell::new(0);
+    let err = db
+        .save_checked(e.rows(), || {
+            calls.set(calls.get() + 1);
+            Ok(calls.get() > 1)
+        })
+        .unwrap_err();
+    assert_eq!(calls.get(), 2, "détection au début et juste avant le remplacement");
+    assert!(err.to_string().contains("Ferme ComicRack"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), COMICDB, "fichier intact");
+    assert!(std::fs::read_dir(dir.path()).unwrap().flatten().all(|f| !f.file_name().to_string_lossy().contains("tmp")));
+    let calls = std::cell::Cell::new(0);
+    db.save_checked(e.rows(), || {
+        calls.set(calls.get() + 1);
+        Ok(false)
+    })
+    .unwrap();
+    assert_eq!(calls.get(), 2);
+}
+
+#[test]
+fn origin_backup_is_kept_forever() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ComicDb.xml");
+    std::fs::write(&path, COMICDB).unwrap();
+    // Première écriture : sauvegarde d'origine + sauvegarde ordinaire.
+    let db = ComicDbLists::read(&path).unwrap();
+    let mut e = ListsEditor::new(db.rows.clone());
+    e.rename(L1, "Un").unwrap();
+    let report = db.save_checked(e.rows(), || Ok(false)).unwrap();
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    let origin = comicdb::origin_backup(dir.path(), "ComicDb").expect("sauvegarde d'origine");
+    let name = origin.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(name.starts_with("ComicDb.comicrust-origine-") && name.ends_with(".xml.bak"), "{name}");
+    assert_eq!(std::fs::read_to_string(&origin).unwrap(), COMICDB);
+    assert_eq!(backups(dir.path(), "ComicDb"), std::slice::from_ref(&report.backup));
+    // Beaucoup d'écritures : la rotation ne touche jamais l'origine.
+    for n in 0..(BACKUPS_KEPT + 3) {
+        let db = ComicDbLists::read(&path).unwrap();
+        let mut e = ListsEditor::new(db.rows.clone());
+        e.rename(L1, &format!("N{n}")).unwrap();
+        db.save_checked(e.rows(), || Ok(false)).unwrap();
+    }
+    assert_eq!(backups(dir.path(), "ComicDb").len(), BACKUPS_KEPT);
+    assert_eq!(comicdb::origin_backup(dir.path(), "ComicDb"), Some(origin.clone()));
+    assert_eq!(std::fs::read_to_string(&origin).unwrap(), COMICDB, "toujours le fichier d'avant ComicRust");
+}
+
+#[test]
+fn oldest_previous_backup_becomes_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ComicDb.xml");
+    std::fs::write(&path, COMICDB).unwrap();
+    std::fs::write(dir.path().join("ComicDb.comicrust-20200101-000000.xml.bak"), "ancienne").unwrap();
+    std::fs::write(dir.path().join("ComicDb.comicrust-20210101-000000.xml.bak"), "moins ancienne").unwrap();
+    let db = ComicDbLists::read(&path).unwrap();
+    db.save_checked(db.rows.as_slice(), || Ok(false)).unwrap();
+    let origin = comicdb::origin_backup(dir.path(), "ComicDb").unwrap();
+    assert_eq!(origin.file_name().unwrap(), "ComicDb.comicrust-origine-20200101-000000.xml.bak");
+    assert_eq!(std::fs::read_to_string(&origin).unwrap(), "ancienne");
+    assert_eq!(backups(dir.path(), "ComicDb").len(), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn backup_failure_prevents_writing() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ComicDb.xml");
+    std::fs::write(&path, COMICDB).unwrap();
+    let db = ComicDbLists::read(&path).unwrap();
+    let mut e = ListsEditor::new(db.rows.clone());
+    e.rename(L1, "Un").unwrap();
+    // Dossier en lecture seule : sauvegarde impossible (sauf pour root, qui passe outre).
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let probe = std::fs::write(dir.path().join("essai"), "x").is_ok();
+    let res = db.save_checked(e.rows(), || Ok(false));
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    if probe {
+        eprintln!("droits ignorés (root) : test de sauvegarde impossible sauté");
+        return;
+    }
+    let err = res.unwrap_err();
+    assert!(err.to_string().contains("sauvegarde"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), COMICDB, "rien écrit");
 }

@@ -49,7 +49,9 @@ impl LibrarySource {
     pub fn describe(&self) -> String {
         match self {
             LibrarySource::ComicRackMySql(c) => format!("base ComicRack {}", c.describe()),
-            LibrarySource::ComicRackXml(p) => format!("ComicRack {} (lecture seule)", p.display()),
+            // Livres en lecture seule (ComicRack réécrit ce fichier lui-même) ; les listes
+            // suivent l'option d'écriture (`lists_target`).
+            LibrarySource::ComicRackXml(p) => format!("ComicRack {} (livres en lecture seule)", p.display()),
             LibrarySource::Standalone(c) => format!("base ComicRust {}", c.describe()),
         }
     }

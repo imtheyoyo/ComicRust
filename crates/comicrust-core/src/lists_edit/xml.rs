@@ -30,8 +30,63 @@ use crate::comic_lists::{local, xml_err};
 use crate::smart::{LimitKind, Matcher, Mode, Selection, SmartQuery};
 use crate::Error;
 
-/// Échappe un texte d'élément comme `XmlTextWriter`.
+/// Caractère autorisé en XML 1.0 (`Char` : tabulation, retours à la ligne, U+0020 à
+/// U+D7FF, U+E000 à U+FFFD, U+10000 et au-delà ; les demi-codets n'existent pas dans une
+/// `String`). `XmlSerializer` refuse un document qui en contient un autre, même écrit
+/// `&#x1;` : ComicRack ne chargerait plus `ComicDb.xml`.
+pub(crate) fn is_xml_char(c: char) -> bool {
+    matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..)
+}
+
+/// Texte sans caractère interdit en XML 1.0 : tabulation verticale et saut de page
+/// (U+000B, U+000C, venus d'un copier-coller) deviennent des espaces, les autres sont
+/// retirés.
+pub fn xml_safe(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.chars().all(is_xml_char) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    std::borrow::Cow::Owned(
+        s.chars()
+            .filter_map(|c| match c {
+                '\u{B}' | '\u{C}' => Some(' '),
+                c if is_xml_char(c) => Some(c),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
+/// Contrôle final d'un document avant de l'écrire : aucun caractère interdit en XML 1.0,
+/// ni brut ni sous forme de référence (`&#x1;`, `&#1;`).
+pub(crate) fn check_xml_document(text: &str, what: &str) -> Result<(), Error> {
+    let refuse = |c: u32| {
+        Err(Error::Database(format!(
+            "{what} non enregistré : caractère interdit en XML (U+{c:04X}), ComicRack ne pourrait plus le lire"
+        )))
+    };
+    if let Some(c) = text.chars().find(|&c| !is_xml_char(c) && c != '\u{feff}') {
+        return refuse(c as u32);
+    }
+    let mut rest = text;
+    while let Some(i) = rest.find("&#") {
+        rest = &rest[i + 2..];
+        let (digits, radix) = match rest.strip_prefix(['x', 'X']) {
+            Some(h) => (h, 16),
+            None => (rest, 10),
+        };
+        let end = digits.find(';').unwrap_or(digits.len());
+        let n = u32::from_str_radix(&digits[..end], radix).unwrap_or(u32::MAX);
+        if !char::from_u32(n).is_some_and(is_xml_char) {
+            return refuse(n);
+        }
+    }
+    Ok(())
+}
+
+/// Échappe un texte d'élément comme `XmlTextWriter` (caractères interdits en XML 1.0
+/// retirés, voir [`xml_safe`]).
 pub(crate) fn escape_text(s: &str) -> String {
+    let s = xml_safe(s);
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -39,15 +94,16 @@ pub(crate) fn escape_text(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '\r' => out.push_str("&#xD;"),
-            c if (c as u32) < 0x20 && c != '\n' && c != '\t' => out.push_str(&format!("&#x{:X};", c as u32)),
             c => out.push(c),
         }
     }
     out
 }
 
-/// Échappe une valeur d'attribut comme `XmlTextWriter` (guillemets doubles).
+/// Échappe une valeur d'attribut comme `XmlTextWriter` (guillemets doubles ; caractères
+/// interdits en XML 1.0 retirés, voir [`xml_safe`]).
 pub(crate) fn escape_attr(s: &str) -> String {
+    let s = xml_safe(s);
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -58,7 +114,6 @@ pub(crate) fn escape_attr(s: &str) -> String {
             '\t' => out.push_str("&#x9;"),
             '\n' => out.push_str("&#xA;"),
             '\r' => out.push_str("&#xD;"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("&#x{:X};", c as u32)),
             c => out.push(c),
         }
     }
@@ -110,12 +165,37 @@ fn has_ignore_case(kind: &str) -> bool {
 }
 
 /// Un critère (`<ComicBookMatcher xsi:type=…>`), indenté sous `ind`.
+///
+/// Critère non modifié (même sens que son XML d'origine relu) : XML d'origine recopié
+/// octet pour octet. Sinon régénéré au format de `XmlSerializer`, en gardant les
+/// attributs et sous-éléments que ComicRust ne modélise pas (voir
+/// [`crate::smart::MatcherXml`]) ; si le type du critère a changé, seul `Name` (commun à
+/// tous les critères à valeur) est gardé.
 pub(crate) fn matcher_xml(m: &Matcher, ind: &str, nl: &str) -> String {
+    let src = m.xml().source();
+    if let Some(src) = src {
+        if crate::comic_lists::parse_matcher(&src.raw).is_ok_and(|orig| orig == *m) {
+            return src.raw.clone();
+        }
+    }
+    let extra = |kind: &str| -> (Vec<(String, String)>, Vec<String>) {
+        let Some(src) = src else { return (Vec::new(), Vec::new()) };
+        let same = src.kind == kind;
+        let attrs = src.attrs.iter().filter(|(k, _)| same || k == "Name").cloned().collect();
+        let kids = if same { src.children.iter().map(|c| c.raw.clone()).collect() } else { Vec::new() };
+        (attrs, kids)
+    };
+    let attr = |k: &str, v: &str| format!(" {k}=\"{}\"", escape_attr(v));
     match m {
-        Matcher::Value { kind, op, value, value2, not, ignore_case } => {
-            let mut attrs = format!(" xsi:type=\"{}\"", escape_attr(kind));
+        Matcher::Value { kind, op, value, value2, not, ignore_case, .. } => {
+            let (extra_attrs, extra_kids) = extra(kind);
+            let mut attrs = attr("xsi:type", kind);
             if *not {
                 attrs.push_str(" Not=\"true\"");
+            }
+            // Ordre de `XmlSerializer` : `Name` (ComicBookValueMatcher) avant `MatchOperator`.
+            for (k, v) in extra_attrs.iter().filter(|(k, _)| k == "Name") {
+                attrs.push_str(&attr(k, v));
             }
             if *op != 0 {
                 attrs.push_str(&format!(" MatchOperator=\"{op}\""));
@@ -123,13 +203,18 @@ pub(crate) fn matcher_xml(m: &Matcher, ind: &str, nl: &str) -> String {
             if !*ignore_case && has_ignore_case(kind) {
                 attrs.push_str(" IgnoreCase=\"false\"");
             }
+            for (k, v) in extra_attrs.iter().filter(|(k, _)| k != "Name") {
+                attrs.push_str(&attr(k, v));
+            }
             let mut kids = vec![text_element("MatchValue", value)];
             if !value2.is_empty() {
                 kids.push(text_element("MatchValue2", value2));
             }
+            kids.extend(extra_kids);
             block_element("ComicBookMatcher", &attrs, &kids, ind, nl)
         }
-        Matcher::Group { mode, not, matchers } => {
+        Matcher::Group { mode, not, matchers, .. } => {
+            let (extra_attrs, extra_kids) = extra("ComicBookGroupMatcher");
             let mut attrs = String::from(" xsi:type=\"ComicBookGroupMatcher\"");
             if *not {
                 attrs.push_str(" Not=\"true\"");
@@ -137,8 +222,12 @@ pub(crate) fn matcher_xml(m: &Matcher, ind: &str, nl: &str) -> String {
             if *mode == Mode::Or {
                 attrs.push_str(" MatcherMode=\"Or\"");
             }
+            for (k, v) in &extra_attrs {
+                attrs.push_str(&attr(k, v));
+            }
             let inner = format!("{ind}  ");
-            let kids = vec![matchers_xml(matchers, &inner, nl)];
+            let mut kids = vec![matchers_xml(matchers, &inner, nl)];
+            kids.extend(extra_kids);
             block_element("ComicBookMatcher", &attrs, &kids, ind, nl)
         }
     }
@@ -510,7 +599,14 @@ impl ItemXml {
     pub(crate) fn set_query(&mut self, q: &SmartQuery) {
         self.set_attr("MatcherMode", (q.mode == Mode::Or).then_some("Or"));
         let (ind, nl) = (self.child_indent(), self.nl);
-        self.set_child("Matchers", Some(matchers_xml(&q.matchers, &ind, nl)));
+        // Critères inchangés : `<Matchers>` gardé tel quel, octet pour octet.
+        let same = self
+            .child_raw("Matchers")
+            .and_then(|raw| crate::comic_lists::parse_matchers(raw).ok())
+            .is_some_and(|old| old == q.matchers);
+        if !same {
+            self.set_child("Matchers", Some(matchers_xml(&q.matchers, &ind, nl)));
+        }
         match &q.limit {
             Some(l) => {
                 self.set_text_child("Limit", Some("true"));

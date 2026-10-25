@@ -58,10 +58,116 @@ pub struct Limit {
     pub seed: i64,
 }
 
+/// Critère d'une liste intelligente.
+///
+/// `xml` garde l'élément d'origine (lu dans `ComicDb.xml`) : il n'entre pas dans les
+/// comparaisons (`==` compare le sens du critère) et sert à le réécrire sans perte (voir
+/// [`MatcherXml`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Matcher {
-    Value { kind: String, op: i32, value: String, value2: String, not: bool, ignore_case: bool },
-    Group { mode: Mode, not: bool, matchers: Vec<Matcher> },
+    Value { kind: String, op: i32, value: String, value2: String, not: bool, ignore_case: bool, xml: MatcherXml },
+    Group { mode: Mode, not: bool, matchers: Vec<Matcher>, xml: MatcherXml },
+}
+
+impl Matcher {
+    /// Critère simple, sans XML d'origine.
+    pub fn value(kind: &str, op: i32, value: &str, value2: &str, not: bool, ignore_case: bool) -> Self {
+        Matcher::Value {
+            kind: kind.to_string(),
+            op,
+            value: value.to_string(),
+            value2: value2.to_string(),
+            not,
+            ignore_case,
+            xml: MatcherXml::default(),
+        }
+    }
+
+    /// Groupe de critères, sans XML d'origine.
+    pub fn group(mode: Mode, not: bool, matchers: Vec<Matcher>) -> Self {
+        Matcher::Group { mode, not, matchers, xml: MatcherXml::default() }
+    }
+
+    /// XML d'origine du critère.
+    pub fn xml(&self) -> &MatcherXml {
+        match self {
+            Matcher::Value { xml, .. } | Matcher::Group { xml, .. } => xml,
+        }
+    }
+
+    /// Même critère, au XML d'origine près (celui-ci est gardé, voir [`MatcherXml`]).
+    pub fn with_xml(mut self, source: MatcherXml) -> Self {
+        match &mut self {
+            Matcher::Value { xml, .. } | Matcher::Group { xml, .. } => *xml = source,
+        }
+        self
+    }
+
+    /// `<Option>` de « Toutes les propriétés » (`ComicBookAllPropertiesMatcher.Option`,
+    /// `All` si absent).
+    pub fn all_properties_option(&self) -> String {
+        self.xml()
+            .source()
+            .and_then(|s| s.children.iter().find(|c| c.name == "Option"))
+            .map(|c| c.text.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "All".into())
+    }
+}
+
+/// Élément XML d'origine d'un critère, pour le réécrire sans perte.
+///
+/// ComicRust ne modélise pas tous les membres des critères de ComicRack : `Name`
+/// (`ComicBookValueMatcher`), `Collapsed` (groupes), `PluginKey`
+/// (`ComicBookPluginMatcher`), `<Option>` (`ComicBookAllPropertiesMatcher`), membres de
+/// critères ajoutés par des modules… À l'écriture (`lists_edit`), un critère **non
+/// modifié** (même sens que son XML d'origine relu) est recopié octet pour octet ; un
+/// critère modifié est régénéré en gardant ses attributs et sous-éléments inconnus.
+///
+/// Ces informations n'entrent pas dans les comparaisons : deux critères de même sens sont
+/// égaux, quelle que soit leur origine.
+#[derive(Debug, Clone, Default)]
+pub struct MatcherXml(Option<std::sync::Arc<MatcherSource>>);
+
+impl PartialEq for MatcherXml {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl MatcherXml {
+    pub fn new(source: MatcherSource) -> Self {
+        MatcherXml(Some(std::sync::Arc::new(source)))
+    }
+
+    pub fn source(&self) -> Option<&MatcherSource> {
+        self.0.as_deref()
+    }
+}
+
+/// Élément d'origine d'un critère.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MatcherSource {
+    /// `xsi:type` d'origine.
+    pub kind: String,
+    /// Élément complet, tel qu'il était dans le fichier.
+    pub raw: String,
+    /// Attributs que ComicRust ne modélise pas (nom qualifié, valeur non échappée), dans
+    /// l'ordre d'origine.
+    pub attrs: Vec<(String, String)>,
+    /// Sous-éléments que ComicRust ne modélise pas, dans l'ordre d'origine.
+    pub children: Vec<UnknownChild>,
+}
+
+/// Sous-élément inconnu d'un critère.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UnknownChild {
+    /// Nom local.
+    pub name: String,
+    /// Élément complet d'origine.
+    pub raw: String,
+    /// Texte (élément simple).
+    pub text: String,
 }
 
 /// Critères d'une liste intelligente.
@@ -125,6 +231,18 @@ fn s(v: &Option<String>) -> String {
 /// Nombre au format invariant (« 12 », « 1.5 ») ; -1 si illisible, comme `TryParse`.
 fn parse_num(v: &str) -> f32 {
     v.trim().parse().unwrap_or(-1.0)
+}
+
+/// Valeur numérique d'un critère (`MatchValue`) : ComicRack la lit avec la culture du
+/// poste (`float.TryParse`), donc « 4,5 » sur un poste français et « 4.5 » ailleurs.
+/// ComicRust accepte les deux : une seule virgule sans point est un séparateur décimal.
+/// -1 si illisible, comme ComicRack.
+pub fn parse_match_num(v: &str) -> f32 {
+    let t = v.trim();
+    if !t.contains('.') && t.matches(',').count() == 1 {
+        return t.replace(',', ".").parse().unwrap_or(-1.0);
+    }
+    t.parse().unwrap_or(-1.0)
 }
 
 fn file_stem(b: &LibraryBook) -> String {
@@ -484,6 +602,10 @@ impl Matcher {
                 let field_ref = |v: &str| v.trim_start().starts_with('{') && v.trim_end().ends_with('}');
                 if getter(kind).is_none() {
                     out.push(describe_kind(kind));
+                } else if matches!(getter(kind), Some(Getter::AllProperties))
+                    && AllOption::parse(&self.all_properties_option()).is_none()
+                {
+                    out.push(format!("toutes les propriétés (option « {} »)", self.all_properties_option()));
                 } else if field_ref(value) || field_ref(value2) {
                     out.push(format!("{} comparé à un autre champ", describe_kind(kind)));
                 }
@@ -524,6 +646,8 @@ enum Prepared {
         d1: Option<NaiveDate>,
         d2: Option<NaiveDate>,
         regex: Option<regex::Regex>,
+        /// « Toutes les propriétés » : champs examinés.
+        option: Option<AllOption>,
     },
     Group {
         mode: Mode,
@@ -538,11 +662,19 @@ enum Prepared {
 
 fn prepare(m: &Matcher, today: NaiveDate) -> Prepared {
     match m {
-        Matcher::Group { mode, not, matchers } => {
+        Matcher::Group { mode, not, matchers, .. } => {
             Prepared::Group { mode: *mode, not: *not, items: matchers.iter().map(|x| prepare(x, today)).collect() }
         }
-        Matcher::Value { kind, op, value, value2, not, ignore_case } => {
+        Matcher::Value { kind, op, value, value2, not, ignore_case, .. } => {
             let Some(getter) = getter(kind) else { return Prepared::Never { not: *not } };
+            let option = match getter {
+                Getter::AllProperties => match AllOption::parse(&m.all_properties_option()) {
+                    Some(o) => Some(o),
+                    // Option inconnue : critère signalé (`unsupported`), jamais vrai.
+                    None => return Prepared::Never { not: *not },
+                },
+                _ => None,
+            };
             let low = |v: &str| if *ignore_case { v.to_lowercase() } else { v.to_string() };
             let regex = (*op == 7 && matches!(getter, Getter::Str(_) | Getter::AllProperties))
                 .then(|| regex::Regex::new(value).ok())
@@ -553,11 +685,12 @@ fn prepare(m: &Matcher, today: NaiveDate) -> Prepared {
                 ignore_case: *ignore_case,
                 text: if *op == 6 { value.trim().to_lowercase() } else { low(value) },
                 parts: split_values(value).iter().map(|p| low(p)).collect(),
-                n1: parse_num(value),
-                n2: parse_num(value2),
+                n1: parse_match_num(value),
+                n2: parse_match_num(value2),
                 d1: parse_match_date(value, today),
                 d2: parse_match_date(value2, today),
                 regex,
+                option,
                 getter,
             }
         }
@@ -614,11 +747,11 @@ impl Prepared {
 
     fn test(&self, i: usize, ctx: &Ctx) -> bool {
         let b = &ctx.books[i];
-        let (getter, op, ic, text, parts, n1, n2, d1, d2, regex) = match self {
+        let (getter, op, ic, text, parts, n1, n2, d1, d2, regex, option) = match self {
             Prepared::Never { .. } => return false,
             Prepared::Group { mode, items, .. } => return combine(*mode, items, i, ctx),
-            Prepared::Value { getter, op, ignore_case, text, parts, n1, n2, d1, d2, regex, .. } => {
-                (getter, *op, *ignore_case, text, parts, *n1, *n2, *d1, *d2, regex.as_ref())
+            Prepared::Value { getter, op, ignore_case, text, parts, n1, n2, d1, d2, regex, option, .. } => {
+                (getter, *op, *ignore_case, text, parts, *n1, *n2, *d1, *d2, regex.as_ref(), *option)
             }
         };
         match getter {
@@ -658,26 +791,132 @@ impl Prepared {
             // « Activé » (0) : seulement les doublons ; « désactivé » : tous.
             Getter::Duplicate => op != 0 || ctx.duplicates.as_ref().is_some_and(|d| d.contains(&i)),
             Getter::AllProperties => {
-                let fields = [
-                    shadow_series(b),
-                    s(&b.title),
-                    s(&b.writer),
-                    s(&b.penciller),
-                    s(&b.inker),
-                    s(&b.colorist),
-                    s(&b.cover_artist),
-                    s(&b.publisher),
-                    s(&b.genre),
-                    s(&b.story_arc),
-                    s(&b.characters),
-                    s(&b.teams),
-                    s(&b.locations),
-                    s(&b.tags),
-                    s(&b.summary),
-                    s(&b.file),
-                ];
-                fields.iter().any(|f| str_test(op, f, text, parts, ic, regex))
+                let option = option.unwrap_or(AllOption::All);
+                all_properties_values(b, option).iter().any(|f| str_test(op, f, text, parts, ic, regex))
             }
+        }
+    }
+}
+
+/// Champs examinés par « Toutes les propriétés »
+/// (`ComicBookAllPropertiesMatcher.MatcherOption`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AllOption {
+    All,
+    Series,
+    Writer,
+    Artists,
+    Descriptive,
+    File,
+    Catalog,
+}
+
+impl AllOption {
+    fn parse(v: &str) -> Option<Self> {
+        Some(match v.trim() {
+            "" | "All" => AllOption::All,
+            "Series" => AllOption::Series,
+            "Writer" => AllOption::Writer,
+            "Artists" => AllOption::Artists,
+            "Descriptive" => AllOption::Descriptive,
+            "File" => AllOption::File,
+            "Catalog" => AllOption::Catalog,
+            _ => return None,
+        })
+    }
+}
+
+/// Valeurs examinées par « Toutes les propriétés » (`GetOptionValueSet` de ComicRack,
+/// dans le même ordre). Pour `All`, les textes de volume, numéro et année sont
+/// approchés (ComicRack les met en forme selon la langue : « V3 », « 12 (of 20) »).
+fn all_properties_values(b: &LibraryBook, option: AllOption) -> Vec<String> {
+    let f = |v: &Option<String>| s(v);
+    match option {
+        AllOption::Series => {
+            vec![shadow_series(b), f(&b.alternate_series), b.shadow_format(), f(&b.series_group), f(&b.story_arc)]
+        }
+        AllOption::Writer => vec![f(&b.writer)],
+        AllOption::Artists => vec![
+            f(&b.writer),
+            f(&b.penciller),
+            f(&b.inker),
+            f(&b.colorist),
+            f(&b.editor),
+            f(&b.translator),
+            f(&b.letterer),
+            f(&b.cover_artist),
+        ],
+        AllOption::File => vec![f(&b.file)],
+        AllOption::Descriptive => vec![
+            f(&b.notes),
+            f(&b.summary),
+            f(&b.review),
+            f(&b.tags),
+            f(&b.characters),
+            f(&b.teams),
+            f(&b.main_character_or_team),
+            f(&b.locations),
+            f(&b.scan_information),
+        ],
+        AllOption::Catalog => vec![
+            f(&b.book_age),
+            f(&b.book_collection_status),
+            f(&b.book_notes),
+            f(&b.book_owner),
+            f(&b.book_store),
+            f(&b.book_location),
+            f(&b.isbn),
+        ],
+        AllOption::All => {
+            let volume = b.shadow_volume();
+            let year = b.shadow_year();
+            let number = shadow_number(b);
+            let mut v = vec![
+                shadow_series(b),
+                f(&b.alternate_series),
+                f(&b.title),
+                f(&b.series_group),
+                f(&b.story_arc),
+                f(&b.writer),
+                f(&b.penciller),
+                f(&b.inker),
+                f(&b.colorist),
+                f(&b.letterer),
+                f(&b.editor),
+                f(&b.translator),
+                f(&b.cover_artist),
+                f(&b.summary),
+                f(&b.file),
+                f(&b.genre),
+                f(&b.notes),
+                f(&b.review),
+                f(&b.publisher),
+                f(&b.imprint),
+                if volume != -1 { format!("V{volume}") } else { String::new() },
+                if number == "-" { String::new() } else { number },
+                f(&b.alternate_number),
+                if year != -1 { year.to_string() } else { String::new() },
+                b.shadow_format(),
+                f(&b.age_rating),
+                f(&b.tags),
+                f(&b.characters),
+                f(&b.teams),
+                f(&b.main_character_or_team),
+                f(&b.locations),
+                f(&b.book_age),
+                f(&b.book_collection_status),
+                f(&b.book_notes),
+                f(&b.book_owner),
+                f(&b.book_store),
+                f(&b.book_location),
+                f(&b.isbn),
+                f(&b.scan_information),
+            ];
+            // Valeurs personnalisées (`a=1,b=deux`) : les valeurs.
+            if let Some(store) = &b.custom_values_store {
+                v.extend(store.split(',').filter_map(|kv| kv.split_once('=')).map(|(_, x)| x.to_string()));
+            }
+            v
         }
     }
 }
@@ -796,14 +1035,7 @@ mod tests {
     use super::*;
 
     fn v(kind: &str, op: i32, value: &str) -> Matcher {
-        Matcher::Value {
-            kind: kind.into(),
-            op,
-            value: value.into(),
-            value2: String::new(),
-            not: false,
-            ignore_case: true,
-        }
+        Matcher::value(kind, op, value, "", false, true)
     }
 
     fn book() -> LibraryBook {
@@ -849,14 +1081,7 @@ mod tests {
         let t = |m: Matcher| m.matches(&b, today);
         assert!(t(v("ComicBookNumberMatcher", 0, "224")));
         assert!(t(v("ComicBookYearMatcher", 1, "2011")));
-        assert!(t(Matcher::Value {
-            kind: "ComicBookReadPercentageMatcher".into(),
-            op: 3,
-            value: "1".into(),
-            value2: "99".into(),
-            not: false,
-            ignore_case: true
-        }));
+        assert!(t(Matcher::value("ComicBookReadPercentageMatcher", 3, "1", "99", false, true)));
         assert!(t(v("ComicBookFileSizeMatcher", 1, "49.5")), "taille en Mo");
         assert!(t(v("ComicBookAddedMatcher", 2, "01/01/2020")), "date française jour/mois/année");
         assert!(t(v("ComicBookAddedMatcher", 0, "2019-10-01")));
@@ -868,6 +1093,46 @@ mod tests {
     }
 
     #[test]
+    fn decimal_comma_or_point() {
+        assert_eq!(parse_match_num("4,5"), 4.5);
+        assert_eq!(parse_match_num(" 4.5 "), 4.5);
+        assert_eq!(parse_match_num("12"), 12.0);
+        assert_eq!(parse_match_num("1,2,3"), -1.0);
+        assert_eq!(parse_match_num("x"), -1.0);
+        let b = book();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        assert!(v("ComicBookRatingMatcher", 1, "3,5").matches(&b, today), "note 4 > 3,5");
+        assert!(!v("ComicBookRatingMatcher", 1, "4,5").matches(&b, today));
+        assert!(v("ComicBookFileSizeMatcher", 1, "49,5").matches(&b, today));
+    }
+
+    /// Critère « Toutes les propriétés » avec son `<Option>` (lu dans le XML d'origine).
+    fn all_props(option: &str, value: &str) -> Matcher {
+        let xml = format!(
+            "<ComicBookMatcher xsi:type=\"ComicBookAllPropertiesMatcher\" MatchOperator=\"1\"><MatchValue>{value}</MatchValue><Option>{option}</Option></ComicBookMatcher>"
+        );
+        crate::comic_lists::parse_matcher(&xml).unwrap()
+    }
+
+    #[test]
+    fn all_properties_option() {
+        let b = book();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        assert!(all_props("All", "starlin").matches(&b, today));
+        assert!(all_props("Writer", "starlin").matches(&b, today));
+        assert!(!all_props("Series", "starlin").matches(&b, today), "auteur hors des champs « Série »");
+        assert!(all_props("Series", "cosmic").matches(&b, today));
+        assert!(!all_props("Writer", "cosmic").matches(&b, today));
+        assert!(all_props("Descriptive", "mort").matches(&b, today), "personnages");
+        assert!(all_props("File", "thanos rising").matches(&b, today));
+        assert!(!all_props("Catalog", "cosmic").matches(&b, today));
+        assert!(v("ComicBookAllPropertiesMatcher", 1, "starlin").matches(&b, today), "sans <Option> : tout");
+        let q = SmartQuery { matchers: vec![all_props("Futur", "x")], ..Default::default() };
+        assert_eq!(q.unsupported(), ["toutes les propriétés (option « Futur »)"]);
+        assert!(SmartQuery { matchers: vec![all_props("Writer", "x")], ..Default::default() }.unsupported().is_empty());
+    }
+
+    #[test]
     fn groups_not_and_unsupported() {
         let b = book();
         let today = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
@@ -875,19 +1140,12 @@ mod tests {
             mode: Mode::And,
             matchers: vec![
                 v("ComicBookSeriesMatcher", 1, "cosmic"),
-                Matcher::Group {
-                    mode: Mode::Or,
-                    not: false,
-                    matchers: vec![v("ComicBookYearMatcher", 0, "1990"), v("ComicBookVolumeMatcher", 0, "3")],
-                },
-                Matcher::Value {
-                    kind: "ComicBookWriterMatcher".into(),
-                    op: 1,
-                    value: "Byrne".into(),
-                    value2: String::new(),
-                    not: true,
-                    ignore_case: true,
-                },
+                Matcher::group(
+                    Mode::Or,
+                    false,
+                    vec![v("ComicBookYearMatcher", 0, "1990"), v("ComicBookVolumeMatcher", 0, "3")],
+                ),
+                Matcher::value("ComicBookWriterMatcher", 1, "Byrne", "", true, true),
             ],
             ..Default::default()
         };

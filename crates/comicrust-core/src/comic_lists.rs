@@ -27,7 +27,7 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
 use crate::db::ComicDatabase;
-use crate::smart::{Limit, LimitKind, Matcher, Mode, Selection, SmartQuery};
+use crate::smart::{Limit, LimitKind, Matcher, MatcherSource, MatcherXml, Mode, Selection, SmartQuery, UnknownChild};
 use crate::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -313,17 +313,17 @@ fn skip(r: &mut Reader<&[u8]>, start: &BytesStart) -> Result<(), Error> {
 }
 
 /// Lit les `<Item>` jusqu'à la balise fermante du conteneur.
-fn read_items(r: &mut Reader<&[u8]>) -> Result<Vec<ComicList>, Error> {
+fn read_items(r: &mut Reader<&[u8]>, src: &str) -> Result<Vec<ComicList>, Error> {
     let mut out = Vec::new();
     loop {
         match r.read_event().map_err(xml_err)? {
             Event::Start(e) if local(e.name().as_ref()) == b"Item" => {
                 let e = e.into_owned();
-                out.push(read_item(r, &e, false)?);
+                out.push(read_item(r, &e, false, src)?);
             }
             Event::Empty(e) if local(e.name().as_ref()) == b"Item" => {
                 let e = e.into_owned();
-                out.push(read_item(r, &e, true)?);
+                out.push(read_item(r, &e, true, src)?);
             }
             Event::Start(e) => {
                 let e = e.into_owned();
@@ -336,7 +336,7 @@ fn read_items(r: &mut Reader<&[u8]>) -> Result<Vec<ComicList>, Error> {
     }
 }
 
-fn read_item(r: &mut Reader<&[u8]>, e: &BytesStart, empty: bool) -> Result<ComicList, Error> {
+fn read_item(r: &mut Reader<&[u8]>, e: &BytesStart, empty: bool, src: &str) -> Result<ComicList, Error> {
     let ty = attr(e, b"xsi:type").unwrap_or_default();
     let combine = match attr(e, b"CombineMode").as_deref() {
         Some("And") => Combine::And,
@@ -362,12 +362,12 @@ fn read_item(r: &mut Reader<&[u8]>, e: &BytesStart, empty: bool) -> Result<Comic
                 Event::Start(c) => {
                     let c = c.into_owned();
                     match local(c.name().as_ref()) {
-                        b"Items" => children = read_items(r)?,
+                        b"Items" => children = read_items(r, src)?,
                         b"BookIds" => ids = read_child_texts(r)?,
                         b"CacheStorage" => cache = Some(read_text(r)?),
                         b"Description" => list.description = read_text(r)?,
                         b"BookCount" => list.comicrack_count = read_text(r)?.trim().parse().unwrap_or(0),
-                        b"Matchers" => query.matchers = read_matchers(r)?,
+                        b"Matchers" => query.matchers = read_matchers(r, src)?,
                         b"Limit" => limit_on = read_text(r)?.trim().eq_ignore_ascii_case("true"),
                         b"LimitType" => {
                             limit_kind = match read_text(r)?.trim() {
@@ -426,18 +426,19 @@ fn read_item(r: &mut Reader<&[u8]>, e: &BytesStart, empty: bool) -> Result<Comic
 }
 
 /// Critères d'une liste intelligente (`<Matchers>` : un élément par critère, son type
-/// dans `xsi:type`).
-fn read_matchers(r: &mut Reader<&[u8]>) -> Result<Vec<Matcher>, Error> {
+/// dans `xsi:type`). `src` : texte lu par `r` (pour garder le XML d'origine des critères).
+fn read_matchers(r: &mut Reader<&[u8]>, src: &str) -> Result<Vec<Matcher>, Error> {
     let mut out = Vec::new();
     loop {
+        let before = r.buffer_position() as usize;
         match r.read_event().map_err(xml_err)? {
             Event::Start(e) => {
                 let e = e.into_owned();
-                out.push(read_matcher(r, &e, false)?);
+                out.push(read_matcher(r, &e, false, before, src)?);
             }
             Event::Empty(e) => {
                 let e = e.into_owned();
-                out.push(read_matcher(r, &e, true)?);
+                out.push(read_matcher(r, &e, true, before, src)?);
             }
             Event::End(_) => return Ok(out),
             Event::Eof => return Err(xml_err("fin de fichier inattendue")),
@@ -446,25 +447,59 @@ fn read_matchers(r: &mut Reader<&[u8]>) -> Result<Vec<Matcher>, Error> {
     }
 }
 
-fn read_matcher(r: &mut Reader<&[u8]>, e: &BytesStart, empty: bool) -> Result<Matcher, Error> {
+/// Attributs d'un critère que ComicRust modélise (les autres sont gardés tels quels).
+fn known_matcher_attr(group: bool, name: &str) -> bool {
+    matches!(name, "xsi:type" | "Not")
+        || if group { name == "MatcherMode" } else { matches!(name, "MatchOperator" | "IgnoreCase") }
+}
+
+/// Texte d'origine `[début, fin)` (positions du lecteur dans `src`), blancs de tête retirés.
+fn source_text(src: &str, start: usize, end: usize) -> String {
+    src.get(start..end).unwrap_or_default().trim_start().to_string()
+}
+
+/// Un critère ; `start` : position de sa balise ouvrante (pour garder son XML d'origine).
+fn read_matcher(r: &mut Reader<&[u8]>, e: &BytesStart, empty: bool, start: usize, src: &str) -> Result<Matcher, Error> {
     let kind = attr(e, b"xsi:type").unwrap_or_default();
+    let group = kind == "ComicBookGroupMatcher";
     let flag =
         |name: &[u8], default: bool| attr(e, name).map(|v| v.trim().eq_ignore_ascii_case("true")).unwrap_or(default);
     let not = flag(b"Not", false);
     let ignore_case = flag(b"IgnoreCase", true);
     let op = attr(e, b"MatchOperator").and_then(|v| v.trim().parse().ok()).unwrap_or(0);
     let mode = Mode::parse(attr(e, b"MatcherMode").as_deref());
+    let mut source = MatcherSource { kind: kind.clone(), ..Default::default() };
+    for a in e.attributes().flatten() {
+        let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
+        if !known_matcher_attr(group, &key) {
+            let v = a.unescape_value().map(|v| v.into_owned()).unwrap_or_default();
+            source.attrs.push((key, v));
+        }
+    }
     let (mut value, mut value2, mut inner) = (String::new(), String::new(), Vec::new());
     if !empty {
         loop {
+            let before = r.buffer_position() as usize;
             match r.read_event().map_err(xml_err)? {
                 Event::Start(c) => {
                     let c = c.into_owned();
-                    match local(c.name().as_ref()) {
-                        b"MatchValue" => value = read_text(r)?,
-                        b"MatchValue2" => value2 = read_text(r)?,
-                        b"Matchers" => inner = read_matchers(r)?,
-                        _ => skip(r, &c)?,
+                    match (group, local(c.name().as_ref())) {
+                        (false, b"MatchValue") => value = read_text(r)?,
+                        (false, b"MatchValue2") => value2 = read_text(r)?,
+                        (true, b"Matchers") => inner = read_matchers(r, src)?,
+                        (_, name) => {
+                            let name = String::from_utf8_lossy(name).into_owned();
+                            let text = read_text(r)?;
+                            let raw = source_text(src, before, r.buffer_position() as usize);
+                            source.children.push(UnknownChild { name, raw, text });
+                        }
+                    }
+                }
+                Event::Empty(c) => {
+                    let name = String::from_utf8_lossy(local(c.name().as_ref())).into_owned();
+                    if !matches!((group, name.as_str()), (false, "MatchValue" | "MatchValue2") | (true, "Matchers")) {
+                        let raw = source_text(src, before, r.buffer_position() as usize);
+                        source.children.push(UnknownChild { name, raw, text: String::new() });
                     }
                 }
                 Event::End(_) => break,
@@ -473,23 +508,58 @@ fn read_matcher(r: &mut Reader<&[u8]>, e: &BytesStart, empty: bool) -> Result<Ma
             }
         }
     }
-    Ok(if kind == "ComicBookGroupMatcher" {
-        Matcher::Group { mode, not, matchers: inner }
+    source.raw = source_text(src, start, r.buffer_position() as usize);
+    let xml = MatcherXml::new(source);
+    Ok(if group {
+        Matcher::Group { mode, not, matchers: inner, xml }
     } else {
-        Matcher::Value { kind, op, value, value2, not, ignore_case }
+        Matcher::Value { kind, op, value, value2, not, ignore_case, xml }
     })
+}
+
+/// Un critère seul (élément `<ComicBookMatcher …>` complet), comme dans `<Matchers>`.
+pub(crate) fn parse_matcher(raw: &str) -> Result<Matcher, Error> {
+    let mut r = Reader::from_str(raw);
+    loop {
+        let before = r.buffer_position() as usize;
+        match r.read_event().map_err(xml_err)? {
+            Event::Start(e) => {
+                let e = e.into_owned();
+                return read_matcher(&mut r, &e, false, before, raw);
+            }
+            Event::Empty(e) => {
+                let e = e.into_owned();
+                return read_matcher(&mut r, &e, true, before, raw);
+            }
+            Event::Eof => return Err(xml_err("critère vide")),
+            _ => {}
+        }
+    }
+}
+
+/// Critères d'un élément `<Matchers>` complet.
+pub(crate) fn parse_matchers(raw: &str) -> Result<Vec<Matcher>, Error> {
+    let mut r = Reader::from_str(raw);
+    loop {
+        match r.read_event().map_err(xml_err)? {
+            Event::Start(_) => return read_matchers(&mut r, raw),
+            Event::Empty(_) | Event::Eof => return Ok(Vec::new()),
+            _ => {}
+        }
+    }
 }
 
 /// Listes de ComicRack contenues dans un `ComicDb.xml`.
 pub fn parse_comic_lists(xml: &str) -> Result<Vec<ComicList>, Error> {
-    let mut r = Reader::from_str(xml.trim_start_matches('\u{feff}'));
+    let text = xml.trim_start_matches('\u{feff}');
+    let mut r = Reader::from_str(text);
     let mut depth = 0;
     loop {
         match r.read_event().map_err(xml_err)? {
             Event::Start(e) => {
                 depth += 1;
                 if depth == 2 && local(e.name().as_ref()) == b"ComicLists" {
-                    return read_items(&mut r);
+                    return read_items(&mut r, text);
                 }
                 if depth == 2 {
                     // <Books> peut être énorme : sauté d'un bloc.

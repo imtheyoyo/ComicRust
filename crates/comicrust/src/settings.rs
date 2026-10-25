@@ -199,6 +199,9 @@ pub struct Settings {
     /// Mode écriture : ne plus proposer de reporter dans ComicRack la lecture gardée dans
     /// ComicRust par les versions précédentes (« Ne plus demander »).
     pub comicrack_write_migration_declined: bool,
+    /// Mode écriture : fichiers convertis et infos écrites pas encore reportés dans la base
+    /// de ComicRack (base injoignable, conflit…) ; refaits au lancement suivant.
+    pub comicrack_files_pending: Vec<crate::library::comicrack_write::PendingFileWrite>,
 }
 
 impl Default for Settings {
@@ -240,6 +243,7 @@ impl Default for Settings {
             comicrack_config: None,
             comicrack_write: false,
             comicrack_write_migration_declined: false,
+            comicrack_files_pending: Vec::new(),
         }
     }
 }

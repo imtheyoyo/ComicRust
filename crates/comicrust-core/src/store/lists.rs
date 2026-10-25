@@ -42,6 +42,11 @@ impl Store {
     /// Enregistre `rows` (toutes les listes) si `lists_counter` vaut toujours
     /// `expected_counter` ; renvoie la nouvelle valeur du compteur.
     pub fn save_list_rows(&mut self, rows: &[ListRow], expected_counter: i64) -> Result<i64, Error> {
+        // Contrôle final : aucun caractère interdit en XML 1.0 (ces listes peuvent être
+        // rendues à ComicRack).
+        for r in rows {
+            crate::lists_edit::xml::check_xml_document(&r.xml, &format!("Liste « {} »", r.name))?;
+        }
         self.conn.write_tx(|conn| {
             let counter = schema::bump(conn, "lists_counter")?;
             if counter != expected_counter + 1 {
