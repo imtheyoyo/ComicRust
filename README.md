@@ -12,7 +12,8 @@ d'origine est dans [`docs/INVENTAIRE_REA.md`](docs/INVENTAIRE_REA.md).
 Chaque [release](https://github.com/imtheyoyo/ComicRust/releases) contient
 `ComicRust-<version>-windows-x64.zip` pour Windows 10/11 x64 : dézipper et lancer
 `ComicRust.exe`. Aucun runtime à installer. Le zip contient aussi `pdfium.dll` (lecture des
-PDF, à laisser à côté de l'exe) et `comicrust-cli.exe`.
+PDF, à laisser à côté de l'exe), `comicrust-cli.exe`, un Python embarqué (`python\`, pour les
+scripts) et des scripts d'exemple (`scripts\`).
 
 **ComicRust est exclusivement portable** : il n'écrit rien en dehors de son dossier. Réglages,
 cache de l'index des BD et miniatures des couvertures vont dans `data\` à côté de l'exe (le
@@ -159,6 +160,18 @@ de page fixe, bordure, fond, droite à gauche). Exemples dans `recette/echantill
 | F11 ou F, Échap | plein écran |
 | Ctrl+O | ouvrir |
 
+## Scripts
+
+Depuis la v0.10.0, des **scripts Python 3** modifient les fiches, rangent les fichiers,
+récupèrent des informations en ligne ou s'exécutent tout seuls (nouveaux livres, ouverture
+d'un livre…). Python est fourni (distribution officielle « embeddable » 3.13 dans `python\`) :
+rien à installer. Les scripts vont dans `scripts\` à côté de l'exe ; quatre exemples y sont
+livrés ([`scripts-exemples/`](scripts-exemples)) : nettoyage des fiches, rangement des
+fichiers selon un modèle de nom, informations depuis Comic Vine (clé d'API personnelle),
+automatisme sur les nouveaux livres. Les scripts du menu ne modifient rien sans l'aperçu.
+Documentation : [`docs/scripts.md`](docs/scripts.md) (en-têtes `#@Name`/`#@Hook`, module
+`comicrust`, modules supplémentaires dans `scripts\lib`).
+
 ## Ligne de commande
 
 ```powershell
@@ -180,6 +193,8 @@ comicrust-cli missing "F:\BD" Thanos.cbl            # ou un ComicDB.xml à la pl
 ```powershell
 cargo test --all                 # tests PDF actifs si PDFIUM_DYNAMIC_LIB_PATH pointe vers PDFium
                                  # test MySQL actif si COMICRUST_TEST_MYSQL contient une chaîne de connexion
+                                 # scripts : Python de COMICRUST_PYTHON, sinon python3 du PATH
+./scripts/python_embarque.ps1    # Python embarqué dans python-embed\ (version figée, SHA-256 vérifiée)
 cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ```
 
@@ -193,8 +208,12 @@ Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
 
 Créer la release sur GitHub (ou `gh release create v0.3.0 --generate-notes`), pousser un tag
 `v*`, ou lancer le workflow *Release* à la main avec le nom du tag : la CI teste, compile la
-version Windows x64 (`ComicRust.exe` + `comicrust-cli.exe` + `pdfium.dll`) et attache le zip,
-la recette et les échantillons. **La release échoue si `recette/<tag>.md` n'existe pas.**
+version Windows x64 (`ComicRust.exe` + `comicrust-cli.exe` + `pdfium.dll` + Python embarqué +
+scripts d'exemple) et attache le zip, la recette et les échantillons. Le Python « embeddable »
+est téléchargé depuis python.org et vérifié par son empreinte SHA-256 (version et empreinte
+dans [`.github/python-embarque.env`](.github/python-embarque.env)) ; le paquet est essayé
+(SSL, HTTPS, scripts d'exemple) avant d'être publié.
+**La release échoue si `recette/<tag>.md` n'existe pas.**
 
 Les notes de chaque release viennent de [`CHANGELOG.md`](CHANGELOG.md) (section `## [vX.Y.Z]`) :
 **la release échoue aussi si cette section manque**. Le workflow *Notes de version* recopie le
@@ -213,7 +232,8 @@ journal dans les releases déjà publiées.
 | `XmlSerializer` (ComicDB.xml, CBL, ComicInfo, CBW) | `quick-xml` + `serde` |
 | MySqlConnector | `mysql` (lecture seule) |
 | Mise à jour (ClickOnce / site) | releases GitHub + SHA-256 (`ureq`, `sha2`) |
-| IronPython, WCF | à venir |
+| IronPython (scripts) | Python 3 embarqué, processus séparé (`scripting/`) |
+| WCF | à venir |
 
 ## Feuille de route
 
@@ -237,6 +257,9 @@ journal dans les releases déjà publiées.
 ## Licences
 
 ComicRust est sous **GPL-2.0-or-later** (ComicRack CE est sous GPL-2.0). Composants tiers
-distribués dans le zip : PDFium (BSD-3, `licences/PDFium-LICENSE.txt`) et le code de
+distribués dans le zip : PDFium (BSD-3, `licences/PDFium-LICENSE.txt`), le code de
 décompression UnRAR (licence freeware de RARLAB, `licences/UnRAR-license.txt` — utilisable pour
-lire les RAR, pas pour créer un compresseur RAR).
+lire les RAR, pas pour créer un compresseur RAR) et **Python embarqué** (distribution officielle
+« embeddable » de la Python Software Foundation, licence PSF, `licences/Python-LICENSE.txt`,
+copiée de la distribution par la CI ; elle couvre aussi les bibliothèques livrées avec Python :
+OpenSSL, SQLite, libffi, zlib… et le runtime Visual C++ `vcruntime140.dll`).

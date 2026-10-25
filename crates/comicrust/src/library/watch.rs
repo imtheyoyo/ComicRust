@@ -95,11 +95,18 @@ impl DbWatch {
         }
     }
 
-    /// Écritures faites par ComicRust (base MySQL de ComicRack seulement).
+    /// Écritures faites par ComicRust (base MySQL de ComicRack ou base de ComicRust :
+    /// modifications des scripts…), à ne pas prendre pour des modifications extérieures.
     fn note_written(&mut self, sink: &WrittenSink) {
         let written: Vec<(String, i64)> = std::mem::take(&mut *sink.lock().unwrap());
-        if let DbWatch::MySql(w) = self {
-            w.note_written(written.iter().map(|(id, c)| (id.as_str(), *c)));
+        match self {
+            DbWatch::MySql(w) => w.note_written(written.iter().map(|(id, c)| (id.as_str(), *c))),
+            DbWatch::Store(w) => {
+                for (id, c) in &written {
+                    w.note_written([id.as_str()], *c);
+                }
+            }
+            DbWatch::Xml(..) => {}
         }
     }
 

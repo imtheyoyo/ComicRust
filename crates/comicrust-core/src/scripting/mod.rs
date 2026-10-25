@@ -121,86 +121,34 @@ impl Hook {
 }
 
 /// Champs de fiche qu'un script peut modifier (noms ComicRack ; en Python, aussi en
-/// snake_case : `book.series`, `book.language_iso`…).
-pub const EDITABLE_FIELDS: &[&str] = &[
-    "Series",
-    "Number",
-    "Count",
-    "Volume",
-    "Year",
-    "Month",
-    "Day",
-    "Title",
-    "Publisher",
-    "Imprint",
-    "Writer",
-    "Penciller",
-    "Inker",
-    "Colorist",
-    "Letterer",
-    "CoverArtist",
-    "Editor",
-    "Translator",
-    "Genre",
-    "StoryArc",
-    "SeriesGroup",
-    "AlternateSeries",
-    "AlternateNumber",
-    "AlternateCount",
-    "Summary",
-    "Notes",
-    "Review",
-    "Web",
-    "LanguageISO",
-    "Format",
-    "AgeRating",
-    "BlackAndWhite",
-    "Manga",
-    "Characters",
-    "Teams",
-    "MainCharacterOrTeam",
-    "Locations",
-    "Tags",
-    "Rating",
-    "CommunityRating",
-    "BookAge",
-    "BookCollectionStatus",
-    "BookCondition",
-    "BookLocation",
-    "BookNotes",
-    "BookOwner",
-    "BookStore",
-    "BookPrice",
-    "ISBN",
-    "SeriesComplete",
-    "ScanInformation",
-    "Released",
-];
+/// snake_case : `book.series`, `book.language_iso`…) : **exactement** ceux que
+/// [`crate::edit`] sait appliquer ([`crate::edit::FIELDS`]). S'y ajoutent les valeurs
+/// personnalisées, champ `CustomValue:<clé>` ([`crate::edit::CUSTOM_VALUE_PREFIX`]).
+pub static EDITABLE_FIELDS: std::sync::LazyLock<Vec<&'static str>> =
+    std::sync::LazyLock::new(|| crate::edit::FIELDS.iter().map(|f| f.name).collect());
 
-/// Champs lisibles mais non modifiables par un script.
-pub const READ_ONLY_FIELDS: &[&str] = &[
-    "Id",
-    "File",
-    "FileSize",
-    "FileModifiedTime",
-    "FileCreationTime",
-    "PageCount",
-    "CurrentPage",
-    "LastPageRead",
-    "Added",
-    "Opened",
-    "OpenCount",
-    "Missing",
-    "Checked",
-    "ComicInfoIsDirty",
-    "ComicBookIsDirty",
-    "EnableProposed",
-    "PreferredFrontCover",
-    "CustomValuesStore",
-    "CustomThumbnailKey",
-    "LastOpenedFromListId",
-    "NewPages",
-];
+/// Champs lisibles mais non modifiables par un script ([`crate::edit::READ_ONLY_FIELDS`]).
+pub static READ_ONLY_FIELDS: std::sync::LazyLock<Vec<&'static str>> =
+    std::sync::LazyLock::new(|| crate::edit::READ_ONLY_FIELDS.iter().map(|(n, _)| *n).collect());
+
+/// Modification de champ demandée par un script → modification de fiche de [`crate::edit`]
+/// (`Null` = vider ; nombre entier, réel, booléen ou texte gardés tels quels, la validation
+/// et les conversions tolérantes sont celles de [`crate::edit`]).
+pub fn field_edit(book_id: &str, field: &str, value: &serde_json::Value) -> crate::edit::FieldEdit {
+    use crate::edit::EditValue;
+    use serde_json::Value;
+    let value = match value {
+        Value::Null => None,
+        Value::Bool(b) => Some(EditValue::Bool(*b)),
+        Value::Number(n) => Some(match n.as_i64() {
+            Some(i) => EditValue::Int(i),
+            None => EditValue::Real(n.as_f64().unwrap_or_default()),
+        }),
+        Value::String(s) => Some(EditValue::Text(s.clone())),
+        other => Some(EditValue::Text(other.to_string())),
+    };
+    crate::edit::FieldEdit { book_id: book_id.to_string(), field: field.to_string(), value }
+}
 
 /// Erreurs de mise en route (avant l'exécution du script proprement dite).
 #[derive(Debug, thiserror::Error)]

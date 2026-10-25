@@ -899,7 +899,11 @@ impl Session {
                     "live": self.ctx.live,
                     "args": self.ctx.args,
                     "settings": settings,
-                    "fields": {"editable": EDITABLE_FIELDS, "read_only": READ_ONLY_FIELDS},
+                    "fields": {
+                        "editable": &*EDITABLE_FIELDS,
+                        "read_only": &*READ_ONLY_FIELDS,
+                        "custom_prefix": crate::edit::CUSTOM_VALUE_PREFIX,
+                    },
                     "lib_dirs": lib_dirs,
                 });
                 self.send(&run);
@@ -1050,7 +1054,8 @@ impl Session {
         }
         Ok(match item {
             ChangeItem::Set { book, field, value } => {
-                if !EDITABLE_FIELDS.contains(&field.as_str()) {
+                let custom = field.starts_with(crate::edit::CUSTOM_VALUE_PREFIX);
+                if !custom && !EDITABLE_FIELDS.contains(&field.as_str()) {
                     return Err(if READ_ONLY_FIELDS.contains(&field.as_str()) {
                         format!("champ « {field} » non modifiable")
                     } else {
@@ -1060,6 +1065,9 @@ impl Session {
                 if matches!(value, Value::Array(_) | Value::Object(_)) {
                     return Err(format!("valeur de « {field} » : texte, nombre, booléen ou None attendu"));
                 }
+                // Même validation que l'application des modifications : une valeur refusée
+                // l'est tout de suite (journal du script), pas seulement à l'aperçu.
+                crate::edit::validate(&super::field_edit(&book, &field, &value)).map_err(|e| e.message)?;
                 ScriptChange::SetField { book_id: book, field, value }
             }
             ChangeItem::Rename { book, path } => {

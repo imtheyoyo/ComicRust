@@ -580,3 +580,77 @@ fn fiche_json() {
         assert!(EDITABLE_FIELDS.contains(&f) && v.get(f).is_some(), "{f}");
     }
 }
+
+#[test]
+fn une_seule_liste_de_champs() {
+    // Ce qu'un script peut demander est exactement ce que `edit` sait appliquer.
+    let edit_names: Vec<&str> = crate::edit::FIELDS.iter().map(|f| f.name).collect();
+    assert_eq!(*EDITABLE_FIELDS, edit_names);
+    for f in EDITABLE_FIELDS.iter() {
+        assert!(crate::edit::field(f).is_some(), "{f}");
+        assert!(!READ_ONLY_FIELDS.contains(f), "{f} à la fois modifiable et en lecture seule");
+    }
+    for f in ["Id", "File", "PageCount", "CurrentPage", "Opened", "Missing"] {
+        assert!(READ_ONLY_FIELDS.contains(&f), "{f}");
+    }
+    // Tous les champs d'une fiche JSON sont connus du module Python (lecture `book.x`).
+    let xml = r#"<Book Id="x" File="/a.cbz"><Series>S</Series><PageCount>3</PageCount><Checked>false</Checked>
+        <CustomValuesStore>,a=1</CustomValuesStore><LastOpenedFromListId>l</LastOpenedFromListId></Book>"#;
+    let b = LibraryBook::from_xml(xml).unwrap();
+    for k in book_json(&b).as_object().unwrap().keys() {
+        assert!(EDITABLE_FIELDS.contains(&k.as_str()) || READ_ONLY_FIELDS.contains(&k.as_str()), "{k}");
+    }
+}
+
+#[test]
+fn conversion_en_modification_de_fiche() {
+    use crate::edit::EditValue;
+    let e = field_edit("b", "Year", &json!(2024));
+    assert_eq!((e.book_id.as_str(), e.field.as_str(), e.value), ("b", "Year", Some(EditValue::Int(2024))));
+    assert_eq!(field_edit("b", "Rating", &json!(4.5)).value, Some(EditValue::Real(4.5)));
+    assert_eq!(field_edit("b", "Manga", &json!(true)).value, Some(EditValue::Bool(true)));
+    assert_eq!(field_edit("b", "Series", &json!("X")).value, Some(EditValue::Text("X".into())));
+    assert_eq!(field_edit("b", "Series", &Value::Null).value, None);
+    let mut book = LibraryBook { id: "b".into(), ..Default::default() };
+    assert!(crate::edit::apply_to_book(&mut book, &field_edit("b", "CustomValue:cv", &json!("1"))).unwrap());
+    assert_eq!(crate::edit::custom_value(book.custom_values_store.as_deref(), "cv").as_deref(), Some("1"));
+}
+
+#[test]
+fn valeurs_personnalisees_et_valeurs_refusees() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let mut host = TestHost::default();
+    let b =
+        LibraryBook { id: "id-0".into(), custom_values_store: Some(",Source=cv,Vu=oui".into()), ..Default::default() };
+    host.books.insert(b.id.clone(), book_json(&b));
+    let code = r#"
+import comicrust
+
+#@Name Valeurs
+#@Hook Books
+def valeurs(books):
+    b = books[0]
+    assert b.custom_value("source") == "cv", b.custom_value("source")
+    assert b.custom_value("absente", "d") == "d"
+    b.set_custom_value("Note", "bien")
+    assert b.custom_value("note") == "bien"
+    b.set_custom_value("Vu", None)
+    b.year = "pas une année"
+    b.checked = False
+    comicrust.flush()
+"#;
+    let r = fx.run(code, "valeurs", RunContext::new(Hook::Books, ids(1)), Arc::new(host));
+    assert_eq!(r.state, RunState::Finished, "{:?}\n{}", r.failure, r.journal_text());
+    let fields: Vec<&str> = r
+        .changes
+        .iter()
+        .filter_map(|c| match c {
+            ScriptChange::SetField { field, .. } => Some(field.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fields, ["CustomValue:Note", "CustomValue:Vu", "Checked"]);
+    assert_eq!(r.rejected.len(), 1, "{:?}", r.rejected);
+    assert!(r.rejected[0].reason.contains("Année"), "{}", r.rejected[0].reason);
+}

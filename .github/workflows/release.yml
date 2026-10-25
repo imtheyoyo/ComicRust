@@ -57,6 +57,12 @@ jobs:
           echo "PDFIUM_DYNAMIC_LIB_PATH=$(cygpath -w "$PWD/pdfium/bin")" >> "$GITHUB_ENV"
           ls pdfium/bin
 
+      - name: Python embarqué (téléchargement et vérification SHA-256)
+        shell: pwsh
+        # Version et empreinte figées dans .github/python-embarque.env ; définit
+        # COMICRUST_PYTHON : les tests des scripts d'exemple tournent avec ce Python.
+        run: ./scripts/python_embarque.ps1 -Destination python-embed
+
       - name: Tests
         run: cargo test --all --target $env:TARGET
 
@@ -72,16 +78,50 @@ jobs:
           $out = "target/$env:TARGET/release"
           New-Item -ItemType Directory -Force "$name/licences" | Out-Null
           Copy-Item "$out/ComicRust.exe", "$out/comicrust-cli.exe", "pdfium/bin/pdfium.dll" $name
-          Copy-Item README.md, docs/INVENTAIRE_REA.md $name
+          Copy-Item README.md, docs/INVENTAIRE_REA.md, docs/scripts.md $name
           Copy-Item "recette/$tag.md" "$name/RECETTE.md"
           Compress-Archive -Path "recette/echantillons/*" -DestinationPath "ComicRust-echantillons.zip" -Force
           Copy-Item pdfium/LICENSE "$name/licences/PDFium-LICENSE.txt"
           Copy-Item licences/* "$name/licences/"
+          # Python embarqué (distribution officielle « embeddable », vérifiée plus haut) et
+          # sa licence (PSF).
+          Copy-Item -Recurse python-embed "$name/python"
+          Copy-Item python-embed/LICENSE.txt "$name/licences/Python-LICENSE.txt"
+          # Scripts d'exemple (+ scripts\lib\ avec son LISEZMOI) : dossier scripts\ du paquet.
+          New-Item -ItemType Directory -Force "$name/scripts" | Out-Null
+          Copy-Item -Recurse scripts-exemples/* "$name/scripts/"
+          Get-ChildItem "$name/scripts" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "zip=$name.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Essai du paquet (Python embarqué et scripts d'exemple)
+        shell: pwsh
+        run: |
+          $name = "${{ steps.pkg.outputs.name }}"
+          $py = (Resolve-Path "$name/python/python.exe").Path
+          # Modules natifs de la distribution (SSL, SQLite…).
+          & $py -I -c "import ssl, json, urllib.request, sqlite3, zipfile, lzma, bz2, ctypes; print(ssl.OPENSSL_VERSION, '- SQLite', sqlite3.sqlite_version)"
+          if ($LASTEXITCODE -ne 0) { throw "Python embarqué : modules natifs indisponibles" }
+          # HTTPS avec les certificats du magasin Windows (comme les scripts Comic Vine).
+          & $py -I -c "import ssl, urllib.request as u; r = u.urlopen(u.Request('https://api.github.com/', headers={'User-Agent': 'ComicRust-CI'}), timeout=30, context=ssl.create_default_context()); print('HTTPS', r.status)"
+          if ($LASTEXITCODE -ne 0) { throw "Python embarqué : HTTPS en échec" }
+          # Scripts d'exemple du paquet, exécutés par l'hôte de scripts avec ce Python
+          # (le CLI n'exécute pas de scripts : test Rust tests/scripts_exemples.rs).
+          $env:COMICRUST_PYTHON = $py
+          $env:COMICRUST_EXIGER_PYTHON = "1"
+          $env:COMICRUST_DOSSIER_EXEMPLES = (Resolve-Path "$name/scripts").Path
+          cargo test --target $env:TARGET -p comicrust-core --test scripts_exemples
+          if ($LASTEXITCODE -ne 0) { throw "scripts d'exemple en échec avec le Python du paquet" }
+          Get-ChildItem "$name/scripts" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+
+      - name: Archive zip
+        shell: pwsh
+        run: |
+          $name = "${{ steps.pkg.outputs.name }}"
           Compress-Archive -Path "$name/*" -DestinationPath "$name.zip" -Force
           $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "zip=$name.zip" >> $env:GITHUB_OUTPUT
 
       - name: Publication de la release
         uses: softprops/action-gh-release@v3

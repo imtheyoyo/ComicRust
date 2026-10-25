@@ -22,6 +22,41 @@ côté de l'exe. Pour utiliser un autre interpréteur, définir la variable d'en
 ComicRust **lit** les scripts pour trouver leurs points d'entrée, sans les exécuter. Un
 script n'est exécuté que lorsqu'on le lance (menu) ou que son événement survient.
 
+## Scripts fournis
+
+Le zip Windows contient dans `scripts\` quatre scripts prêts à l'emploi (dans le dépôt :
+[`scripts-exemples/`](../scripts-exemples)), commentés pour servir de modèles. Aucun ne
+supprime de fichier ; ceux du menu passent par l'aperçu. Copiez-en un sous un autre nom
+avant de le modifier : la mise à jour intégrée de ComicRust remplace les fichiers livrés
+(les vôtres, et ceux de `scripts\lib`, ne sont pas touchés).
+
+| Script | Menu / déclenchement | Rôle | Réglages (bouton « Réglages ») |
+|---|---|---|---|
+| `nettoyage.py` | **Nettoyer les fiches** (`Books`, `Library`) | Espaces en trop ; listes d'auteurs, genres, personnages, étiquettes remises en forme (séparateur « , », doublons retirés) ; numéro normalisé (`001` → `1`, `#12` → `12`, `T03` → `3` ; `1.5`, `½`, `12a` gardés) ; série, numéro, année, titre vides complétés depuis le nom du fichier ; en option, casse des séries écrites TOUT EN MAJUSCULES ou tout en minuscules (une casse mixte comme « iZombie » n'est jamais touchée). | numéro, complément depuis le nom, casse des séries |
+| `ranger_fichiers.py` | **Ranger les fichiers** (`Books`) | Renomme/déplace selon un modèle de nom (syntaxe de la fenêtre « Renommer » : `{series}[ v{volume}][ #{number:000}][ ({year})]`, `/` = sous-dossier), dans un dossier racine, avec sous-dossiers par série ou par éditeur/série. Deux livres de même nom ou un fichier déjà présent : suffixe « (2) », jamais d'écrasement ; chemin de plus de 259 caractères ignoré. | modèle, dossier racine (vide = dossier actuel), sous-dossiers |
+| `comic_vine.py` | **Infos depuis Comic Vine** (`Books`) | Cherche la série (nom + année) puis le numéro sur Comic Vine, demande de choisir si c'est ambigu, puis complète titre, résumé, scénaristes, dessinateurs, encreurs, coloristes, lettreurs, couverture, éditeurs, personnages, équipes, lieux, arcs, année/mois (date de couverture), éditeur, nombre de numéros, Web (page Comic Vine). Seuls les champs vides par défaut. | **clé d'API** (secrète), remplacer les champs remplis, écrire ComicInfo.xml |
+| `automatisme_nouveaux.py` | automatique (`NewBooks`) | Étiquette « à lire » et série/numéro/année depuis le nom du fichier sur les nouveaux livres. **Désactivé par défaut** : l'activer dans ses réglages. | activer, étiquette, complément depuis le nom |
+
+### Comic Vine
+
+L'API de Comic Vine demande une clé personnelle gratuite (compte sur
+<https://comicvine.gamespot.com>, puis <https://comicvine.gamespot.com/api/>) : la coller
+dans « Comic Vine : réglages » (enregistrée chiffrée sous Windows). Requêtes utilisées
+(`format=json`, `field_list` pour ne recevoir que les champs utiles) :
+
+| Requête | Usage |
+|---|---|
+| `volumes/?filter=name:<série>` | séries (« volumes ») de ce nom, avec `start_year`, `publisher`, `count_of_issues` |
+| `search/?query=<série>&resources=volume` | recherche plus souple si la précédente ne trouve rien |
+| `issues/?filter=volume:<id>,issue_number:<n>` | le numéro dans la série choisie |
+| `issue/4000-<id>/` | fiche complète : `description` (HTML), `person_credits` (avec `role`), `character_credits`, `team_credits`, `location_credits`, `story_arc_credits`, `cover_date`, `site_detail_url` |
+
+Comic Vine limite à environ 200 requêtes par heure et par type de ressource et bloque les
+rafales : le script attend 1,5 s entre deux requêtes (2 à 3 requêtes par livre) et
+s'identifie par un `User-Agent`. Réponse `status_code` 100 (clé invalide) ou 107 (limite
+atteinte) : le script s'arrête avec un message. Pour les essais, l'adresse de l'API se
+change par le réglage `url_base` ou la variable d'environnement `COMICRUST_COMICVINE_URL`.
+
 ## En-têtes
 
 Chaque fonction proposée par un fichier est précédée d'en-têtes en commentaires, juste
@@ -97,14 +132,25 @@ vérifie et applique.
 - `comicrust.flush()` : envoyer tout de suite (fait automatiquement tous les 500
   changements et à la fin).
 
-Champs modifiables : Series, Number, Count, Volume, Year, Month, Day, Title, Publisher,
-Imprint, Writer, Penciller, Inker, Colorist, Letterer, CoverArtist, Editor, Translator,
-Genre, StoryArc, SeriesGroup, AlternateSeries, AlternateNumber, AlternateCount, Summary,
-Notes, Review, Web, LanguageISO, Format, AgeRating, BlackAndWhite, Manga, Characters, Teams,
-MainCharacterOrTeam, Locations, Tags, Rating, CommunityRating, BookAge,
-BookCollectionStatus, BookCondition, BookLocation, BookNotes, BookOwner, BookStore,
-BookPrice, ISBN, SeriesComplete, ScanInformation, Released.
-En lecture seule : Id, File, FileSize, PageCount, CurrentPage, Added, Opened…
+Champs modifiables : exactement ceux que ComicRust sait écrire (la même liste sert à
+l'interface et aux scripts) — Series, Number, Count, Volume, Year, Month, Day, Title,
+Publisher, Imprint, Writer, Penciller, Inker, Colorist, Letterer, CoverArtist, Editor,
+Translator, Genre, StoryArc, SeriesGroup, AlternateSeries, AlternateNumber, AlternateCount,
+Summary, Notes, Review, Web, LanguageISO, Format, AgeRating, BlackAndWhite, Manga,
+PreferredFrontCover, Characters, Teams, MainCharacterOrTeam, Locations, CommunityRating,
+ScanInformation, Tags, Released, Rating, EnableProposed, SeriesComplete, Checked, BookPrice,
+BookAge, BookCondition, BookStore, BookOwner, BookCollectionStatus, BookNotes, BookLocation,
+ISBN, CustomValuesStore.
+En lecture seule : Id, File, FileSize, FileModifiedTime, FileCreationTime, PageCount, Pages,
+Added, Opened, OpenCount, CurrentPage, LastPageRead, NewPages, Missing, ComicInfoIsDirty,
+ComicBookIsDirty, CustomThumbnailKey, LastOpenedFromListId.
+
+Une valeur refusée (année qui n'est pas un nombre, mois 13…) l'est **tout de suite** : elle
+est notée dans le journal du script et ne figure pas dans l'aperçu.
+
+Valeurs personnalisées (`GetCustomValue` / `SetCustomValue` de ComicRack) :
+`book.custom_value("clé", défaut)` et `book.set_custom_value("clé", "valeur")` (`None` ou
+`""` la supprime) ; c'est le champ `CustomValue:<clé>` (`book.set("CustomValue:clé", …)`).
 
 Une demande sur un livre hors du contexte du script est refusée (journal).
 
@@ -140,6 +186,34 @@ s.save()                          # aussi fait automatiquement à la fin si modi
   avec `urllib` (bibliothèque standard, utilisable directement aussi). Un `User-Agent` est
   ajouté (Comic Vine refuse celui de Python). Sous Windows, les certificats SSL sont ceux
   du magasin Windows.
+
+## Dans ComicRust
+
+- Menu **📜 Scripts** de la barre d'outils : scripts `Library` (toute la bibliothèque) et
+  `Books` (livres sélectionnés), « Ouvrir le dossier des scripts », « Recharger les
+  scripts », « Gérer les scripts… » et la case « Exécuter les automatismes ».
+- Menu contextuel d'un livre : **📜 Scripts ▸** (scripts `Books` sur la sélection).
+- **Gérer les scripts** : scripts rangés par hook, case pour activer / désactiver chacun,
+  description, fichier, bouton « Réglages… » quand le fichier a une fonction `ConfigScript`,
+  avertissements de lecture des en-têtes, journal des automatismes.
+- Un script lancé d'un menu ouvre une fenêtre (avancement, journal copiable, « Arrêter ») ;
+  ses questions s'affichent dans une petite fenêtre (Annuler = valeur par défaut ; arrêter le
+  script pendant une question rend aussi la valeur par défaut). À la fin, un **aperçu**
+  montre pour chaque livre les champs (avant → après), les renommages (conflits signalés :
+  destination existante, deux livres vers le même fichier, fichier introuvable) et les
+  écritures d'infos ; on coche les livres à modifier puis « Appliquer » (ou « Annuler »).
+  Après un arrêt, ce qui avait déjà été demandé peut être vu en aperçu ; rien n'est appliqué
+  sans accord.
+- Application : fiches, puis renommages, puis écriture des infos dans les fichiers (comme
+  « Écrire les infos dans le fichier »), suivies d'un bilan.
+- Bibliothèque en lecture seule (ComicRack MySQL sans écriture, `ComicDb.xml`) : l'aperçu
+  s'affiche mais « Appliquer » est refusé, avec la marche à suivre.
+- **Automatismes** (`Startup` après le chargement de la bibliothèque, `BookOpened` /
+  `BookClosed` dans le lecteur, `NewBooks` après une analyse des dossiers qui a ajouté des
+  livres) : **désactivés par défaut** (case « Exécuter les automatismes ») car ils modifient
+  la bibliothèque sans aperçu. Un seul automatisme à la fois par hook (les suivants
+  attendent), jamais pendant un transfert ; erreurs signalées avec le nom du script.
+- Réglages des scripts gardés dans `data\comicrust.ron` (valeurs secrètes chiffrées).
 
 ## Exemples
 
@@ -233,15 +307,39 @@ def ouvert(book):
 
 ### Paquet Windows (Python « embeddable »)
 
-- Copier le contenu de `python-3.x.y-embed-amd64.zip` dans `python\` : `python.exe`,
-  `python3xx.dll`, `python3.dll`, `python3xx.zip` (bibliothèque standard), `python3xx._pth`,
-  les `.pyd` (`_ssl`, `_socket`, `select`, `_hashlib`, `unicodedata`, `_ctypes`,
-  `_lzma`, `_bz2`, `pyexpat`, `_sqlite3`…) et leurs DLL (`libssl-3*.dll`,
-  `libcrypto-3*.dll`, `libffi-8.dll`, `sqlite3.dll`, `vcruntime140*.dll`).
-- `python3xx._pth` : rien d'obligatoire (ComicRust ajoute ses chemins). Pour installer des
-  paquets avec pip dans `python\Lib\site-packages`, décommenter `import site` ; on peut
-  aussi y ajouter `..\scripts\lib`.
+- Le zip contient dans `python\` la distribution officielle `python-3.13.17-embed-amd64.zip`
+  (Python 3.13.17), téléchargée par la CI depuis python.org et **refusée si son empreinte
+  SHA-256 diffère** de celle figée dans `.github/python-embarque.env` (relevée sur la page
+  de la version). Sa licence (PSF) est dans `licences\Python-LICENSE.txt`.
+- Contenu : `python.exe`, `python313.dll`, `python3.dll`, `python313.zip` (bibliothèque
+  standard), `python313._pth`, les `.pyd` (`_ssl`, `_socket`, `select`, `_hashlib`,
+  `unicodedata`, `_ctypes`, `_lzma`, `_bz2`, `pyexpat`, `_sqlite3`…) et leurs DLL
+  (`libssl-3*.dll`, `libcrypto-3*.dll`, `libffi-8.dll`, `sqlite3.dll`, `vcruntime140*.dll`).
+- `python313._pth` est laissé tel quel (`import site` commenté : pas de `site-packages`) ;
+  ComicRust ajoute lui-même le dossier du script et `scripts\lib` à `sys.path`.
 - Certificats : `ssl.create_default_context()` charge sous Windows les magasins « ROOT » et
   « CA » du système ; aucun fichier de certificats à livrer. (Un PC très ancien ou hors
   ligne peut ne pas avoir toutes les racines : Windows les télécharge à la demande pour
   ses propres connexions, pas pour Python.)
+- La CI vérifie le paquet : modules natifs (`ssl`, `sqlite3`…), une connexion HTTPS, puis
+  les scripts fournis exécutés avec ce Python (test `tests/scripts_exemples.rs`).
+
+## Modules supplémentaires
+
+- **Module pur Python** (sans fichier `.pyd` compilé) : copier le dossier du paquet (celui
+  qui contient `__init__.py`), ou le fichier `.py` d'un module simple, dans `scripts\lib\`.
+  Une « wheel » (`.whl`) de PyPI est un zip : l'ouvrir et en copier le dossier. Les
+  dépendances s'installent de la même façon.
+- **Avec un autre Python 3.13 installé** sur le PC (même version mineure, 64 bits), pip
+  peut installer directement dans `scripts\lib` :
+  `py -3.13 -m pip install --target "C:\…\ComicRust\scripts\lib" nom-du-paquet` (les
+  modules compilés conviennent alors aussi, puisqu'ils visent la même version).
+- **pip dans le Python embarqué** : non fourni. Pour l'activer, à vos risques (une mise à
+  jour de ComicRust remet le `python313._pth` d'origine : il faut alors décommenter à
+  nouveau `import site` ; un changement de version de Python rend les paquets compilés
+  inutilisables) : décommenter
+  `import site` dans `python\python313._pth`, télécharger `get-pip.py`
+  (<https://bootstrap.pypa.io/get-pip.py>) et lancer `python\python.exe get-pip.py` ; les
+  paquets vont alors dans `python\Lib\site-packages`. Préférer `scripts\lib`, qui
+  survit aux mises à jour.
+- Autre solution : un Python complet désigné par `COMICRUST_PYTHON` (voir plus haut).

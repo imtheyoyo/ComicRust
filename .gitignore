@@ -1,1 +1,3 @@
 /target
+/python-embed/
+__pycache__/

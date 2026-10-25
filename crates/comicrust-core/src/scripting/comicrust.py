@@ -154,6 +154,7 @@ class _Session:
         fields = run.get("fields") or {}
         self.editable = set(fields.get("editable") or [])
         self.read_only = set(fields.get("read_only") or [])
+        self.custom_prefix = fields.get("custom_prefix") or "CustomValue:"
         known = self.editable | self.read_only
         self.snake = {_snake(f): f for f in known}
         self.cache = {}
@@ -184,6 +185,8 @@ def _field(name):
     s = _session()
     if name in s.editable or name in s.read_only:
         return name
+    if name.startswith(s.custom_prefix) and len(name) > len(s.custom_prefix):
+        return name
     f = s.snake.get(name)
     if f is None:
         f = s.snake.get(_snake(name))
@@ -197,6 +200,17 @@ def _queue(item):
     s.pending.append(item)
     if len(s.pending) >= FLUSH_EVERY:
         flush()
+
+
+def _custom_values(store):
+    """Décode ``CustomValuesStore`` (``,clé=valeur,…``, ``&#61;`` = ``=``, ``&#44;`` = ``,``)."""
+    out = []
+    for seg in (store or "").split(","):
+        parts = seg.split("=")
+        if len(parts) == 2:
+            dec = lambda t: t.replace("&#61;", "=").replace("&#44;", ",")
+            out.append((dec(parts[0]), dec(parts[1])))
+    return out
 
 
 def _book_id(book):
@@ -252,17 +266,40 @@ class Book:
         """Met en attente la modification d'un champ (``None`` = vider)."""
         s = _session()
         f = _field(field)
-        if f not in s.editable:
+        if f not in s.editable and not f.startswith(s.custom_prefix):
             raise AttributeError("champ non modifiable : %s" % f)
         if isinstance(value, (list, tuple, set)):
             value = ", ".join(str(v) for v in value)
         elif value is not None and not isinstance(value, (str, int, float, bool)):
             value = str(value)
+        if f.startswith(s.custom_prefix):
+            # Valeur personnalisée : gardée à part (lue par custom_value), la fiche
+            # n'a pas de champ de ce nom.
+            self._changed[f] = value
+            _queue({"op": "set", "book": self.id, "field": f, "value": value})
+            return
         if self._data.get(f) == value and f not in self._changed:
             return
         self._data[f] = value
         self._changed[f] = value
         _queue({"op": "set", "book": self.id, "field": f, "value": value})
+
+    def custom_value(self, key, default=None):
+        """Valeur personnalisée ``key`` (sans casse, comme ``GetCustomValue`` de ComicRack)."""
+        wanted = (_session().custom_prefix + key).lower()
+        for f, pending in reversed(list(self._changed.items())):
+            if f.lower() == wanted:
+                return default if pending in (None, "") else pending
+        for k, v in _custom_values(self._data.get("CustomValuesStore")):
+            if k.lower() == key.lower():
+                return v
+        return default
+
+    def set_custom_value(self, key, value):
+        """Met en attente une valeur personnalisée (``None`` ou ``""`` la supprime)."""
+        if not key:
+            raise ValueError("clé de valeur personnalisée vide")
+        self.set(_session().custom_prefix + key, None if value is None else str(value))
 
     def to_dict(self):
         """Copie de la fiche (noms ComicRack)."""

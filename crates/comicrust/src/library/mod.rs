@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use comicrust_core::comic_lists::{ComicList, Members};
 use comicrust_core::db::{Applied, ComicDatabase, DbConfig, LoadProgress};
+use comicrust_core::library::LibraryBook;
 use comicrust_core::store::{Store, StoreConfig};
 use eframe::egui;
 
@@ -354,6 +355,20 @@ impl LibraryState {
         self.generation += 1;
         self.last_refresh = Some(applied);
         applied
+    }
+
+    /// Fiches réécrites par ComicRust lui-même (base de ComicRust : modifications des
+    /// scripts), relues après écriture ; `rows` : compteurs des lignes écrites.
+    pub fn update_books(&mut self, books: Vec<LibraryBook>, rows: Vec<(String, i64)>) {
+        let Status::Loaded(db) = &mut self.status else { return };
+        if books.is_empty() {
+            return;
+        }
+        let db = Arc::make_mut(db);
+        let counters = db.counters;
+        db.apply(comicrust_core::db::Changes { updated: books, rows, counters, present: None });
+        self.generation += 1;
+        self.view_key = None;
     }
 
     /// Reporte les livres écrits par ComicRust dans la base MySQL de ComicRack (fiches

@@ -133,6 +133,8 @@ impl ComicRustApp {
         let mods = ui.input(|i| i.modifiers);
         let mut select_plain: Option<String> = None;
         let mut list_request: Option<(BookListAction, Vec<String>)> = None;
+        let scripts_menu = self.book_scripts();
+        let mut script_request: Option<(String, Vec<String>)> = None;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         // Souris : glisser en cours, réordonnancement possible ou non, balayage.
         let n = view.len();
@@ -241,6 +243,7 @@ impl ComicRustApp {
                         Self::book_file_menu(ui, &self.settings, &book.id, book.file.as_deref(), &mut file_request);
                         let books = if selected { selection.clone() } else { vec![book.id.clone()] };
                         book_lists_menu(ui, &lists_menu, &books, &mut list_request);
+                        crate::ui::scripts_ui::book_scripts_menu(ui, &scripts_menu, &books, &mut script_request);
                     });
                     if resp.double_clicked() {
                         open = Some(book.id.clone());
@@ -326,6 +329,9 @@ impl ComicRustApp {
         if let Some(id) = open {
             self.library.selected_book = Some(id.clone());
             self.open_library_book(ui.ctx(), &id, crate::app::Start::Auto);
+        }
+        if let Some((script, books)) = script_request {
+            self.run_script(ui.ctx(), &script, comicrust_core::scripting::Hook::Books, books);
         }
     }
 }

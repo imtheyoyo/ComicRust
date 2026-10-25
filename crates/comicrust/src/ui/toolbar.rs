@@ -36,6 +36,7 @@ impl ComicRustApp {
                     ui.close();
                 }
             });
+            self.scripts_menu(ui);
             ui.separator();
 
             if self.mode == Mode::Reader {

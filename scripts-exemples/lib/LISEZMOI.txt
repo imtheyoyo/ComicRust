@@ -1,0 +1,17 @@
+Modules Python partagés par les scripts de ComicRust
+=====================================================
+
+Ce dossier (scripts\lib) est ajouté au chemin d'import de chaque script : un fichier
+scripts\lib\outils.py s'importe par « import outils » depuis n'importe quel script.
+Les fichiers de ce dossier ne sont jamais proposés comme scripts (pas de menu).
+
+Installer un module pur Python (sans fichier .pyd compilé), par exemple depuis PyPI :
+télécharger la « wheel » (fichier .whl, c'est un zip) ou l'archive des sources, puis
+copier le dossier du paquet (celui qui contient __init__.py) ici :
+
+    scripts\lib\unidecode\__init__.py   ->   « import unidecode »
+
+Ses dépendances éventuelles s'installent de la même façon.
+
+pip n'est pas fourni avec le Python embarqué de ComicRust ; voir docs\scripts.md
+(section « Modules supplémentaires ») pour l'activer à vos risques.

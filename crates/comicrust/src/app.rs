@@ -89,6 +89,8 @@ pub struct ComicRustApp {
     pub(crate) lists_ui: crate::ui::lists_ui::ListsUi,
     /// Écritures dans la base MySQL de ComicRack (mode écriture).
     pub(crate) cr_writes: crate::library::comicrack_write::ComicRackWrites,
+    /// Scripts Python (v0.10.0) : découverte, exécutions, automatismes.
+    pub(crate) scripts: crate::scripts::ScriptsState,
 }
 
 impl ComicRustApp {
@@ -134,7 +136,9 @@ impl ComicRustApp {
             transfer: None,
             lists_ui: Default::default(),
             cr_writes: Default::default(),
+            scripts: crate::scripts::ScriptsState::new(Default::default()),
         };
+        app.scripts = crate::scripts::ScriptsState::new(app.settings.script_settings.clone());
         crate::update::cleanup_previous_install();
         if app.settings.library_mode == crate::settings::LibraryMode::Unset {
             // Premier démarrage : ComicRust seul ou avec ComicRack ?
@@ -232,6 +236,11 @@ impl ComicRustApp {
             }
         };
         self.resume_prompt = None;
+        // Automatismes : le livre précédent est fermé, celui-ci ouvert.
+        if let Some(old) = self.book.as_ref().map(|b| b.path.clone()) {
+            self.script_book_event(comicrust_core::scripting::Hook::BookClosed, &old);
+        }
+        self.script_book_event(comicrust_core::scripting::Hook::BookOpened, &path);
         self.mode = Mode::Reader;
         let max_side = ctx.input(|i| i.max_texture_side).min(16384) as u32;
         let loader = BookLoader::open(path.clone(), ctx.clone(), max_side);
@@ -385,6 +394,11 @@ impl ComicRustApp {
                 if !done.changes.is_empty() {
                     self.library.apply_changes(done.changes.clone());
                 }
+                // Automatismes « nouveaux livres » (livres ajoutés par cette analyse).
+                let added: Vec<String> = done.report.added.iter().map(|b| b.id.clone()).collect();
+                if !added.is_empty() {
+                    self.trigger_scripts(comicrust_core::scripting::Hook::NewBooks, added);
+                }
                 if self.scan_manual && !done.report.errors.is_empty() {
                     self.show_last_scan = true;
                 }
@@ -427,7 +441,9 @@ impl ComicRustApp {
     pub(crate) fn close_book(&mut self, ctx: &Context) {
         self.remember_position();
         let _ = self.store_progress();
-        self.book = None;
+        if let Some(old) = self.book.take().map(|b| b.path) {
+            self.script_book_event(comicrust_core::scripting::Hook::BookClosed, &old);
+        }
         if self.fullscreen {
             self.fullscreen = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
@@ -595,6 +611,7 @@ impl eframe::App for ComicRustApp {
         self.comicrack_write_window(&ctx);
         self.transfer_window(&ctx);
         self.lists_windows(&ctx);
+        self.scripts_windows(&ctx);
         self.scan_window(&ctx);
         self.update_window(&ctx);
         self.info_window(&ctx);

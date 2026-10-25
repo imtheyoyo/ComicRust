@@ -61,10 +61,12 @@ impl ComicRustApp {
             if std::mem::take(&mut self.scan_after_load) {
                 self.start_scan(ctx, false);
             }
+            self.scripts_library_loaded();
         }
         self.poll_scan();
         self.poll_files();
         self.poll_comicrack_writes(ctx);
+        self.poll_scripts(ctx);
         let errs: Vec<String> = std::mem::take(&mut *self.bg_errors.lock().unwrap());
         if !errs.is_empty() && self.error.is_none() {
             self.error = Some(errs.join("\n\n"));

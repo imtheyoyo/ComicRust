@@ -180,6 +180,30 @@ impl ComicRustApp {
         }
     }
 
+    /// Lance un travail sur les fichiers (fiches lues dans la bibliothèque) ; `show` : montrer
+    /// sa fenêtre (avancement, bilan). Aussi utilisé par les scripts (`write_info`).
+    pub(crate) fn start_file_job(
+        &mut self,
+        ctx: &Context,
+        action: FileAction,
+        targets: Vec<Target>,
+        move_original: bool,
+        show: bool,
+    ) {
+        use crate::library::files::RecordSource;
+        use crate::settings::LibraryMode;
+        let source = match (self.settings.library_mode, self.library.database()) {
+            (LibraryMode::ComicRackMySql, _) => match self.settings.db_source.config().ok().flatten() {
+                Some(c) => RecordSource::ComicRackMySql(c),
+                None => RecordSource::None,
+            },
+            (_, Some(db)) => RecordSource::Loaded(db),
+            (_, None) => RecordSource::None,
+        };
+        self.file_job = Some(FileJob::start(action, targets, source, move_original, ctx));
+        self.show_file_job = show;
+    }
+
     pub(crate) fn files_windows(&mut self, ctx: &Context) {
         self.file_dialog_window(ctx);
         self.file_job_window(ctx);
@@ -292,18 +316,7 @@ impl ComicRustApp {
         if go {
             let d = self.file_dialog.take().unwrap();
             self.settings.move_converted_original = d.move_original;
-            use crate::library::files::RecordSource;
-            use crate::settings::LibraryMode;
-            let source = match (self.settings.library_mode, self.library.database()) {
-                (LibraryMode::ComicRackMySql, _) => match self.settings.db_source.config().ok().flatten() {
-                    Some(c) => RecordSource::ComicRackMySql(c),
-                    None => RecordSource::None,
-                },
-                (_, Some(db)) => RecordSource::Loaded(db),
-                (_, None) => RecordSource::None,
-            };
-            self.file_job = Some(FileJob::start(d.action, d.targets, source, d.move_original, ctx));
-            self.show_file_job = true;
+            self.start_file_job(ctx, d.action, d.targets, d.move_original, true);
         } else if cancel {
             self.file_dialog = None;
         }

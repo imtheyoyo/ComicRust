@@ -43,6 +43,19 @@ jobs:
           echo "PDFIUM_DYNAMIC_LIB_PATH=$dir" >> "$GITHUB_ENV"
           ls "pdfium/${{ matrix.lib }}"
 
+      - name: Python embarqué (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        # Même distribution « embeddable » que la release (version et SHA-256 dans
+        # .github/python-embarque.env) ; définit COMICRUST_PYTHON pour les tests des scripts.
+        run: '& "$env:GITHUB_WORKSPACE/scripts/python_embarque.ps1" -Destination python-embed'
+
+      - name: Python du runner (Linux)
+        if: runner.os == 'Linux'
+        # Tests des scripts obligatoires (pas ignorés faute de Python) avec python3.
+        run: echo "COMICRUST_EXIGER_PYTHON=1" >> "$GITHUB_ENV"
+
       - name: MySQL de test (Linux)
         if: runner.os == 'Linux'
         run: |

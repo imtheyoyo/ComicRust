@@ -202,6 +202,15 @@ pub struct Settings {
     /// Mode écriture : fichiers convertis et infos écrites pas encore reportés dans la base
     /// de ComicRack (base injoignable, conflit…) ; refaits au lancement suivant.
     pub comicrack_files_pending: Vec<crate::library::comicrack_write::PendingFileWrite>,
+    /// Scripts désactivés (identifiants `ScriptEntry::id`).
+    pub scripts_disabled: std::collections::BTreeSet<String>,
+    /// Exécuter les automatismes des scripts (ouverture / fermeture d'un livre, nouveaux
+    /// livres, démarrage). **Désactivé par défaut** : un automatisme modifie la
+    /// bibliothèque sans aperçu ; on l'active en connaissance de cause.
+    pub scripts_auto: bool,
+    /// Réglages des scripts, par fichier (`ScriptEntry::settings_key`) : JSON de
+    /// `ScriptSettings::to_stored` (valeurs secrètes chiffrées).
+    pub script_settings: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -244,6 +253,9 @@ impl Default for Settings {
             comicrack_write: false,
             comicrack_write_migration_declined: false,
             comicrack_files_pending: Vec::new(),
+            scripts_disabled: Default::default(),
+            scripts_auto: false,
+            script_settings: Default::default(),
         }
     }
 }

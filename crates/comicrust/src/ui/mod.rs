@@ -7,6 +7,7 @@ mod library_table;
 mod library_view;
 pub mod list_panel;
 pub mod lists_ui;
+pub mod scripts_ui;
 pub mod setup_window;
 pub mod smart_editor;
 mod status_bar;

@@ -14,6 +14,7 @@ mod input;
 mod library;
 mod paths;
 mod reading_list;
+mod scripts;
 mod settings;
 mod ui;
 mod update;
