@@ -48,7 +48,7 @@ Gestion complète des listes et écriture dans la base de ComicRack.
 - Écritures en attente gardées à la fermeture de ComicRust et refaites au lancement suivant.
 
 ### Recette
-[recette/v0.9.0.md](recette/v0.9.0.md).
+[recette/v0.9.0.md](recette/v0.9.0.md) — GO (21/21 OK).
 
 ## [v0.8.0] — 2026-10-24
 

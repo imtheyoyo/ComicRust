@@ -1,0 +1,10 @@
+Rapport de recette ComicRust v0.9.0 — 25/10/2026 13:33
+Résultat : 21 OK, 0 échec(s), 0 non testé(s) sur 21.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- L-02 : La sélection des livres et le déplacement dans la liste doit pouvoir se faire avec la souris. Actuellement ce n'est pas possible.
+- W-07 : Il faut relancer ComicRack pour qu'il ne le marque plus.
