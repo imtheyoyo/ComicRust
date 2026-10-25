@@ -400,7 +400,7 @@ impl ComicDatabase {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Les tests MySQL de `db` recréent les mêmes tables `comics` / `changes` de la base

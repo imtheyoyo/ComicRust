@@ -656,6 +656,12 @@ fn mysql_store() {
     drop_tables(&db_cfg);
     targeted_writes_scenario(&cfg);
 
+    // Modification des fiches et déplacement des fichiers (module `edit`).
+    drop_tables(&db_cfg);
+    crate::edit::tests::store_scenario(&cfg);
+    drop_tables(&db_cfg);
+    crate::edit::tests::store_move_scenario(&cfg);
+
     // Migration du schéma 1 (clé `VARCHAR(700)` de la v0.7.0) vers le schéma 2.
     drop_tables(&db_cfg);
     {

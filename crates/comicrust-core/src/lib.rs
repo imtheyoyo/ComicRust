@@ -9,11 +9,15 @@
 //! - [`scanner`]    ↔ `ComicScanner` (dossiers surveillés : ajout, mise à jour, manquants)
 //! - [`comic_lists`], [`smart`] ↔ listes (`ComicListItem…`, `ComicBook…Matcher`) ; modification :
 //!   [`lists_edit`] ; critères pour l'éditeur : [`matcher_catalog`]
+//! - [`edit`] : modification des fiches (champs, aperçu, écriture) et des fichiers
+//!   (déplacement, modèles de nom), pour les scripts et l'interface
+//! - [`scripting`]  ↔ `ScriptUtility` / `PythonCommand` (scripts Python, processus séparé)
 
 pub mod cbl;
 pub mod comic_info;
 pub mod comic_lists;
 pub mod db;
+pub mod edit;
 pub mod index;
 pub mod library;
 pub mod lists_edit;
@@ -22,6 +26,7 @@ pub mod matcher_catalog;
 pub mod name_info;
 pub mod providers;
 pub mod scanner;
+pub mod scripting;
 pub mod secret;
 pub mod smart;
 pub mod store;

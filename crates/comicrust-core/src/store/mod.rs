@@ -31,6 +31,7 @@
 //! [`Store::scan_into`], [`Store::replace_file`], [`Store::set_comic_info_written`].
 
 mod conn;
+mod edit;
 pub mod import;
 #[cfg(test)]
 mod import_tests;
