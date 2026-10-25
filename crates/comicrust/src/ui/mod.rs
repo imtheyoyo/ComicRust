@@ -1,5 +1,6 @@
 //! Éléments d'interface (chacun ajoute des méthodes de dessin à `ComicRustApp`).
 
+pub mod book_drag;
 mod files_window;
 mod library_panels;
 mod library_table;

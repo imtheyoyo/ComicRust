@@ -5,9 +5,10 @@ use comicrust_core::comic_lists::{ComicList, ListKind};
 use comicrust_core::library::LibraryBook;
 use eframe::egui::{self, vec2, Rect, RichText, Ui};
 
+use super::book_drag::{BooksDrag, DropHint};
 use super::library_table::{human_size, long_date, short_date};
 use super::library_view::{paint_cover, ACCENT, COVER_RATIO};
-use super::lists_ui::{handle_drop, list_menu, new_menu, rename_field, NodeCtx, PanelAction};
+use super::lists_ui::{handle_books_drop, handle_drop, list_menu, new_menu, rename_field, NodeCtx, PanelAction};
 use crate::app::ComicRustApp;
 
 fn icon(l: &ComicList) -> &'static str {
@@ -83,8 +84,13 @@ impl ComicRustApp {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             let all = self.library.selected_list.is_none();
             let n = db.as_ref().map(|d| d.len()).unwrap_or(0);
-            if ui.selectable_label(all, format!("📚 Toute la bibliothèque ({n})")).clicked() {
+            let r = ui.selectable_label(all, format!("📚 Toute la bibliothèque ({n})"));
+            if r.clicked() {
                 chosen = Some(None);
+            }
+            if r.dnd_hover_payload::<BooksDrag>().is_some() {
+                self.lists_ui.drag_hint =
+                    Some(DropHint::Refused("La bibliothèque contient déjà tous les livres".into()));
             }
             ui.add_space(4.0);
             let items = std::mem::take(&mut self.library.lists.items);
@@ -95,6 +101,8 @@ impl ComicRustApp {
                 renaming: self.lists_ui.renaming.take(),
                 expand: std::mem::take(&mut self.lists_ui.expand),
                 acts: std::mem::take(&mut acts),
+                shown: self.library.reading_list_shown().then(|| self.library.selected_list.clone()).flatten(),
+                hint: None,
             };
             for l in &items {
                 // La « Bibliothèque » de ComicRack fait doublon avec la ligne ci-dessus.
@@ -105,6 +113,9 @@ impl ComicRustApp {
             self.lists_ui.renaming = nc.renaming;
             self.lists_ui.expand = nc.expand;
             acts = nc.acts;
+            if nc.hint.is_some() {
+                self.lists_ui.drag_hint = nc.hint;
+            }
             self.library.lists.items = items;
             ui.add_space(8.0);
             if let Some(what) = self.lists_ui.ops.current() {
@@ -188,6 +199,7 @@ impl ComicRustApp {
             *chosen = Some(Some(l.id.clone()));
         }
         handle_drop(ui, &r, l, nc);
+        handle_books_drop(ui, &r, l, nc);
         r.context_menu(|ui| list_menu(ui, l, nc));
     }
 

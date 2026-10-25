@@ -20,6 +20,7 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.7.3 | [v0.7.3.md](v0.7.3.md) — [page à cocher](https://claude.ai/artifact/L6X8JvG2M2MuJPrXHPxbik) — [rapport](rapports/v0.7.3-2026-10-24.txt) | **GO** (24/10/2026) : 8/8 OK ; mot de passe chiffré vérifié |
 | v0.8.0 | [v0.8.0.md](v0.8.0.md) — [page à cocher](https://claude.ai/artifact/LcCkUQpinxSQ8Pam8eXSvs) | **GO** (24/10/2026) : 17/17 OK ; 5 323 livres et 47 listes transférés, 0 doublon |
 | v0.9.0 | [v0.9.0.md](v0.9.0.md) — [page à cocher](https://claude.ai/artifact/JWGKwvo1khckvqU7V1x7Sb) — [rapport](rapports/v0.9.0-2026-10-25.txt) | **GO** (25/10/2026) : 21/21 OK ; glisser-déposer des livres demandé → v0.9.1 |
+| v0.9.1 | [v0.9.1.md](v0.9.1.md) | en attente |
 
 ## Déroulé
 

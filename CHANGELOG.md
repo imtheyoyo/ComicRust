@@ -5,6 +5,38 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.9.1] — 2026-10-25
+
+Les livres se sélectionnent et se déplacent à la souris, comme dans ComicRack et l'explorateur
+Windows (demande de la recette de la v0.9.0).
+
+### Nouveautés
+- **Sélection à la souris** :
+  - vue des couvertures : tirer un **rectangle de sélection** depuis un espace vide (Ctrl :
+    ajouté à la sélection) ; la vue défile toute seule quand le pointeur approche du bord ;
+  - vue tableau : cliquer sur une ligne **non sélectionnée** et glisser vers le haut ou le bas
+    sélectionne les lignes balayées (Ctrl : ajoutées à la sélection) ;
+  - **Ctrl+A** : tous les livres affichés ; **Échap** ou **clic dans le vide** : plus de
+    sélection.
+- **Réordonner une liste de lecture en glissant** (couvertures et tableau) : glisser un livre,
+  ou la sélection, et le déposer entre deux livres. Un trait montre où il ira, la vue défile
+  près des bords ; la liste est enregistrée une seule fois, au lâcher.
+  - Vue pas triée dans l'ordre de la liste : curseur « interdit » et message « Trier dans
+    l'ordre de la liste pour réordonner ».
+  - Dans le tableau, on glisse depuis une ligne **déjà sélectionnée** (depuis une autre ligne,
+    c'est une sélection).
+- **Ajouter des livres à une liste par glisser-déposer** : déposer la sélection sur une liste
+  de lecture du panneau des listes. La liste survolée est mise en évidence ; un badge « N
+  livres » suit le pointeur et dit ce que fera le dépôt. Listes intelligentes, dossiers,
+  Bibliothèque, liste affichée et listes en lecture seule : curseur « interdit », avec la
+  raison.
+- Un glisser ne démarre qu'après un petit déplacement (un clic reste un clic) ; double-clic
+  pour ouvrir et clic droit inchangés ; Échap pendant un glisser l'annule. **Aucun glisser ne
+  déplace ni ne supprime de fichier** : seules les listes changent.
+
+### Recette
+[recette/v0.9.1.md](recette/v0.9.1.md).
+
 ## [v0.9.0] — 2026-10-25
 
 Gestion complète des listes et écriture dans la base de ComicRack.

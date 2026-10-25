@@ -3,6 +3,12 @@
 //! (une bibliothèque peut compter des dizaines de milliers de livres).
 //!
 //! Un clic sélectionne un livre (panneau de détails), un double-clic ou Entrée l'ouvre.
+//!
+//! Souris (v0.9.1) : rectangle de sélection tiré depuis un espace vide (Ctrl : ajouté à la
+//! sélection), clic dans le vide pour désélectionner ; glisser une couverture déplace la
+//! sélection : vers une liste de lecture du panneau (ajout) ou, dans une liste de lecture
+//! triée dans l'ordre de la liste, entre deux livres (réordonnancement). Clavier : Ctrl+A,
+//! Échap.
 
 use std::path::PathBuf;
 
@@ -11,7 +17,9 @@ use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, RichText, Se
 
 use crate::app::{ComicRustApp, Start};
 use crate::library::covers::{Cover, CoverCache};
-use crate::library::{GroupKey, Row, SortKey, Status};
+use crate::library::mouse::{grid_insertion, marquee_hits, reorder_allowed, reorder_anchor, CoverRow, GridGeom};
+use crate::library::{Gesture, GroupKey, Row, SortKey, Status};
+use crate::ui::book_drag::{dragged_books, edge_scroll, paint_insertion, start_books_drag, DropHint};
 use crate::ui::lists_ui::{book_lists_menu, BookListAction};
 
 const HEADER_H: f32 = 34.0;
@@ -362,6 +370,11 @@ impl ComicRustApp {
         let (enter, esc, delete) = ui.input(|i| {
             (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Delete))
         });
+        // Ctrl+A : tous les livres affichés (pas sur les piles fermées).
+        let piles = self.settings.library_stack && !self.settings.library_table && self.library.open_stack.is_none();
+        if !piles && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+            self.library.select_all();
+        }
         // Suppr dans une liste de lecture : retirer les livres de la liste (jamais les fichiers).
         if delete && self.library.reading_list_shown() && self.library.selected_book.is_some() {
             let books = self.library.selection();
@@ -380,8 +393,9 @@ impl ComicRustApp {
             }
         }
         if esc {
+            self.library.gesture = Gesture::None;
             if self.library.selected_book.is_some() {
-                self.library.selected_book = None;
+                self.library.clear_selection();
             } else {
                 self.library.open_stack = None;
             }
@@ -438,9 +452,60 @@ impl ComicRustApp {
         let mut select_plain: Option<String> = None;
         let mut list_request: Option<(BookListAction, Vec<String>)> = None;
 
+        // Souris : géométrie des rangées de couvertures (coordonnées du contenu), glisser en
+        // cours, réordonnancement possible ou non.
+        let geom = GridGeom { cell, gap: GAP };
+        let mut cover_rows: Vec<CoverRow> = Vec::new();
+        {
+            let (mut y, mut first) = (0.0, 0);
+            for (row, h) in rows.iter().zip(&heights) {
+                if let Row::Covers(items) = row {
+                    cover_rows.push(CoverRow { top: y, first, len: items.len() });
+                    first += items.len();
+                }
+                y += h;
+            }
+        }
+        let ctx = ui.ctx().clone();
+        let drag = dragged_books(&ctx);
+        let sorted = opts.sort == SortKey::Position && !opts.descending;
+        let reorder = reorder_allowed(in_list, sorted, lists_menu.reason.as_deref());
+        let (pointer, released, primary_down, press_origin) = ctx.input(|i| {
+            (i.pointer.latest_pos(), i.pointer.any_released(), i.pointer.primary_down(), i.pointer.press_origin())
+        });
+        let mut clear = false;
+        let mut new_gesture: Option<Gesture> = None;
+        let mut marquee_sel: Option<(Vec<usize>, std::collections::HashSet<String>)> = None;
+        let mut drag_start: Option<(String, bool)> = None;
+        let mut reorder_drop: Option<usize> = None;
+        let mut hint: Option<DropHint> = None;
+
         egui::ScrollArea::vertical().auto_shrink(false).id_salt("bibliotheque").show_viewport(ui, |ui, viewport| {
             ui.set_height(total);
             let origin = ui.min_rect().min + vec2(GAP, GAP * 0.5);
+            let clip = ui.clip_rect();
+            // Fond (sous les vignettes) : clic dans le vide, rectangle de sélection.
+            let bg = ui.interact(ui.max_rect(), ui.scope_id().with("fond-couvertures"), Sense::click_and_drag());
+            if bg.clicked() && !mods.command {
+                clear = true;
+            }
+            if !stacked && bg.drag_started_by(egui::PointerButton::Primary) {
+                if let Some(p) = press_origin {
+                    let base = if mods.command { self.library.selection_set() } else { Default::default() };
+                    new_gesture = Some(Gesture::Marquee { start: (p - origin).to_pos2(), base });
+                }
+            }
+            let mut marquee: Option<Rect> = None;
+            if let (Gesture::Marquee { start, base }, Some(p)) = (&self.library.gesture, pointer) {
+                if primary_down {
+                    let r = Rect::from_two_pos(*start, (p - origin).to_pos2());
+                    marquee_sel = Some((marquee_hits(&cover_rows, &geom, r), base.clone()));
+                    marquee = Some(r.translate(origin.to_vec2()));
+                    edge_scroll(ui, clip, p);
+                } else {
+                    new_gesture = Some(Gesture::None);
+                }
+            }
             let mut y = 0.0;
             for (row, h) in rows.iter().zip(&heights) {
                 let top = y;
@@ -476,7 +541,8 @@ impl ComicRustApp {
                             let book = &db.books[bi];
                             let min = origin + vec2(k as f32 * (cell.x + GAP), top);
                             let rect = Rect::from_min_size(min, cell);
-                            let resp = ui.interact(rect, ui.scope_id().with(("livre", &book.id)), Sense::click());
+                            let resp =
+                                ui.interact(rect, ui.scope_id().with(("livre", &book.id)), Sense::click_and_drag());
                             let cover_rect = Rect::from_min_size(min, vec2(cell.x, cover_h));
                             let selected = self.library.is_selected(&book.id);
                             if selected {
@@ -538,6 +604,9 @@ impl ComicRustApp {
                                 open = Some(book.id.clone());
                             } else if resp.clicked() {
                                 select = Some(book.id.clone());
+                            }
+                            if resp.drag_started_by(egui::PointerButton::Primary) {
+                                drag_start = Some((book.id.clone(), selected));
                             }
                         }
                     }
@@ -619,7 +688,63 @@ impl ComicRustApp {
                     }
                 }
             }
+            // Livres glissés au-dessus de la vue : trait d'insertion (réordonnancement) ou refus.
+            if let (Some(_), Some(p)) = (&drag, pointer) {
+                if clip.contains(p) {
+                    match &reorder {
+                        Ok(()) => {
+                            if let Some((ins, line)) = grid_insertion(&cover_rows, &geom, (p - origin).to_pos2()) {
+                                paint_insertion(ui, clip, line[0] + origin.to_vec2(), line[1] + origin.to_vec2());
+                                hint = Some(DropHint::Move);
+                                edge_scroll(ui, clip, p);
+                                if released {
+                                    reorder_drop = Some(ins);
+                                }
+                            }
+                        }
+                        Err(why) => hint = Some(DropHint::Refused(why.clone())),
+                    }
+                }
+            }
+            if let Some(r) = marquee {
+                let v = ui.visuals();
+                let painter = ui.painter().with_clip_rect(clip);
+                painter.rect_filled(r, 2.0, v.selection.bg_fill.gamma_multiply(0.3));
+                painter.rect_stroke(r, 2.0, Stroke::new(1.0, v.selection.stroke.color), StrokeKind::Inside);
+            }
         });
+
+        if let Some(g) = new_gesture {
+            self.library.gesture = g;
+        }
+        if let Some((hits, base)) = marquee_sel {
+            self.library.select_view_indices(hits, &base);
+        }
+        if clear {
+            if stacked {
+                self.library.selected_stack = None;
+            } else {
+                self.library.clear_selection();
+            }
+        }
+        if let Some((id, selected)) = drag_start {
+            // Livre non sélectionné : il devient la sélection (ajouté avec Ctrl), comme dans
+            // l'explorateur ; puis toute la sélection est glissée.
+            if !selected {
+                self.library.click_book(&id, mods.command, false);
+            }
+            let books = if selected || mods.command { self.library.selection() } else { vec![id] };
+            start_books_drag(&ctx, books);
+        }
+        if let (Some(ins), Some(d)) = (reorder_drop, &drag) {
+            egui::DragAndDrop::clear_payload(&ctx);
+            if let Some(anchor) = reorder_anchor(&self.library.view_ids(), &d.books, ins) {
+                list_request = Some((BookListAction::Reorder(anchor), d.books.clone()));
+            }
+        }
+        if hint.is_some() {
+            self.lists_ui.drag_hint = hint;
+        }
 
         if let Some(s) = select_stack {
             self.library.selected_stack = Some(s);

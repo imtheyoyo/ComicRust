@@ -17,6 +17,8 @@ use crate::library::lists_ops::{
     self, ancestors, base_dependents, locate, step_position, subtree, DropPlace, ListOp, ListsOps, ListsTarget, OpTag,
     Outcome,
 };
+use crate::library::mouse::{books_drop_on_list, reorder_target, Anchor};
+use crate::ui::book_drag::{BooksDrag, DropHint};
 use crate::ui::smart_editor::{EditorEnv, EditorRequest, SmartEditor};
 
 /// Message montré quand ComicRack est lancé.
@@ -88,6 +90,9 @@ pub struct ListsUi {
     pub expand: HashSet<String>,
     /// Bilan de la dernière opération (affiché sous le panneau).
     pub info: Option<String>,
+    /// Glisser de livres : ce que ferait le dépôt à l'endroit survolé (remis à zéro à chaque
+    /// image, voir [`crate::ui::book_drag`]).
+    pub drag_hint: Option<DropHint>,
     serial: u64,
 }
 
@@ -102,7 +107,11 @@ pub enum NewKind {
 /// Commande du panneau des listes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PanelAction {
-    New { parent: Option<String>, position: Option<usize>, kind: NewKind },
+    New {
+        parent: Option<String>,
+        position: Option<usize>,
+        kind: NewKind,
+    },
     Edit(String),
     Rename(String),
     CommitRename(String, String),
@@ -111,7 +120,16 @@ pub enum PanelAction {
     Convert(String),
     Step(String, bool),
     MoveInto(String, Option<String>),
-    Drop { dragged: String, target: String, place: DropPlace },
+    Drop {
+        dragged: String,
+        target: String,
+        place: DropPlace,
+    },
+    /// Livres glissés depuis la vue et déposés sur une liste de lecture.
+    AddBooks {
+        list: String,
+        books: Vec<String>,
+    },
 }
 
 /// Charge utile du glisser-déposer d'une liste.
@@ -127,6 +145,10 @@ pub struct NodeCtx<'a> {
     pub renaming: Option<Renaming>,
     pub expand: HashSet<String>,
     pub acts: Vec<PanelAction>,
+    /// Liste affichée dans la vue (d'où viennent les livres glissés).
+    pub shown: Option<String>,
+    /// Glisser de livres au-dessus d'une liste : ce que ferait le dépôt.
+    pub hint: Option<DropHint>,
 }
 
 impl NodeCtx<'_> {
@@ -272,11 +294,43 @@ pub fn handle_drop(ui: &Ui, r: &egui::Response, l: &ComicList, nc: &mut NodeCtx)
             };
         }
     }
+    // `dnd_release_payload` retire la charge utile quel que soit son type : vérifier d'abord
+    // que c'est bien une liste qui est glissée (et pas des livres).
+    if r.dnd_hover_payload::<ListDrag>().is_none() {
+        return;
+    }
     if let Some(p) = r.dnd_release_payload::<ListDrag>() {
         if p.0 != l.id {
             let place = drop_place(r.rect, pointer.y, folder);
             nc.acts.push(PanelAction::Drop { dragged: p.0.clone(), target: l.id.clone(), place });
         }
+    }
+}
+
+/// Livres glissés depuis la vue au-dessus d'une liste : mise en évidence de la liste si
+/// elle les accepte (liste de lecture modifiable), ajout au lâcher.
+pub fn handle_books_drop(ui: &Ui, r: &egui::Response, l: &ComicList, nc: &mut NodeCtx) {
+    if r.dnd_hover_payload::<BooksDrag>().is_none() {
+        return;
+    }
+    let reason = nc.reason();
+    match books_drop_on_list(l, reason.as_deref(), nc.shown.as_deref()) {
+        Ok(()) => {
+            let v = ui.visuals();
+            let rect = r.rect.expand(1.0);
+            ui.painter().rect_filled(rect, 3.0, v.selection.bg_fill.gamma_multiply(0.5));
+            ui.painter().rect_stroke(
+                rect,
+                3.0,
+                egui::Stroke::new(2.0, v.selection.stroke.color),
+                egui::StrokeKind::Inside,
+            );
+            nc.hint = Some(DropHint::Add(l.name.clone()));
+            if let Some(p) = r.dnd_release_payload::<BooksDrag>() {
+                nc.acts.push(PanelAction::AddBooks { list: l.id.clone(), books: p.books.clone() });
+            }
+        }
+        Err(why) => nc.hint = Some(DropHint::Refused(why)),
     }
 }
 
@@ -345,6 +399,8 @@ pub enum BookListAction {
     NewList,
     Remove,
     Shift(bool),
+    /// Glisser-déposer dans la vue : déplacer les livres à ce repère.
+    Reorder(Anchor),
 }
 
 pub fn book_lists_menu(
@@ -646,6 +702,7 @@ impl ComicRustApp {
                 });
                 self.run_list_op(ctx, OpTag::Panel, op);
             }
+            PanelAction::AddBooks { list, books } => self.book_list_request(ctx, BookListAction::Add(list), books),
             PanelAction::Drop { dragged, target, place } => {
                 let Some((parent, position)) = lists_ops::drop_position(&items, &dragged, &target, place) else {
                     return;
@@ -977,6 +1034,25 @@ impl ComicRustApp {
                 ListOp::new("Réordonnancement de la liste", move |ed| {
                     let current = ed.books(&list)?;
                     if let Some(to) = lists_ops::shift_books(&current, &books, up) {
+                        ed.move_books(&list, &books, to)?;
+                    }
+                    Ok(Outcome::default())
+                })
+            }
+            BookListAction::Reorder(anchor) => {
+                let Some(list) = shown else { return };
+                // Dépôt sans effet (à sa place) : rien à enregistrer.
+                let current = match ComicList::find(&items, &list).map(|l| &l.kind) {
+                    Some(ListKind::Ids(ids)) => ids.clone(),
+                    _ => return,
+                };
+                if reorder_target(&current, &books, &anchor).is_none() {
+                    return;
+                }
+                let what = format!("Réordonnancement de « {} »", name_of(&list));
+                ListOp::new(what, move |ed| {
+                    let current = ed.books(&list)?;
+                    if let Some(to) = reorder_target(&current, &books, &anchor) {
                         ed.move_books(&list, &books, to)?;
                     }
                     Ok(Outcome::default())

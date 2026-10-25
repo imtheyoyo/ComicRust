@@ -586,6 +586,8 @@ impl eframe::App for ComicRustApp {
             Mode::Library => self.library_view(ui),
             Mode::Reader => self.viewer(ui),
         });
+        // Glisser de livres : curseur et badge « N livres » par-dessus tout.
+        self.books_drag_overlay(&ctx);
 
         self.resume_window(&ctx);
         self.files_windows(&ctx);

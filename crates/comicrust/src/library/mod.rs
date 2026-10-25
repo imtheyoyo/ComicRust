@@ -5,11 +5,12 @@ pub mod comicrack_write;
 pub mod covers;
 pub mod files;
 pub mod lists_ops;
+pub mod mouse;
 pub mod scan;
 pub mod sorting;
 pub mod watch;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
@@ -223,6 +224,20 @@ pub struct LibraryState {
     pub source: Option<LibrarySource>,
     /// Analyse des dossiers de BD en cours (mode autonome).
     pub scan: Option<scan::ScanJob>,
+    /// Sélection à la souris en cours (rectangle, balayage du tableau).
+    pub gesture: Gesture,
+}
+
+/// Sélection à la souris en cours.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Gesture {
+    #[default]
+    None,
+    /// Rectangle de sélection (vue des couvertures) : point de départ en coordonnées du
+    /// contenu ; `base` : sélection gardée (Ctrl), à laquelle s'ajoutent les livres touchés.
+    Marquee { start: egui::Pos2, base: std::collections::HashSet<String> },
+    /// Balayage des lignes du tableau depuis la ligne `anchor` (rang dans la vue).
+    Sweep { anchor: usize, base: std::collections::HashSet<String> },
 }
 
 impl Default for LibraryState {
@@ -246,6 +261,7 @@ impl Default for LibraryState {
             watcher: None,
             source: None,
             scan: None,
+            gesture: Gesture::None,
         }
     }
 }
@@ -298,6 +314,7 @@ impl LibraryState {
         self.selected_book = None;
         self.open_stack = None;
         self.selected_stack = None;
+        self.gesture = Gesture::None;
     }
 
     /// Mode autonome ?
@@ -432,6 +449,50 @@ impl LibraryState {
         }
         self.selected_books = [id.clone()].into();
         self.selected_book = Some(id);
+    }
+
+    /// Sélection à la souris : `base` plus les livres de rangs `indices` dans la vue. Le livre
+    /// courant (fiche, point de départ de Maj+clic) est gardé s'il reste sélectionné, sinon
+    /// c'est le premier de la vue.
+    pub fn select_view_indices(&mut self, indices: impl IntoIterator<Item = usize>, base: &HashSet<String>) {
+        let Some(db) = self.database() else { return };
+        let mut set = base.clone();
+        set.extend(
+            indices.into_iter().filter_map(|k| self.view.get(k)).filter_map(|&i| db.books.get(i)).map(|b| b.id.clone()),
+        );
+        let keep = self.selected_book.as_ref().is_some_and(|b| set.contains(b));
+        if !keep {
+            self.selected_book =
+                self.view.iter().filter_map(|&i| db.books.get(i)).find(|b| set.contains(&b.id)).map(|b| b.id.clone());
+            if self.selected_book.is_none() {
+                // Livres de `base` hors de la vue (recherche) : n'importe lequel.
+                self.selected_book = set.iter().next().cloned();
+            }
+        }
+        self.selected_books = set;
+    }
+
+    /// Ctrl+A : tous les livres affichés.
+    pub fn select_all(&mut self) {
+        let all = 0..self.view.len();
+        self.select_view_indices(all, &HashSet::new());
+    }
+
+    /// Échap, clic dans le vide : plus aucun livre sélectionné.
+    pub fn clear_selection(&mut self) {
+        self.selected_book = None;
+        self.selected_books.clear();
+    }
+
+    /// Identifiants des livres affichés, dans l'ordre de la vue.
+    pub fn view_ids(&self) -> Vec<String> {
+        let Some(db) = self.database() else { return Vec::new() };
+        self.view.iter().filter_map(|&i| db.books.get(i)).map(|b| b.id.clone()).collect()
+    }
+
+    /// Sélection courante sous forme d'ensemble (base d'une sélection à la souris avec Ctrl).
+    pub fn selection_set(&self) -> HashSet<String> {
+        self.selection().into_iter().collect()
     }
 
     /// Le livre fait-il partie de la sélection ?
@@ -796,6 +857,36 @@ mod tests {
         assert_eq!(s.selection(), ["d"]);
         s.selected_book = None;
         assert!(s.selection().is_empty() && !s.is_selected("e"));
+    }
+
+    #[test]
+    fn mouse_selection() {
+        let mut s = state();
+        assert_eq!(ids(&mut s, &series()), ["c", "e", "b", "a", "d"]);
+        assert_eq!(s.view_ids(), ["c", "e", "b", "a", "d"]);
+        // Rectangle (ou balayage) sur les rangs 1 à 3.
+        s.select_view_indices(1..=3, &HashSet::new());
+        assert_eq!(s.selection(), ["e", "b", "a"]);
+        assert_eq!(s.selected_book.as_deref(), Some("e"), "fiche : premier livre touché");
+        // Le rectangle rétrécit : le livre courant reste s'il est encore dedans.
+        s.selected_book = Some("b".into());
+        s.select_view_indices(2..=3, &HashSet::new());
+        assert_eq!((s.selection(), s.selected_book.as_deref()), (vec!["b".to_string(), "a".into()], Some("b")));
+        // Avec Ctrl : ajouté à la sélection de départ.
+        let base = s.selection_set();
+        s.select_view_indices([0], &base);
+        assert_eq!(s.selection(), ["c", "b", "a"]);
+        // Rien touché, sans Ctrl : plus de sélection.
+        s.select_view_indices(std::iter::empty(), &HashSet::new());
+        assert!(s.selection().is_empty() && s.selected_book.is_none());
+        // Rangs hors de la vue ignorés.
+        s.select_view_indices([4, 99], &HashSet::new());
+        assert_eq!(s.selection(), ["d"]);
+        s.select_all();
+        assert_eq!(s.selection(), ["c", "e", "b", "a", "d"]);
+        assert_eq!(s.selected_book.as_deref(), Some("d"), "Ctrl+A garde le livre courant");
+        s.clear_selection();
+        assert!(s.selection().is_empty() && s.selected_books.is_empty());
     }
 
     #[test]
