@@ -38,6 +38,12 @@ livres (infos, lecture, notes, signets), ses listes et ses dossiers dans la base
 puis ComicRust passe en autonome. ComicRack n'est que lu ; le transfert peut être relancé sans
 créer de doublons.
 
+**Listes** (v0.9.0) : création, modification, copie, suppression, déplacement, listes de lecture
+remplies depuis la bibliothèque, éditeur de listes intelligentes. En autonome, elles sont dans la
+base de ComicRust ; avec ComicRack, dans son `ComicDb.xml`, seulement quand ComicRack est fermé et
+l'écriture activée (sauvegarde avant chaque modification). Avec l'écriture activée, la lecture et
+les fichiers convertis sont aussi enregistrés dans la base MySQL de ComicRack.
+
 ## Bibliothèque (base MySQL de ComicRack)
 
 ComicRust lit la base **MySQL** de ComicRack CE, **en lecture seule** (uniquement des `SELECT`) :
@@ -180,7 +186,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.8.0](recette/v0.8.0.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.9.0](recette/v0.9.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -222,7 +228,8 @@ journal dans les releases déjà publiées.
    ComicRack (MySQL ou ComicDb.xml)~~ (v0.7.0).
 6. ~~Transfert de la bibliothèque ComicRack (livres, lecture, listes, dossiers) vers la base
    de ComicRust~~ (v0.8.0).
-7. Gestion complète des listes ; écriture dans la base de ComicRack (v0.9.0).
+7. ~~Gestion complète des listes, éditeur de listes intelligentes ; écriture dans la base de
+   ComicRack~~ (v0.9.0).
 8. Scripts Python (v0.10.0), serveur OPDS / HTTP (v0.11.0) ; plus tard, associations de
    fichiers Windows et un **mode serveur sous Docker**.
 

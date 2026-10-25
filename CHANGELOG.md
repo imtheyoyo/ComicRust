@@ -5,6 +5,51 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.9.0] — 2026-10-25
+
+Gestion complète des listes et écriture dans la base de ComicRack.
+
+### Nouveautés
+- **Gestion des listes** (panneau des listes) :
+  - bouton « ＋ » : nouvelle liste de lecture, liste intelligente ou dossier ;
+  - menu contextuel : Modifier, Renommer (F2), Dupliquer, Supprimer (avec avertissement des
+    listes intelligentes qui en partent), Convertir en liste de lecture, Monter / Descendre,
+    Déplacer dans ▸ ;
+  - glisser-déposer dans l'arbre.
+- **Livres et listes de lecture** : sélection multiple (Ctrl / Maj + clic), « Ajouter à la
+  liste ▸ » (ou nouvelle liste avec les livres choisis) ; dans une liste de lecture : « Retirer
+  de la liste » (Suppr : ne supprime jamais de fichier), Monter / Descendre.
+- **Éditeur de listes intelligentes**, comme celui de ComicRack :
+  - critères (tous / au moins un), Non, groupes imbriqués ;
+  - liste de départ, limite ;
+  - aperçu en direct du nombre de livres.
+
+  Les critères que tu ne touches pas sont gardés à l'identique.
+- **Où sont enregistrées les listes** :
+  - en autonome : dans la base de ComicRust ;
+  - avec ComicRack : dans `ComicDb.xml`, **seulement quand ComicRack est fermé** et si
+    l'écriture est activée. Une sauvegarde est faite avant chaque modification : la première,
+    `ComicDb.comicrust-origine-….xml.bak`, est gardée pour toujours, plus les 10 dernières.
+- **Écriture dans la base MySQL de ComicRack** (assistant → « Lecture et écriture » ; lecture
+  seule par défaut) :
+  - ce qui est enregistré : la lecture (page, date, nombre d'ouvertures), les fichiers convertis
+    en CBZ, les infos écrites dans les fichiers ;
+  - ComicRack lancé voit les modifications en quelques secondes ;
+  - seuls les éléments concernés de la fiche sont modifiés ;
+  - les lectures faites dans ComicRust en lecture seule sont proposées au report, sans jamais
+    faire reculer ComicRack.
+
+### Corrections (relecture avant publication)
+- Caractères interdits en XML retirés des noms et descriptions (ComicRack aurait refusé
+  `ComicDb.xml`).
+- Nombres décimaux écrits avec le séparateur de Windows (« 4,5 »), comme ComicRack les lit.
+- Mode lecture seule : les listes de ComicRack ne sont plus modifiables.
+- ComicRack lancé pendant l'enregistrement : vérifié à nouveau juste avant d'écrire.
+- Écritures en attente gardées à la fermeture de ComicRust et refaites au lancement suivant.
+
+### Recette
+[recette/v0.9.0.md](recette/v0.9.0.md).
+
 ## [v0.8.0] — 2026-10-24
 
 Se passer de ComicRack : sa bibliothèque peut être transférée dans la base de ComicRust.
