@@ -35,7 +35,7 @@ Windows (demande de la recette de la v0.9.0).
   déplace ni ne supprime de fichier** : seules les listes changent.
 
 ### Recette
-[recette/v0.9.1.md](recette/v0.9.1.md).
+[recette/v0.9.1.md](recette/v0.9.1.md) — GO (19/19 OK).
 
 ## [v0.9.0] — 2026-10-25
 
