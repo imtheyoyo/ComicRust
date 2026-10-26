@@ -21,7 +21,7 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.8.0 | [v0.8.0.md](v0.8.0.md) — [page à cocher](https://claude.ai/artifact/LcCkUQpinxSQ8Pam8eXSvs) | **GO** (24/10/2026) : 17/17 OK ; 5 323 livres et 47 listes transférés, 0 doublon |
 | v0.9.0 | [v0.9.0.md](v0.9.0.md) — [page à cocher](https://claude.ai/artifact/JWGKwvo1khckvqU7V1x7Sb) — [rapport](rapports/v0.9.0-2026-10-25.txt) | **GO** (25/10/2026) : 21/21 OK ; glisser-déposer des livres demandé → v0.9.1 |
 | v0.9.1 | [v0.9.1.md](v0.9.1.md) — [page à cocher](https://claude.ai/artifact/FtSwg3kxQAoJhZDouYeuzg) — [rapport](rapports/v0.9.1-2026-10-25.txt) | **GO** (25/10/2026) : 19/19 OK |
-| v0.10.0 | [v0.10.0.md](v0.10.0.md) — [page à cocher](https://claude.ai/artifact/7oo6BZvTNycrqMRAUn8pqn) | en recette |
+| v0.10.0 | [v0.10.0.md](v0.10.0.md) — [page à cocher](https://claude.ai/artifact/7oo6BZvTNycrqMRAUn8pqn) — [rapport](rapports/v0.10.0-2026-10-26.txt) | **GO** (26/10/2026) : 18/18 OK ; demandes (fiches, flèches, Bedetheque, Library Organizer) → v0.10.1 |
 
 ## Déroulé
 

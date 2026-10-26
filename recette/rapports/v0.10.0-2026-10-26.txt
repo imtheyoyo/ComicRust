@@ -1,0 +1,13 @@
+Rapport de recette ComicRust v0.10.0 — 26/10/2026 20:44
+Résultat : 18 OK, 0 échec(s), 0 non testé(s) sur 18.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+Avant de passer à la v0.10.0, il faut ajouter ces améliorations :
+
+* Pouvoir éditer manuellement les informations des livres.
+* Pouvoir utiliser les flèches haut, bas, gauche, droite pour se déplacer dans la liste des livres, ainsi que dans l'arborescence des listes.
+* Crée un script identique à 'Bedetheque Scraper 2' de ComickRack.
+* Crée un script identique à 'Library Organiser' de ComickRack.

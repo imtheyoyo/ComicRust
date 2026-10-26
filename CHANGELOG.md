@@ -48,7 +48,7 @@ Scripts Python, avec Python embarqué dans le zip.
 - Aperçu préparé en arrière-plan (pas de blocage sur un NAS), processus Python toujours arrêtés.
 
 ### Recette
-[recette/v0.10.0.md](recette/v0.10.0.md).
+[recette/v0.10.0.md](recette/v0.10.0.md) — GO (18/18 OK).
 
 ## [v0.9.1] — 2026-10-25
 
