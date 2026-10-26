@@ -26,6 +26,7 @@ Ce fichier est fourni par ComicRust (il est réécrit à chaque lancement) : ne 
 """
 
 import _thread
+import base64
 import inspect
 import io
 import json
@@ -45,9 +46,14 @@ __all__ = [
     "progress", "cancelled", "check_cancelled", "log", "message",
     "ask", "ask_choice", "confirm", "settings", "format_name",
     "http_get", "http_get_text", "http_get_json",
+    "form", "choose", "ui", "open_url", "clipboard_set",
 ]
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+# Taille maximale d'une image envoyée à l'interface (formulaire, liste de choix,
+# progression) et taille cumulée des images d'une fenêtre.
+MAX_IMAGE_BYTES = 2 * 1024 * 1024
+MAX_IMAGES_TOTAL = 12 * 1024 * 1024
 # Nombre de modifications en attente au-delà duquel elles sont envoyées à ComicRust.
 FLUSH_EVERY = 500
 # Livres lus par lot.
@@ -473,15 +479,25 @@ def flush():
 # Interface : progression, journal, questions
 # ---------------------------------------------------------------------------------------
 
-def progress(fraction=None, text=""):
-    """Avancement : ``fraction`` entre 0 et 1 (``None`` = inconnu), ``text`` affiché."""
+def progress(fraction=None, text="", detail=None, image=None):
+    """Avancement : ``fraction`` entre 0 et 1 (``None`` = inconnu), ``text`` affiché.
+
+    ``detail`` : sous-texte sous la barre (``None`` = inchangé, ``""`` = effacé).
+    ``image`` : image affichée à côté (couverture de l'album traité…) : octets JPEG, PNG,
+    WebP, GIF ou BMP, ou chemin d'un fichier ; ``None`` = inchangée, ``b""`` = retirée.
+    Envoyer l'image seulement quand elle change."""
     if fraction is not None:
         try:
             fraction = float(fraction)
             fraction = max(0.0, min(1.0, fraction)) if math.isfinite(fraction) else None
         except (TypeError, ValueError):
             fraction = None
-    _session().ch.send({"t": "progress", "fraction": fraction, "text": str(text)})
+    msg = {"t": "progress", "fraction": fraction, "text": str(text)}
+    if detail is not None:
+        msg["detail"] = str(detail)
+    if image is not None:
+        msg["image"] = "" if image in (b"", "") else _image_b64(image, "image de progression")
+    _session().ch.send(msg)
 
 
 def cancelled():
@@ -529,6 +545,324 @@ def ask_choice(question, choices, default=None):
 def confirm(question, default=False):
     """Question oui/non ; ``default`` sans interface."""
     return bool(_session().ch.request("ask", kind="confirm", question=str(question), default=bool(default)))
+
+
+# ---------------------------------------------------------------------------------------
+# Fenêtres : formulaires, listes de choix, navigateur, presse-papiers
+# ---------------------------------------------------------------------------------------
+
+def _image_bytes(data, what):
+    """Octets d'une image : ``bytes`` (ou équivalent) ou chemin d'un fichier."""
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        raw = bytes(data)
+    elif isinstance(data, (str, os.PathLike)):
+        size = os.path.getsize(data)
+        if size > MAX_IMAGE_BYTES:
+            raise ValueError("%s : image trop grosse (%d octets, %d au plus)" % (what, size, MAX_IMAGE_BYTES))
+        with open(data, "rb") as f:
+            raw = f.read()
+    else:
+        raise TypeError("%s : octets ou chemin de fichier attendus, pas %s" % (what, type(data).__name__))
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError("%s : image trop grosse (%d octets, %d au plus)" % (what, len(raw), MAX_IMAGE_BYTES))
+    return raw
+
+
+def _image_b64(data, what):
+    return base64.b64encode(_image_bytes(data, what)).decode("ascii")
+
+
+def _choices(choices):
+    """Choix : textes, paires ``(valeur, libellé)`` ou dictionnaire ``{valeur: libellé}``."""
+    if choices is None:
+        return []
+    if isinstance(choices, dict):
+        return [[k, str(v)] for k, v in choices.items()]
+    out = []
+    for c in choices:
+        if isinstance(c, (tuple, list)) and len(c) == 2:
+            out.append([c[0], str(c[1])])
+        else:
+            out.append(c)
+    return out
+
+
+def _ctl(type_, key=None, label=None, help=None, enabled_if=None, width=None, **extra):
+    c = {"type": type_}
+    for k, v in (("key", key), ("label", label), ("help", help), ("enabled_if", enabled_if), ("width", width)):
+        if v is not None:
+            c[k] = v
+    for k, v in extra.items():
+        if v is not None:
+            c[k] = v
+    return c
+
+
+class ui:
+    """Contrôles des formulaires (:func:`form`). Chaque fonction renvoie un simple
+    dictionnaire : on peut aussi les écrire à la main (``{"type": "text", "key": …}``).
+
+    Paramètres communs : ``key`` (nom de la valeur rendue), ``label``, ``default``,
+    ``help`` (infobulle), ``enabled_if`` (contrôle actif seulement si : ``"clé"`` est
+    cochée/non vide, ``"!clé"`` ne l'est pas, ``"clé=valeur"``, ``"clé!=valeur"``),
+    ``width`` (largeur du champ en pixels)."""
+
+    @staticmethod
+    def text(key, label="", default="", help=None, placeholder=None, required=False, enabled_if=None,
+             width=None, inserts=None):
+        """Texte d'une ligne. ``inserts`` : morceaux à insérer par un menu « Insérer »
+        (textes ou paires ``(texte_inséré, libellé)``, ex. ``("{series}", "Série")``)."""
+        return _ctl("text", key, label, help, enabled_if, width, default=str(default or ""),
+                    placeholder=placeholder, required=bool(required) or None, inserts=_choices(inserts) or None)
+
+    @staticmethod
+    def textarea(key, label="", default="", rows=4, help=None, placeholder=None, required=False,
+                 enabled_if=None, width=None, inserts=None):
+        """Texte de plusieurs lignes."""
+        return _ctl("textarea", key, label, help, enabled_if, width, default=str(default or ""), rows=rows,
+                    placeholder=placeholder, required=bool(required) or None, inserts=_choices(inserts) or None)
+
+    @staticmethod
+    def secret(key, label="", default=None, help=None, enabled_if=None, width=None):
+        """Saisie masquée (clé d'API, mot de passe) : ``default`` (valeur actuelle) n'est
+        ni affiché ni envoyé à l'interface ; une saisie vide le rend tel quel."""
+        c = _ctl("secret", key, label, help, enabled_if, width)
+        c["_secret_default"] = default
+        return c
+
+    @staticmethod
+    def checkbox(key, label="", default=False, help=None, enabled_if=None):
+        """Case à cocher (``True``/``False``)."""
+        return _ctl("checkbox", key, label, help, enabled_if, None, default=bool(default))
+
+    @staticmethod
+    def number(key, label="", default=0, min=None, max=None, step=1, decimals=0, help=None,
+               enabled_if=None, width=None):
+        """Nombre borné (entier si ``decimals=0``)."""
+        return _ctl("number", key, label, help, enabled_if, width, default=default, min=min, max=max,
+                    step=step, decimals=decimals)
+
+    @staticmethod
+    def choice(key, label="", choices=(), default=None, editable=False, required=False, help=None,
+               enabled_if=None, width=None):
+        """Liste déroulante ; ``editable=True`` : saisie libre possible."""
+        return _ctl("choice", key, label, help, enabled_if, width, choices=_choices(choices), default=default,
+                    editable=bool(editable) or None, required=bool(required) or None)
+
+    @staticmethod
+    def radio(key, label="", choices=(), default=None, horizontal=False, help=None, enabled_if=None):
+        """Boutons radio (premier choix par défaut)."""
+        return _ctl("radio", key, label, help, enabled_if, None, choices=_choices(choices), default=default,
+                    horizontal=bool(horizontal) or None)
+
+    @staticmethod
+    def multichoice(key, label="", choices=(), default=(), height=None, required=False, help=None,
+                    enabled_if=None):
+        """Liste à cocher : valeur = liste des valeurs cochées (boutons Tout / Rien)."""
+        return _ctl("multichoice", key, label, help, enabled_if, None, choices=_choices(choices),
+                    default=list(default or ()), height=height, required=bool(required) or None)
+
+    @staticmethod
+    def list_edit(key, label="", default=(), choices=None, unique=True, required=False, height=None,
+                  help=None, enabled_if=None):
+        """Liste éditable de textes (ajouter, retirer, monter, descendre) ; ``choices`` :
+        suggestions proposées à l'ajout ; ``unique`` : doublons refusés (sans casse)."""
+        return _ctl("list_edit", key, label, help, enabled_if, None, default=[str(x) for x in default or ()],
+                    choices=[str(x) for x in choices] if choices else None, unique=bool(unique),
+                    required=bool(required) or None, height=height)
+
+    @staticmethod
+    def column(title, type="text", choices=None, width=None):
+        """Colonne de :func:`ui.table` : ``type`` = ``"text"``, ``"number"``,
+        ``"checkbox"`` ou ``"choice"`` (avec ``choices``)."""
+        return _ctl(type, None, None, None, None, width, title=str(title), choices=_choices(choices) or None)
+
+    @staticmethod
+    def table(key, label="", columns=(), default=(), height=None, help=None, enabled_if=None):
+        """Tableau éditable (règles, substitutions…) : valeur = liste de lignes (listes).
+        ``columns`` : titres ou :func:`ui.column`."""
+        return _ctl("table", key, label, help, enabled_if, None,
+                    columns=[c if isinstance(c, dict) else str(c) for c in columns],
+                    default=[list(r) for r in default or ()], height=height)
+
+    @staticmethod
+    def folder(key, label="", default="", required=False, help=None, enabled_if=None, width=None):
+        """Dossier, avec bouton « Parcourir… »."""
+        return _ctl("folder", key, label, help, enabled_if, width, default=str(default or ""),
+                    required=bool(required) or None)
+
+    @staticmethod
+    def file(key, label="", default="", filters=None, save=False, required=False, help=None,
+             enabled_if=None, width=None):
+        """Fichier, avec bouton « Parcourir… » ; ``filters`` : ``[("Images", ["jpg", "png"])]`` ;
+        ``save=True`` : fichier à créer (fenêtre « Enregistrer sous »)."""
+        return _ctl("file", key, label, help, enabled_if, width, default=str(default or ""),
+                    filters=[[n, list(e) if isinstance(e, (list, tuple)) else e] for n, e in filters or ()] or None,
+                    save=bool(save) or None, required=bool(required) or None)
+
+    @staticmethod
+    def label(text, style=None, enabled_if=None):
+        """Texte fixe ; ``style`` : ``"bold"``, ``"small"``, ``"weak"``, ``"heading"``,
+        ``"warning"``, ``"error"``."""
+        return _ctl("label", None, None, None, enabled_if, None, text=str(text), style=style)
+
+    @staticmethod
+    def separator():
+        """Trait de séparation."""
+        return {"type": "separator"}
+
+    @staticmethod
+    def image(data, caption=None, max_width=None, max_height=None):
+        """Image fixe (couverture…) : octets JPEG/PNG/WebP/GIF/BMP ou chemin d'un fichier
+        (2 Mo au plus)."""
+        return _ctl("image", None, None, None, None, None, data=_image_b64(data, "image du formulaire"),
+                    caption=caption, max_width=max_width, max_height=max_height)
+
+    @staticmethod
+    def group(title, controls, enabled_if=None, help=None):
+        """Cadre titré contenant d'autres contrôles."""
+        return _ctl("group", None, None, help, enabled_if, None, title=str(title or ""), controls=list(controls))
+
+    @staticmethod
+    def columns(*columns, enabled_if=None):
+        """Colonnes côte à côte : ``ui.columns([contrôles…], [contrôles…])``."""
+        return _ctl("columns", None, None, None, enabled_if, None, columns=[list(c) for c in columns])
+
+    @staticmethod
+    def tabs(tabs, enabled_if=None):
+        """Onglets : ``{"Titre": [contrôles…], …}`` (ou liste de paires)."""
+        items = tabs.items() if isinstance(tabs, dict) else tabs
+        return _ctl("tabs", None, None, None, enabled_if, None,
+                    tabs=[{"title": str(t), "controls": list(c)} for t, c in items])
+
+    @staticmethod
+    def button(key, label, help=None, validate=False, enabled_if=None):
+        """Bouton dans le formulaire : ferme le formulaire et rend ``(key, valeurs)`` ; le
+        script peut le rouvrir avec ``values=`` (formulaire dynamique : nouveau profil,
+        ajout d'une règle…). ``validate=True`` : champs vérifiés avant."""
+        return _ctl("button", key, label, help, enabled_if, None, validate=bool(validate) or None)
+
+
+def _prepare_controls(controls, secrets):
+    """Copie des contrôles pour l'envoi : valeurs secrètes retirées (gardées ici dans
+    ``secrets``), images en base64."""
+    out = []
+    for c in controls:
+        if not isinstance(c, dict):
+            raise TypeError("contrôle de formulaire : dictionnaire attendu (voir comicrust.ui), pas %r" % (c,))
+        c = dict(c)
+        if c.get("type") == "secret" or c.get("secret"):
+            secrets[c.get("key")] = c.pop("_secret_default", c.get("default"))
+            c.pop("default", None)
+        c.pop("_secret_default", None)
+        if c.get("type") == "image" and not isinstance(c.get("data"), str):
+            c["data"] = _image_b64(c.get("data"), "image du formulaire")
+        if "controls" in c:
+            c["controls"] = _prepare_controls(c["controls"], secrets)
+        if "columns" in c and c.get("type") == "columns":
+            c["columns"] = [_prepare_controls(col, secrets) for col in c["columns"]]
+        if "tabs" in c:
+            c["tabs"] = [dict(t, controls=_prepare_controls(t.get("controls") or [], secrets)) for t in c["tabs"]]
+        out.append(c)
+    return out
+
+
+_UNSET = object()
+
+
+def form(title, controls, buttons=("OK", "Annuler"), values=None, width=None, message=None, cancel=_UNSET):
+    """Affiche un formulaire et attend la réponse.
+
+    ``controls`` : liste de contrôles (:class:`ui`) ; ``buttons`` : boutons du bas ;
+    ``cancel`` : bouton qui annule (par défaut le dernier s'il y en a plusieurs ;
+    ``None`` = aucun) ; ``values`` : valeurs initiales (remplacent les ``default``, pour
+    rouvrir un formulaire) ; ``width`` : largeur en pixels ; ``message`` : texte en tête.
+
+    Renvoie ``(bouton, valeurs)`` — ``bouton`` : libellé du bouton du bas ou clé d'un
+    :func:`ui.button` ; ``valeurs`` : dictionnaire clé → valeur — ou ``None`` si
+    l'utilisateur annule, ferme la fenêtre ou arrête le script, et **toujours** ``None``
+    pour un script sans interface (automatisme) : prévoir des valeurs par défaut."""
+    secrets = {}
+    ctrls = _prepare_controls(list(controls), secrets)
+    vals = dict(values or {})
+    for k in secrets:
+        vals.pop(k, None)
+    params = {"title": str(title), "controls": ctrls, "buttons": [str(b) for b in buttons], "values": vals}
+    if width is not None:
+        params["width"] = width
+    if message is not None:
+        params["message"] = str(message)
+    if cancel is not _UNSET:
+        params["cancel"] = None if cancel is None else str(cancel)
+    rep = _session().ch.request("form", **params)
+    if rep is None:
+        return None
+    result = dict(rep.get("values") or {})
+    for k, current in secrets.items():
+        if result.get(k) in (None, ""):
+            result[k] = current
+    return rep.get("button"), result
+
+
+def choose(title, columns, rows, images=None, multi=False, default=None, message=None, filter=None,
+           timeout=None, thumb_size=None):
+    """Liste de choix (tableau triable, vignettes facultatives) ; double-clic = choisir.
+
+    ``columns`` : titres des colonnes ; ``rows`` : une liste de cellules par ligne (ou
+    un simple texte) ; ``images`` : une image par ligne (octets JPEG/PNG/WebP/GIF/BMP,
+    chemin de fichier ou ``None``), 2 Mo au plus chacune et 12 Mo en tout (``ValueError``
+    sinon) ; ``multi`` : plusieurs lignes ; ``default`` : rang (ou liste de rangs) choisi
+    au départ ; ``filter`` : champ de filtre (par défaut au-delà de 8 lignes) ; ``timeout``
+    : secondes après lesquelles ``default`` est validé tout seul (toute action arrête le
+    compte à rebours) ; ``thumb_size`` : hauteur des vignettes (64 px par défaut).
+
+    Renvoie le rang choisi (liste de rangs avec ``multi``), ou ``None`` (annulé, arrêté,
+    script sans interface)."""
+    if isinstance(columns, str):
+        columns = [columns]
+    rows = [list(r) if isinstance(r, (list, tuple)) else [r] for r in rows]
+    params = {"title": str(title), "columns": [str(c) for c in columns], "rows": rows, "multi": bool(multi)}
+    if images is not None:
+        images = list(images)
+        if len(images) != len(rows):
+            raise ValueError("choose : %d images pour %d lignes" % (len(images), len(rows)))
+        enc, total = [], 0
+        for i, img in enumerate(images):
+            if img is None:
+                enc.append(None)
+                continue
+            raw = _image_bytes(img, "image de la ligne %d" % i)
+            total += len(raw)
+            if total > MAX_IMAGES_TOTAL:
+                raise ValueError("choose : images trop grosses au total (%d octets au plus)" % MAX_IMAGES_TOTAL)
+            enc.append(base64.b64encode(raw).decode("ascii"))
+        params["images"] = enc
+    if default is not None:
+        params["default"] = list(default) if isinstance(default, (list, tuple, set)) else default
+    if message is not None:
+        params["message"] = str(message)
+    if filter is not None:
+        params["filter"] = bool(filter)
+    if timeout is not None:
+        params["timeout"] = float(timeout)
+    if thumb_size is not None:
+        params["thumb_size"] = thumb_size
+    return _session().ch.request("choose", **params)
+
+
+def open_url(url):
+    """Ouvre ``url`` (http ou https seulement, ``ValueError`` sinon) dans le navigateur.
+    Renvoie ``False`` pour un script sans interface (rien n'est ouvert)."""
+    u = str(url).strip()
+    if not re.match(r"(?i)^https?://", u):
+        raise ValueError("open_url : seules les adresses http:// et https:// sont permises (%r)" % (u,))
+    return bool(_session().ch.request("open_url", url=u))
+
+
+def clipboard_set(text):
+    """Copie ``text`` dans le presse-papiers. Renvoie ``False`` pour un script sans
+    interface (rien n'est copié)."""
+    return bool(_session().ch.request("clipboard_set", text=str(text)))
 
 
 # ---------------------------------------------------------------------------------------
@@ -717,6 +1051,12 @@ def _main():
     ch.send({"t": "hello", "protocol": PROTOCOL_VERSION, "python": sys.version.split()[0]})
     run = ch.inbox.get()
     if not run or run.get("t") != "run":
+        os._exit(2)
+    if run.get("protocol") != PROTOCOL_VERSION:
+        ch.finished = True
+        ch.send({"t": "error", "type": "ComicRust",
+                 "message": "module comicrust (protocole %d) incompatible avec ComicRust (protocole %r)"
+                 % (PROTOCOL_VERSION, run.get("protocol")), "traceback": ""})
         os._exit(2)
     _S = _Session(ch, run)
     script = run["script"]

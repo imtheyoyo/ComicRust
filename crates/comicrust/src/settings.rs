@@ -214,6 +214,9 @@ pub struct Settings {
     /// Réglages des scripts, par fichier (`ScriptEntry::settings_key`) : JSON de
     /// `ScriptSettings::to_stored` (valeurs secrètes chiffrées).
     pub script_settings: std::collections::BTreeMap<String, String>,
+    /// Fenêtre « Infos du livre » : écrire aussi les infos dans le fichier (CBZ) à
+    /// l'enregistrement (v0.10.1).
+    pub info_write_file: bool,
 }
 
 impl Default for Settings {
@@ -260,6 +263,7 @@ impl Default for Settings {
             scripts_enabled: Default::default(),
             scripts_auto: false,
             script_settings: Default::default(),
+            info_write_file: false,
         }
     }
 }

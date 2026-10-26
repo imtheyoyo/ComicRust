@@ -6,12 +6,16 @@
 //! déplace les livres sélectionnés (vers une liste de lecture du panneau, ou entre deux
 //! lignes d'une liste de lecture triée dans l'ordre de la liste). Clic sous les lignes :
 //! plus de sélection.
+//!
+//! Clavier (v0.10.1) : ↑/↓, Début/Fin, Page préc./suiv. (Maj : étendre la sélection ;
+//! Ctrl : curseur seul, Espace : (dé)sélectionner), Entrée ouvre le livre.
 
 use comicrust_core::library::LibraryBook;
 use eframe::egui::{self, pos2, RichText, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use crate::app::ComicRustApp;
+use crate::library::keynav::{list_move, KeyFocus, NavKey, SelectMode};
 use crate::library::mouse::{reorder_allowed, reorder_anchor, sweep_range, table_insertion, table_row_at};
 use crate::library::{Gesture, SortKey};
 use crate::ui::book_drag::{dragged_books, edge_scroll, paint_insertion, start_books_drag, DropHint};
@@ -136,6 +140,31 @@ impl ComicRustApp {
         let scripts_menu = self.book_scripts();
         let mut script_request: Option<(String, Vec<String>)> = None;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+        // Clavier : déplacement dans les lignes.
+        if self.nav_keys_for(ui.ctx(), KeyFocus::Books) {
+            let (keys, space) = crate::ui::library_view::nav_presses(ui.ctx());
+            let pitch = row_h + ui.spacing().item_spacing.y;
+            let page = ((ui.available_height() / pitch).floor() as usize).saturating_sub(2).max(1);
+            for (k, m) in keys {
+                if matches!(k, NavKey::Left | NavKey::Right) {
+                    continue; // ←/→ : défilement horizontal des colonnes, pas la sélection
+                }
+                if let Some(t) = list_move(view.len(), self.library.cursor_index(), k, page) {
+                    self.library.key_select(t, SelectMode::of(m));
+                }
+            }
+            if space {
+                self.library.toggle_cursor();
+            }
+        }
+        let scroll_row =
+            if std::mem::take(&mut self.library.nav.scroll_to_cursor) { self.library.cursor_index() } else { None };
+        let cursor_mark: Option<String> = if self.library.nav.focus == KeyFocus::Books {
+            self.library.cursor.clone().filter(|c| !self.library.is_selected(c) || self.library.selection().len() > 1)
+        } else {
+            None
+        };
+        let mut info_request: Option<Vec<String>> = None;
         // Souris : glisser en cours, réordonnancement possible ou non, balayage.
         let n = view.len();
         let ctx = ui.ctx().clone();
@@ -161,6 +190,9 @@ impl ComicRustApp {
                 .resizable(true)
                 .sense(Sense::click_and_drag())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+            if let Some(r) = scroll_row {
+                t = t.scroll_to_row(r, None);
+            }
             if in_list {
                 t = t.column(Column::initial(40.0).at_least(30.0));
             }
@@ -230,6 +262,9 @@ impl ComicRustApp {
                         });
                     }
                     let resp = row.response();
+                    if cursor_mark.as_deref() == Some(book.id.as_str()) {
+                        cursor_stroke(&resp, clip);
+                    }
                     if top0.is_none() {
                         top0 = Some(resp.rect.top() - row.index() as f32 * pitch);
                     }
@@ -242,6 +277,7 @@ impl ComicRustApp {
                     resp.context_menu(|ui| {
                         Self::book_file_menu(ui, &self.settings, &book.id, book.file.as_deref(), &mut file_request);
                         let books = if selected { selection.clone() } else { vec![book.id.clone()] };
+                        crate::ui::library_view::info_menu_item(ui, &books, &mut info_request);
                         book_lists_menu(ui, &lists_menu, &books, &mut list_request);
                         crate::ui::scripts_ui::book_scripts_menu(ui, &scripts_menu, &books, &mut script_request);
                     });
@@ -333,7 +369,21 @@ impl ComicRustApp {
         if let Some((script, books)) = script_request {
             self.run_script(ui.ctx(), &script, comicrust_core::scripting::Hook::Books, books);
         }
+        if let Some(books) = info_request {
+            self.open_info_editor(books);
+        }
     }
+}
+
+/// Cadre du curseur du clavier autour d'une ligne.
+fn cursor_stroke(resp: &egui::Response, clip: egui::Rect) {
+    let p = resp.ctx.layer_painter(resp.layer_id).with_clip_rect(clip);
+    p.rect_stroke(
+        resp.rect.shrink(1.0),
+        2.0,
+        egui::Stroke::new(1.5, crate::ui::library_view::ACCENT),
+        egui::StrokeKind::Inside,
+    );
 }
 
 #[cfg(test)]

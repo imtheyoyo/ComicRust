@@ -4,6 +4,8 @@
 pub mod comicrack_write;
 pub mod covers;
 pub mod files;
+pub mod info_form;
+pub mod keynav;
 pub mod lists_ops;
 pub mod mouse;
 pub mod scan;
@@ -227,6 +229,12 @@ pub struct LibraryState {
     pub scan: Option<scan::ScanJob>,
     /// Sélection à la souris en cours (rectangle, balayage du tableau).
     pub gesture: Gesture,
+    /// Curseur du clavier (livre atteint par les flèches ; `None` : le livre sélectionné).
+    /// Différent de `selected_book` après Maj+flèche (l'ancre reste `selected_book`) ou
+    /// Ctrl+flèche (seul le curseur bouge).
+    pub cursor: Option<String>,
+    /// Navigation au clavier : panneau actif, défilement, arbre des listes.
+    pub nav: keynav::NavState,
 }
 
 /// Sélection à la souris en cours.
@@ -263,6 +271,8 @@ impl Default for LibraryState {
             source: None,
             scan: None,
             gesture: Gesture::None,
+            cursor: None,
+            nav: Default::default(),
         }
     }
 }
@@ -316,6 +326,7 @@ impl LibraryState {
         self.open_stack = None;
         self.selected_stack = None;
         self.gesture = Gesture::None;
+        self.cursor = None;
     }
 
     /// Mode autonome ?
@@ -428,6 +439,7 @@ impl LibraryState {
     /// sélectionné jusqu'à lui dans l'ordre de la vue (Maj).
     pub fn click_book(&mut self, id: &str, ctrl: bool, shift: bool) {
         let id = id.to_string();
+        self.cursor = Some(id.clone());
         if shift {
             if let (Some(anchor), Some(db)) = (self.selected_book.clone(), self.database()) {
                 let pos = |x: &str| self.view.iter().position(|&i| db.books.get(i).is_some_and(|b| b.id == x));
@@ -475,6 +487,7 @@ impl LibraryState {
         set.extend(
             indices.into_iter().filter_map(|k| self.view.get(k)).filter_map(|&i| db.books.get(i)).map(|b| b.id.clone()),
         );
+        self.cursor = None;
         let keep = self.selected_book.as_ref().is_some_and(|b| set.contains(b));
         if !keep {
             self.selected_book =
@@ -497,6 +510,57 @@ impl LibraryState {
     pub fn clear_selection(&mut self) {
         self.selected_book = None;
         self.selected_books.clear();
+        self.cursor = None;
+    }
+
+    /// Rang d'un livre dans la vue.
+    pub fn view_index(&self, id: &str) -> Option<usize> {
+        let db = self.database()?;
+        self.view.iter().position(|&i| db.books.get(i).is_some_and(|b| b.id == id))
+    }
+
+    /// Identifiant du livre de rang `k` dans la vue.
+    pub fn view_id(&self, k: usize) -> Option<String> {
+        let db = self.database()?;
+        self.view.get(k).and_then(|&i| db.books.get(i)).map(|b| b.id.clone())
+    }
+
+    /// Livre du curseur du clavier : le curseur s'il est affiché, sinon le livre sélectionné.
+    pub fn cursor_id(&self) -> Option<String> {
+        self.cursor.clone().filter(|c| self.view_index(c).is_some()).or_else(|| self.selected_book.clone())
+    }
+
+    /// Rang du curseur du clavier dans la vue.
+    pub fn cursor_index(&self) -> Option<usize> {
+        self.view_index(&self.cursor_id()?)
+    }
+
+    /// Flèches : le livre de rang `k` est atteint (`mode` : effet des modificateurs).
+    pub fn key_select(&mut self, k: usize, mode: keynav::SelectMode) {
+        let Some(id) = self.view_id(k) else { return };
+        match mode {
+            keynav::SelectMode::Replace => self.click_book(&id, false, false),
+            keynav::SelectMode::MoveOnly => self.cursor = Some(id),
+            keynav::SelectMode::Extend => {
+                let anchor = self.selected_book.as_deref().and_then(|a| self.view_index(a));
+                match anchor {
+                    Some(a) => {
+                        let ids: HashSet<String> = keynav::extend_range(a, k).filter_map(|i| self.view_id(i)).collect();
+                        self.selected_books = ids;
+                        self.cursor = Some(id);
+                    }
+                    None => self.click_book(&id, false, false),
+                }
+            }
+        }
+        self.nav.scroll_to_cursor = true;
+    }
+
+    /// Espace : ajoute ou retire le livre du curseur de la sélection (comme Ctrl+clic).
+    pub fn toggle_cursor(&mut self) {
+        if let Some(id) = self.cursor_id() {
+            self.click_book(&id, true, false);
+        }
     }
 
     /// Identifiants des livres affichés, dans l'ordre de la vue.
@@ -902,6 +966,44 @@ mod tests {
         assert_eq!(s.selected_book.as_deref(), Some("d"), "Ctrl+A garde le livre courant");
         s.clear_selection();
         assert!(s.selection().is_empty() && s.selected_books.is_empty());
+    }
+
+    #[test]
+    fn keyboard_selection() {
+        use keynav::SelectMode::*;
+        let mut s = state();
+        assert_eq!(ids(&mut s, &series()), ["c", "e", "b", "a", "d"]);
+        assert_eq!(s.cursor_index(), None, "rien de sélectionné");
+        s.key_select(1, Replace);
+        assert_eq!((s.selection(), s.cursor_index()), (vec!["e".to_string()], Some(1)));
+        assert!(std::mem::take(&mut s.nav.scroll_to_cursor), "la vue défile jusqu'au curseur");
+        // Maj+flèches : de l'ancre (« e ») au curseur, dans les deux sens.
+        s.key_select(3, Extend);
+        assert_eq!(s.selection(), ["e", "b", "a"]);
+        assert_eq!((s.selected_book.as_deref(), s.cursor_index()), (Some("e"), Some(3)), "l'ancre reste");
+        s.key_select(0, Extend);
+        assert_eq!(s.selection(), ["c", "e"]);
+        // Ctrl+flèches : le curseur seul ; Espace (dé)sélectionne.
+        s.key_select(4, MoveOnly);
+        assert_eq!(s.selection(), ["c", "e"]);
+        assert_eq!(s.cursor_index(), Some(4));
+        s.toggle_cursor();
+        assert_eq!(s.selection(), ["c", "e", "d"]);
+        s.toggle_cursor();
+        assert_eq!(s.selection(), ["c", "e"]);
+        // Clic : le curseur suit ; Échap : plus de curseur.
+        s.click_book("b", false, false);
+        assert_eq!(s.cursor_index(), Some(2));
+        s.clear_selection();
+        assert_eq!(s.cursor_index(), None);
+        // Maj+flèche sans sélection : sélection simple.
+        s.key_select(2, Extend);
+        assert_eq!(s.selection(), ["b"]);
+        // Curseur sorti de la vue (recherche) : on repart du livre sélectionné.
+        s.key_select(4, MoveOnly);
+        s.search = "thanos".into();
+        assert_eq!(ids(&mut s, &series()), ["e", "b", "a"]);
+        assert_eq!(s.cursor_index(), Some(1), "livre sélectionné « b »");
     }
 
     #[test]

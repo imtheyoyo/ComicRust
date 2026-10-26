@@ -27,6 +27,26 @@ impl ComicRustApp {
             if full {
                 self.toggle_fullscreen(ctx);
             }
+            // Tab (ou Maj+Tab) : les flèches passent de la vue des livres à l'arbre des
+            // listes et inversement (rien n'a le focus d'egui : pas de saisie en cours).
+            if self.info_editor.is_none()
+                && self.settings.show_comic_lists
+                && self.library.database().is_some()
+                && ctx.memory(|m| m.focused().is_none())
+                && ctx.input_mut(|i| {
+                    i.consume_key(eframe::egui::Modifiers::NONE, Key::Tab)
+                        || i.consume_key(eframe::egui::Modifiers::SHIFT, Key::Tab)
+                })
+            {
+                use crate::library::keynav::KeyFocus;
+                self.library.nav.focus = match self.library.nav.focus {
+                    KeyFocus::Books => KeyFocus::Lists,
+                    KeyFocus::Lists => KeyFocus::Books,
+                };
+                // Tab ne donne pas le focus au premier bouton venu.
+                ctx.memory_mut(|m| m.move_focus(eframe::egui::FocusDirection::None));
+                ctx.request_repaint();
+            }
             return;
         }
         let manga = self.settings.manga;

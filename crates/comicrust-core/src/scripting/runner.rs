@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use super::forms::{check_url, ChooseSpec, FormAnswer, FormSpec, ProgressDetails};
 use super::protocol::{ChangeItem, FromScript};
 use super::{find_python, Hook, ScriptEntry, EDITABLE_FIELDS, PROTOCOL_VERSION, PYTHON_MODULE, READ_ONLY_FIELDS};
 use crate::library::LibraryBook;
@@ -23,6 +24,8 @@ const MAX_BOOKS_PER_REQUEST: usize = 5_000;
 const MAX_CHANGES: usize = 1_000_000;
 /// Longueur maximale d'une ligne du journal (au-delà : tronquée).
 const MAX_LOG_LINE: usize = 16 * 1024;
+/// Longueur maximale d'un texte copié dans le presse-papiers.
+const MAX_CLIPBOARD: usize = 1024 * 1024;
 
 /// Lancement du module : `sys.argv[1]` = dossier où `comicrust.py` a été écrit. Le Python
 /// « embeddable » ignore `PYTHONPATH` : le chemin est donc ajouté ici.
@@ -271,6 +274,37 @@ pub trait ScriptHost: Send + Sync {
     /// Avancement (`fraction` entre 0 et 1, ou `None` si inconnu).
     fn progress(&self, _fraction: Option<f32>, _text: &str) {}
 
+    /// Sous-texte et image de la fenêtre de progression (appelée après [`progress`]
+    /// seulement si l'un des deux est donné).
+    ///
+    /// [`progress`]: ScriptHost::progress
+    fn progress_details(&self, _details: &ProgressDetails) {}
+
+    /// Formulaire (`comicrust.form`) : bouton et valeurs, ou `None` (fenêtre fermée,
+    /// annulée, script arrêté). N'est appelée que si le contexte est interactif. Par
+    /// défaut : aucune interface (`None`).
+    fn form(&self, _form: &FormSpec) -> Option<FormAnswer> {
+        None
+    }
+
+    /// Liste de choix (`comicrust.choose`) : rangs choisis, ou `None`. N'est appelée que si
+    /// le contexte est interactif. Par défaut : aucune interface (`None`).
+    fn choose(&self, _choice: &ChooseSpec) -> Option<Vec<usize>> {
+        None
+    }
+
+    /// Ouvre une adresse http(s) déjà vérifiée dans le navigateur ; vrai si c'est fait.
+    /// N'est appelée que si le contexte est interactif.
+    fn open_url(&self, _url: &str) -> bool {
+        false
+    }
+
+    /// Copie un texte dans le presse-papiers ; vrai si c'est fait. N'est appelée que si le
+    /// contexte est interactif.
+    fn clipboard_set(&self, _text: &str) -> bool {
+        false
+    }
+
     /// Réglages enregistrés du script.
     fn load_settings(&self, _settings_key: &str) -> ScriptSettings {
         ScriptSettings::default()
@@ -361,7 +395,9 @@ impl Default for RunOptions {
             timeout: None,
             start_timeout: Duration::from_secs(30),
             grace: Duration::from_secs(3),
-            max_message_bytes: 8 * 1024 * 1024,
+            // Images des formulaires et listes de choix comprises (base64 : 4/3 des 12 Mo
+            // permis au total, voir `forms::MAX_IMAGES_TOTAL`).
+            max_message_bytes: 20 * 1024 * 1024,
             max_journal_bytes: 1024 * 1024,
         }
     }
@@ -946,8 +982,10 @@ impl Session {
         match msg {
             FromScript::Hello { protocol, python } => {
                 if protocol != PROTOCOL_VERSION {
+                    let age = if protocol < PROTOCOL_VERSION { "plus ancien" } else { "plus récent" };
                     return Err(format!(
-                        "version de protocole {protocol} du module Python, {PROTOCOL_VERSION} attendue"
+                        "module Python comicrust {age} que ComicRust (protocole {protocol}, {PROTOCOL_VERSION} \
+                         attendu) : un autre fichier comicrust.py est-il importé à la place de celui de ComicRust ?"
                     ));
                 }
                 self.hello = true;
@@ -1003,9 +1041,14 @@ impl Session {
                     self.log(kind, l.to_string());
                 }
             }
-            FromScript::Progress { fraction, text } => {
+            FromScript::Progress { fraction, text, detail, image } => {
                 let f = fraction.filter(|f| f.is_finite()).map(|f| f.clamp(0.0, 1.0) as f32);
                 self.host.progress(f, &text);
+                match ProgressDetails::parse(detail, image.as_ref()) {
+                    Ok(d) if d.is_empty() => {}
+                    Ok(d) => self.host.progress_details(&d),
+                    Err(e) => self.log(JournalKind::Warning, format!("progression : {e}")),
+                }
             }
             FromScript::Done { value } => self.end = Some((RunState::Finished, None, value)),
             FromScript::Error { kind, message, traceback } => {
@@ -1072,6 +1115,56 @@ impl Session {
                 Ok(Value::Null)
             }
             "changes" => self.changes(p),
+            "form" => {
+                let spec = FormSpec::parse(p).map_err(|e| format!("formulaire : {e}"))?;
+                if !self.ctx.interactive {
+                    self.log(
+                        JournalKind::Info,
+                        format!("formulaire « {} » non affiché : script sans interface (None)", spec.title),
+                    );
+                    return Ok(Value::Null);
+                }
+                let Some(answer) = self.host.form(&spec) else { return Ok(Value::Null) };
+                match spec.check_button(&answer.button) {
+                    Ok(true) => Ok(json!({"button": answer.button, "values": spec.sanitize(&answer.values)})),
+                    Ok(false) => Ok(Value::Null),
+                    Err(e) => Err(format!("formulaire : {e}")),
+                }
+            }
+            "choose" => {
+                let spec = ChooseSpec::parse(p).map_err(|e| format!("liste de choix : {e}"))?;
+                if !self.ctx.interactive {
+                    self.log(
+                        JournalKind::Info,
+                        format!("liste de choix « {} » non affichée : script sans interface (None)", spec.title),
+                    );
+                    return Ok(Value::Null);
+                }
+                Ok(match self.host.choose(&spec).and_then(|picked| spec.sanitize(&picked)) {
+                    None => Value::Null,
+                    Some(picked) if spec.multi => json!(picked),
+                    Some(picked) => json!(picked[0]),
+                })
+            }
+            "open_url" => {
+                let url = check_url(p.get("url").and_then(Value::as_str).unwrap_or_default())?;
+                if !self.ctx.interactive {
+                    self.log(JournalKind::Info, format!("adresse non ouverte (script sans interface) : {url}"));
+                    return Ok(Value::Bool(false));
+                }
+                Ok(Value::Bool(self.host.open_url(&url)))
+            }
+            "clipboard_set" => {
+                let text = p.get("text").and_then(Value::as_str).unwrap_or_default();
+                if text.len() > MAX_CLIPBOARD {
+                    return Err(format!("texte trop long pour le presse-papiers (plus de {MAX_CLIPBOARD} octets)"));
+                }
+                if !self.ctx.interactive {
+                    self.log(JournalKind::Info, "presse-papiers non modifié : script sans interface".into());
+                    return Ok(Value::Bool(false));
+                }
+                Ok(Value::Bool(self.host.clipboard_set(text)))
+            }
             "save_settings" => {
                 let values = p.get("values").and_then(Value::as_object).cloned().unwrap_or_default();
                 let secret = p

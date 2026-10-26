@@ -176,7 +176,11 @@ Une demande sur un livre hors du contexte du script est refusée (journal).
 
 ### Interface
 
-- `comicrust.progress(fraction, texte)` : barre d'avancement (0 à 1).
+- `comicrust.progress(fraction, texte, detail=None, image=None)` : barre d'avancement
+  (0 à 1) ; `detail` : sous-texte sous la barre ; `image` : image affichée à côté
+  (couverture de l'album traité : octets JPEG/PNG/WebP/GIF/BMP ou chemin de fichier,
+  2 Mo au plus ; `b""` la retire). `None` = inchangé : n'envoyer l'image que quand elle
+  change.
 - `comicrust.cancelled()` : vrai si l'utilisateur a cliqué sur « Arrêter » — à tester dans
   les boucles. Sans réaction en 1 s, `KeyboardInterrupt` est levée dans le script ; sans
   réaction quelques secondes de plus, le processus est arrêté.
@@ -194,6 +198,186 @@ Une demande sur un livre hors du contexte du script est refusée (journal).
   s'arrête sur une erreur, les modifications valides déjà demandées restent visibles en
   aperçu.
 - `comicrust.hook()`, `comicrust.interactive()`, `comicrust.args()`.
+- `comicrust.form(...)`, `comicrust.choose(...)` : formulaires et listes de choix avec
+  vignettes (section suivante).
+- `comicrust.open_url(url)` : ouvre une adresse `http://` ou `https://` dans le
+  navigateur (`ValueError` pour toute autre adresse) ; renvoie `False` sans rien ouvrir
+  pour un automatisme.
+- `comicrust.clipboard_set(texte)` : copie dans le presse-papiers (`False` pour un
+  automatisme).
+
+### Fenêtres : formulaires et listes de choix (v0.10.1)
+
+Pour des réglages riches (onglets, listes à cocher, règles…) et le choix d'un album parmi
+plusieurs résultats avec sa couverture, comme les fenêtres de Bedetheque Scraper ou de
+Library Organizer dans ComicRack.
+
+**Sans interface** (automatismes `NewBooks`, `BookOpened`… : personne pour répondre),
+`form` et `choose` **renvoient toujours `None`** sans rien afficher (une ligne est écrite
+dans le journal) : prévoir des valeurs par défaut. `None` aussi si l'utilisateur annule,
+ferme la fenêtre (Échap) ou clique sur « Arrêter le script ».
+
+#### `comicrust.form`
+
+```python
+bouton_et_valeurs = comicrust.form(titre, controles, buttons=("OK", "Annuler"),
+                                   values=None, width=None, message=None, cancel=…)
+```
+
+- Renvoie `(bouton, valeurs)` : `bouton` = libellé du bouton du bas cliqué, ou clé d'un
+  `ui.button` ; `valeurs` = dictionnaire clé → valeur de **tous** les contrôles (y compris
+  ceux d'onglets non visités ou désactivés). Ou `None`.
+- `buttons` : boutons du bas, le premier est mis en avant ; `cancel` : celui qui annule
+  (rend `None`, sans vérification) — par défaut le **dernier** quand il y en a plusieurs,
+  `cancel=None` : aucun.
+- `values` : valeurs initiales qui remplacent les `default` (pour rouvrir un formulaire
+  avec la saisie précédente) ; `width` : largeur en pixels (560 par défaut) ; `message` :
+  texte d'introduction. Un formulaire trop haut défile.
+- Avant de fermer, ComicRust vérifie les champs **actifs** : champ `required` vide, nombre
+  hors de `min`/`max`, doublon dans une `list_edit` ; l'erreur s'affiche sous le champ,
+  l'onglet concerné s'ouvre (marqué ⚠), le formulaire reste ouvert.
+- Une description invalide (type inconnu, clé en double, `enabled_if` vers une clé
+  inconnue, image trop grosse…) lève `comicrust.ScriptError` avec la raison.
+
+Contrôles (`from comicrust import ui`) ; chacun est un simple dictionnaire
+(`{"type": "text", "key": …}` s'écrit aussi à la main). Paramètres communs : `key` (nom de
+la valeur), `label`, `default`, `help` (infobulle), `enabled_if` (actif seulement si :
+`"clé"` cochée ou non vide, `"!clé"`, `"clé=valeur"`, `"clé!=valeur"` ; un conteneur
+désactivé désactive son contenu), `width` (pixels).
+
+| Fonction | Valeur rendue | Particularités |
+|---|---|---|
+| `ui.text(key, label, default="", placeholder=, required=, inserts=)` | `str` | `inserts` : menu « Insérer ▾ » qui insère au curseur, ex. `[("{series}", "Série"), ("{number}", "Numéro")]` (modèles de nom) |
+| `ui.textarea(key, label, default="", rows=4, …)` | `str` | plusieurs lignes, `inserts` aussi |
+| `ui.secret(key, label, default=valeur_actuelle)` | `str` | saisie masquée ; la valeur actuelle n'est **ni affichée ni envoyée** à l'interface ; vide = valeur actuelle rendue |
+| `ui.checkbox(key, label, default=False)` | `bool` | |
+| `ui.number(key, label, default=0, min=, max=, step=1, decimals=0)` | `int` (ou `float` si `decimals`) | bornes vérifiées |
+| `ui.choice(key, label, choices, default=None, editable=False, required=False)` | valeur du choix | liste déroulante ; `editable` : saisie libre (texte rendu tel quel) |
+| `ui.radio(key, label, choices, default=None, horizontal=False)` | valeur du choix | premier choix par défaut |
+| `ui.multichoice(key, label, choices, default=(), height=None, required=False)` | `list` des valeurs cochées | liste à cocher avec « Tout » / « Rien » (champs à récupérer…) |
+| `ui.list_edit(key, label, default=(), choices=None, unique=True, required=False)` | `list` de `str` | ajouter (Entrée), retirer, monter, descendre ; `choices` : suggestions |
+| `ui.table(key, label, columns, default=())` | `list` de lignes (`list`) | tableau éditable : `ui.column(titre, type="text"|"number"|"checkbox"|"choice", choices=, width=)` ; ajouter, retirer, ordonner les lignes |
+| `ui.folder(key, label, default="", required=)` | `str` | bouton « Parcourir… » |
+| `ui.file(key, label, default="", filters=[("Images", ["jpg", "png"])], save=False)` | `str` | `save=True` : « Enregistrer sous » |
+| `ui.label(texte, style=None)` | — | `style` : `"bold"`, `"small"`, `"weak"`, `"heading"`, `"warning"`, `"error"` |
+| `ui.separator()` | — | |
+| `ui.image(octets_ou_chemin, caption=None, max_width=240, max_height=320)` | — | couverture… (2 Mo au plus) |
+| `ui.group(titre, [contrôles])` | — | cadre titré |
+| `ui.columns([contrôles], [contrôles], …)` | — | colonnes côte à côte (2 couvertures à comparer…) |
+| `ui.tabs({"Onglet": [contrôles], …})` | — | onglets |
+| `ui.button(key, label, validate=False)` | — | ferme le formulaire et rend `(key, valeurs)` (voir plus bas) |
+
+`choices` : liste de textes, de paires `(valeur, libellé)` ou dictionnaire
+`{valeur: libellé}`.
+
+Exemple (réglages à onglets, à la manière de Bedetheque Scraper) :
+
+```python
+import comicrust
+from comicrust import ui
+
+CHAMPS = ["Series", "Title", "Writer", "Penciller", "Colorist", "Summary", "Genre"]
+
+#@Name Réglages
+#@Hook ConfigScript
+def reglages():
+    s = comicrust.settings()
+    r = comicrust.form("Réglages du scraper", [
+        ui.tabs({
+            "Options": [
+                ui.radio("langue", "Langue", [("fr", "Français"), ("en", "Anglais")], horizontal=True),
+                ui.checkbox("debug", "Journal de débogage"),
+                ui.number("log_max", "Taille max du journal (Ko)", 500, min=10, max=10000, enabled_if="debug"),
+                ui.choice("choix", "Choix de l'album", [("0", "Jamais"), ("1", "Toujours"),
+                                                        ("2", "Automatique après délai")]),
+                ui.number("delai", "Délai (s)", 5, min=1, max=60, enabled_if="choix=2"),
+                ui.secret("cle", "Clé d'API", default=s.get("cle")),
+            ],
+            "Champs": [ui.multichoice("champs", "Champs à récupérer", CHAMPS, default=CHAMPS)],
+        }),
+    ], values=s)
+    if r is None:
+        return                      # annulé : rien n'est changé
+    bouton, valeurs = r
+    s.update(valeurs)
+    s.mark_secret("cle")
+```
+
+**Formulaire dynamique** (profils de Library Organizer : nouveau, renommer, supprimer…) :
+un `ui.button` ferme le formulaire et rend sa clé avec les valeurs saisies ; le script
+fait l'action et rouvre le formulaire avec `values=` :
+
+```python
+valeurs = {"profil": "Défaut"}
+while True:
+    profils = sorted(tous_les_profils)
+    r = comicrust.form("Library Organizer", [
+        ui.choice("profil", "Profil", profils),
+        ui.button("nouveau", "Nouveau profil…"),
+        ui.text("modele", "Modèle", "{publisher}/{series}", required=True,
+                inserts=[("{series}", "Série"), ("{number}", "Numéro"), ("{year}", "Année")]),
+        ui.table("regles", "Ne pas déplacer si", [
+            ui.column("Champ", "choice", choices=["Series", "Publisher", "Tags"]),
+            ui.column("Opérateur", "choice", choices=["est", "contient"]),
+            ui.column("Valeur")]),
+        ui.list_edit("exceptions", "Dossiers vides à garder"),
+    ], buttons=("Enregistrer", "Fermer"), values=valeurs)
+    if r is None:
+        break
+    bouton, valeurs = r
+    if bouton == "nouveau":
+        nom = comicrust.ask("Nom du nouveau profil :")
+        ...                         # créer le profil, puis la boucle rouvre le formulaire
+        continue
+    enregistrer(valeurs)
+    break
+```
+
+Fenêtre des doublons (deux couvertures côte à côte et des boutons) :
+
+```python
+r = comicrust.form("Ce fichier existe déjà", [
+    ui.columns(
+        [ui.label("À déplacer", style="bold"), ui.image(couv_nouveau), ui.label(infos_nouveau)],
+        [ui.label("Déjà présent", style="bold"), ui.image(couv_ancien), ui.label(infos_ancien)],
+    ),
+    ui.checkbox("tous", "Faire de même pour tous les conflits"),
+], buttons=("Remplacer", "Garder les deux", "Ne pas déplacer", "Annuler"))
+```
+
+#### `comicrust.choose`
+
+```python
+rang = comicrust.choose(titre, colonnes, lignes, images=None, multi=False, default=None,
+                        message=None, filter=None, timeout=None, thumb_size=None)
+```
+
+- Tableau **triable** (clic sur un titre de colonne : numérique si les cellules sont des
+  nombres, sinon ordre « naturel » 2 < 10), avec une colonne de **vignettes** si `images`
+  est donné ; survoler une vignette l'agrandit, l'image de la ligne survolée ou choisie
+  est aussi montrée à droite. **Double-clic** (ou Entrée) = choisir.
+- `colonnes` : titres ; `lignes` : une liste de cellules par ligne (ou un simple texte).
+- `images` : une par ligne, `None` pour aucune : octets JPEG/PNG/WebP/GIF/BMP ou chemin de
+  fichier ; **2 Mo au plus chacune et 12 Mo en tout** (`ValueError` sinon, avant tout
+  envoi). Elles sont décodées et réduites par ComicRust, hors de l'interface.
+- Renvoie le **rang** de la ligne choisie dans `lignes` (quel que soit le tri ou le
+  filtre), la liste des rangs avec `multi=True` (lignes cochées par clic), ou `None`.
+- `default` : rang (ou liste) choisi au départ ; `filter` : champ de filtre (tous les mots,
+  sans casse ; par défaut au-delà de 8 lignes) ; `timeout` : secondes après lesquelles la
+  sélection est validée toute seule (option « choix automatique » de Bedetheque Scraper ;
+  toute action de l'utilisateur arrête le compte à rebours ; sans sélection : `None`) ;
+  `thumb_size` : hauteur des vignettes (64 px).
+
+```python
+albums = chercher(book.series)               # [(titre, numéro, année, url_couv, url), …]
+couvs = [comicrust.http_get(a[3]) if a[3] else None for a in albums]
+i = comicrust.choose("Quel album ?", ["Titre", "N°", "Année"],
+                     [a[:3] for a in albums], images=couvs, default=0,
+                     timeout=10 if reglages["choix"] == "2" else None)
+if i is None:
+    return                                   # ignoré
+album = albums[i]
+```
 
 ### Réglages du script
 
@@ -333,7 +517,11 @@ def ouvert(book):
 - Chaque exécution lance un processus Python séparé : un script qui plante ou boucle ne
   fait pas tomber ComicRust.
 - Dialogue en JSON par lignes : entrée standard (ComicRust → script) et sortie standard
-  d'origine (script → ComicRust). `print()` est redirigé vers le journal (stderr).
+  d'origine (script → ComicRust). `print()` est redirigé vers le journal (stderr). Le
+  protocole porte un numéro de version (2 depuis la v0.10.1 : formulaires, listes de
+  choix, `open_url`, presse-papiers, image de progression) : un module `comicrust.py` plus
+  ancien ou plus récent que ComicRust est refusé avec un message clair. Les images
+  voyagent en base64 (un message fait 20 Mo au plus).
 - Le module `comicrust.py` est intégré à ComicRust et écrit à chaque lancement dans
   `data\python\` à côté de `ComicRust.exe` (ComicRust est portable : rien n'est écrit
   hors de son dossier) ; ne pas le modifier.

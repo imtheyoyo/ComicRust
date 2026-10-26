@@ -135,6 +135,14 @@ struct TestHost {
     saved: Mutex<Vec<(String, ScriptSettings)>>,
     live: Mutex<Vec<ScriptChange>>,
     book_requests: Mutex<usize>,
+    /// Formulaires reçus et réponses à donner (dans l'ordre).
+    forms: Mutex<Vec<FormSpec>>,
+    form_answers: Mutex<Vec<Option<FormAnswer>>>,
+    chooses: Mutex<Vec<ChooseSpec>>,
+    choose_answers: Mutex<Vec<Option<Vec<usize>>>>,
+    urls: Mutex<Vec<String>>,
+    clipboard: Mutex<Vec<String>>,
+    details: Mutex<Vec<ProgressDetails>>,
 }
 
 impl ScriptHost for TestHost {
@@ -164,7 +172,38 @@ impl ScriptHost for TestHost {
         self.live.lock().unwrap().extend_from_slice(changes);
         Ok(())
     }
+    fn progress_details(&self, d: &ProgressDetails) {
+        self.details.lock().unwrap().push(d.clone());
+    }
+    fn form(&self, f: &FormSpec) -> Option<FormAnswer> {
+        self.forms.lock().unwrap().push(f.clone());
+        let mut a = self.form_answers.lock().unwrap();
+        if a.is_empty() {
+            None
+        } else {
+            a.remove(0)
+        }
+    }
+    fn choose(&self, c: &ChooseSpec) -> Option<Vec<usize>> {
+        self.chooses.lock().unwrap().push(c.clone());
+        let mut a = self.choose_answers.lock().unwrap();
+        if a.is_empty() {
+            None
+        } else {
+            a.remove(0)
+        }
+    }
+    fn open_url(&self, url: &str) -> bool {
+        self.urls.lock().unwrap().push(url.into());
+        true
+    }
+    fn clipboard_set(&self, text: &str) -> bool {
+        self.clipboard.lock().unwrap().push(text.into());
+        true
+    }
 }
+
+mod forms;
 
 fn library(n: usize) -> TestHost {
     let mut host = TestHost::default();

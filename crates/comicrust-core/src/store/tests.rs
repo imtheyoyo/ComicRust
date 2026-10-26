@@ -444,6 +444,82 @@ fn tiny_cbz(path: &Path) {
     w.finish().unwrap();
 }
 
+/// CBZ d'une page avec un ComicInfo.xml (série `series`) ; `pad` grossit le fichier.
+fn cbz_with_info(path: &Path, series: &str, pad: usize) {
+    use std::io::Write;
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut w = ::zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let o = ::zip::write::SimpleFileOptions::default().compression_method(::zip::CompressionMethod::Stored);
+    w.start_file("001.jpg", o).unwrap();
+    w.write_all(&vec![b'x'; 1 + pad]).unwrap();
+    w.start_file("ComicInfo.xml", o).unwrap();
+    let xml = format!(
+        "<?xml version=\"1.0\"?><ComicInfo><Series>{series}</Series><Number>1</Number><Writer>Du fichier</Writer></ComicInfo>"
+    );
+    w.write_all(xml.as_bytes()).unwrap();
+    w.finish().unwrap();
+}
+
+/// v0.10.1 : une fiche modifiée à la main (fenêtre « Infos du livre ») n'est pas écrasée
+/// par la relecture du fichier lors de l'analyse suivante, même si le fichier a changé ;
+/// seul ce qui décrit le fichier est mis à jour. Une fiche non modifiée, elle, est relue.
+#[test]
+fn manual_edits_survive_the_next_folder_scan() {
+    use crate::edit::{apply_edits, EditTarget, FieldEdit};
+    let (dir, cfg) = temp_cfg();
+    let root = dir.path().join("BD");
+    let (pa, pb) = (root.join("A.cbz"), root.join("B.cbz"));
+    cbz_with_info(&pa, "Série du fichier", 0);
+    cbz_with_info(&pb, "Autre série", 0);
+    let mut s = Store::open(&cfg).unwrap();
+    let folders = [root.clone()];
+    let p = ScanProgress::default();
+    let no = AtomicBool::new(false);
+    let (report, _) = s.scan_into(&folders, &[], &p, &no, new_book_id).unwrap();
+    assert_eq!(report.added.len(), 2);
+    let books = s.load(None).unwrap().books;
+    let id_of =
+        |path: &Path| books.iter().find(|b| b.file.as_deref() == Some(path.to_str().unwrap())).unwrap().id.clone();
+    let (a, b) = (id_of(&pa), id_of(&pb));
+    assert_eq!(s.get(std::slice::from_ref(&a)).unwrap()[0].series.as_deref(), Some("Série du fichier"));
+
+    // Modification à la main de A (comme la fenêtre d'infos : `edit::apply_edits`).
+    let r = apply_edits(
+        EditTarget::Store(&mut s),
+        &[FieldEdit::set(&a, "Series", "Corrigée à la main"), FieldEdit::set(&a, "Writer", "Jim Starlin")],
+    )
+    .unwrap();
+    assert!(r.is_complete() && r.changed.len() == 1, "{r:?}");
+    assert_eq!(r.changed[0].comic_info_is_dirty, Some(true));
+
+    // Les deux fichiers changent sur le disque (autre taille, autre date).
+    for (path, series) in [(&pa, "Série réécrite"), (&pb, "Autre série réécrite")] {
+        cbz_with_info(path, series, 5000);
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+        std::fs::File::options().write(true).open(path).unwrap().set_modified(later).unwrap();
+    }
+    let known = s.load(None).unwrap().books;
+    let (report, _) = s.scan_into(&folders, &known, &p, &no, new_book_id).unwrap();
+    assert_eq!(report.updated.len(), 2, "{}", report.summary());
+    let get = |s: &mut Store, id: &str| s.get(&[id.to_string()]).unwrap().remove(0);
+    let ga = get(&mut s, &a);
+    assert_eq!(ga.series.as_deref(), Some("Corrigée à la main"), "modification à la main gardée");
+    assert_eq!(ga.writer.as_deref(), Some("Jim Starlin"));
+    assert_eq!(ga.comic_info_is_dirty, Some(true), "toujours « à écrire dans le fichier »");
+    assert!(ga.file_size.unwrap_or(0) > 5000, "ce qui décrit le fichier est relu");
+    let gb = get(&mut s, &b);
+    assert_eq!(gb.series.as_deref(), Some("Autre série réécrite"), "fiche non modifiée : relue");
+
+    // Une fois les infos écrites dans le fichier, l'analyse relit de nouveau le fichier.
+    s.set_comic_info_written(std::slice::from_ref(&a)).unwrap();
+    cbz_with_info(&pa, "Écrite dans le fichier", 9000);
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(240);
+    std::fs::File::options().write(true).open(&pa).unwrap().set_modified(later).unwrap();
+    let known = s.load(None).unwrap().books;
+    s.scan_into(&folders, &known, &p, &no, new_book_id).unwrap();
+    assert_eq!(get(&mut s, &a).series.as_deref(), Some("Écrite dans le fichier"));
+}
+
 #[test]
 fn scan_into_saves_added_books_in_batches() {
     let (dir, cfg) = temp_cfg();

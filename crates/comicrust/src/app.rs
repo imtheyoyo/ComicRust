@@ -96,6 +96,8 @@ pub struct ComicRustApp {
     pub(crate) cr_writes: crate::library::comicrack_write::ComicRackWrites,
     /// Scripts Python (v0.10.0) : découverte, exécutions, automatismes.
     pub(crate) scripts: crate::scripts::ScriptsState,
+    /// Fenêtre « Infos du livre » (v0.10.1) : modification manuelle des fiches.
+    pub(crate) info_editor: Option<crate::ui::info_editor::InfoEditor>,
 }
 
 impl ComicRustApp {
@@ -144,6 +146,7 @@ impl ComicRustApp {
             lists_ui: Default::default(),
             cr_writes: Default::default(),
             scripts: crate::scripts::ScriptsState::new(Default::default()),
+            info_editor: None,
         };
         app.scripts = crate::scripts::ScriptsState::new(app.settings.script_settings.clone());
         crate::update::cleanup_previous_install();
@@ -640,6 +643,9 @@ impl eframe::App for ComicRustApp {
         self.comicrack_write_window(&ctx);
         self.transfer_window(&ctx);
         self.lists_windows(&ctx);
+        // Avant les fenêtres des scripts : un script `Editor` terminé remplit la fenêtre
+        // d'infos au lieu d'ouvrir son aperçu.
+        self.info_editor_window(&ctx);
         self.scripts_windows(&ctx);
         self.scripts_closing_window(&ctx);
         self.scan_window(&ctx);

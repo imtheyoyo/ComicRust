@@ -11,8 +11,11 @@ use std::time::Duration;
 
 use comicrust_core::db::ComicDatabase;
 use comicrust_core::library::LibraryBook;
-use comicrust_core::scripting::{book_json, JournalLine, Question, ScriptChange, ScriptHost, ScriptSettings};
-use eframe::egui;
+use comicrust_core::scripting::{
+    book_json, ChooseSpec, FormAnswer, FormSpec, JournalLine, ProgressDetails, Question, ScriptChange, ScriptHost,
+    ScriptSettings,
+};
+use eframe::egui::{self, ColorImage};
 use serde_json::Value;
 
 use super::apply::{apply_plan, ApplyOutcome, ApplyPlan, ApplyTarget};
@@ -49,6 +52,28 @@ pub enum HostEvent {
         text: String,
         reply: Sender<()>,
     },
+    /// Formulaire (images déjà décodées, par identifiant de contrôle) ; `None` = annulé.
+    Form {
+        spec: Box<FormSpec>,
+        images: HashMap<usize, ColorImage>,
+        reply: Sender<Option<FormAnswer>>,
+    },
+    /// Liste de choix (vignettes déjà décodées) ; `None` = annulé.
+    Choose {
+        spec: Box<ChooseSpec>,
+        images: Vec<Option<ColorImage>>,
+        reply: Sender<Option<Vec<usize>>>,
+    },
+    /// Sous-texte et image de la progression (`None` : inchangés ; image `Some(None)` :
+    /// retirée).
+    ProgressDetails {
+        detail: Option<String>,
+        image: Option<Option<ColorImage>>,
+    },
+    /// Adresse http(s) vérifiée à ouvrir dans le navigateur.
+    OpenUrl(String),
+    /// Texte à copier dans le presse-papiers.
+    Clipboard(String),
     /// Modifications appliquées au fil de l'eau (automatisme).
     Applied(Box<ApplyOutcome>),
     /// Modifications refusées : bibliothèque en lecture seule (automatisme).
@@ -138,6 +163,47 @@ impl ScriptHost for UiHost {
 
     fn progress(&self, fraction: Option<f32>, text: &str) {
         self.send(HostEvent::Progress(fraction, text.to_string()));
+    }
+
+    fn progress_details(&self, d: &ProgressDetails) {
+        // Décodage ici, sur le fil du script : l'interface ne se fige pas.
+        let image = d
+            .image
+            .as_ref()
+            .map(|img| img.as_ref().and_then(|b| super::forms::decode_image(b, super::forms::PROGRESS_IMAGE_SIDE)));
+        self.send(HostEvent::ProgressDetails { detail: d.detail.clone(), image });
+    }
+
+    fn form(&self, spec: &FormSpec) -> Option<FormAnswer> {
+        let images = spec
+            .images()
+            .into_iter()
+            .filter_map(|(id, b)| super::forms::decode_image(&b, super::forms::FORM_IMAGE_SIDE).map(|i| (id, i)))
+            .collect();
+        let (reply, rx) = mpsc::channel();
+        self.send(HostEvent::Form { spec: Box::new(spec.clone()), images, reply });
+        self.wait(rx).flatten()
+    }
+
+    fn choose(&self, spec: &ChooseSpec) -> Option<Vec<usize>> {
+        let images = spec
+            .images
+            .iter()
+            .map(|b| b.as_ref().and_then(|b| super::forms::decode_image(b, super::forms::CHOOSE_IMAGE_SIDE)))
+            .collect();
+        let (reply, rx) = mpsc::channel();
+        self.send(HostEvent::Choose { spec: Box::new(spec.clone()), images, reply });
+        self.wait(rx).flatten()
+    }
+
+    fn open_url(&self, url: &str) -> bool {
+        self.send(HostEvent::OpenUrl(url.to_string()));
+        true
+    }
+
+    fn clipboard_set(&self, text: &str) -> bool {
+        self.send(HostEvent::Clipboard(text.to_string()));
+        true
     }
 
     fn load_settings(&self, key: &str) -> ScriptSettings {
@@ -250,6 +316,76 @@ mod tests {
         let text = r.journal_text();
         assert!(text.contains("réponse Yoyo"), "{text}");
         assert!(text.contains("confirmé True"), "valeur par défaut après l'arrêt : {text}");
+    }
+
+    /// Formulaire et liste de choix par le canal de l'interface (images décodées sur le fil
+    /// du script), puis arrêt pendant un formulaire : le script reçoit None.
+    #[test]
+    fn formulaire_choix_et_arret_pendant_un_formulaire() {
+        if scripting_python().is_none() {
+            eprintln!("python3 absent : test ignoré");
+            return;
+        }
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(600, 900, image::Rgba([0, 90, 200, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("couv.png"), &png).unwrap();
+        let code = "import comicrust\nfrom comicrust import ui\n\n#@Name F\n#@Hook Library\ndef f(books):\n    \
+                    r = comicrust.form('Essai', [ui.text('nom', 'Nom', 'x'), ui.image('couv.png')])\n    \
+                    print('formulaire', r)\n    \
+                    c = comicrust.choose('Album', ['Titre'], ['A', 'B'], images=['couv.png', None])\n    \
+                    print('choix', c)\n    \
+                    r = comicrust.form('Second', [ui.checkbox('c', 'Case')])\n    \
+                    print('second', r)\n    \
+                    import time\n    \
+                    while not comicrust.cancelled():\n        time.sleep(0.05)\n";
+        let file = dir.path().join("f.py");
+        std::fs::write(&file, code).unwrap();
+        let entry = parse_script(code, &file, "f.py").0.remove(0);
+        let (tx, rx) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let host = UiHost::new(
+            Arc::new(ComicDatabase::default()),
+            tx,
+            egui::Context::default(),
+            stop.clone(),
+            Default::default(),
+            Default::default(),
+            None,
+        );
+        let opts = RunOptions { module_dir: Some(dir.path().join("module")), ..Default::default() };
+        let handle = ScriptRunner::new(opts).start(&entry, RunContext::new(Hook::Library, vec![]), Arc::new(host));
+        let next = || loop {
+            match rx.recv_timeout(Duration::from_secs(20)).expect("fenêtre attendue") {
+                ev @ (HostEvent::Form { .. } | HostEvent::Choose { .. }) => return ev,
+                _ => continue,
+            }
+        };
+        let HostEvent::Form { spec, images, reply } = next() else { panic!("formulaire attendu") };
+        assert_eq!(spec.title, "Essai");
+        let img = images.values().next().expect("image décodée");
+        assert_eq!(img.size, [600, 900], "image de formulaire gardée jusqu'à 1024 px");
+        let mut st = super::super::forms::FormState::new(*spec, images);
+        st.fields.insert("nom".into(), super::super::forms::Field::Text("Yoyo".into()));
+        reply.send(st.submit("OK")).unwrap();
+        let HostEvent::Choose { spec, images, reply } = next() else { panic!("liste de choix attendue") };
+        assert_eq!(spec.rows.len(), 2);
+        assert_eq!(images[0].as_ref().unwrap().size, [320, 480], "vignette réduite");
+        assert!(images[1].is_none());
+        reply.send(Some(vec![1])).unwrap();
+        // Second formulaire : l'utilisateur arrête le script au lieu de répondre.
+        let HostEvent::Form { reply, .. } = next() else { panic!("formulaire attendu") };
+        stop.store(true, Ordering::SeqCst);
+        handle.cancel();
+        drop(reply);
+        let r = handle.wait();
+        assert!(matches!(r.state, RunState::Cancelled | RunState::Finished), "{:?}", r.state);
+        let text = r.journal_text();
+        assert!(text.contains("formulaire ('OK', {'nom': 'Yoyo'})"), "{text}");
+        assert!(text.contains("choix 1"), "{text}");
+        assert!(text.contains("second None"), "{text}");
     }
 
     fn scripting_python() -> Option<std::path::PathBuf> {

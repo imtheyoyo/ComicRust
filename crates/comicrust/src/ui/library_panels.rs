@@ -1,5 +1,9 @@
 //! Panneaux de la bibliothèque : listes de ComicRack (à gauche) et fiche du livre
 //! sélectionné (à droite).
+//!
+//! Arbre des listes au clavier (v0.10.1, voir `library/keynav.rs`) : ↑/↓ liste visible
+//! précédente/suivante (affichée aussitôt), → déplie un dossier puis va à son premier
+//! enfant, ← replie ou remonte au parent ; F2 renomme.
 
 use comicrust_core::comic_lists::{ComicList, ListKind};
 use comicrust_core::library::LibraryBook;
@@ -10,6 +14,7 @@ use super::library_table::{human_size, long_date, short_date};
 use super::library_view::{paint_cover, ACCENT, COVER_RATIO};
 use super::lists_ui::{handle_books_drop, handle_drop, list_menu, new_menu, rename_field, NodeCtx, PanelAction};
 use crate::app::ComicRustApp;
+use crate::library::keynav::{tree_move, KeyFocus, TreeAction, TreeRecorder};
 
 fn icon(l: &ComicList) -> &'static str {
     match &l.kind {
@@ -31,6 +36,17 @@ impl ComicRustApp {
             _ => None,
         };
         let mut acts: Vec<PanelAction> = Vec::new();
+        // Clic dans le panneau : les flèches vont à l'arbre.
+        if ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) {
+            self.library.nav.focus = KeyFocus::Lists;
+        }
+        let tree_focused = self.library.nav.focus == KeyFocus::Lists;
+        let mut tree = TreeRecorder {
+            fold: std::mem::take(&mut self.library.nav.fold),
+            focused: tree_focused,
+            scroll: std::mem::take(&mut self.library.nav.scroll_tree),
+            ..Default::default()
+        };
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.heading("Listes");
@@ -88,6 +104,10 @@ impl ComicRustApp {
             if r.clicked() {
                 chosen = Some(None);
             }
+            tree.push(None, false, false);
+            if all {
+                focus_frame(ui, &r, &tree);
+            }
             if r.dnd_hover_payload::<BooksDrag>().is_some() {
                 self.lists_ui.drag_hint =
                     Some(DropHint::Refused("La bibliothèque contient déjà tous les livres".into()));
@@ -103,6 +123,7 @@ impl ComicRustApp {
                 acts: std::mem::take(&mut acts),
                 shown: self.library.reading_list_shown().then(|| self.library.selected_list.clone()).flatten(),
                 hint: None,
+                tree: std::mem::take(&mut tree),
             };
             for l in &items {
                 // La « Bibliothèque » de ComicRack fait doublon avec la ligne ci-dessus.
@@ -110,6 +131,7 @@ impl ComicRustApp {
                     self.list_node(ui, l, &mut chosen, &mut nc);
                 }
             }
+            tree = std::mem::take(&mut nc.tree);
             self.lists_ui.renaming = nc.renaming;
             self.lists_ui.expand = nc.expand;
             acts = nc.acts;
@@ -164,8 +186,35 @@ impl ComicRustApp {
                 ui.label(RichText::new("Recherche du ComicDb.xml…").small().weak());
             }
         });
+        // Clavier : parcours de l'arbre (lignes visibles de ce dessin).
+        let rows = std::mem::take(&mut tree.rows);
+        if chosen.is_none() && self.nav_keys_for(&ctx, KeyFocus::Lists) {
+            let (keys, _) = super::library_view::nav_presses(&ctx);
+            let page = ((ui.available_height().max(ui.max_rect().height()) / 22.0).floor() as usize).max(1);
+            let mut cur = rows.iter().position(|r| r.id == self.library.selected_list);
+            for (k, _) in keys {
+                match tree_move(&rows, cur, k, page) {
+                    TreeAction::Select(i) => {
+                        cur = Some(i);
+                        chosen = Some(rows[i].id.clone());
+                        self.library.nav.scroll_tree = true;
+                    }
+                    TreeAction::Open(i) | TreeAction::Close(i) => {
+                        if let Some(id) = rows[i].id.clone() {
+                            let open = !rows[i].open;
+                            self.library.nav.fold.insert(id, open);
+                            ctx.request_repaint();
+                        }
+                    }
+                    TreeAction::None => {}
+                }
+            }
+        }
+        self.library.nav.tree_rows = rows;
         if let Some(c) = chosen {
-            self.select_list(c);
+            if c != self.library.selected_list {
+                self.select_list(c);
+            }
         }
         for a in acts {
             self.handle_panel_action(&ctx, a);
@@ -195,6 +244,9 @@ impl ComicRustApp {
         let r = ui
             .add(egui::Button::selectable(selected, text).sense(egui::Sense::click_and_drag()))
             .on_hover_ui(|ui| self.list_tooltip(ui, l));
+        if selected {
+            focus_frame(ui, &r, &nc.tree);
+        }
         if r.clicked() {
             *chosen = Some(Some(l.id.clone()));
         }
@@ -211,13 +263,27 @@ impl ComicRustApp {
                 if nc.expand.remove(&l.id.to_ascii_lowercase()) || nc.expand.remove(&l.id) {
                     state.set_open(true);
                 }
+                // Dossier déplié / replié au clavier (→ / ←).
+                if let Some(open) = nc.tree.fold.remove(&l.id) {
+                    state.set_open(open);
+                }
+                let open = state.is_open();
+                nc.tree.push(Some(l.id.clone()), true, open);
                 state.show_header(ui, |ui| self.list_label(ui, l, chosen, nc)).body(|ui| {
+                    // Contenu dessiné pendant l'animation de fermeture : lignes non visibles.
+                    nc.tree.hidden += usize::from(!open);
+                    nc.tree.depth += 1;
                     for c in children {
                         self.list_node(ui, c, chosen, nc);
                     }
+                    nc.tree.depth -= 1;
+                    nc.tree.hidden -= usize::from(!open);
                 });
             }
-            _ => self.list_label(ui, l, chosen, nc),
+            _ => {
+                nc.tree.push(Some(l.id.clone()), false, false);
+                self.list_label(ui, l, chosen, nc);
+            }
         }
     }
 
@@ -263,10 +329,15 @@ impl ComicRustApp {
         let ctx = ui.ctx().clone();
         self.ensure_covers(&ctx);
         let mut open = None;
+        let mut edit_info = false;
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.add_space(6.0);
             let w = ui.available_width().min(260.0);
-            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), w / COVER_RATIO), egui::Sense::hover());
+            let (rect, cover_resp) =
+                ui.allocate_exact_size(vec2(ui.available_width(), w / COVER_RATIO), egui::Sense::click());
+            if cover_resp.on_hover_text("Double-clic : modifier les infos (Ctrl+I)").double_clicked() {
+                edit_info = true;
+            }
             let cover = Rect::from_center_size(rect.center(), vec2(w, w / COVER_RATIO));
             let drawn = paint_cover(ui, self.covers.as_mut().unwrap(), &book, cover);
             if let Some(pct) = self.read_percent(&book) {
@@ -294,6 +365,9 @@ impl ComicRustApp {
                 if resume.is_some() && ui.button("⏮ Depuis le début").clicked() {
                     open = Some(true);
                 }
+                if ui.button("✏ Modifier").on_hover_text("Modifier les infos du livre (Ctrl+I)").clicked() {
+                    edit_info = true;
+                }
             });
             ui.separator();
             let standalone = self.library.standalone().is_some();
@@ -307,11 +381,26 @@ impl ComicRustApp {
                 }
             }
         });
+        if edit_info {
+            let books = self.library.selection();
+            self.open_info_editor(books);
+        }
         if let Some(from_start) = open {
             // « Lire (page N) » : la page de ComicRack, telle qu'affichée sur le bouton.
             let page = if from_start { 0 } else { book.current_page.unwrap_or(0) as usize };
             self.open_library_book(&ctx, &book.id, crate::app::Start::Page(page));
         }
+    }
+}
+
+/// Cadre de la liste affichée quand l'arbre a le focus du clavier ; défilement jusqu'à
+/// elle après un déplacement au clavier.
+fn focus_frame(ui: &Ui, r: &egui::Response, tree: &TreeRecorder) {
+    if tree.focused {
+        ui.painter().rect_stroke(r.rect.expand(1.0), 3.0, egui::Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
+    }
+    if tree.scroll {
+        r.scroll_to_me(None);
     }
 }
 

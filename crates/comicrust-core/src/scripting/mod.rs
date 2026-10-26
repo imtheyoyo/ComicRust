@@ -20,6 +20,10 @@
 //!   modifications ([`ScriptChange`]) que ComicRust vérifie (livre du contexte, champ connu)
 //!   puis rend dans le [`RunResult`] (aperçu avant application pour un script lancé du menu)
 //!   ou transmet au fil de l'eau à [`ScriptHost::apply_live`] (automatismes).
+//! - Fenêtres riches ([`forms`], v0.10.1) : formulaires (`comicrust.form`, contrôles à
+//!   onglets, groupes, listes éditables, tableaux…) et listes de choix avec vignettes
+//!   (`comicrust.choose`), décrits en JSON par le script, vérifiés ici et dessinés par
+//!   l'interface ([`ScriptHost::form`], [`ScriptHost::choose`]).
 //! - Module Python `comicrust` : fichier `comicrust.py` embarqué dans le binaire
 //!   (`include_str!`), écrit au lancement dans un dossier de travail (par défaut
 //!   `data\python\` à côté de l'exécutable, voir [`RunOptions::module_dir`] : ComicRust
@@ -33,6 +37,7 @@
 //! l'exécutable (Python embarqué du zip Windows), puis, hors Windows, `python3` du système.
 
 mod discover;
+pub mod forms;
 pub mod protocol;
 mod runner;
 
@@ -40,6 +45,7 @@ mod runner;
 mod tests;
 
 pub use discover::{discover, discover_with_warnings, entries_for_hook, parse_script, DiscoveryWarning, ScriptEntry};
+pub use forms::{ChooseSpec, FormAnswer, FormSpec, ProgressDetails};
 pub use runner::{
     book_json, default_module_dir, BookChanges, JournalKind, JournalLine, Question, QuestionKind, RejectedChange,
     RunContext, RunHandle, RunOptions, RunResult, RunState, ScriptChange, ScriptFailure, ScriptHost, ScriptRunner,
@@ -51,8 +57,10 @@ use std::path::{Path, PathBuf};
 /// Texte du module Python `comicrust` fourni aux scripts.
 pub const PYTHON_MODULE: &str = include_str!("comicrust.py");
 
-/// Version du protocole échangée au démarrage (`hello` du script).
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Version du protocole échangée au démarrage (`hello` du script). 2 (v0.10.1) :
+/// formulaires (`form`), listes de choix avec vignettes (`choose`), `open_url`,
+/// `clipboard_set`, sous-texte et image de la progression.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Moments où ComicRust appelle un script (en-tête `#@Hook`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
@@ -71,10 +79,14 @@ pub enum Hook {
     Startup,
     /// Bouton « Réglages » du script : `fonction()`.
     ConfigScript,
+    /// Bouton « Scripts » de la fenêtre « Infos du livre » (v0.10.1, `#@Hook Editor` de
+    /// ComicRack) : `fonction(books)` sur le livre affiché ; ses modifications remplissent
+    /// les champs de la fenêtre, enregistrées seulement quand l'utilisateur valide.
+    Editor,
 }
 
 impl Hook {
-    pub const ALL: [Hook; 7] = [
+    pub const ALL: [Hook; 8] = [
         Hook::Books,
         Hook::Library,
         Hook::BookOpened,
@@ -82,6 +94,7 @@ impl Hook {
         Hook::NewBooks,
         Hook::Startup,
         Hook::ConfigScript,
+        Hook::Editor,
     ];
 
     /// Nom tel qu'écrit dans `#@Hook`.
@@ -94,6 +107,7 @@ impl Hook {
             Hook::NewBooks => "NewBooks",
             Hook::Startup => "Startup",
             Hook::ConfigScript => "ConfigScript",
+            Hook::Editor => "Editor",
         }
     }
 
@@ -118,6 +132,7 @@ impl Hook {
             Hook::NewBooks => "Nouveaux livres (après une analyse)",
             Hook::Startup => "Au démarrage",
             Hook::ConfigScript => "Réglages du script",
+            Hook::Editor => "Fenêtre « Infos du livre » (bouton Scripts)",
         }
     }
 }

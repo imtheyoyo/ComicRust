@@ -20,6 +20,15 @@ use eframe::egui::{self, Context, RichText, Ui};
 use crate::app::ComicRustApp;
 use crate::scripts::apply::{ApplyOutcome, ApplyTarget};
 use crate::scripts::{AutoEvent, Pending, ScriptChoices, ScriptsError};
+use crate::ui::script_forms::{self, Action};
+
+/// Réponse d'une fenêtre de formulaire ou de liste de choix.
+enum FormOrChoice {
+    Form(Option<comicrust_core::scripting::FormAnswer>),
+    Choice(Option<Vec<usize>>),
+    /// Question ou message ordinaire.
+    Neither,
+}
 
 /// Script `Books` proposé dans un menu : (identifiant, libellé, description).
 pub type ScriptMenuItem = (String, String, Option<String>);
@@ -436,6 +445,37 @@ impl ComicRustApp {
         let Some(run) = &mut self.scripts.run else { return };
         let Some(pending) = &mut run.pending else { return };
         let name = run.entry.name.clone();
+        // Formulaire et liste de choix : fenêtres à part (`script_forms.rs`).
+        let reply = match pending {
+            Pending::Form { state, .. } => match script_forms::form_window(ctx, &name, state) {
+                Action::Nothing => return,
+                Action::Stop => None,
+                Action::Reply(a) => Some(FormOrChoice::Form(a)),
+            },
+            Pending::Choose { state, .. } => match script_forms::choose_window(ctx, &name, state) {
+                Action::Nothing => return,
+                Action::Stop => None,
+                Action::Reply(a) => Some(FormOrChoice::Choice(a)),
+            },
+            _ => Some(FormOrChoice::Neither),
+        };
+        match (reply, run.pending.take()) {
+            // « Arrêter le script » : la fenêtre se ferme, le script reçoit None.
+            (None, _) => {
+                run.stop();
+                return;
+            }
+            (Some(FormOrChoice::Form(a)), Some(Pending::Form { reply, .. })) => {
+                let _ = reply.send(a);
+                return;
+            }
+            (Some(FormOrChoice::Choice(a)), Some(Pending::Choose { reply, .. })) => {
+                let _ = reply.send(a);
+                return;
+            }
+            (_, other) => run.pending = other,
+        }
+        let Some(pending) = &mut run.pending else { return };
         // None : rien ; Some(None) : défaut ; Some(Some(v)) : réponse ; arrêt à part.
         let mut answer: Option<Option<serde_json::Value>> = None;
         let mut stop = false;
@@ -459,6 +499,7 @@ impl ComicRustApp {
                         }
                     });
                 }
+                Pending::Form { .. } | Pending::Choose { .. } => {}
                 Pending::Ask { question, text, choice, .. } => {
                     ui.add_space(4.0);
                     ui.label(RichText::new(&question.text).strong());
@@ -547,6 +588,7 @@ impl ComicRustApp {
             Some(Pending::Message { reply, .. }) => {
                 let _ = reply.send(());
             }
+            Some(other @ (Pending::Form { .. } | Pending::Choose { .. })) => run.pending = Some(other),
             None => {}
         }
     }
@@ -589,6 +631,21 @@ impl ComicRustApp {
                     run.progress_text.clone()
                 };
                 ui.add(bar.text(text));
+                // Sous-texte et image (`progress(detail=, image=)`) : couverture de l'album
+                // traité, comme la fenêtre de progression de Bedetheque Scraper.
+                if !run.progress_detail.is_empty() || run.progress_image.is_some() {
+                    ui.horizontal_top(|ui| {
+                        if let Some(tex) = &run.progress_image {
+                            ui.add(
+                                egui::Image::from_texture(egui::load::SizedTexture::from_handle(tex))
+                                    .max_size(egui::vec2(120.0, 170.0)),
+                            );
+                        }
+                        if !run.progress_detail.is_empty() {
+                            ui.label(RichText::new(&run.progress_detail).weak());
+                        }
+                    });
+                }
                 ui.horizontal(|ui| {
                     if run.stopping {
                         ui.spinner();

@@ -149,6 +149,8 @@ pub struct NodeCtx<'a> {
     pub shown: Option<String>,
     /// Glisser de livres au-dessus d'une liste : ce que ferait le dépôt.
     pub hint: Option<DropHint>,
+    /// Navigation au clavier (v0.10.1) : lignes visibles relevées pendant le dessin.
+    pub tree: crate::library::keynav::TreeRecorder,
 }
 
 impl NodeCtx<'_> {

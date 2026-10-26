@@ -7,8 +7,9 @@
 //! - **stderr** : journal libre du script (`print()`, tracebacks imprévus…).
 //!
 //! Déroulement :
-//! 1. le script envoie `{"t":"hello","protocol":1,"python":"3.13.1"}` ;
-//! 2. ComicRust répond `{"t":"run", "protocol":1, "script":…, "function":…, "hook":…,
+//! 1. le script envoie `{"t":"hello","protocol":2,"python":"3.13.1"}` ; une autre version
+//!    est refusée (module plus ancien ou plus récent que ComicRust) ;
+//! 2. ComicRust répond `{"t":"run", "protocol":2, "script":…, "function":…, "hook":…,
 //!    "book_ids":[…], "interactive":…, "live":…, "settings":{"values":{…},"secret":[…]},
 //!    "fields":{"editable":[…],"read_only":[…]}, "lib_dirs":[…], "args":…}` ;
 //! 3. pendant l'exécution, le script envoie des **demandes** `{"t":"req","id":N,"m":…}`
@@ -21,8 +22,16 @@
 //!      {"op":"rename","book":…,"path":…}, {"op":"write_info","book":…}]}` →
 //!      `{"accepted":N,"rejected":[{"index":i,"reason":…}],"live_error":…}` ;
 //!    - `save_settings` `{"values":{…},"secret":[…]}` ;
+//!    - `form` `{"title":…,"message":…,"controls":[{"type":…,"key":…,…}],"buttons":[…],
+//!      "cancel":…,"values":{…},"width":…}` → `{"button":…,"values":{…}}` ou `null`
+//!      (annulé, arrêté, script sans interface) ; voir [`super::forms::FormSpec`] ;
+//!    - `choose` `{"title":…,"columns":[…],"rows":[[…]],"images":[base64|null…],
+//!      "multi":…,"default":…,"filter":…,"timeout":…}` → rang, liste de rangs ou `null` ;
+//!    - `open_url` `{"url":…}` → booléen (http/https seulement) ;
+//!    - `clipboard_set` `{"text":…}` → booléen ;
 //! 4. et des **notifications** sans réponse : `{"t":"log","level":…,"text":…}`,
-//!    `{"t":"progress","fraction":0.5,"text":…}` ;
+//!    `{"t":"progress","fraction":0.5,"text":…,"detail":…,"image":base64}` (`detail` et
+//!    `image` facultatifs : absents = inchangés ; image `""` = retirée) ;
 //! 5. fin : `{"t":"done","value":…}`, `{"t":"error","type":…,"message":…,"traceback":…}`
 //!    ou `{"t":"cancelled"}`.
 //!
@@ -60,6 +69,10 @@ pub enum FromScript {
         fraction: Option<f64>,
         #[serde(default)]
         text: String,
+        #[serde(default)]
+        detail: Option<String>,
+        #[serde(default)]
+        image: Option<Value>,
     },
     Done {
         #[serde(default)]

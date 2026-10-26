@@ -9,6 +9,11 @@
 //! sélection : vers une liste de lecture du panneau (ajout) ou, dans une liste de lecture
 //! triée dans l'ordre de la liste, entre deux livres (réordonnancement). Clavier : Ctrl+A,
 //! Échap.
+//!
+//! Clavier (v0.10.1, voir `library/keynav.rs`) : flèches, Début/Fin, Page préc./suiv.
+//! (Maj : étendre la sélection ; Ctrl : déplacer le curseur seul, Espace : (dé)sélectionner),
+//! Entrée ouvre, Ctrl+I modifie les infos. Les flèches vont au panneau qui a le focus (clic
+//! dans la vue ou dans l'arbre des listes, Tab pour passer de l'un à l'autre).
 
 use std::path::PathBuf;
 
@@ -17,6 +22,7 @@ use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, RichText, Se
 
 use crate::app::{ComicRustApp, Start};
 use crate::library::covers::{Cover, CoverCache};
+use crate::library::keynav::{grid_move, KeyFocus, NavKey, SelectMode, Span};
 use crate::library::mouse::{grid_insertion, marquee_hits, reorder_allowed, reorder_anchor, CoverRow, GridGeom};
 use crate::library::{Gesture, GroupKey, Row, SortKey, Status};
 use crate::ui::book_drag::{dragged_books, edge_scroll, paint_insertion, start_books_drag, DropHint};
@@ -82,7 +88,35 @@ pub(crate) fn book_tooltip(ui: &mut Ui, book: &LibraryBook) {
     }
 }
 
+/// Touches de déplacement pressées pendant cette image (répétitions comprises), et Espace.
+pub(crate) fn nav_presses(ctx: &egui::Context) -> (Vec<(NavKey, egui::Modifiers)>, bool) {
+    ctx.input(|i| {
+        let mut keys = Vec::new();
+        let mut space = false;
+        for e in &i.events {
+            if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
+                if let Some((_, k)) = NavKey::ALL.iter().find(|(x, _)| x == key) {
+                    keys.push((*k, *modifiers));
+                }
+                space |= *key == egui::Key::Space;
+            }
+        }
+        (keys, space)
+    })
+}
+
 impl ComicRustApp {
+    /// Les touches de déplacement vont-elles au panneau `focus` ? Pas pendant une saisie,
+    /// un menu ouvert, un glisser, ni avec la fenêtre d'infos ouverte.
+    pub(crate) fn nav_keys_for(&self, ctx: &egui::Context, focus: KeyFocus) -> bool {
+        self.library.nav.focus == focus
+            && self.info_editor.is_none()
+            && ctx.memory(|m| m.focused().is_none())
+            && !ctx.egui_wants_keyboard_input()
+            && !egui::Popup::is_any_open(ctx)
+            && dragged_books(ctx).is_none()
+    }
+
     pub(crate) fn library_shown(&self) -> usize {
         self.library.shown()
     }
@@ -248,6 +282,10 @@ impl ComicRustApp {
 
     pub(crate) fn library_view(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        // Clic dans la vue : les flèches vont aux livres.
+        if ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) {
+            self.library.nav.focus = KeyFocus::Books;
+        }
         // Avancement du livre ouvert à jour dès le retour à la bibliothèque.
         self.remember_position();
         self.ensure_covers(&ctx);
@@ -362,10 +400,15 @@ impl ComicRustApp {
         }
     }
 
-    /// Entrée ouvre le livre sélectionné ; Échap le désélectionne.
+    /// Entrée ouvre le livre sélectionné ; Échap le désélectionne ; Ctrl+I modifie les infos.
     fn library_keys(&mut self, ui: &mut Ui) {
-        if ui.ctx().memory(|m| m.focused().is_some()) {
-            return; // saisie dans la recherche
+        if ui.ctx().memory(|m| m.focused().is_some()) || self.info_editor.is_some() {
+            return; // saisie dans la recherche, fenêtre d'infos ouverte
+        }
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::I)) {
+            let books = self.info_editor_books();
+            self.open_info_editor(books);
+            return;
         }
         let (enter, esc, delete) = ui.input(|i| {
             (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Delete))
@@ -376,7 +419,8 @@ impl ComicRustApp {
             self.library.select_all();
         }
         // Suppr dans une liste de lecture : retirer les livres de la liste (jamais les fichiers).
-        if delete && self.library.reading_list_shown() && self.library.selected_book.is_some() {
+        let books_focus = self.library.nav.focus == KeyFocus::Books;
+        if delete && books_focus && self.library.reading_list_shown() && self.library.selected_book.is_some() {
             let books = self.library.selection();
             if self.book_menu_data(ui.ctx()).reason.is_none() {
                 self.book_list_request(ui.ctx(), BookListAction::Remove, books);
@@ -440,6 +484,83 @@ impl ComicRustApp {
             })
             .collect();
         let total: f32 = heights.iter().sum::<f32>() + GAP;
+
+        // Clavier : déplacement dans la grille (rangées de couvertures ou de piles).
+        let spans: Vec<Span> = {
+            let mut first = 0;
+            rows.iter()
+                .filter_map(|r| {
+                    let len = match r {
+                        Row::Covers(items) => items.len(),
+                        Row::Stacks(s) => s.len(),
+                        Row::Header { .. } => return None,
+                    };
+                    let s = Span { first, len };
+                    first += len;
+                    Some(s)
+                })
+                .collect()
+        };
+        let stack_names: Vec<String> = if stacked {
+            rows.iter()
+                .filter_map(|r| match r {
+                    Row::Stacks(s) => Some(s.iter().map(|x| x.series.clone())),
+                    _ => None,
+                })
+                .flatten()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if self.nav_keys_for(ui.ctx(), KeyFocus::Books) {
+            let (keys, space) = nav_presses(ui.ctx());
+            let page = ((ui.available_height() / (cell.y + GAP)).floor() as usize).max(1);
+            for (k, m) in keys {
+                if stacked {
+                    let cur =
+                        self.library.selected_stack.as_ref().and_then(|s| stack_names.iter().position(|x| x == s));
+                    if let Some(t) = grid_move(&spans, cur, k, page) {
+                        self.library.selected_stack = Some(stack_names[t].clone());
+                        self.library.nav.scroll_to_cursor = true;
+                    }
+                } else if let Some(t) = grid_move(&spans, self.library.cursor_index(), k, page) {
+                    self.library.key_select(t, SelectMode::of(m));
+                }
+            }
+            if space && !stacked {
+                self.library.toggle_cursor();
+            }
+        }
+        // Défilement jusqu'au curseur : (haut de la rangée, colonne).
+        let mut scroll_target: Option<(f32, usize)> = None;
+        if std::mem::take(&mut self.library.nav.scroll_to_cursor) {
+            let target = if stacked {
+                self.library.selected_stack.as_ref().and_then(|s| stack_names.iter().position(|x| x == s))
+            } else {
+                self.library.cursor_index()
+            };
+            if let Some(t) = target {
+                let (mut y, mut k) = (0.0, 0);
+                for (row, h) in rows.iter().zip(&heights) {
+                    if !matches!(row, Row::Header { .. }) {
+                        let s = spans[k];
+                        if t >= s.first && t < s.first + s.len {
+                            scroll_target = Some((y, t - s.first));
+                            break;
+                        }
+                        k += 1;
+                    }
+                    y += h;
+                }
+            }
+        }
+        // Curseur du clavier affiché quand il ne se confond pas avec la sélection.
+        let cursor_mark: Option<String> = if !stacked && self.library.nav.focus == KeyFocus::Books {
+            self.library.cursor.clone().filter(|c| !self.library.is_selected(c) || self.library.selection().len() > 1)
+        } else {
+            None
+        };
+        let mut info_request: Option<Vec<String>> = None;
         let mut open: Option<String> = None;
         let mut select: Option<String> = None;
         let mut open_stack: Option<String> = None;
@@ -486,6 +607,10 @@ impl ComicRustApp {
             ui.set_height(total);
             let origin = ui.min_rect().min + vec2(GAP, GAP * 0.5);
             let clip = ui.clip_rect();
+            if let Some((top, col)) = scroll_target {
+                let r = Rect::from_min_size(origin + vec2(col as f32 * (cell.x + GAP), top), cell);
+                ui.scroll_to_rect(r.expand(GAP * 0.5), None);
+            }
             // Fond (sous les vignettes) : clic dans le vide, rectangle de sélection.
             let bg = ui.interact(ui.max_rect(), ui.scope_id().with("fond-couvertures"), Sense::click_and_drag());
             if bg.clicked() && !mods.command {
@@ -552,6 +677,14 @@ impl ComicRustApp {
                             } else if resp.hovered() {
                                 ui.painter().rect_filled(rect.expand(4.0), 6.0, ui.visuals().widgets.hovered.bg_fill);
                             }
+                            if cursor_mark.as_deref() == Some(book.id.as_str()) {
+                                ui.painter().rect_stroke(
+                                    rect.expand(5.0),
+                                    6.0,
+                                    Stroke::new(2.0, ACCENT),
+                                    StrokeKind::Outside,
+                                );
+                            }
                             let covers = self.covers.as_mut().unwrap();
                             paint_cover(ui, covers, book, cover_rect);
                             let painter = ui.painter();
@@ -600,6 +733,7 @@ impl ComicRustApp {
                                     &mut file_request,
                                 );
                                 let books = if selected { selection.clone() } else { vec![book.id.clone()] };
+                                info_menu_item(ui, &books, &mut info_request);
                                 book_lists_menu(ui, &lists_menu, &books, &mut list_request);
                                 crate::ui::scripts_ui::book_scripts_menu(
                                     ui,
@@ -784,5 +918,22 @@ impl ComicRustApp {
         if let Some((script, books)) = script_request {
             self.run_script(ui.ctx(), &script, comicrust_core::scripting::Hook::Books, books);
         }
+        if let Some(books) = info_request {
+            self.open_info_editor(books);
+        }
     }
+}
+
+/// Entrée « Modifier les infos… » du menu contextuel d'un livre.
+pub(crate) fn info_menu_item(ui: &mut Ui, books: &[String], request: &mut Option<Vec<String>>) {
+    let text = if books.len() > 1 {
+        format!("✏ Modifier les infos des {} livres…", books.len())
+    } else {
+        "✏ Modifier les infos…".to_string()
+    };
+    if ui.add(egui::Button::new(text).shortcut_text("Ctrl+I")).clicked() {
+        *request = Some(books.to_vec());
+        ui.close();
+    }
+    ui.separator();
 }

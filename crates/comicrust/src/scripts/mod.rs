@@ -10,6 +10,7 @@
 
 pub mod apply;
 pub mod auto;
+pub mod forms;
 pub mod host;
 
 use std::collections::{HashSet, VecDeque};
@@ -22,14 +23,15 @@ use std::time::{Duration, Instant};
 
 use comicrust_core::db::ComicDatabase;
 use comicrust_core::scripting::{
-    self, discover_with_warnings, DiscoveryWarning, Hook, JournalKind, JournalLine, Question, RunContext, RunHandle,
-    RunOptions, RunResult, RunState, ScriptEntry, ScriptRunner,
+    self, discover_with_warnings, DiscoveryWarning, FormAnswer, Hook, JournalKind, JournalLine, Question, RunContext,
+    RunHandle, RunOptions, RunResult, RunState, ScriptEntry, ScriptRunner,
 };
 use eframe::egui;
 use serde_json::Value;
 
 use apply::{apply_plan, ApplyOutcome, ApplyTarget, Preview};
 use auto::{AutoJob, AutoQueue};
+use forms::{ChooseState, FormState};
 use host::{HostEvent, Live, SharedSettings, UiHost};
 
 use crate::library::watch::WrittenSink;
@@ -76,6 +78,16 @@ pub enum Pending {
         text: String,
         reply: Sender<()>,
     },
+    /// Formulaire (`comicrust.form`).
+    Form {
+        state: Box<FormState>,
+        reply: Sender<Option<FormAnswer>>,
+    },
+    /// Liste de choix (`comicrust.choose`).
+    Choose {
+        state: Box<ChooseState>,
+        reply: Sender<Option<Vec<usize>>>,
+    },
 }
 
 impl Pending {
@@ -109,6 +121,9 @@ pub struct ScriptRun {
     pub journal: Vec<JournalLine>,
     pub progress: Option<f32>,
     pub progress_text: String,
+    /// Sous-texte et image de la progression (`comicrust.progress(detail=, image=)`).
+    pub progress_detail: String,
+    pub progress_image: Option<egui::TextureHandle>,
     pub pending: Option<Pending>,
     pub result: Option<RunResult>,
     pub preview: Option<Preview>,
@@ -203,6 +218,29 @@ impl ScriptRun {
                         self.pending = Some(Pending::Message { text, reply });
                     }
                 }
+                HostEvent::Form { spec, images, reply } => {
+                    if !self.stopping {
+                        let state = Box::new(FormState::new(*spec, images));
+                        self.pending = Some(Pending::Form { state, reply });
+                    }
+                }
+                HostEvent::Choose { spec, images, reply } => {
+                    if !self.stopping {
+                        let state = Box::new(ChooseState::new(*spec, images));
+                        self.pending = Some(Pending::Choose { state, reply });
+                    }
+                }
+                HostEvent::ProgressDetails { detail, image } => {
+                    if let Some(d) = detail {
+                        self.progress_detail = d;
+                    }
+                    if let Some(img) = image {
+                        self.progress_image =
+                            img.map(|i| self.ctx.load_texture("script-progression", i, egui::TextureOptions::LINEAR));
+                    }
+                }
+                HostEvent::OpenUrl(url) => self.ctx.open_url(egui::OpenUrl::new_tab(url)),
+                HostEvent::Clipboard(text) => self.ctx.copy_text(text),
                 HostEvent::Applied(_) | HostEvent::LiveRefused(_) => {}
             }
         }
@@ -442,6 +480,8 @@ impl ScriptsState {
             journal: Vec::new(),
             progress: None,
             progress_text: String::new(),
+            progress_detail: String::new(),
+            progress_image: None,
             pending: None,
             result: None,
             preview: None,
@@ -561,8 +601,16 @@ impl ScriptsState {
                     }
                     HostEvent::Applied(o) => out.push(AutoEvent::Applied(name.clone(), *o)),
                     HostEvent::LiveRefused(m) => out.push(AutoEvent::Refused(name.clone(), m)),
-                    // Automatisme : jamais interactif (le runner ne pose pas de question).
-                    HostEvent::Ask { .. } | HostEvent::Message { .. } | HostEvent::Progress(..) => {}
+                    // Automatisme : jamais interactif (le runner ne pose pas de question, ni
+                    // formulaire, ni liste de choix, n'ouvre pas d'adresse).
+                    HostEvent::Ask { .. }
+                    | HostEvent::Message { .. }
+                    | HostEvent::Form { .. }
+                    | HostEvent::Choose { .. }
+                    | HostEvent::OpenUrl(_)
+                    | HostEvent::Clipboard(_)
+                    | HostEvent::ProgressDetails { .. }
+                    | HostEvent::Progress(..) => {}
                 }
             }
             if let Some(r) = a.handle.poll() {
