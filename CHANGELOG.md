@@ -5,6 +5,51 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.0] — 2026-10-26
+
+Scripts Python, avec Python embarqué dans le zip.
+
+### Nouveautés
+- **Scripts Python** dans le dossier `scripts\` à côté de l'exe, avec **Python 3.13 embarqué**
+  (dossier `python\` : rien à installer). Le guide est dans `scripts.md`.
+  - Un script qui plante ne fait pas tomber ComicRust : Python tourne dans un processus à part.
+  - Les scripts ne modifient jamais directement la base ni les fichiers : ils demandent les
+    modifications à ComicRust, qui les applique avec ses protections.
+- **Menu 📜 Scripts**, et **Scripts ▸** dans le menu contextuel des livres. Une fenêtre suit
+  l'exécution : avancement, journal, bouton Arrêter, questions du script.
+- **Aperçu avant application** de ce que le script veut faire :
+  - pour chaque livre : le champ, la valeur avant et la valeur après ;
+  - les renommages (ancien → nouveau chemin) et les écritures dans les fichiers ;
+  - une case à cocher par livre ; les conflits sont signalés et ne sont pas appliqués.
+- **Automatismes** (au démarrage, à l'ouverture ou à la fermeture d'un livre, sur les nouveaux
+  livres d'une analyse) : **désactivés par défaut** (« Gérer les scripts… »), jamais lancés en
+  lecture seule.
+- **Modification des fiches et des fichiers** par les scripts :
+  - 57 champs de ComicRack, valeurs personnalisées comprises, contrôlés selon leur type ;
+  - renommage et déplacement des fichiers avec mise à jour de la fiche. Pas d'écrasement, nom
+    vérifié pour Windows ; si la fiche ne peut pas être mise à jour, le fichier est remis en
+    place ;
+  - en mode ComicRack, il faut l'écriture activée ; seuls les éléments modifiés sont réécrits.
+- **Scripts fournis** dans `scripts\exemples\` :
+  - **Nettoyage des fiches** : espaces, numéros, champs complétés depuis le nom du fichier ;
+  - **Ranger les fichiers** : modèle de nom et sous-dossiers série ou éditeur ;
+  - **Comic Vine** : infos d'un livre en ligne, avec ta clé d'API, gardée chiffrée et jamais
+    affichée ;
+  - un automatisme pour les nouveaux livres, désactivé.
+- **Mises à jour** : un script d'exemple que tu as modifié n'est jamais écrasé. La nouvelle
+  version est posée à côté (`.py.nouveau`).
+
+### Corrections (relecture avant publication)
+- Fermer ComicRust pendant « Appliquer » : il attend la fin du livre en cours (un fichier ne
+  peut plus être séparé de sa fiche).
+- Chemins des renommages normalisés (pas de `..`, même écriture de la racine que le livre :
+  pas de doublon dans ComicRack).
+- Rien n'est écrit hors du dossier de ComicRust (module Python dans `data\python\`).
+- Aperçu préparé en arrière-plan (pas de blocage sur un NAS), processus Python toujours arrêtés.
+
+### Recette
+[recette/v0.10.0.md](recette/v0.10.0.md).
+
 ## [v0.9.1] — 2026-10-25
 
 Les livres se sélectionnent et se déplacent à la souris, comme dans ComicRack et l'explorateur

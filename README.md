@@ -202,7 +202,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.9.0](recette/v0.9.0.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.10.0](recette/v0.10.0.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release
@@ -251,7 +251,7 @@ journal dans les releases déjà publiées.
    de ComicRust~~ (v0.8.0).
 7. ~~Gestion complète des listes, éditeur de listes intelligentes ; écriture dans la base de
    ComicRack~~ (v0.9.0).
-8. Scripts Python (v0.10.0), serveur OPDS / HTTP (v0.11.0) ; plus tard, associations de
+8. ~~Scripts Python, Python embarqué~~ (v0.10.0) ; serveur OPDS / HTTP (v0.11.0) ; plus tard, associations de
    fichiers Windows et un **mode serveur sous Docker**.
 
 
