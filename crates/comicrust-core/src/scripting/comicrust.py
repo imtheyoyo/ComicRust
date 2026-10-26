@@ -29,6 +29,7 @@ import _thread
 import inspect
 import io
 import json
+import math
 import os
 import queue
 import re
@@ -53,6 +54,9 @@ FLUSH_EVERY = 500
 BATCH = 500
 # Délai (secondes) laissé au script pour s'arrêter de lui-même après une annulation.
 INTERRUPT_DELAY = 1.0
+# ComicRust a disparu (stdin fermé) : délai avant l'arrêt immédiat du processus, si le
+# script ne s'est pas arrêté de lui-même après l'interruption.
+EXIT_DELAY = 5.0
 
 
 class Cancelled(KeyboardInterrupt):
@@ -85,10 +89,14 @@ class _Channel:
         self.cancelled = threading.Event()
         self.closed = False
         self.started = False
+        # Message de fin envoyé : plus rien à interrompre.
+        self.finished = False
         self.inbox = queue.Queue()
 
     def send(self, msg):
-        data = (json.dumps(msg, ensure_ascii=False, default=_json_default) + "\n").encode("utf-8")
+        # allow_nan=False : NaN et l'infini ne sont pas du JSON (ComicRust refuserait tout
+        # le message) ; les modifications sont vérifiées avant (Book.set).
+        data = (json.dumps(msg, ensure_ascii=False, default=_json_default, allow_nan=False) + "\n").encode("utf-8")
         with self._lock:
             self._out.write(data)
             self._out.flush()
@@ -136,13 +144,26 @@ class _Channel:
                 else:
                     self.inbox.put(msg)
         finally:
-            # ComicRust a fermé stdin : plus personne pour répondre.
+            # ComicRust a fermé stdin (fin normale, arrêt forcé, ComicRust fermé ou planté) :
+            # plus personne pour répondre. Si le script tourne encore, il est arrêté :
+            # interruption du fil principal, puis sortie immédiate du processus après
+            # EXIT_DELAY (un script bloqué dans un appel système ne reste pas orphelin).
             self.closed = True
             self.inbox.put(None)
+            if not self.finished:
+                self.cancelled.set()
+                self._interrupt()
+                t = threading.Timer(EXIT_DELAY, self._exit)
+                t.daemon = True
+                t.start()
 
     def _interrupt(self):
-        if self.started:
+        if self.started and not self.finished:
             _thread.interrupt_main()
+
+    def _exit(self):
+        if not self.finished:
+            os._exit(3)
 
 
 class _Session:
@@ -272,6 +293,10 @@ class Book:
             value = ", ".join(str(v) for v in value)
         elif value is not None and not isinstance(value, (str, int, float, bool)):
             value = str(value)
+        if isinstance(value, float) and not math.isfinite(value):
+            # Refus de cette seule modification (le reste du script continue s'il
+            # intercepte l'erreur) : NaN / infini ne sont pas des valeurs de fiche.
+            raise ValueError("valeur %r refusée pour le champ %s : nombre non fini (NaN ou infini)" % (value, f))
         if f.startswith(s.custom_prefix):
             # Valeur personnalisée : gardée à part (lue par custom_value), la fiche
             # n'a pas de champ de ce nom.
@@ -452,7 +477,8 @@ def progress(fraction=None, text=""):
     """Avancement : ``fraction`` entre 0 et 1 (``None`` = inconnu), ``text`` affiché."""
     if fraction is not None:
         try:
-            fraction = max(0.0, min(1.0, float(fraction)))
+            fraction = float(fraction)
+            fraction = max(0.0, min(1.0, fraction)) if math.isfinite(fraction) else None
         except (TypeError, ValueError):
             fraction = None
     _session().ch.send({"t": "progress", "fraction": fraction, "text": str(text)})
@@ -480,8 +506,15 @@ def message(text):
     _session().ch.request("message", text=str(text))
 
 
-def ask(question, default=""):
-    """Demande un texte à l'utilisateur ; ``default`` sans interface ou si annulé."""
+def ask(question, default="", secret=False):
+    """Demande un texte à l'utilisateur ; ``default`` sans interface ou si annulé.
+
+    ``secret=True`` (clé d'API, mot de passe…) : saisie masquée, ``default`` n'est **ni
+    affiché ni envoyé** à l'interface ; une réponse vide rend ``default`` (« garder la
+    valeur actuelle »)."""
+    if secret:
+        v = _session().ch.request("ask", kind="text", question=str(question), default="", secret=True)
+        return default if v in (None, "") else v
     v = _session().ch.request("ask", kind="text", question=str(question), default=default)
     return default if v is None else v
 
@@ -651,7 +684,7 @@ def _call(func, hook_name):
 
 def _result_value(v):
     try:
-        json.dumps(v)
+        json.dumps(v, allow_nan=False)
         return v
     except (TypeError, ValueError):
         return repr(v)
@@ -733,6 +766,14 @@ def _main():
     except BaseException as e:
         ch.started = False
         end = {"t": "error", "type": type(e).__name__, "message": str(e), "traceback": _format_error(e)}
+        # Les modifications valides demandées avant l'erreur restent proposées (aperçu
+        # partiel), comme celles déjà envoyées.
+        try:
+            if not ch.closed:
+                flush()
+        except BaseException:
+            pass
+    ch.finished = True
     try:
         ch.send(end)
     except BaseException:

@@ -17,7 +17,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
-use std::time::Instant;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use comicrust_core::db::ComicDatabase;
 use comicrust_core::scripting::{
@@ -35,6 +36,10 @@ use crate::library::watch::WrittenSink;
 
 /// Nombre de lignes gardées dans le journal des automatismes.
 const AUTO_JOURNAL_LINES: usize = 500;
+/// Fermeture de ComicRust : au-delà de ce délai après la demande d'arrêt, les processus
+/// Python encore vivants sont tués (`RunHandle::cancel` les tue déjà après le délai de
+/// grâce du runner ; ceci borne l'attente des fils eux-mêmes).
+pub const SHUTDOWN_SCRIPTS_WAIT: Duration = Duration::from_secs(8);
 
 /// Message quand Python manque (`detail` : chemin cherché).
 pub fn python_missing(detail: &str) -> String {
@@ -76,6 +81,8 @@ pub enum Pending {
 impl Pending {
     fn ask(question: Question, reply: Sender<Option<Value>>) -> Pending {
         let text = match &question.default {
+            // Saisie secrète : jamais pré-remplie (la valeur actuelle n'est pas affichée).
+            _ if question.secret => String::new(),
             Value::String(s) => s.clone(),
             Value::Null => String::new(),
             v => v.to_string(),
@@ -105,7 +112,14 @@ pub struct ScriptRun {
     pub pending: Option<Pending>,
     pub result: Option<RunResult>,
     pub preview: Option<Preview>,
+    /// Aperçu en préparation (fil d'arrière-plan : lecture du disque pour les renommages).
+    preparing: Option<Receiver<Preview>>,
     applying: Option<Receiver<ApplyOutcome>>,
+    /// Fil d'application et son drapeau d'arrêt (fermeture de ComicRust : vérifié entre
+    /// deux livres).
+    apply_thread: Option<JoinHandle<()>>,
+    apply_stop: Arc<AtomicBool>,
+    ctx: egui::Context,
     /// Bilan de l'application (texte à copier).
     pub report: Option<(String, Vec<String>)>,
     /// Modifications abandonnées par l'utilisateur.
@@ -120,6 +134,44 @@ impl ScriptRun {
 
     pub fn applying(&self) -> bool {
         self.applying.is_some()
+    }
+
+    pub fn preparing(&self) -> bool {
+        self.preparing.is_some()
+    }
+
+    /// Construit l'aperçu dans un fil (accès disque pour les renommages : l'interface ne
+    /// se fige pas sur un NAS lent) ; « Préparation de l'aperçu… » en attendant.
+    fn start_preview(&mut self) {
+        let Some(r) = &self.result else { return };
+        let changes = r.changes.clone();
+        let db = self.db.clone();
+        let ctx = self.ctx.clone();
+        let (tx, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new().name("comicrust-script-apercu".into()).spawn(move || {
+            let _ = tx.send(Preview::build(&changes, &db));
+            ctx.request_repaint();
+        });
+        match spawned {
+            Ok(_) => self.preparing = Some(rx),
+            // Fil impossible (ressources épuisées) : construit ici.
+            Err(_) => self.preview = Some(Preview::build(&r.changes, &self.db)),
+        }
+    }
+
+    /// Fermeture de ComicRust : arrêt du script, application arrêtée entre deux livres.
+    pub fn shutdown(&mut self) {
+        if self.running() {
+            self.stop();
+        }
+        self.apply_stop.store(true, Ordering::SeqCst);
+    }
+
+    /// Plus rien ne tourne (script terminé, application finie) ?
+    pub fn idle(&mut self) -> bool {
+        let script_done = self.result.is_some() || self.handle.poll().is_some();
+        let apply_done = self.apply_thread.as_ref().is_none_or(|t| t.is_finished());
+        script_done && apply_done
     }
 
     /// Arrêt demandé : la question en cours rend sa valeur par défaut.
@@ -161,10 +213,21 @@ impl ScriptRun {
                 // Journal complet (lignes d'erreur finales comprises).
                 self.journal = r.journal.clone();
                 // Menu terminé normalement : aperçu tout de suite. Arrêté : proposé.
-                if r.state == RunState::Finished && !r.changes.is_empty() {
-                    self.preview = Some(Preview::build(&r.changes, &self.db));
-                }
+                let preview = r.state == RunState::Finished && !r.changes.is_empty() && !self.stopping;
                 self.result = Some(r);
+                if preview {
+                    self.start_preview();
+                }
+            }
+        }
+        if let Some(rx) = &self.preparing {
+            match rx.try_recv() {
+                Ok(p) => {
+                    self.preview = Some(p);
+                    self.preparing = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.preparing = None,
+                Err(mpsc::TryRecvError::Empty) => {}
             }
         }
         let rx = self.applying.as_ref()?;
@@ -175,8 +238,8 @@ impl ScriptRun {
 
     /// Aperçu de ce qui a été demandé avant un arrêt ou une erreur.
     pub fn show_partial_preview(&mut self) {
-        if let Some(r) = &self.result {
-            self.preview = Some(Preview::build(&r.changes, &self.db));
+        if self.preparing.is_none() {
+            self.start_preview();
         }
     }
 
@@ -189,10 +252,11 @@ impl ScriptRun {
         let sink = self.sink.clone();
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
-        std::thread::Builder::new()
+        let stop = self.apply_stop.clone();
+        let thread = std::thread::Builder::new()
             .name("comicrust-script-application".into())
             .spawn(move || {
-                let outcome = apply_plan(&target, &plan);
+                let outcome = apply_plan(&target, &plan, &stop);
                 if let Some(sink) = &sink {
                     sink.lock().unwrap().extend(outcome.written());
                 }
@@ -200,6 +264,7 @@ impl ScriptRun {
                 ctx.request_repaint();
             })
             .expect("fil d'application des modifications");
+        self.apply_thread = Some(thread);
         self.applying = Some(rx);
     }
 
@@ -237,6 +302,9 @@ pub struct AutoRun {
     pub job: AutoJob,
     handle: RunHandle,
     rx: Receiver<HostEvent>,
+    /// Arrêt (fermeture de ComicRust) : l'application au fil de l'eau s'arrête entre deux
+    /// livres.
+    stop: Arc<AtomicBool>,
 }
 
 /// Fin d'un automatisme (pour l'application).
@@ -301,13 +369,9 @@ impl ScriptsState {
         self.warnings = warnings;
     }
 
-    /// Points d'entrée actifs d'un hook.
-    pub fn enabled<'a>(
-        &'a self,
-        hook: Hook,
-        disabled: &'a std::collections::BTreeSet<String>,
-    ) -> impl Iterator<Item = &'a ScriptEntry> + 'a {
-        self.entries.iter().filter(move |e| e.has_hook(hook) && !disabled.contains(&e.id()))
+    /// Points d'entrée actifs d'un hook (voir [`is_active`]).
+    pub fn enabled<'a>(&'a self, hook: Hook, choices: &'a ScriptChoices) -> impl Iterator<Item = &'a ScriptEntry> + 'a {
+        self.entries.iter().filter(move |e| e.has_hook(hook) && choices.is_active(e))
     }
 
     /// Point d'entrée d'après son identifiant.
@@ -325,7 +389,14 @@ impl ScriptsState {
     }
 
     fn options(&self, hook: Hook, python: PathBuf) -> RunOptions {
-        RunOptions { python: Some(python), scripts_dir: Some(self.dir.clone()), ..RunOptions::for_hook(hook) }
+        RunOptions {
+            python: Some(python),
+            scripts_dir: Some(self.dir.clone()),
+            // `data\python\` à côté de l'exécutable : rien n'est écrit hors du dossier de
+            // ComicRust (portable).
+            module_dir: Some(crate::paths::exe_dir().join("data").join("python")),
+            ..RunOptions::for_hook(hook)
+        }
     }
 
     /// Lance un script depuis un menu (interactif, aperçu avant application).
@@ -374,7 +445,11 @@ impl ScriptsState {
             pending: None,
             result: None,
             preview: None,
+            preparing: None,
             applying: None,
+            apply_thread: None,
+            apply_stop: Arc::new(AtomicBool::new(false)),
+            ctx: ctx.clone(),
             report: None,
             discarded: false,
             stopping: false,
@@ -392,9 +467,9 @@ impl ScriptsState {
     }
 
     /// Met en file les automatismes actifs de `hook`.
-    pub fn trigger(&mut self, hook: Hook, book_ids: Vec<String>, disabled: &std::collections::BTreeSet<String>) {
+    pub fn trigger(&mut self, hook: Hook, book_ids: Vec<String>, choices: &ScriptChoices) {
         let jobs: Vec<AutoJob> = self
-            .enabled(hook, disabled)
+            .enabled(hook, choices)
             .map(|e| AutoJob { entry: e.clone(), hook, book_ids: book_ids.clone() })
             .collect();
         for job in jobs {
@@ -413,8 +488,21 @@ impl ScriptsState {
         target: &ApplyTarget,
         sink: Option<WrittenSink>,
         ctx: &egui::Context,
-    ) -> Result<(), String> {
+    ) -> Result<(), ScriptsError> {
         let Some(db) = db else { return Ok(()) };
+        // Bibliothèque en lecture seule : les automatismes ne sont pas lancés (leurs
+        // modifications seraient refusées) ; dit une fois par session (`Err`).
+        if let Some(m) = target.read_only() {
+            let jobs = self.queue.start_ready(allowed);
+            if jobs.is_empty() {
+                return Ok(());
+            }
+            for j in &jobs {
+                self.queue.finished(j.hook);
+                self.auto_log(format!("« {} » ({}) non lancé : lecture seule", j.entry.name, j.hook.name()));
+            }
+            return Err(ScriptsError::ReadOnly(m.to_string()));
+        }
         let jobs = self.queue.start_ready(allowed);
         if jobs.is_empty() {
             return Ok(());
@@ -426,17 +514,18 @@ impl ScriptsState {
                     self.queue.finished(j.hook);
                 }
                 self.queue.clear_waiting();
-                return Err(e);
+                return Err(ScriptsError::Python(e));
             }
         };
         for job in jobs {
             let (tx, rx) = mpsc::channel();
             let live = Live { target: target.clone(), sink: sink.clone() };
+            let stop = Arc::new(AtomicBool::new(false));
             let host = UiHost::new(
                 db.clone(),
                 tx,
                 ctx.clone(),
-                Arc::new(AtomicBool::new(false)),
+                stop.clone(),
                 self.stored.clone(),
                 self.settings_dirty.clone(),
                 Some(live),
@@ -450,7 +539,7 @@ impl ScriptsState {
             ));
             let handle =
                 ScriptRunner::new(self.options(job.hook, python.clone())).start(&job.entry, context, Arc::new(host));
-            self.autos.push(AutoRun { job, handle, rx });
+            self.autos.push(AutoRun { job, handle, rx, stop });
         }
         Ok(())
     }
@@ -507,4 +596,65 @@ impl ScriptsState {
             a.handle.cancel();
         }
     }
+
+    /// Fermeture de ComicRust : arrêt de tout (exécution du menu, application en cours
+    /// entre deux livres, automatismes : annulation polie puis arrêt forcé du processus
+    /// Python par le runner après son délai de grâce).
+    pub fn shutdown(&mut self) {
+        if let Some(r) = &mut self.run {
+            r.shutdown();
+        }
+        self.queue.clear_waiting();
+        for a in &self.autos {
+            a.stop.store(true, Ordering::SeqCst);
+            a.handle.cancel();
+        }
+    }
+
+    /// Plus rien ne tourne : on peut quitter.
+    pub fn idle(&mut self) -> bool {
+        let run = self.run.as_mut().is_none_or(|r| r.idle());
+        run && self.autos.iter_mut().all(|a| a.handle.poll().is_some())
+    }
+
+    /// Ce qui retarde la fermeture (texte pour l'interface), `None` si rien.
+    pub fn shutdown_status(&self) -> Option<&'static str> {
+        let applying = self.run.as_ref().is_some_and(|r| r.apply_thread.as_ref().is_some_and(|t| !t.is_finished()));
+        if applying {
+            return Some("Application des modifications en cours… (ComicRust se ferme après le livre en cours)");
+        }
+        let running = self.run.as_ref().is_some_and(|r| r.result.is_none()) || !self.autos.is_empty();
+        running.then_some("Arrêt des scripts en cours…")
+    }
+}
+
+/// Choix de l'utilisateur dans « Gérer les scripts » (identifiants `ScriptEntry::id`).
+pub struct ScriptChoices<'a> {
+    /// Désactivés par l'utilisateur.
+    pub disabled: &'a std::collections::BTreeSet<String>,
+    /// Activés par l'utilisateur alors que l'en-tête `#@Enabled false` les désactive.
+    pub enabled: &'a std::collections::BTreeSet<String>,
+}
+
+impl ScriptChoices<'_> {
+    /// Actif ? Le choix de l'utilisateur prime ; sans choix, l'en-tête `#@Enabled`.
+    pub fn is_active(&self, e: &ScriptEntry) -> bool {
+        let id = e.id();
+        if self.disabled.contains(&id) {
+            false
+        } else if self.enabled.contains(&id) {
+            true
+        } else {
+            e.enabled_by_default
+        }
+    }
+}
+
+/// Automatismes non lancés.
+#[derive(Debug)]
+pub enum ScriptsError {
+    /// Python introuvable (message).
+    Python(String),
+    /// Bibliothèque en lecture seule (message).
+    ReadOnly(String),
 }

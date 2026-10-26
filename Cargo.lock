@@ -987,6 +987,7 @@ dependencies = [
  "heif-oxide",
  "image",
  "jxl-oxide",
+ "libc",
  "mysql",
  "natord",
  "oxideav-avif",

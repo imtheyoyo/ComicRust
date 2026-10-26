@@ -544,3 +544,115 @@ fn mysql_comicrack_edits() {
     assert!(e.contains("absent de la base ComicRack") && e.contains("remis à sa place"), "{e}");
     assert!(dst.is_file() && !src.exists());
 }
+
+// ---------------------------------------------------------------------------------------
+// Normalisation des chemins de renommage
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn normalisation_chemins_windows() {
+    let cur = r"D:\BD\Batman\Batman 001.cbz";
+    let n = |req: &str| normalize_rename(cur, req);
+    // Simple nom : même dossier, séparateur de Windows.
+    assert_eq!(n("Batman 1.cbz").unwrap(), r"D:\BD\Batman\Batman 1.cbz");
+    // Séparateurs mélangés et doublés.
+    assert_eq!(n("D:/BD//Batman\\Annuel/x.cbz").unwrap(), r"D:\BD\Batman\Annuel\x.cbz");
+    // Relatif avec sous-dossier.
+    assert_eq!(n("Annuel/x.cbz").unwrap(), r"D:\BD\Batman\Annuel\x.cbz");
+    // Casse de la racine et des dossiers existants gardée (ComicRack compare le texte exact) ;
+    // le nouveau dossier et le nom gardent la casse demandée.
+    assert_eq!(n(r"d:\bd\BATMAN\Nouveau\X.cbz").unwrap(), r"D:\BD\Batman\Nouveau\X.cbz");
+    // Autre lecteur : lettre en majuscule, rien d'autre de changé.
+    assert_eq!(n(r"e:\bd\x.cbz").unwrap(), r"E:\bd\x.cbz");
+    // Refusés.
+    for (bad, why) in [
+        (r"D:\BD\..\BD\x.cbz", "« .. »"),
+        (r"..\x.cbz", "« .. »"),
+        (r".\x.cbz", "« . »"),
+        (r"\BD\x.cbz", "sans lecteur"),
+        ("/BD/x.cbz", "sans lecteur"),
+        (r"D:x.cbz", "relatif à un lecteur"),
+        (r"\\?\D:\BD\x.cbz", "non pris en charge"),
+        (r"\\serveur", "incomplet"),
+        ("  ", "vide"),
+        (r"D:\", "manquant"),
+    ] {
+        let e = n(bad).unwrap_err();
+        assert!(e.contains(why), "{bad} : {e}");
+    }
+}
+
+#[test]
+fn normalisation_chemins_unc() {
+    let cur = r"\\SERVEURNAS\BD\Marvel\Thanos\Thanos 01.cbz";
+    let n = |req: &str| normalize_rename(cur, req);
+    // Même partage écrit autrement : le préfixe du livre est gardé exactement.
+    assert_eq!(
+        n(r"\\serveurnas\bd\marvel\Thanos Quest\01.cbz").unwrap(),
+        r"\\SERVEURNAS\BD\Marvel\Thanos Quest\01.cbz"
+    );
+    assert_eq!(n("//SERVEURNAS/BD/Marvel/x.cbz").unwrap(), r"\\SERVEURNAS\BD\Marvel\x.cbz");
+    assert_eq!(n("Thanos 1.cbz").unwrap(), r"\\SERVEURNAS\BD\Marvel\Thanos\Thanos 1.cbz");
+    // Autre partage : écrit tel que demandé (séparateurs normalisés).
+    assert_eq!(n(r"\\autre\Partage/x.cbz").unwrap(), r"\\autre\Partage\x.cbz");
+    // Vers un lecteur depuis un partage.
+    assert_eq!(n(r"z:/BD/x.cbz").unwrap(), r"Z:\BD\x.cbz");
+    assert!(n(r"\\SERVEURNAS\BD\Marvel\..\x.cbz").unwrap_err().contains(".."));
+    assert!(n(r"\BD\x.cbz").unwrap_err().contains("sans lecteur"));
+    // Lettre de lecteur d'origine en minuscule : gardée telle quelle.
+    assert_eq!(normalize_rename(r"d:\BD\a.cbz", r"D:\bd\b.cbz").unwrap(), r"d:\BD\b.cbz");
+}
+
+#[cfg(not(windows))]
+#[test]
+fn normalisation_chemins_unix() {
+    let cur = "/srv/bd/Batman/Batman 001.cbz";
+    let n = |req: &str| normalize_rename(cur, req);
+    assert_eq!(n("Batman 1.cbz").unwrap(), "/srv/bd/Batman/Batman 1.cbz");
+    assert_eq!(n("/srv//bd/Autre/x.cbz").unwrap(), "/srv/bd/Autre/x.cbz");
+    assert_eq!(n("Annuel\\x.cbz").unwrap(), "/srv/bd/Batman/Annuel/x.cbz", "\\ = séparateur");
+    // Casse respectée (Unix : noms sensibles à la casse).
+    assert_eq!(n("/srv/BD/x.cbz").unwrap(), "/srv/BD/x.cbz");
+    assert!(n("/srv/bd/../x.cbz").unwrap_err().contains(".."));
+    assert!(n("\\srv\\x.cbz").unwrap_err().contains("sans lecteur"));
+    // check_path refuse aussi `..` et `.`.
+    assert!(check_path(Path::new("/srv/bd/../x.cbz")).is_err());
+    assert!(check_path(Path::new("/srv/./x.cbz")).is_err());
+}
+
+/// La destination apparue entre le contrôle et le renommage n'est jamais remplacée.
+#[test]
+fn renommage_sans_remplacement() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.cbz"), dir.path().join("b.cbz"));
+    write_file(&a, b"source");
+    write_file(&b, b"autre livre");
+    let e = rename_no_replace(&a, &b).unwrap_err();
+    assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists, "{e}");
+    assert_eq!(std::fs::read(&b).unwrap(), b"autre livre");
+    assert_eq!(std::fs::read(&a).unwrap(), b"source");
+    let c = dir.path().join("c.cbz");
+    rename_no_replace(&a, &c).unwrap();
+    assert!(!a.exists());
+    assert_eq!(std::fs::read(&c).unwrap(), b"source");
+}
+
+/// `rename_or_move` écrit dans la fiche le chemin normalisé.
+#[test]
+fn renommage_normalise_dans_la_fiche() {
+    let (_d, cfg) = temp_store();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("BD").join("a.cbz");
+    write_file(&src, b"12345");
+    let mut s = Store::open(&cfg).unwrap();
+    let mut b = book();
+    b.file = Some(src.to_string_lossy().into());
+    s.upsert(std::slice::from_ref(&b)).unwrap();
+    let sep = std::path::MAIN_SEPARATOR;
+    let r = rename_or_move(EditTarget::Store(&mut s), &b, Path::new("Série//b.cbz")).unwrap();
+    let expected = format!("{}{sep}BD{sep}Série{sep}b.cbz", dir.path().display());
+    assert_eq!(r.book.file.as_deref(), Some(expected.as_str()));
+    assert!(Path::new(&expected).is_file());
+    let e = rename_or_move(EditTarget::Store(&mut s), &r.book, Path::new("../c.cbz")).unwrap_err().to_string();
+    assert!(e.contains(".."), "{e}");
+}

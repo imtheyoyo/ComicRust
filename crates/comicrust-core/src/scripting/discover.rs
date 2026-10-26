@@ -9,8 +9,12 @@
 //! #@Description Retire les espaces en trop…
 //! #@Key nettoyer-series
 //! #@Image nettoyer.png
+//! #@Enabled false
 //! def nettoyer(books): ...
 //! ```
+//!
+//! `#@Enabled false` (comme dans ComicRack) : point d'entrée **désactivé par défaut**,
+//! tant que l'utilisateur ne l'active pas dans « Gérer les scripts » (son choix prime).
 //!
 //! Différences voulues avec ComicRack : seul un `def` en début de ligne (fonction de
 //! premier niveau) clôt un bloc d'en-têtes ; les en-têtes inconnus ou mal formés sont
@@ -47,6 +51,9 @@ pub struct ScriptEntry {
     pub image: Option<PathBuf>,
     /// Ligne (1 = première) du `def`.
     pub line: usize,
+    /// `#@Enabled` : actif par défaut (vrai sans l'en-tête). L'utilisateur peut changer
+    /// l'état dans « Gérer les scripts ».
+    pub enabled_by_default: bool,
 }
 
 impl ScriptEntry {
@@ -175,6 +182,7 @@ struct Pending {
     key: Option<String>,
     description: Vec<String>,
     image: Option<String>,
+    enabled: Option<bool>,
 }
 
 /// Analyse le texte d'un script (BOM UTF-8 accepté). `rel_path` : chemin relatif affiché.
@@ -219,8 +227,13 @@ pub fn parse_script(text: &str, file: &Path, rel_path: &str) -> (Vec<ScriptEntry
                     "key" => p.key = Some(value.to_string()),
                     "description" => p.description.push(value.to_string()),
                     "image" => p.image = Some(value.to_string()),
+                    "enabled" => match value.to_ascii_lowercase().as_str() {
+                        "true" | "yes" | "oui" | "1" => p.enabled = Some(true),
+                        "false" | "no" | "non" | "0" => p.enabled = Some(false),
+                        _ => warn(&mut warnings, n, format!("#@Enabled : « {value} » ni true ni false")),
+                    },
                     // Attributs de ComicRack sans objet ici : ignorés sans bruit.
-                    "pcount" | "enabled" | "editor" => {}
+                    "pcount" | "editor" => {}
                     _ => warn(&mut warnings, n, format!("en-tête inconnu « #@{name} »")),
                 }
                 continue;
@@ -263,6 +276,7 @@ pub fn parse_script(text: &str, file: &Path, rel_path: &str) -> (Vec<ScriptEntry
             description: (!p.description.is_empty()).then(|| p.description.join("\n")),
             image: p.image.map(|i| base_dir.join(i)),
             line: n,
+            enabled_by_default: p.enabled.unwrap_or(true),
         });
     }
     if let Some(p) = pending {
@@ -272,11 +286,11 @@ pub fn parse_script(text: &str, file: &Path, rel_path: &str) -> (Vec<ScriptEntry
 }
 
 /// Points d'entrée d'un hook, sans ceux que l'utilisateur a désactivés (identifiants
-/// [`ScriptEntry::id`]).
+/// [`ScriptEntry::id`]) ni ceux désactivés par défaut (`#@Enabled false`).
 pub fn entries_for_hook<'a>(
     entries: &'a [ScriptEntry],
     hook: Hook,
     disabled: &'a HashSet<String>,
 ) -> impl Iterator<Item = &'a ScriptEntry> + 'a {
-    entries.iter().filter(move |e| e.has_hook(hook) && !disabled.contains(&e.id()))
+    entries.iter().filter(move |e| e.has_hook(hook) && e.enabled_by_default && !disabled.contains(&e.id()))
 }

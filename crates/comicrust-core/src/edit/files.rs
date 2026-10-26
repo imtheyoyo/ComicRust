@@ -25,7 +25,7 @@
 //! tel quel) ; `{volume}` et `{number}` donnent la valeur seule (ComicRack affiche
 //! « V3 » et ajoute « (of 12) » au numéro).
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::db::{BookEdit, FileState};
 use crate::library::LibraryBook;
@@ -86,19 +86,192 @@ pub fn check_file_name(name: &str) -> Result<(), String> {
 }
 
 /// Chemin valide sous Windows : chaque élément (hors préfixe de lecteur ou de partage)
-/// et la longueur totale.
+/// et la longueur totale. Les éléments `.` et `..` sont refusés (ComicRack compare le
+/// texte exact des chemins : `D:\BD\..\BD\x.cbz` serait un autre livre).
 pub fn check_path(path: &Path) -> Result<(), String> {
-    for c in path.components() {
-        if let Component::Normal(n) = c {
-            let n = n.to_str().ok_or_else(|| format!("{} : nom illisible (Unicode invalide)", path.display()))?;
-            check_file_name(n)?;
-        }
+    let text = path.to_str().ok_or_else(|| format!("{} : nom illisible (Unicode invalide)", path.display()))?;
+    let parsed = parse_path(text, windows_style(text), true)?;
+    for n in &parsed.parts {
+        check_file_name(n)?;
     }
-    let len = path.as_os_str().to_string_lossy().encode_utf16().count();
+    let len = text.encode_utf16().count();
     if len > MAX_PATH_LEN {
         return Err(format!("chemin trop long ({len} caractères, {MAX_PATH_LEN} au plus pour ComicRack)"));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------
+// Normalisation des chemins (renommages demandés par les scripts, fenêtre « Renommer »)
+// ---------------------------------------------------------------------------------------
+
+/// Racine d'un chemin, telle qu'écrite.
+#[derive(Debug, Clone, PartialEq)]
+enum Root {
+    /// Lettre de lecteur (`C:`).
+    Drive(String),
+    /// Partage réseau `\\serveur\partage` : (serveur, partage).
+    Unc(String, String),
+    /// `/` (chemin Unix).
+    Unix,
+    /// Chemin relatif.
+    Relative,
+}
+
+impl Root {
+    fn is_windows(&self) -> bool {
+        matches!(self, Root::Drive(_) | Root::Unc(..))
+    }
+
+    /// Même racine, sans casse pour une racine Windows ?
+    fn same(&self, other: &Root) -> bool {
+        match (self, other) {
+            (Root::Drive(a), Root::Drive(b)) => a.eq_ignore_ascii_case(b),
+            (Root::Unc(s1, p1), Root::Unc(s2, p2)) => same_text_nocase(s1, s2) && same_text_nocase(p1, p2),
+            (a, b) => a == b,
+        }
+    }
+}
+
+/// Chemin découpé : racine et éléments (sans séparateurs).
+#[derive(Debug, Clone, PartialEq)]
+struct ParsedPath {
+    root: Root,
+    parts: Vec<String>,
+}
+
+impl ParsedPath {
+    /// Texte du chemin : séparateur `\` pour une racine Windows, `/` sinon.
+    fn text(&self) -> String {
+        match &self.root {
+            Root::Drive(d) => format!("{d}\\{}", self.parts.join("\\")),
+            Root::Unc(server, share) => {
+                let mut s = format!("\\\\{server}\\{share}");
+                for p in &self.parts {
+                    s.push('\\');
+                    s.push_str(p);
+                }
+                s
+            }
+            Root::Unix => format!("/{}", self.parts.join("/")),
+            Root::Relative => self.parts.join(if cfg!(windows) { "\\" } else { "/" }),
+        }
+    }
+}
+
+/// Mêmes textes, sans casse (noms de fichiers Windows).
+fn same_text_nocase(a: &str, b: &str) -> bool {
+    a == b || a.to_lowercase() == b.to_lowercase()
+}
+
+fn is_sep(c: char) -> bool {
+    c == '/' || c == '\\'
+}
+
+/// Chemin de style Windows (lettre de lecteur ou partage `\\serveur`) ? Sous Windows,
+/// tout chemin l'est.
+fn windows_style(text: &str) -> bool {
+    let b = text.as_bytes();
+    cfg!(windows) || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':') || text.starts_with("\\\\")
+}
+
+/// Découpe `text`. `windows` : contexte Windows (un chemin commençant par un seul
+/// séparateur n'a ni lecteur ni partage : refusé, sauf si `lenient`). `.` et `..` sont
+/// toujours refusés.
+fn parse_path(text: &str, windows: bool, lenient: bool) -> Result<ParsedPath, String> {
+    let b = text.as_bytes();
+    let starts_two_seps = text.chars().take(2).filter(|c| is_sep(*c)).count() == 2;
+    if starts_two_seps && (text[2..].starts_with('?') || text[2..].starts_with('.')) && text[3..].starts_with(is_sep) {
+        return Err(format!("« {text} » : préfixe « \\\\?\\ » ou « \\\\.\\ » non pris en charge"));
+    }
+    let (root, rest) = if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        if !text[2..].starts_with(is_sep) && text.len() > 2 {
+            return Err(format!(
+                "« {text} » : chemin relatif à un lecteur ; écrire le chemin complet ({}\\…)",
+                &text[..2]
+            ));
+        }
+        (Root::Drive(text[..2].to_string()), text.get(3..).unwrap_or(""))
+    } else if starts_two_seps {
+        let mut it = text[2..].splitn(3, is_sep);
+        let server = it.next().unwrap_or("");
+        let share = it.next().unwrap_or("");
+        if server.is_empty() || share.is_empty() {
+            return Err(format!("« {text} » : partage réseau incomplet (\\\\serveur\\partage\\…)"));
+        }
+        (Root::Unc(server.to_string(), share.to_string()), it.next().unwrap_or(""))
+    } else if text.starts_with(is_sep) {
+        if (windows || text.starts_with('\\')) && !lenient {
+            return Err(format!(
+                "« {text} » : chemin sans lecteur ni partage réseau ; écrire le chemin complet (D:\\BD\\… ou \\\\serveur\\partage\\…)"
+            ));
+        }
+        (Root::Unix, &text[1..])
+    } else {
+        (Root::Relative, text)
+    };
+    let mut parts = Vec::new();
+    for p in rest.split(is_sep).filter(|p| !p.is_empty()) {
+        if p == "." || p == ".." {
+            return Err(format!("« {text} » : les éléments « . » et « .. » sont interdits dans un chemin"));
+        }
+        parts.push(p.to_string());
+    }
+    Ok(ParsedPath { root, parts })
+}
+
+/// Chemin cible d'un renommage, **normalisé**, à écrire tel quel dans la fiche.
+///
+/// - `requested` : chemin complet, ou relatif au dossier actuel du fichier (`current`) ;
+///   séparateurs `/` et `\` acceptés, doublés ou mélangés ;
+/// - refusés : éléments `.` et `..`, chemin Windows sans lecteur ni partage (`\BD\…`),
+///   préfixes `\\?\` ;
+/// - résultat : séparateur `\` pour un chemin Windows (lecteur `C:` ou partage
+///   `\\serveur\partage`), `/` sinon ;
+/// - **style du chemin d'origine gardé** : ComicRack compare le texte exact des chemins,
+///   donc une même racine (`\\SERVEURNAS\BD` demandé `\\serveurnas\bd`) et les mêmes
+///   premiers dossiers sont écrits comme dans le chemin actuel du livre (sans casse pour
+///   un chemin Windows) ; les nouveaux dossiers et le nom gardent la casse demandée.
+pub fn normalize_rename(current: &str, requested: &str) -> Result<String, String> {
+    let requested = requested.trim_end();
+    if requested.trim().is_empty() {
+        return Err("nouveau chemin vide".into());
+    }
+    let windows = windows_style(current) || windows_style(requested);
+    let cur = parse_path(current, windows, true);
+    let req = parse_path(requested, windows, false)?;
+    let mut out = match req.root {
+        Root::Relative => {
+            let cur = cur.map_err(|e| format!("emplacement actuel du livre illisible : {e}"))?;
+            if cur.root == Root::Relative {
+                return Err(format!("emplacement actuel du livre relatif (« {current} »)"));
+            }
+            let mut parts = cur.parts.clone();
+            parts.pop();
+            parts.extend(req.parts);
+            ParsedPath { root: cur.root, parts }
+        }
+        Root::Drive(d) => ParsedPath { root: Root::Drive(d.to_ascii_uppercase()), parts: req.parts },
+        root => ParsedPath { root, parts: req.parts },
+    };
+    if out.parts.is_empty() {
+        return Err(format!("« {requested} » : nom de fichier manquant"));
+    }
+    // Style du chemin d'origine : même racine et mêmes premiers dossiers écrits pareil.
+    if let Ok(cur) = parse_path(current, windows, true) {
+        if out.root.is_windows() && out.root.same(&cur.root) {
+            out.root = cur.root.clone();
+            let dirs = &cur.parts[..cur.parts.len().saturating_sub(1)];
+            let n = out.parts.len() - 1;
+            for (i, d) in dirs.iter().enumerate().take(n) {
+                if !same_text_nocase(&out.parts[i], d) {
+                    break;
+                }
+                out.parts[i] = d.clone();
+            }
+        }
+    }
+    Ok(out.text())
 }
 
 /// Rend un texte utilisable comme nom de fichier Windows : `:` → ` -`, `/ \ |` → `-`,
@@ -379,6 +552,83 @@ pub(crate) fn copy_then_delete(from: &Path, to: &Path) -> Result<(), Error> {
     res
 }
 
+/// Renomme `from` en `to` **sans jamais remplacer** un fichier `to` qui existerait
+/// (créé entre le contrôle de [`move_file`] et le renommage) : erreur `AlreadyExists`.
+///
+/// - Windows : `MoveFileExW` sans `MOVEFILE_REPLACE_EXISTING` (ni copie entre volumes :
+///   `ERROR_NOT_SAME_DEVICE`, traité par l'appelant) ;
+/// - Linux : `renameat2(RENAME_NOREPLACE)` ; si le système de fichiers ne le permet pas
+///   (`EINVAL`, `ENOSYS`), lien dur puis suppression de l'original (le lien échoue si la
+///   destination existe) ;
+/// - autres Unix : lien dur puis suppression ;
+/// - en dernier recours (liens durs impossibles : FAT, certains partages réseau), contrôle
+///   d'existence puis `rename` : il reste alors un court instant où une destination créée
+///   par un autre programme pourrait être remplacée.
+pub fn rename_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVE_FILE_FLAGS};
+        let wide = |p: &Path| p.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+        let (f, t) = (wide(from), wide(to));
+        // SAFETY : chaînes UTF-16 terminées par 0, vivantes pendant l'appel.
+        let r = unsafe { MoveFileExW(PCWSTR(f.as_ptr()), PCWSTR(t.as_ptr()), MOVE_FILE_FLAGS(0)) };
+        r.map_err(|e| {
+            let hr = e.code().0 as u32;
+            // HRESULT_FROM_WIN32 : code Win32 dans les 16 bits bas.
+            if hr & 0xFFFF_0000 == 0x8007_0000 {
+                std::io::Error::from_raw_os_error((hr & 0xFFFF) as i32)
+            } else {
+                std::io::Error::other(e.message())
+            }
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let c = |p: &Path| std::ffi::CString::new(p.as_os_str().as_bytes());
+            let (Ok(f), Ok(t)) = (c(from), c(to)) else {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "chemin avec un octet nul"));
+            };
+            // SAFETY : chaînes C valides, terminées par 0.
+            let r = unsafe {
+                libc::renameat2(libc::AT_FDCWD, f.as_ptr(), libc::AT_FDCWD, t.as_ptr(), libc::RENAME_NOREPLACE)
+            };
+            if r == 0 {
+                return Ok(());
+            }
+            let e = std::io::Error::last_os_error();
+            match e.raw_os_error() {
+                Some(libc::EINVAL) | Some(libc::ENOSYS) | Some(libc::EOPNOTSUPP) => {}
+                _ => return Err(e),
+            }
+        }
+        match std::fs::hard_link(from, to) {
+            Ok(()) => {
+                if let Err(e) = std::fs::remove_file(from) {
+                    let _ = std::fs::remove_file(to);
+                    return Err(e);
+                }
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e),
+            Err(e) if is_cross_device(&e) => Err(e),
+            Err(_) => {
+                if to.symlink_metadata().is_ok() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        format!("la destination existe déjà : {}", to.display()),
+                    ));
+                }
+                std::fs::rename(from, to)
+            }
+        }
+    }
+}
+
 /// Déplace / renomme `from` en `to` sur le disque, avec les contrôles de
 /// [`rename_or_move`] (source existante, destination libre et valide), en créant les
 /// dossiers manquants.
@@ -421,7 +671,9 @@ pub fn move_file(from: &Path, to: &Path) -> Result<MovedFile, Error> {
             let _ = std::fs::remove_dir(d);
         }
     };
-    match std::fs::rename(from, to) {
+    // Simple changement de casse : la destination est le fichier lui-même.
+    let renamed = if same { std::fs::rename(from, to) } else { rename_no_replace(from, to) };
+    match renamed {
         Ok(()) => Ok(MovedFile { from: from.into(), to: to.into(), copied: false, created_dirs }),
         Err(e) if is_cross_device(&e) => match copy_then_delete(from, to) {
             Ok(()) => Ok(MovedFile { from: from.into(), to: to.into(), copied: true, created_dirs }),
@@ -440,8 +692,14 @@ pub fn move_file(from: &Path, to: &Path) -> Result<MovedFile, Error> {
 /// Défait un déplacement : remet le fichier à sa place et supprime les dossiers créés
 /// (s'ils sont vides).
 pub fn undo_move(m: &MovedFile) -> Result<(), Error> {
-    let res =
-        if m.copied { copy_then_delete(&m.to, &m.from) } else { std::fs::rename(&m.to, &m.from).map_err(Error::from) };
+    let same = same_file::is_same_file(&m.to, &m.from).unwrap_or(false);
+    let res = if m.copied {
+        copy_then_delete(&m.to, &m.from)
+    } else if same {
+        std::fs::rename(&m.to, &m.from).map_err(Error::from)
+    } else {
+        rename_no_replace(&m.to, &m.from).map_err(Error::from)
+    };
     if res.is_ok() {
         for d in m.created_dirs.iter().rev() {
             let _ = std::fs::remove_dir(d);
@@ -491,7 +749,9 @@ fn moved_book(book: &LibraryBook, path: &Path) -> Result<(LibraryBook, FileState
 ///   destination existe, ou si le nouveau chemin est invalide sous Windows (caractères
 ///   `<>:"/\|?*`, noms réservés `CON`, `PRN`, `COM1`…, point ou espace final, plus de
 ///   255 caractères par élément ou [`MAX_PATH_LEN`] au total).
-/// - Même volume : `rename` ; autre volume : copie vérifiée (octet par octet) puis
+/// - Le nouveau chemin est d'abord normalisé ([`normalize_rename`]) : c'est ce texte qui
+///   est écrit dans la fiche (`.`/`..` et chemins Windows sans lecteur refusés).
+/// - Même volume : `rename` sans remplacement ([`rename_no_replace`]) ; autre volume : copie vérifiée (octet par octet) puis
 ///   suppression de l'original. Les dossiers manquants sont créés.
 /// - Si la mise à jour de la base échoue, le fichier est **remis à sa place** (et les
 ///   dossiers créés supprimés) ; l'erreur rendue le dit.
@@ -505,6 +765,10 @@ pub fn rename_or_move(target: EditTarget<'_>, book: &LibraryBook, new_path: &Pat
             .filter(|f| !f.is_empty())
             .ok_or_else(|| invalid(format!("livre {} sans fichier", book.id)))?,
     );
+    // Chemin normalisé (séparateurs, style du chemin d'origine) : c'est lui qui est écrit
+    // dans la fiche.
+    let normalized = normalize_rename(&from.to_string_lossy(), &new_path.to_string_lossy()).map_err(invalid)?;
+    let new_path = Path::new(&normalized);
     let moved = move_file(&from, new_path)?;
     let undo_after = |e: Error, moved: &MovedFile| -> Error {
         match undo_move(moved) {

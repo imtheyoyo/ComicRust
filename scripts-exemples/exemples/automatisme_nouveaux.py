@@ -2,9 +2,9 @@
 """Automatisme sur les nouveaux livres (script d'exemple fourni avec ComicRust).
 
     ┌──────────────────────────────────────────────────────────────────────────────┐
-    │ DÉSACTIVÉ PAR DÉFAUT. Pour l'activer : fenêtre des scripts → « Nouveaux      │
-    │ livres : réglages » → répondre « Oui » à « Activer l'automatisme ? ».        │
-    │ (On peut aussi le désactiver complètement dans la liste des scripts.)        │
+    │ DÉSACTIVÉ PAR DÉFAUT (en-tête « #@Enabled false »). Pour l'activer :         │
+    │ 📜 Scripts ▸ Gérer les scripts… ▸ cocher « Nouveaux livres : étiquette et    │
+    │ série depuis le nom » (et cocher « Exécuter les automatismes »).             │
     └──────────────────────────────────────────────────────────────────────────────┘
 
 Une fois activé, après chaque analyse des dossiers qui ajoute des livres (hook
@@ -24,7 +24,7 @@ import re
 
 import comicrust
 
-DEFAUTS = {"actif": False, "etiquette": "à lire", "completer": True}
+DEFAUTS = {"etiquette": "à lire", "completer": True}
 
 
 def _reglage(nom):
@@ -35,10 +35,9 @@ def _reglage(nom):
 #@Name Nouveaux livres : réglages
 #@Hook ConfigScript
 #@Key nouveaux-livres-reglages
-#@Description Activer l'automatisme, choisir l'étiquette ajoutée aux nouveaux livres.
+#@Description Étiquette ajoutée aux nouveaux livres, complément depuis le nom du fichier.
 def reglages():
     s = comicrust.settings()
-    s["actif"] = comicrust.confirm("Activer l'automatisme sur les nouveaux livres ?", bool(_reglage("actif")))
     s["etiquette"] = (comicrust.ask("Étiquette ajoutée (vide = aucune) :", _reglage("etiquette")) or "").strip()
     s["completer"] = comicrust.confirm(
         "Compléter série, numéro et année vides depuis le nom du fichier ?", bool(_reglage("completer")))
@@ -81,10 +80,9 @@ def _vide(v):
 #@Hook NewBooks
 #@Key nouveaux-livres
 #@Description Après une analyse : étiquette « à lire » et série/numéro/année depuis le nom
-#@Description du fichier. Désactivé tant qu'il n'est pas activé dans ses réglages.
+#@Description du fichier. Désactivé par défaut : à cocher dans « Gérer les scripts ».
+#@Enabled false
 def nouveaux(books):
-    if not _reglage("actif"):
-        return None  # désactivé (réglage par défaut) : rien à faire
     etiquette = (_reglage("etiquette") or "").strip()
     completer = bool(_reglage("completer"))
     n = 0

@@ -13,7 +13,7 @@ Chaque [release](https://github.com/imtheyoyo/ComicRust/releases) contient
 `ComicRust-<version>-windows-x64.zip` pour Windows 10/11 x64 : dézipper et lancer
 `ComicRust.exe`. Aucun runtime à installer. Le zip contient aussi `pdfium.dll` (lecture des
 PDF, à laisser à côté de l'exe), `comicrust-cli.exe`, un Python embarqué (`python\`, pour les
-scripts) et des scripts d'exemple (`scripts\`).
+scripts) et des scripts d'exemple (`scripts\exemples\`).
 
 **ComicRust est exclusivement portable** : il n'écrit rien en dehors de son dossier. Réglages,
 cache de l'index des BD et miniatures des couvertures vont dans `data\` à côté de l'exe (le
@@ -165,8 +165,9 @@ de page fixe, bordure, fond, droite à gauche). Exemples dans `recette/echantill
 Depuis la v0.10.0, des **scripts Python 3** modifient les fiches, rangent les fichiers,
 récupèrent des informations en ligne ou s'exécutent tout seuls (nouveaux livres, ouverture
 d'un livre…). Python est fourni (distribution officielle « embeddable » 3.13 dans `python\`) :
-rien à installer. Les scripts vont dans `scripts\` à côté de l'exe ; quatre exemples y sont
-livrés ([`scripts-exemples/`](scripts-exemples)) : nettoyage des fiches, rangement des
+rien à installer. Les scripts vont dans `scripts\` à côté de l'exe ; quatre exemples sont
+livrés dans `scripts\exemples\` ([`scripts-exemples/exemples/`](scripts-exemples/exemples),
+jamais écrasés s'ils ont été modifiés : la mise à jour pose la nouvelle version à côté) : nettoyage des fiches, rangement des
 fichiers selon un modèle de nom, informations depuis Comic Vine (clé d'API personnelle),
 automatisme sur les nouveaux livres. Les scripts du menu ne modifient rien sans l'aperçu.
 Documentation : [`docs/scripts.md`](docs/scripts.md) (en-têtes `#@Name`/`#@Hook`, module

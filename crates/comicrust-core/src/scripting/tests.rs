@@ -59,6 +59,23 @@ fn en_tetes_mal_formes() {
     assert!(has("sans fonction"), "{msgs:?}");
 }
 
+/// `#@Enabled false` : point d'entrée désactivé par défaut (ignoré par `entries_for_hook`).
+#[test]
+fn en_tete_enabled() {
+    let text = "#@Name A\n#@Hook NewBooks\n#@Enabled false\ndef a(books): pass\n\
+        #@Name B\n#@Hook NewBooks\n#@Enabled True\ndef b(books): pass\n\
+        #@Name C\n#@Hook NewBooks\ndef c(books): pass\n\
+        #@Name D\n#@Hook NewBooks\n#@Enabled peut-être\ndef d(books): pass\n";
+    let (e, w) = parse_script(text, Path::new("x.py"), "x.py");
+    let states: Vec<(&str, bool)> = e.iter().map(|e| (e.function.as_str(), e.enabled_by_default)).collect();
+    assert_eq!(states, [("a", false), ("b", true), ("c", true), ("d", true)]);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].message.contains("#@Enabled"));
+    let aucun = HashSet::new();
+    let actifs: Vec<&str> = entries_for_hook(&e, Hook::NewBooks, &aucun).map(|e| e.function.as_str()).collect();
+    assert_eq!(actifs, ["b", "c", "d"]);
+}
+
 #[test]
 fn decouverte_dossier() {
     let dir = tempfile::tempdir().unwrap();
@@ -207,6 +224,7 @@ impl Fixture {
             description: None,
             image: None,
             line: 1,
+            enabled_by_default: true,
         }
     }
 
@@ -653,4 +671,134 @@ def valeurs(books):
     assert_eq!(fields, ["CustomValue:Note", "CustomValue:Vu", "Checked"]);
     assert_eq!(r.rejected.len(), 1, "{:?}", r.rejected);
     assert!(r.rejected[0].reason.contains("Année"), "{}", r.rejected[0].reason);
+}
+
+// ---------------------------------------------------------------------------------------
+// Fin de ComicRust, valeurs refusées, saisie secrète, dossier du module
+// ---------------------------------------------------------------------------------------
+
+/// ComicRust disparaît (stdin du script fermé, sans « cancel ») : le module interrompt le
+/// script puis, s'il ne s'arrête pas (KeyboardInterrupt avalé), sort de lui-même : pas de
+/// processus Python orphelin.
+#[test]
+fn fermeture_de_stdin_arrete_python() {
+    use std::io::{BufRead, BufReader, Write};
+    let py = need_python!();
+    let fx = Fixture::new(py.clone());
+    let module = fx.dir.path().join("module");
+    super::runner::ensure_module(&module).unwrap();
+    for (code, max) in [
+        // Boucle ordinaire : interrompue tout de suite.
+        ("import time\ndef f():\n    while True:\n        time.sleep(0.05)\n", Duration::from_secs(4)),
+        // Script qui avale KeyboardInterrupt : arrêt forcé après EXIT_DELAY (5 s).
+        (
+            "import time\ndef f():\n    while True:\n        try:\n            time.sleep(0.05)\n        except BaseException:\n            pass\n",
+            Duration::from_secs(10),
+        ),
+    ] {
+        let entry = fx.script(code, "f", Hook::Library);
+        let mut child = std::process::Command::new(&py)
+            .args(["-I", "-X", "utf8", "-u", "-B", "-c", super::runner::BOOT])
+            .arg(&module)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let mut hello = String::new();
+        out.read_line(&mut hello).unwrap();
+        assert!(hello.contains("hello"), "{hello}");
+        let mut stdin = child.stdin.take().unwrap();
+        let run = json!({"t": "run", "protocol": PROTOCOL_VERSION, "script": entry.file.display().to_string(),
+                         "function": "f", "hook": "Library", "book_ids": [], "interactive": false, "live": false,
+                         "args": null, "settings": {}, "fields": {}, "lib_dirs": []});
+        writeln!(stdin, "{run}").unwrap();
+        stdin.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(child.try_wait().unwrap().is_none(), "le script tourne");
+        let t = Instant::now();
+        drop(stdin); // ComicRust fermé
+        let status = loop {
+            if let Some(st) = child.try_wait().unwrap() {
+                break Some(st);
+            }
+            if t.elapsed() > max {
+                let _ = child.kill();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(status.is_some(), "Python toujours vivant {:?} après la fermeture de stdin", t.elapsed());
+    }
+}
+
+/// NaN / infini : seule la modification fautive est refusée (ValueError claire, que le
+/// script peut intercepter) ; les autres modifications restent.
+#[test]
+fn nan_refuse_seule_modification() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let code = r#"
+import comicrust
+def f(books):
+    b = books[0]
+    b.series = "Bonne"
+    try:
+        b.rating = float("nan")
+    except ValueError as e:
+        comicrust.log("refus : %s" % e)
+    b.number = "2"
+    b.year = float("inf")
+"#;
+    let r = fx.run(code, "f", RunContext::new(Hook::Books, ids(1)), Arc::new(library(1)));
+    assert_eq!(r.state, RunState::Failed);
+    let f = r.failure.clone().unwrap();
+    assert_eq!(f.kind, "ValueError");
+    assert!(f.message.contains("non fini") && f.message.contains("Year"), "{f:?}");
+    assert!(r.journal_text().contains("refus : ") && r.journal_text().contains("Rating"), "{}", r.journal_text());
+    // Les modifications valides demandées avant l'erreur sont gardées (aperçu partiel).
+    let fields: Vec<&str> = r
+        .changes
+        .iter()
+        .filter_map(|c| match c {
+            ScriptChange::SetField { field, .. } => Some(field.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fields, ["Series", "Number"]);
+    // Progression NaN : ignorée sans erreur.
+    let r = fx.run(
+        "import comicrust\ndef f():\n    comicrust.progress(float('nan'), 'x')\n    return 1\n",
+        "f",
+        RunContext::new(Hook::Library, vec![]),
+        Arc::new(TestHost::default()),
+    );
+    assert_eq!(r.state, RunState::Finished, "{:?}", r.failure);
+}
+
+/// `ask(..., secret=True)` : question marquée secrète, valeur actuelle jamais envoyée ;
+/// réponse vide = valeur actuelle.
+#[test]
+fn question_secrete() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let code = "import comicrust\ndef f():\n    return [comicrust.ask('Clé ?', 'ACTUELLE', secret=True), comicrust.ask('Clé ?', 'ACTUELLE', secret=True)]\n";
+    let host = Arc::new(TestHost::default());
+    *host.answers.lock().unwrap() = vec![json!(""), json!("NOUVELLE")];
+    let r = fx.run(code, "f", RunContext::new(Hook::Books, vec![]), host.clone());
+    assert_eq!(r.return_value, json!(["ACTUELLE", "NOUVELLE"]), "{:?}", r.failure);
+    let q = host.questions.lock().unwrap();
+    assert!(q.iter().all(|q| q.secret && q.default == json!("")), "{q:?}");
+}
+
+/// Module `comicrust.py` : par défaut dans `data/python/` à côté de l'exécutable, jamais
+/// dans le dossier temporaire du système.
+#[test]
+fn dossier_du_module_portable() {
+    let d = default_module_dir();
+    let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    assert_eq!(d, exe_dir.join("data").join("python"));
+    assert!(!d.starts_with(std::env::temp_dir()) || exe_dir.starts_with(std::env::temp_dir()));
+    assert!(RunOptions::default().module_dir.is_none());
 }

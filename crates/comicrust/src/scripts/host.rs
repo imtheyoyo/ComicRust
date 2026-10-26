@@ -69,7 +69,8 @@ pub struct UiHost {
     fresh: Mutex<HashMap<String, LibraryBook>>,
     tx: Sender<HostEvent>,
     ctx: egui::Context,
-    /// Arrêt demandé par l'utilisateur : une question en cours rend la valeur par défaut.
+    /// Arrêt demandé (utilisateur, fermeture de ComicRust) : une question en cours rend la
+    /// valeur par défaut ; une application au fil de l'eau s'arrête entre deux livres.
     stop: Arc<AtomicBool>,
     stored: SharedSettings,
     settings_dirty: Arc<AtomicBool>,
@@ -157,7 +158,7 @@ impl ScriptHost for UiHost {
             return Err(m.to_string());
         }
         let plan = ApplyPlan::from_changes(changes, |id| self.book(id));
-        let outcome = apply_plan(&live.target, &plan);
+        let outcome = apply_plan(&live.target, &plan, &self.stop);
         let written = outcome.written();
         if let Some(sink) = &live.sink {
             sink.lock().unwrap().extend(written);

@@ -26,7 +26,7 @@ const MAX_LOG_LINE: usize = 16 * 1024;
 
 /// Lancement du module : `sys.argv[1]` = dossier où `comicrust.py` a été écrit. Le Python
 /// « embeddable » ignore `PYTHONPATH` : le chemin est donc ajouté ici.
-const BOOT: &str = "import sys; sys.path.insert(0, sys.argv[1]); import comicrust; comicrust._main()";
+pub(super) const BOOT: &str = "import sys; sys.path.insert(0, sys.argv[1]); import comicrust; comicrust._main()";
 
 // ---------------------------------------------------------------------------------------
 // Types publics
@@ -194,6 +194,9 @@ pub struct Question {
     pub default: Value,
     /// Choix proposés (textes) pour [`QuestionKind::Choice`].
     pub choices: Vec<String>,
+    /// Saisie secrète (`ask(..., secret=True)` : clé d'API…) : champ masqué, aucune valeur
+    /// par défaut affichée ; une réponse vide garde la valeur actuelle (côté script).
+    pub secret: bool,
 }
 
 /// Réglages propres à un script (par fichier, voir [`ScriptEntry::settings_key`]).
@@ -329,7 +332,9 @@ impl RunContext {
 pub struct RunOptions {
     /// Interpréteur ; `None` = [`find_python`].
     pub python: Option<PathBuf>,
-    /// Dossier où écrire `comicrust.py` ; `None` = `<temp>/comicrust-py-<version>`.
+    /// Dossier où écrire `comicrust.py` ; `None` = `data\python\` à côté de l'exécutable
+    /// ([`default_module_dir`] : ComicRust est portable, rien n'est écrit ailleurs). Les
+    /// tests passent un dossier temporaire explicite.
     pub module_dir: Option<PathBuf>,
     /// Dossier des scripts : `<scripts>/lib` est ajouté à `sys.path`.
     pub scripts_dir: Option<PathBuf>,
@@ -401,6 +406,20 @@ impl RunHandle {
         self.result.as_ref()
     }
 
+    /// Attend la fin de l'exécution au plus `timeout` ; vrai si elle est finie.
+    pub fn wait_timeout(&mut self, timeout: Duration) -> bool {
+        let end = Instant::now() + timeout;
+        loop {
+            if self.poll().is_some() {
+                return true;
+            }
+            if Instant::now() >= end {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Attend la fin de l'exécution.
     pub fn wait(mut self) -> RunResult {
         match self.result.take() {
@@ -448,7 +467,7 @@ impl ScriptRunner {
 
 /// Écrit `comicrust.py` dans `dir` s'il est absent ou différent (fichier temporaire puis
 /// renommage : plusieurs exécutions simultanées ne voient jamais un fichier à moitié écrit).
-fn ensure_module(dir: &Path) -> std::io::Result<()> {
+pub(super) fn ensure_module(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let target = dir.join("comicrust.py");
     if std::fs::read_to_string(&target).is_ok_and(|t| t == PYTHON_MODULE) {
@@ -471,8 +490,14 @@ fn ensure_module(dir: &Path) -> std::io::Result<()> {
     }
 }
 
-fn default_module_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("comicrust-py-{}", env!("CARGO_PKG_VERSION")))
+/// Dossier par défaut du module `comicrust.py` : `data\python\` à côté de l'exécutable
+/// (ComicRust est portable : rien n'est écrit dans `%TEMP%` ni ailleurs hors de son dossier).
+pub fn default_module_dir() -> PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."));
+    exe_dir.join("data").join("python")
 }
 
 enum Ev {
@@ -631,6 +656,12 @@ fn run_inner(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let mut child = cmd.spawn().map_err(|e| format!("impossible de lancer Python ({}) : {e}", python.display()))?;
+    // Windows : Python (et les processus lancés par le script) dans un « Job Object » tué
+    // à la fermeture de son dernier handle : à la fin de l'exécution, ou si ComicRust se
+    // ferme ou plante, rien ne reste orphelin. Ailleurs : le module s'arrête de lui-même
+    // quand stdin se ferme (voir `comicrust.py`, `_Channel.reader`).
+    #[cfg(windows)]
+    let _job = kill_on_close_job(&child);
     let stdin = child.stdin.take();
     let stdout = child.stdout.take().ok_or("sortie de Python indisponible")?;
     let stderr = child.stderr.take().ok_or("erreurs de Python indisponibles")?;
@@ -770,6 +801,50 @@ fn run_inner(
         result.journal.push(JournalLine { kind: JournalKind::Error, text });
     }
     Ok(result)
+}
+
+/// Job Object Windows `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` contenant `child` : tous ses
+/// processus (sous-processus du script compris, créés après l'affectation) sont tués quand
+/// le handle est fermé (`Drop`). `None` si le système refuse (le processus reste alors
+/// géré comme ailleurs : annulation puis `kill`).
+#[cfg(windows)]
+struct KillOnCloseJob(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for KillOnCloseJob {
+    fn drop(&mut self) {
+        // SAFETY : handle obtenu de CreateJobObjectW, fermé une seule fois.
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn kill_on_close_job(child: &Child) -> Option<KillOnCloseJob> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    // SAFETY : appels Win32 sur des handles valides (le job créé ici, le processus enfant
+    // encore vivant tant que `child` existe) ; la structure vit pendant l'appel.
+    unsafe {
+        let job = KillOnCloseJob(CreateJobObjectW(None, PCWSTR::null()).ok()?);
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(
+            job.0,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+        .ok()?;
+        AssignProcessToJobObject(job.0, HANDLE(child.as_raw_handle())).ok()?;
+        Some(job)
+    }
 }
 
 /// Attend la fin du processus pendant `grace`, puis le tue. Code de sortie si connu.
@@ -976,6 +1051,7 @@ impl Session {
                             a.iter().map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).collect()
                         })
                         .unwrap_or_default(),
+                    secret: p.get("secret").and_then(Value::as_bool).unwrap_or(false),
                 };
                 let answer = if self.ctx.interactive { self.host.ask(&q) } else { None };
                 let valid = match (&answer, kind) {

@@ -1,6 +1,7 @@
 //! Tests de l'aperçu et de l'application des modifications des scripts.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use comicrust_core::db::{ComicDatabase, DbConfig};
 use comicrust_core::library::LibraryBook;
@@ -186,7 +187,7 @@ fn lecture_seule_refusee() {
         renames: vec![(db.get(A).unwrap().clone(), dir.path().join("x.cbz"))],
         write_info: vec![A.into()],
     };
-    let out = apply_plan(&ro, &plan);
+    let out = apply_plan(&ro, &plan, &AtomicBool::new(false));
     assert!(out.fatal.as_deref().unwrap().starts_with("Lecture seule"));
     assert!(out.edit.is_none() && out.moves.is_empty() && out.write_info.is_empty());
     assert!(dir.path().join("a.cbz").is_file() && !dir.path().join("x.cbz").exists());
@@ -207,7 +208,7 @@ fn application_dans_la_base_comicrust() {
     ];
     let preview = Preview::build(&changes, &db);
     let plan = preview.plan(&db);
-    let out = apply_plan(&ApplyTarget::Store(cfg.clone()), &plan);
+    let out = apply_plan(&ApplyTarget::Store(cfg.clone()), &plan, &AtomicBool::new(false));
     assert!(out.is_complete(), "{:?}", out.problems(|s| s.to_string()));
     assert_eq!(out.modified(), 2);
     assert_eq!(out.moves.len(), 1);
@@ -228,4 +229,49 @@ fn application_dans_la_base_comicrust() {
     assert_eq!(reloaded.get(A).unwrap().series.as_deref(), Some("Thanos Quest"));
     assert_eq!(reloaded.get(C).unwrap().year, Some(1991));
     assert!(out.summary().starts_with("2 livre(s) modifié(s)"), "{}", out.summary());
+}
+
+/// Chemins demandés par un script : normalisés dans l'aperçu (c'est ce texte qui sera
+/// écrit dans la fiche) ; `..`, `.` et chemins Windows sans lecteur refusés.
+#[test]
+fn apercu_chemins_normalises() {
+    let (dir, db) = fixture();
+    let d = dir.path();
+    let sep = std::path::MAIN_SEPARATOR;
+    let p = Preview::build(&[rename(A, "sous//Thanos 001.cbz"), rename(B, "../b.cbz"), rename(C, r"\BD\c.cbr")], &db);
+    let a = p.books[0].rename.as_ref().unwrap();
+    assert!(a.problem.is_none(), "{:?}", a.problem);
+    assert_eq!(a.to.to_string_lossy(), format!("{}{sep}sous{sep}Thanos 001.cbz", d.display()));
+    let b = p.books[1].rename.as_ref().unwrap();
+    assert!(b.problem.as_deref().unwrap().contains(".."), "{b:?}");
+    assert!(!p.books[1].checked);
+    let c = p.books[2].rename.as_ref().unwrap();
+    assert!(c.problem.as_deref().unwrap().contains("sans lecteur"), "{c:?}");
+    // Automatisme : même normalisation.
+    let plan = ApplyPlan::from_changes(&[rename(A, "x//y.cbz")], |id| db.get(id).cloned());
+    assert_eq!(plan.renames[0].1.to_string_lossy(), format!("{}{sep}x{sep}y.cbz", d.display()));
+    // Chemins de style Windows (calcul seul) : séparateurs, casse de la racine d'origine.
+    assert_eq!(
+        resolve_rename(Path::new(r"\\NAS\BD\a.cbz"), "//nas/bd/Sous/b.cbz").unwrap(),
+        PathBuf::from(r"\\NAS\BD\Sous\b.cbz")
+    );
+}
+
+/// Arrêt demandé (fermeture) : vérifié entre deux livres ; les renommages restants ne sont
+/// pas faits, ceux faits ont leur fiche à jour.
+#[test]
+fn arret_entre_deux_livres() {
+    let (dir, db) = fixture();
+    let cfg = StoreConfig::Sqlite(dir.path().join("data").join("comicrust.db"));
+    Store::open(&cfg).unwrap().upsert(&db.books).unwrap();
+    let plan =
+        ApplyPlan::from_changes(&[set(A, "Series", json!("X")), rename(A, "a2.cbz"), rename(B, "b2.cbz")], |id| {
+            db.get(id).cloned()
+        });
+    let out = apply_plan(&ApplyTarget::Store(cfg.clone()), &plan, &AtomicBool::new(true));
+    assert_eq!(out.interrupted, 2);
+    assert!(out.moves.is_empty() && !out.is_complete());
+    assert!(out.edit.as_ref().is_some_and(|r| r.changed.len() == 1), "fiches écrites d'un seul tenant");
+    assert!(dir.path().join("a.cbz").is_file() && dir.path().join("b.cbz").is_file());
+    assert!(out.summary().contains("non fait"), "{}", out.summary());
 }

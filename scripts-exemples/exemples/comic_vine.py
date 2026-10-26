@@ -95,9 +95,13 @@ def _reglage(nom):
 #@Description Clé d'API Comic Vine (secrète) et options de remplissage.
 def reglages():
     s = comicrust.settings()
-    cle = comicrust.ask("Clé d'API Comic Vine (https://comicvine.gamespot.com/api/) :",
-                        _reglage("api_key"))
-    s["api_key"] = (cle or "").strip()
+    actuelle = (_reglage("api_key") or "").strip()
+    # Saisie masquée : la clé n'est jamais affichée ; réponse vide = garder l'actuelle.
+    question = "Clé d'API Comic Vine (https://comicvine.gamespot.com/api/) :"
+    if actuelle:
+        question += "\n(une clé est déjà enregistrée : laisser vide pour la garder)"
+    cle = comicrust.ask(question, actuelle, secret=True)
+    s["api_key"] = (cle or "").strip() or actuelle
     s.mark_secret("api_key")
     s["remplacer"] = comicrust.confirm(
         "Remplacer aussi les champs déjà remplis ? (sinon : compléter les champs vides)",
@@ -128,30 +132,46 @@ class ComicVine:
             time.sleep(min(reste, 0.2))
             reste = self.derniere + self.delai - time.monotonic()
 
+    def masquer(self, texte):
+        """``texte`` sans la clé d'API (en clair ou encodée dans une URL)."""
+        texte = str(texte)
+        if self.cle:
+            for forme in {self.cle, urllib.parse.quote_plus(self.cle), urllib.parse.quote(self.cle, safe="")}:
+                texte = texte.replace(forme, "…")
+        return texte
+
     def get(self, chemin, **params):
-        """Requête ``GET`` : renvoie ``results`` (liste ou dictionnaire)."""
+        """Requête ``GET`` : renvoie ``results`` (liste ou dictionnaire). Toute erreur devient
+        :class:`Arret` avec un message **sans la clé** (``from None`` : l'exception
+        d'origine, qui peut contenir l'URL complète, n'apparaît pas dans la trace)."""
         self._attendre()
         params.update({"api_key": self.cle, "format": "json"})
         url = self.url_base + chemin + "?" + urllib.parse.urlencode(params)
         # Jamais la clé dans le journal.
-        visible = url.replace(urllib.parse.quote_plus(self.cle), "…") if self.cle else url
+        visible = self.masquer(url)
+        erreur = None
         try:
             donnees = comicrust.http_get(url, headers={"User-Agent": USER_AGENT,
                                                        "Accept": "application/json"})
         except urllib.error.HTTPError as e:
             if e.code in (401, 403, 420, 429):
-                raise Arret("Comic Vine refuse les requêtes (HTTP %d) : clé invalide ou limite "
-                            "atteinte, réessayez plus tard." % e.code)
-            raise Arret("Comic Vine : erreur HTTP %d sur %s" % (e.code, visible))
+                erreur = ("Comic Vine refuse les requêtes (HTTP %d) : clé invalide ou limite "
+                          "atteinte, réessayez plus tard." % e.code)
+            else:
+                erreur = "Comic Vine : erreur HTTP %d sur %s" % (e.code, visible)
         except OSError as e:
-            raise Arret("Comic Vine injoignable : %s" % e)
+            erreur = "Comic Vine injoignable : %s" % self.masquer(e)
+        except Exception as e:  # URL refusée (ValueError…), réponse incomplète…
+            erreur = "Comic Vine : %s (%s)" % (self.masquer(e), type(e).__name__)
         finally:
             self.derniere = time.monotonic()
             self.requetes += 1
+        if erreur is not None:
+            raise Arret(erreur) from None
         try:
             r = json.loads(donnees.decode("utf-8"))
         except ValueError:
-            raise Arret("Réponse illisible de Comic Vine (%s)" % visible)
+            raise Arret("Réponse illisible de Comic Vine (%s)" % visible) from None
         code = r.get("status_code")
         if code == 100:
             raise Arret("Clé d'API refusée par Comic Vine : vérifiez-la (Réglages du script).")

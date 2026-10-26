@@ -22,7 +22,8 @@
 //!   ou transmet au fil de l'eau à [`ScriptHost::apply_live`] (automatismes).
 //! - Module Python `comicrust` : fichier `comicrust.py` embarqué dans le binaire
 //!   (`include_str!`), écrit au lancement dans un dossier de travail (par défaut
-//!   `<temp>/comicrust-py-<version>`, voir [`RunOptions::module_dir`]) et ajouté à
+//!   `data\python\` à côté de l'exécutable, voir [`RunOptions::module_dir`] : ComicRust
+//!   est portable, rien n'est écrit hors de son dossier) et ajouté à
 //!   `sys.path` par la ligne de commande (`-c`), car le Python « embeddable » de Windows
 //!   ignore `PYTHONPATH` (fichier `python3xx._pth`).
 //!
@@ -40,8 +41,9 @@ mod tests;
 
 pub use discover::{discover, discover_with_warnings, entries_for_hook, parse_script, DiscoveryWarning, ScriptEntry};
 pub use runner::{
-    book_json, BookChanges, JournalKind, JournalLine, Question, QuestionKind, RejectedChange, RunContext, RunHandle,
-    RunOptions, RunResult, RunState, ScriptChange, ScriptFailure, ScriptHost, ScriptRunner, ScriptSettings,
+    book_json, default_module_dir, BookChanges, JournalKind, JournalLine, Question, QuestionKind, RejectedChange,
+    RunContext, RunHandle, RunOptions, RunResult, RunState, ScriptChange, ScriptFailure, ScriptHost, ScriptRunner,
+    ScriptSettings,
 };
 
 use std::path::{Path, PathBuf};

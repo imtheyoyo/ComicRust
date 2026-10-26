@@ -19,7 +19,7 @@ use eframe::egui::{self, Context, RichText, Ui};
 
 use crate::app::ComicRustApp;
 use crate::scripts::apply::{ApplyOutcome, ApplyTarget};
-use crate::scripts::{AutoEvent, Pending};
+use crate::scripts::{AutoEvent, Pending, ScriptChoices, ScriptsError};
 
 /// Script `Books` proposé dans un menu : (identifiant, libellé, description).
 pub type ScriptMenuItem = (String, String, Option<String>);
@@ -78,10 +78,15 @@ impl ComicRustApp {
         ApplyTarget::of(self.settings.library_mode, self.settings.comicrack_write, self.library.source.as_ref())
     }
 
+    /// Choix d'activation des scripts faits par l'utilisateur.
+    pub(crate) fn script_choices(&self) -> ScriptChoices<'_> {
+        ScriptChoices { disabled: &self.settings.scripts_disabled, enabled: &self.settings.scripts_enabled }
+    }
+
     /// Scripts `Books` actifs, pour les menus contextuels.
     pub(crate) fn book_scripts(&self) -> Vec<ScriptMenuItem> {
         self.scripts
-            .enabled(Hook::Books, &self.settings.scripts_disabled)
+            .enabled(Hook::Books, &self.script_choices())
             .map(|e| (e.id(), e.name.clone(), e.description.clone()))
             .collect()
     }
@@ -133,7 +138,7 @@ impl ComicRustApp {
             }
             let lib: Vec<ScriptMenuItem> = self
                 .scripts
-                .enabled(Hook::Library, &self.settings.scripts_disabled)
+                .enabled(Hook::Library, &self.script_choices())
                 .map(|e| (e.id(), e.name.clone(), e.description.clone()))
                 .collect();
             let books = self.book_scripts();
@@ -224,8 +229,8 @@ impl ComicRustApp {
         if !self.settings.scripts_auto {
             return;
         }
-        let disabled = self.settings.scripts_disabled.clone();
-        self.scripts.trigger(hook, book_ids, &disabled);
+        let (disabled, enabled) = (self.settings.scripts_disabled.clone(), self.settings.scripts_enabled.clone());
+        self.scripts.trigger(hook, book_ids, &ScriptChoices { disabled: &disabled, enabled: &enabled });
     }
 
     /// Livre ouvert ou fermé dans le lecteur : automatismes `BookOpened` / `BookClosed`
@@ -340,11 +345,18 @@ impl ComicRustApp {
             }
         }
         // Automatismes.
-        let allowed = self.settings.scripts_auto && !self.transfer_busy();
+        let allowed = self.settings.scripts_auto && !self.transfer_busy() && self.scripts_closing.is_none();
         let target = self.script_target();
         let sink = self.library.watcher.as_ref().map(|w| w.written.clone());
-        if let Err(e) = self.scripts.start_autos(allowed, self.library.database(), &target, sink, ctx) {
-            self.warn_once("python".into(), format!("Automatismes des scripts non lancés :\n{e}"));
+        match self.scripts.start_autos(allowed, self.library.database(), &target, sink, ctx) {
+            Ok(()) => {}
+            Err(ScriptsError::Python(e)) => {
+                self.warn_once("python".into(), format!("Automatismes des scripts non lancés :\n{e}"))
+            }
+            Err(ScriptsError::ReadOnly(m)) => self.warn_once(
+                "automatismes-lecture-seule".into(),
+                format!("Automatismes des scripts non lancés : la bibliothèque est en lecture seule.\n{m}"),
+            ),
         }
         for ev in self.scripts.poll_autos() {
             match ev {
@@ -381,7 +393,9 @@ impl ComicRustApp {
             }
         }
         self.start_pending_write_info(ctx);
-        if self.scripts.run.as_ref().is_some_and(|r| r.running() || r.applying()) || !self.scripts.autos.is_empty() {
+        if self.scripts.run.as_ref().is_some_and(|r| r.running() || r.applying() || r.preparing())
+            || !self.scripts.autos.is_empty()
+        {
             // La fin d'un script ne réveille pas l'interface : on vérifie régulièrement.
             ctx.request_repaint_after(Duration::from_millis(150));
         }
@@ -390,6 +404,26 @@ impl ComicRustApp {
     // -----------------------------------------------------------------------------------
     // Fenêtres
     // -----------------------------------------------------------------------------------
+
+    /// Fermeture en attente des scripts : « Application des modifications en cours… ».
+    pub(crate) fn scripts_closing_window(&mut self, ctx: &Context) {
+        if self.scripts_closing.is_none() {
+            return;
+        }
+        let status = self.scripts.shutdown_status().unwrap_or("Fermeture…");
+        egui::Modal::new(egui::Id::unique("comicrust-fermeture-scripts")).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new(status).strong());
+            });
+            ui.label(
+                RichText::new("ComicRust se ferme dès que c'est fini : un fichier déplacé a toujours sa fiche à jour.")
+                    .weak()
+                    .small(),
+            );
+        });
+    }
 
     pub(crate) fn scripts_windows(&mut self, ctx: &Context) {
         self.scripts_manager_window(ctx);
@@ -432,7 +466,12 @@ impl ComicRustApp {
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     match question.kind {
                         QuestionKind::Text => {
-                            let r = ui.add(egui::TextEdit::singleline(text).desired_width(480.0));
+                            // Saisie secrète (clé d'API…) : masquée, jamais pré-remplie.
+                            let mut edit = egui::TextEdit::singleline(text).desired_width(480.0);
+                            if question.secret {
+                                edit = edit.password(true).hint_text("vide = garder la valeur actuelle");
+                            }
+                            let r = ui.add(edit);
                             if !r.has_focus() && !r.lost_focus() {
                                 r.request_focus();
                             }
@@ -583,13 +622,17 @@ impl ComicRustApp {
                 .id_salt("journal-script")
                 .default_open(open_journal)
                 .show(ui, |ui| {
+                    // Seules les lignes visibles sont dessinées (`show_rows`) : un journal de
+                    // 1 Mo ne ralentit pas chaque image. Une ligne de journal = une ligne
+                    // affichée (coupée si elle dépasse la largeur).
+                    let row_h = ui.text_style_height(&egui::TextStyle::Small) + ui.spacing().item_spacing.y;
                     egui::ScrollArea::vertical()
                         .id_salt("journal-script-defilement")
                         .max_height(170.0)
                         .stick_to_bottom(true)
                         .auto_shrink([false, true])
-                        .show(ui, |ui| {
-                            for l in &run.journal {
+                        .show_rows(ui, row_h, run.journal.len(), |ui, range| {
+                            for l in &run.journal[range] {
                                 let color = match l.kind {
                                     JournalKind::Output => ui.visuals().text_color(),
                                     JournalKind::Info => ui.visuals().weak_text_color(),
@@ -598,8 +641,9 @@ impl ComicRustApp {
                                 };
                                 ui.add(
                                     egui::Label::new(RichText::new(&l.text).monospace().small().color(color))
-                                        .selectable(true),
-                                );
+                                        .truncate(),
+                                )
+                                .on_hover_text(&l.text);
                             }
                         });
                     if ui.small_button("📋 Copier le journal").clicked() {
@@ -629,6 +673,11 @@ impl ComicRustApp {
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.label("Application des modifications…");
+                });
+            } else if run.preparing() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Préparation de l'aperçu…");
                 });
             } else if let Some((summary, problems)) = &run.report {
                 ui.label(RichText::new(format!("Bilan : {summary}.")).strong());
@@ -773,13 +822,24 @@ impl ComicRustApp {
                             ui.label(RichText::new(hook.description()).strong());
                             for e in entries {
                                 let id = e.id();
-                                let mut on = !self.settings.scripts_disabled.contains(&id);
+                                let mut on = self.script_choices().is_active(e);
                                 ui.horizontal(|ui| {
-                                    if ui.checkbox(&mut on, RichText::new(&e.name)).changed() {
+                                    let mut check = ui.checkbox(&mut on, RichText::new(&e.name));
+                                    if !e.enabled_by_default {
+                                        check = check.on_hover_text(
+                                            "Désactivé par défaut (en-tête #@Enabled false) : coche-le pour l'activer",
+                                        );
+                                    }
+                                    if check.changed() {
+                                        // Le choix de l'utilisateur prime sur l'en-tête #@Enabled.
                                         if on {
                                             self.settings.scripts_disabled.remove(&id);
+                                            if !e.enabled_by_default {
+                                                self.settings.scripts_enabled.insert(id.clone());
+                                            }
                                         } else {
                                             self.settings.scripts_disabled.insert(id.clone());
+                                            self.settings.scripts_enabled.remove(&id);
                                         }
                                     }
                                     ui.label(

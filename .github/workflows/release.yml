@@ -87,9 +87,12 @@ jobs:
           # sa licence (PSF).
           Copy-Item -Recurse python-embed "$name/python"
           Copy-Item python-embed/LICENSE.txt "$name/licences/Python-LICENSE.txt"
-          # Scripts d'exemple (+ scripts\lib\ avec son LISEZMOI) : dossier scripts\ du paquet.
+          # Dossier scripts\ du paquet (même disposition que scripts-exemples/) : exemples dans
+          # scripts\exemples\ (la mise à jour intégrée ne touche pas aux scripts de
+          # l'utilisateur, à la racine), scripts\lib\ avec son LISEZMOI, README.md.
           New-Item -ItemType Directory -Force "$name/scripts" | Out-Null
           Copy-Item -Recurse scripts-exemples/* "$name/scripts/"
+          if (-not (Test-Path "$name/scripts/exemples/nettoyage.py")) { throw "scripts\exemples\ absent du paquet" }
           Get-ChildItem "$name/scripts" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "name=$name" >> $env:GITHUB_OUTPUT

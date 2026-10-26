@@ -109,11 +109,35 @@ impl ComicRustApp {
                         )));
                         ctx.request_repaint_after(std::time::Duration::from_millis(150));
                     }
-                    Status::Installed(rel) => {
+                    Status::Installed(rel, report) => {
                         ui.label(
                             RichText::new(format!("✔ {} est installée. Redémarre ComicRust pour l'utiliser.", rel.name))
                                 .color(crate::ui::theme::ok(ui)),
                         );
+                        if !report.set_aside.is_empty() {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Scripts : {} fichier(s) que tu as modifié(s) sont gardés tels quels ; la nouvelle \
+                                     version est posée à côté ({}) :",
+                                    report.set_aside.len(),
+                                    update::NEW_SUFFIX
+                                ))
+                                .color(crate::ui::theme::warning(ui)),
+                            );
+                            for p in &report.set_aside {
+                                ui.label(RichText::new(format!("• {}", p.display())).monospace().small());
+                            }
+                        }
+                        if !report.not_reinstalled.is_empty() {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} exemple(s) que tu avais supprimé(s) ne sont pas réinstallés.",
+                                    report.not_reinstalled.len()
+                                ))
+                                .weak()
+                                .small(),
+                            );
+                        }
                         if ui.button("Redémarrer maintenant").clicked() {
                             restart = true;
                         }

@@ -217,6 +217,24 @@ def vide(valeur):
 # Script
 # ---------------------------------------------------------------------------------------
 
+def langue_bcp47(code):
+    """Casse d'usage d'une étiquette de langue BCP 47 : langue en minuscules, écriture
+    (4 lettres) avec une capitale, région (2 lettres ou 3 chiffres) en majuscules :
+    `` FR`` → ``fr``, ``pt-br`` → ``pt-BR``, ``ZH-HANT-tw`` → ``zh-Hant-TW``."""
+    parties = [p for p in code.strip().split("-")]
+    sortie = []
+    for i, p in enumerate(parties):
+        if i == 0:
+            sortie.append(p.lower())
+        elif len(p) == 4 and p.isalpha():
+            sortie.append(p[:1].upper() + p[1:].lower())
+        elif (len(p) == 2 and p.isalpha()) or (len(p) == 3 and p.isdigit()):
+            sortie.append(p.upper())
+        else:
+            sortie.append(p.lower())
+    return "-".join(sortie)
+
+
 def nettoyer_livre(book, casse_series, numero, depuis_nom):
     """Met en attente les corrections d'un livre ; renvoie le nombre de champs modifiés."""
     avant = len(book.changes)
@@ -233,8 +251,8 @@ def nettoyer_livre(book, casse_series, numero, depuis_nom):
         if isinstance(v, str):
             book.set(champ, texte_long(v))
     langue = book.get("LanguageISO")
-    if isinstance(langue, str) and langue != langue.strip().lower():
-        book.set("LanguageISO", langue.strip().lower() or None)
+    if isinstance(langue, str) and langue != langue_bcp47(langue):
+        book.set("LanguageISO", langue_bcp47(langue) or None)
 
     if numero:
         for champ in ("Number", "AlternateNumber"):

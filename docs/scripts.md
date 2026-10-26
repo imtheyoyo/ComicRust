@@ -9,7 +9,9 @@ automatiser des tâches (scripts déclenchés tout seuls).
 
 ## Où placer les scripts
 
-- Dossier `scripts\` à côté de `ComicRust.exe` (sous-dossiers acceptés).
+- Dossier `scripts\` à côté de `ComicRust.exe` (sous-dossiers acceptés). Vos scripts vont
+  à la racine de `scripts\` (ou dans vos propres sous-dossiers) ; `scripts\exemples\`
+  contient les scripts fournis.
 - `scripts\lib\` : modules Python partagés (importables par tous les scripts, jamais
   proposés comme scripts eux-mêmes).
 - Le dossier du script est aussi importable : un script peut avoir ses propres modules
@@ -24,24 +26,41 @@ script n'est exécuté que lorsqu'on le lance (menu) ou que son événement surv
 
 ## Scripts fournis
 
-Le zip Windows contient dans `scripts\` quatre scripts prêts à l'emploi (dans le dépôt :
-[`scripts-exemples/`](../scripts-exemples)), commentés pour servir de modèles. Aucun ne
-supprime de fichier ; ceux du menu passent par l'aperçu. Copiez-en un sous un autre nom
-avant de le modifier : la mise à jour intégrée de ComicRust remplace les fichiers livrés
-(les vôtres, et ceux de `scripts\lib`, ne sont pas touchés).
+Le zip Windows contient dans `scripts\exemples\` quatre scripts prêts à l'emploi (dans le
+dépôt : [`scripts-exemples/exemples/`](../scripts-exemples/exemples)), commentés pour
+servir de modèles. Aucun ne supprime de fichier ; ceux du menu passent par l'aperçu.
+
+Mise à jour intégrée et scripts :
+
+- un fichier livré dans `scripts\` que vous n'avez **pas modifié** est mis à jour ;
+- un fichier que vous avez **modifié** n'est jamais écrasé : la nouvelle version est posée
+  à côté sous le nom `nom.py.nouveau` (pas proposé comme script) et la fenêtre de mise à
+  jour la signale ; comparez puis renommez si vous la voulez ;
+- un exemple que vous avez **supprimé** n'est pas réinstallé (ComicRust note les fichiers
+  livrés et leur empreinte dans `data\scripts-livres.txt`). Limite : la liste est relevée
+  au premier lancement de la v0.10.0 ; un exemple supprimé avant ce premier lancement
+  revient une fois ;
+- vos scripts (racine de `scripts\`, `scripts\lib\`) et vos fichiers `.old` ne sont
+  jamais touchés : seuls les `.old` créés par la mise à jour (listés dans
+  `data\maj\anciens.txt`) sont supprimés au lancement suivant.
+
+Le plus simple reste de copier un exemple à la racine de `scripts\` sous un autre nom
+avant de le modifier (pensez à changer son `#@Key`).
 
 | Script | Menu / déclenchement | Rôle | Réglages (bouton « Réglages ») |
 |---|---|---|---|
 | `nettoyage.py` | **Nettoyer les fiches** (`Books`, `Library`) | Espaces en trop ; listes d'auteurs, genres, personnages, étiquettes remises en forme (séparateur « , », doublons retirés) ; numéro normalisé (`001` → `1`, `#12` → `12`, `T03` → `3` ; `1.5`, `½`, `12a` gardés) ; série, numéro, année, titre vides complétés depuis le nom du fichier ; en option, casse des séries écrites TOUT EN MAJUSCULES ou tout en minuscules (une casse mixte comme « iZombie » n'est jamais touchée). | numéro, complément depuis le nom, casse des séries |
-| `ranger_fichiers.py` | **Ranger les fichiers** (`Books`) | Renomme/déplace selon un modèle de nom (syntaxe de la fenêtre « Renommer » : `{series}[ v{volume}][ #{number:000}][ ({year})]`, `/` = sous-dossier), dans un dossier racine, avec sous-dossiers par série ou par éditeur/série. Deux livres de même nom ou un fichier déjà présent : suffixe « (2) », jamais d'écrasement ; chemin de plus de 259 caractères ignoré. | modèle, dossier racine (vide = dossier actuel), sous-dossiers |
+| `ranger_fichiers.py` | **Ranger les fichiers** (`Books`) | Renomme/déplace selon un modèle de nom (syntaxe de la fenêtre « Renommer » : `{series}[ v{volume}][ #{number:000}][ ({year})]`, `/` = sous-dossier), dans un dossier racine, avec sous-dossiers par série ou par éditeur/série. Deux livres de même nom ou un fichier déjà présent : suffixe « (2) », jamais d'écrasement ; chemin de plus de 259 caractères ignoré. | modèle, dossier racine (vide = dossier actuel ; un fichier déjà dans le bon sous-dossier n'y est pas remis une seconde fois), sous-dossiers |
 | `comic_vine.py` | **Infos depuis Comic Vine** (`Books`) | Cherche la série (nom + année) puis le numéro sur Comic Vine, demande de choisir si c'est ambigu, puis complète titre, résumé, scénaristes, dessinateurs, encreurs, coloristes, lettreurs, couverture, éditeurs, personnages, équipes, lieux, arcs, année/mois (date de couverture), éditeur, nombre de numéros, Web (page Comic Vine). Seuls les champs vides par défaut. | **clé d'API** (secrète), remplacer les champs remplis, écrire ComicInfo.xml |
-| `automatisme_nouveaux.py` | automatique (`NewBooks`) | Étiquette « à lire » et série/numéro/année depuis le nom du fichier sur les nouveaux livres. **Désactivé par défaut** : l'activer dans ses réglages. | activer, étiquette, complément depuis le nom |
+| `automatisme_nouveaux.py` | automatique (`NewBooks`) | Étiquette « à lire » et série/numéro/année depuis le nom du fichier sur les nouveaux livres. **Désactivé par défaut** (`#@Enabled false`) : le cocher dans « Gérer les scripts » (et cocher « Exécuter les automatismes »). | étiquette, complément depuis le nom |
 
 ### Comic Vine
 
 L'API de Comic Vine demande une clé personnelle gratuite (compte sur
 <https://comicvine.gamespot.com>, puis <https://comicvine.gamespot.com/api/>) : la coller
-dans « Comic Vine : réglages » (enregistrée chiffrée sous Windows). Requêtes utilisées
+dans « Comic Vine : réglages » (saisie masquée, jamais affichée ; laisser vide pour garder
+la clé enregistrée ; enregistrée chiffrée sous Windows). La clé n'apparaît dans aucun
+message ni journal, même en cas d'erreur. Requêtes utilisées
 (`format=json`, `field_list` pour ne recevoir que les champs utiles) :
 
 | Requête | Usage |
@@ -80,6 +99,7 @@ def nettoyer(books):
 | `#@Description` | Explication (plusieurs lignes possibles). |
 | `#@Key` | Identifiant stable (sinon `fichier.py:fonction`), utilisé pour activer/désactiver. |
 | `#@Image` | Icône du menu, relative au dossier du script. |
+| `#@Enabled` | `false` : désactivé tant que l'utilisateur ne le coche pas dans « Gérer les scripts » (son choix prime ; conseillé pour un automatisme). Par défaut `true`. |
 
 Hooks :
 
@@ -166,6 +186,13 @@ Une demande sur un livre hors du contexte du script est refusée (journal).
 - `comicrust.ask(question, défaut)`, `comicrust.ask_choice(question, choix, défaut)`,
   `comicrust.confirm(question, défaut)` : questions (valeur par défaut pour un
   automatisme ou si l'utilisateur ferme la fenêtre).
+- `comicrust.ask(question, valeur_actuelle, secret=True)` : saisie masquée (clé d'API,
+  mot de passe) ; la valeur actuelle n'est ni affichée ni envoyée à l'interface, une
+  réponse vide la garde.
+- Valeurs de champ : texte, entier, réel, booléen ou `None`. Un réel non fini (`NaN`,
+  infini) lève `ValueError` pour cette seule modification (interceptable) ; si le script
+  s'arrête sur une erreur, les modifications valides déjà demandées restent visibles en
+  aperçu.
 - `comicrust.hook()`, `comicrust.interactive()`, `comicrust.args()`.
 
 ### Réglages du script
@@ -207,7 +234,14 @@ s.save()                          # aussi fait automatiquement à la fin si modi
 - Application : fiches, puis renommages, puis écriture des infos dans les fichiers (comme
   « Écrire les infos dans le fichier »), suivies d'un bilan.
 - Bibliothèque en lecture seule (ComicRack MySQL sans écriture, `ComicDb.xml`) : l'aperçu
-  s'affiche mais « Appliquer » est refusé, avec la marche à suivre.
+  s'affiche mais « Appliquer » est refusé, avec la marche à suivre ; les automatismes ne
+  sont pas lancés (signalé une fois par session).
+- Chemins des renommages : normalisés avant l'aperçu, et c'est ce texte qui est écrit dans
+  la fiche (ComicRack compare les chemins comme du texte : `D:\BD\x.cbz` et `D:/BD//x.cbz`
+  seraient deux livres). Séparateur `\` pour un chemin Windows (lettre de lecteur ou
+  partage `\\serveur\partage`), `/` sinon ; refusés : `.` et `..`, chemin Windows sans
+  lecteur ni partage (`\BD\…`). Sous la même racine que le livre, l'écriture d'origine est
+  gardée (casse comprise : un livre en `\\SERVEURNAS\BD\…` reste en `\\SERVEURNAS\BD\…`).
 - **Automatismes** (`Startup` après le chargement de la bibliothèque, `BookOpened` /
   `BookClosed` dans le lecteur, `NewBooks` après une analyse des dossiers qui a ajouté des
   livres) : **désactivés par défaut** (case « Exécuter les automatismes ») car ils modifient
@@ -262,7 +296,7 @@ import comicrust
 #@Hook ConfigScript
 def reglages():
     s = comicrust.settings()
-    s["api_key"] = comicrust.ask("Clé d'API Comic Vine :", s.get("api_key", ""))
+    s["api_key"] = comicrust.ask("Clé d'API Comic Vine :", s.get("api_key", ""), secret=True)
     s.mark_secret("api_key")
 
 #@Name Résumé depuis Comic Vine
@@ -301,7 +335,14 @@ def ouvert(book):
 - Dialogue en JSON par lignes : entrée standard (ComicRust → script) et sortie standard
   d'origine (script → ComicRust). `print()` est redirigé vers le journal (stderr).
 - Le module `comicrust.py` est intégré à ComicRust et écrit à chaque lancement dans
-  `%TEMP%\comicrust-py-<version>\` ; ne pas le modifier.
+  `data\python\` à côté de `ComicRust.exe` (ComicRust est portable : rien n'est écrit
+  hors de son dossier) ; ne pas le modifier.
+- Fermeture de ComicRust pendant un script : le script est arrêté (annulation, puis arrêt
+  forcé de Python) ; pendant « Appliquer », ComicRust attend la fin du livre en cours
+  (« Application des modifications en cours… ») et se ferme ensuite : un fichier déplacé a
+  toujours sa fiche à jour. Si ComicRust disparaît (plantage), Python s'arrête de lui-même
+  (fin du dialogue détectée) ; sous Windows, Python et les programmes lancés par le script
+  sont dans un « Job Object » fermé avec ComicRust.
 - Python est lancé en mode isolé (`-I`) : `PYTHONPATH` et le dossier utilisateur sont
   ignorés ; ComicRust ajoute lui-même le dossier du script et `scripts\lib` à `sys.path`.
 

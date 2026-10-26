@@ -90,6 +90,7 @@ mod tests {
                 description: None,
                 image: None,
                 line: 1,
+                enabled_by_default: true,
             },
             hook,
             book_ids: vec![],

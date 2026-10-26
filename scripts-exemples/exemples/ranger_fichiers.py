@@ -14,7 +14,13 @@ Réglages (bouton « Réglages » du script) :
   - ``\\x`` : caractère ``x`` tel quel ;
 - **dossier racine** : où ranger les fichiers (vide = laisser chaque fichier dans son
   dossier actuel, simple renommage) ;
-- **sous-dossiers** : aucun, par série, ou par éditeur puis série.
+- **sous-dossiers** : aucun, par série, ou par éditeur puis série. Sans dossier racine,
+  un fichier déjà dans le bon sous-dossier n'y est pas remis une seconde fois (pas de
+  ``Batman/Batman/…`` au deuxième passage).
+
+Chemins : écrits sous la forme normalisée de Windows (``D:/BD/…`` ou partage réseau
+``//serveur/partage/…``, mais avec des barres obliques inversées seulement, ni ``.`` ni ``..``) quand le fichier ou la racine est un
+chemin Windows ; ComicRust les normalise de toute façon avant de les écrire dans la fiche.
 
 Prudence :
 
@@ -27,7 +33,9 @@ Prudence :
   du fichier) est laissé en place.
 """
 
+import ntpath
 import os
+import posixpath
 import re
 
 import comicrust
@@ -217,9 +225,45 @@ def chemin_relatif(modele, book):
 # Script
 # ---------------------------------------------------------------------------------------
 
-def _cle(chemin):
+def _module_chemins(*chemins):
+    """``ntpath`` pour un chemin Windows (lettre de lecteur, partage ``\\\\serveur`` ou
+    ``\\``), ``posixpath`` sinon : un script lancé sous Windows manipule toujours des
+    chemins Windows ; les tests (Linux) aussi quand les fiches en contiennent."""
+    for c in chemins:
+        c = str(c or "")
+        if os.name == "nt" or "\\" in c or re.match(r"^[A-Za-z]:", c):
+            return ntpath
+    return posixpath
+
+
+def _cle(chemin, p=os.path):
     """Clé de comparaison de chemins (casse ignorée sous Windows)."""
-    return os.path.normcase(os.path.normpath(chemin))
+    return p.normcase(p.normpath(chemin))
+
+
+def _composants(dossier, p):
+    """(racine, [dossiers…]) d'un chemin normalisé : ``D:\\BD\\X`` → (``D:\\``, [BD, X])."""
+    lecteur, reste = p.splitdrive(dossier)
+    sep = "\\" if p is ntpath else "/"
+    racine = lecteur + (sep if reste.startswith(("/", "\\")) else "")
+    return racine, [c for c in re.split(r"[/\\]" if p is ntpath else r"/", reste) if c]
+
+
+def _sans_dossiers_deja_la(dossier, dossiers, p):
+    """``dossier`` sans les derniers dossiers qui sont déjà ceux que le script va ajouter
+    (``dossiers``) : ``BD\\Batman`` + [Batman] → ``BD`` ; ``BD\\DC\\Batman`` ou
+    ``BD\\DC`` + [DC, Batman] → ``BD`` ; ``BD\\Batman`` + [DC, Batman] → ``BD``. Deux
+    passages du script donnent donc le même chemin."""
+    racine, comp = _composants(dossier, p)
+    cle = lambda t: [p.normcase(x) for x in t]
+    n = min(len(dossiers), len(comp))
+    # Fichier dans les premiers dossiers ajoutés (BD\DC\Batman, BD\DC), sinon dans les
+    # derniers (BD\Batman).
+    k = next((k for k in range(n, 0, -1) if cle(comp[len(comp) - k:]) == cle(dossiers[:k])), 0)
+    if not k:
+        k = next((k for k in range(n, 0, -1) if cle(comp[len(comp) - k:]) == cle(dossiers[len(dossiers) - k:])), 0)
+    comp = comp[:len(comp) - k]
+    return p.join(racine, *comp) if comp else (racine or ".")
 
 
 def _meme_fichier(a, b):
@@ -229,13 +273,13 @@ def _meme_fichier(a, b):
         return False
 
 
-def destination_libre(chemin, source, pris):
+def destination_libre(chemin, source, pris, p=os.path):
     """``chemin``, ou ``… (2)``, ``… (3)``… si la place est prise (par un autre livre de
     cette exécution ou par un fichier existant). ``None`` après 99 essais."""
-    base, ext = os.path.splitext(chemin)
+    base, ext = p.splitext(chemin)
     for n in range(1, 100):
         essai = chemin if n == 1 else "%s (%d)%s" % (base, n, ext)
-        cle = _cle(essai)
+        cle = _cle(essai, p)
         if cle in pris:
             continue
         if os.path.lexists(essai) and not _meme_fichier(essai, source):
@@ -267,7 +311,8 @@ def ranger(books):
         if not source:
             ignores += 1
             continue
-        nom = os.path.basename(source)
+        p = _module_chemins(source, racine)
+        nom = p.basename(source)
         if not valeur_champ(book, "series"):
             comicrust.log("Sans série, laissé en place : %s" % nom, level="warning")
             ignores += 1
@@ -277,19 +322,25 @@ def ranger(books):
             comicrust.log("Le modèle donne un nom vide : %s" % nom, level="warning")
             ignores += 1
             continue
-        dossier = racine or os.path.dirname(source)
         if sous == "série":
             morceaux.insert(0, nettoyer_nom(valeur_champ(book, "series")) or "Sans série")
         elif sous == "éditeur/série":
             morceaux.insert(0, nettoyer_nom(valeur_champ(book, "series")) or "Sans série")
             morceaux.insert(0, nettoyer_nom(valeur_champ(book, "publisher")) or "Éditeur inconnu")
-        ext = os.path.splitext(source)[1]
-        cible = os.path.join(dossier, *morceaux) + ext
-        if _cle(cible) == _cle(source) and os.path.basename(cible) == os.path.basename(source):
+        source_n = p.normpath(source)
+        if racine:
+            dossier = p.normpath(racine)
+        else:
+            # Dossier actuel, sans les sous-dossiers que le modèle va de toute façon ajouter
+            # (fichier déjà rangé : pas de « Batman/Batman/… »).
+            dossier = _sans_dossiers_deja_la(p.dirname(source_n), morceaux[:-1], p)
+        ext = p.splitext(source)[1]
+        cible = p.normpath(p.join(dossier, *morceaux) + ext)
+        if _cle(cible, p) == _cle(source_n, p) and p.basename(cible) == p.basename(source_n):
             inchanges += 1
-            pris.add(_cle(cible))
+            pris.add(_cle(cible, p))
             continue
-        libre = destination_libre(cible, source, pris)
+        libre = destination_libre(cible, source, pris, p)
         if libre is None:
             comicrust.log("Aucun nom libre pour %s" % cible, level="warning")
             ignores += 1
@@ -300,9 +351,9 @@ def ranger(books):
             ignores += 1
             continue
         if libre != cible:
-            comicrust.log("Conflit : %s → %s" % (os.path.basename(cible), os.path.basename(libre)),
+            comicrust.log("Conflit : %s → %s" % (p.basename(cible), p.basename(libre)),
                           level="warning")
-        pris.add(_cle(libre))
+        pris.add(_cle(libre, p))
         comicrust.rename_file(book, libre)
         a_renommer += 1
     comicrust.log("%d à renommer, %d déjà bien nommé(s), %d ignoré(s)." % (a_renommer, inchanges, ignores))

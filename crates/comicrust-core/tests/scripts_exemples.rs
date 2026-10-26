@@ -1,5 +1,6 @@
-//! Scripts d'exemple livrés dans le zip Windows (`scripts-exemples/` → `scripts\`) :
-//! découverte (aucun avertissement) et exécution sur des livres factices.
+//! Scripts d'exemple livrés dans le zip Windows (`scripts-exemples/` → `scripts\` : les
+//! exemples dans `scripts\exemples\`, `scripts\lib\` à côté) : découverte (aucun
+//! avertissement) et exécution sur des livres factices.
 //!
 //! Interpréteur : `COMICRUST_PYTHON` (la CI Windows y met le Python « embeddable » du
 //! paquet), sinon `python3` / `python` du `PATH`. Sans Python, les tests d'exécution sont
@@ -22,8 +23,9 @@ use comicrust_core::scripting::{
 };
 use serde_json::{json, Map, Value};
 
-/// Dossier des scripts d'exemple : `COMICRUST_DOSSIER_EXEMPLES` (la CI de release y met
-/// le dossier `scripts` du paquet), sinon `scripts-exemples/` du dépôt.
+/// Dossier des scripts (racine, celle de `scripts\` du paquet) : `COMICRUST_DOSSIER_EXEMPLES`
+/// (la CI de release y met le dossier `scripts` du paquet), sinon `scripts-exemples/` du
+/// dépôt (même disposition : `exemples/`, `lib/`).
 fn dossier_exemples() -> PathBuf {
     match std::env::var_os("COMICRUST_DOSSIER_EXEMPLES").filter(|v| !v.is_empty()) {
         Some(d) => PathBuf::from(d),
@@ -173,19 +175,24 @@ fn decouverte_sans_avertissement() {
         entrees.iter().map(|e| (e.id(), e.rel_path.clone(), e.hooks.clone())).collect();
     vus.sort();
     let attendu = vec![
-        ("comic-vine".into(), "comic_vine.py".into(), vec![Hook::Books]),
-        ("comic-vine-reglages".into(), "comic_vine.py".into(), vec![Hook::ConfigScript]),
-        ("nettoyage".into(), "nettoyage.py".into(), vec![Hook::Books, Hook::Library]),
-        ("nettoyage-reglages".into(), "nettoyage.py".into(), vec![Hook::ConfigScript]),
-        ("nouveaux-livres".into(), "automatisme_nouveaux.py".into(), vec![Hook::NewBooks]),
-        ("nouveaux-livres-reglages".into(), "automatisme_nouveaux.py".into(), vec![Hook::ConfigScript]),
-        ("ranger-fichiers".into(), "ranger_fichiers.py".into(), vec![Hook::Books]),
-        ("ranger-fichiers-reglages".into(), "ranger_fichiers.py".into(), vec![Hook::ConfigScript]),
+        ("comic-vine".into(), "exemples/comic_vine.py".into(), vec![Hook::Books]),
+        ("comic-vine-reglages".into(), "exemples/comic_vine.py".into(), vec![Hook::ConfigScript]),
+        ("nettoyage".into(), "exemples/nettoyage.py".into(), vec![Hook::Books, Hook::Library]),
+        ("nettoyage-reglages".into(), "exemples/nettoyage.py".into(), vec![Hook::ConfigScript]),
+        ("nouveaux-livres".into(), "exemples/automatisme_nouveaux.py".into(), vec![Hook::NewBooks]),
+        ("nouveaux-livres-reglages".into(), "exemples/automatisme_nouveaux.py".into(), vec![Hook::ConfigScript]),
+        ("ranger-fichiers".into(), "exemples/ranger_fichiers.py".into(), vec![Hook::Books]),
+        ("ranger-fichiers-reglages".into(), "exemples/ranger_fichiers.py".into(), vec![Hook::ConfigScript]),
     ];
     assert_eq!(vus, attendu);
     assert!(entrees.iter().all(|e| e.description.is_some()), "chaque entrée a une description");
     // Le dossier lib est livré (avec son LISEZMOI) mais n'est pas parcouru.
     assert!(dossier_exemples().join("lib").join("LISEZMOI.txt").is_file());
+    // Exemples dans `exemples/` (la mise à jour ne touche pas les scripts de l'utilisateur,
+    // à la racine) ; seul l'automatisme est désactivé par défaut (`#@Enabled false`).
+    assert!(entrees.iter().all(|e| e.rel_path.starts_with("exemples/")));
+    let desactives: Vec<String> = entrees.iter().filter(|e| !e.enabled_by_default).map(|e| e.id()).collect();
+    assert_eq!(desactives, vec!["nouveaux-livres"]);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -204,10 +211,12 @@ fn nettoyage() {
     let mut b = livre("b", "/bd/Saga/Saga 012 (2013) (Digital).cbz");
     b.number = Some("#12".into());
     b.year = Some(-1);
+    b.language_iso = Some("pt-br".into());
     let mut c = livre("c", "/bd/LES TUNIQUES BLEUES - 45.cbz");
     c.series = Some("LES TUNIQUES BLEUES".into());
     c.number = Some("1.5".into());
     c.title = Some("Déjà là".into());
+    c.language_iso = Some("pt-BR".into()); // casse BCP 47 gardée
     let mut d = livre("d", "/bd/propre.cbz");
     d.series = Some("Spirou et Fantasio".into());
     d.number = Some("½".into());
@@ -228,6 +237,7 @@ fn nettoyage() {
     assert_eq!(cb["Series"], json!("Saga"));
     assert_eq!(cb["Number"], json!("12"));
     assert_eq!(cb["Year"], json!(2013));
+    assert_eq!(cb["LanguageISO"], json!("pt-BR"));
     assert!(!cb.contains_key("Title"), "{cb:?}");
     let cc = champs(&r, "c");
     assert!(cc.is_empty(), "série et titre déjà remplis, casse non demandée : {cc:?}");
@@ -331,6 +341,58 @@ fn ranger_fichiers() {
     let r = lancer(&py, "ranger-fichiers", RunContext::new(Hook::Books, ids(&["g"])), hote);
     assert!(r.changes.is_empty(), "{:?}", r.changes);
     assert_eq!(r.return_value, json!({"a_renommer": 0, "inchanges": 1, "ignores": 0}));
+}
+
+/// Sans dossier racine, avec sous-dossier par série : un second passage ne renomme rien
+/// (pas de `Batman/Batman/…`) ; chemins Windows normalisés (`\\`, lecteur, partage).
+#[test]
+fn ranger_fichiers_second_passage() {
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let bd = tmp.path().join("BD");
+    std::fs::create_dir_all(&bd).unwrap();
+    let source = bd.join("batman 1.cbz");
+    std::fs::write(&source, b"x").unwrap();
+    let batman = |id: &str, file: &str| {
+        let mut b = livre(id, file);
+        b.series = Some("Batman".into());
+        b.number = Some("1".into());
+        b.publisher = Some("DC".into());
+        b
+    };
+    let reglages = |sous: &str| json!({"racine": "", "sous_dossiers": sous});
+    let premier = |sous: &str, file: &str| {
+        let hote = Arc::new(Hote::avec(vec![batman("a", file)]).reglages(reglages(sous)));
+        let r = lancer(&py, "ranger-fichiers", RunContext::new(Hook::Books, ids(&["a"])), hote);
+        r.changes
+            .iter()
+            .find_map(|c| match c {
+                ScriptChange::Rename { new_path, .. } => Some(new_path.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    // Premier passage : rangé dans BD/Batman/.
+    let cible = premier("série", &source.to_string_lossy());
+    assert_eq!(PathBuf::from(&cible), bd.join("Batman").join("Batman #1.cbz"));
+    // Second passage (fichier déplacé) : rien à faire.
+    std::fs::create_dir_all(bd.join("Batman")).unwrap();
+    std::fs::rename(&source, &cible).unwrap();
+    assert_eq!(premier("série", &cible), "", "second passage sans renommage");
+    // Éditeur/série : BD/Batman → BD/DC/Batman, puis stable.
+    let cible2 = premier("éditeur/série", &cible);
+    assert_eq!(PathBuf::from(&cible2), bd.join("DC").join("Batman").join("Batman #1.cbz"));
+    assert_eq!(premier("éditeur/série", &cible2), "");
+    // Chemins Windows (fichiers absents : seul le calcul est vérifié).
+    assert_eq!(premier("série", r"D:\BD\Batman\Batman #1.cbz"), "");
+    assert_eq!(premier("série", r"d:\bd\BATMAN\Batman #1.cbz"), "", "casse ignorée sous Windows");
+    assert_eq!(premier("série", "D:/BD//batman 1.cbz"), r"D:\BD\Batman\Batman #1.cbz");
+    // Partage réseau : pas sous Windows (le script cherche si la destination existe, ce
+    // qui interrogerait le réseau).
+    if !cfg!(windows) {
+        assert_eq!(premier("série", r"\\NAS\BD\x.cbz"), r"\\NAS\BD\Batman\Batman #1.cbz");
+        assert_eq!(premier("éditeur/série", r"\\NAS\BD\DC\x.cbz"), r"\\NAS\BD\DC\Batman\Batman #1.cbz");
+    }
 }
 
 #[test]
@@ -575,6 +637,42 @@ fn comic_vine_reglages_cle_secrete() {
     assert_eq!(s[0].values["api_key"], json!("MA-CLE"));
     assert_eq!(s[0].values["ecrire_fichier"], json!(true));
     assert!(s[0].secret.contains("api_key"));
+    // Saisie masquée, sans valeur par défaut affichée.
+    let q = hote.questions.lock().unwrap();
+    assert!(q[0].secret && q[0].default == json!(""), "{:?}", q[0]);
+    drop((q, s));
+
+    // Clé déjà enregistrée : jamais envoyée à l'interface ; réponse vide = clé gardée.
+    let hote = Arc::new(Hote::default().reglages(json!({"api_key": "ANCIENNE-CLE"})).reponses(vec![
+        json!(""),
+        json!(false),
+        json!(false),
+    ]));
+    let mut ctx = RunContext::new(Hook::ConfigScript, vec![]);
+    ctx.interactive = true;
+    lancer(&py, "comic-vine-reglages", ctx, hote.clone());
+    let q = hote.questions.lock().unwrap();
+    assert!(q[0].secret && q[0].default == json!("") && !q[0].text.contains("ANCIENNE"), "{:?}", q[0]);
+    assert_eq!(hote.enregistres.lock().unwrap()[0].values["api_key"], json!("ANCIENNE-CLE"));
+}
+
+/// Erreur quelconque (ici une URL refusée par urllib, dont le message contient l'URL
+/// complète) : message clair, sans la clé.
+#[test]
+fn comic_vine_erreur_sans_cle() {
+    let py = need_python!();
+    let mut b = livre("a", "/bd/Saga 001.cbz");
+    b.series = Some("Saga".into());
+    b.number = Some("1".into());
+    let hote = Arc::new(
+        Hote::avec(vec![b]).reglages(json!({"api_key": "CLE/SECRETE+1", "url_base": "sans-schema/", "delai": 0})),
+    );
+    let r = lancer(&py, "comic-vine", RunContext::new(Hook::Books, ids(&["a"])), hote.clone());
+    let messages = hote.messages.lock().unwrap();
+    assert!(messages[0].contains("Comic Vine"), "{messages:?}");
+    for t in messages.iter().chain(std::iter::once(&r.journal_text())) {
+        assert!(!t.contains("SECRETE"), "clé visible : {t}");
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -589,13 +687,10 @@ fn automatisme_nouveaux() {
     b.series = Some("Saga".into());
     b.tags = Some("À LIRE, favori".into());
 
-    // Désactivé par défaut : rien.
-    let hote = Arc::new(Hote::avec(vec![a.clone(), b.clone()]));
-    let r = lancer(&py, "nouveaux-livres", RunContext::new(Hook::NewBooks, ids(&["a", "b"])), hote.clone());
-    assert!(r.changes.is_empty() && hote.direct.lock().unwrap().is_empty());
-
-    // Activé : modifications appliquées au fil de l'eau (automatisme).
-    let hote = Arc::new(Hote::avec(vec![a, b]).reglages(json!({"actif": true})));
+    // Désactivé par défaut par son en-tête (`#@Enabled false`) : ComicRust ne le lance pas
+    // tant que l'utilisateur ne l'a pas coché ; lancé, il fait son travail.
+    assert!(!entree("nouveaux-livres").enabled_by_default);
+    let hote = Arc::new(Hote::avec(vec![a, b]));
     let r = lancer(&py, "nouveaux-livres", RunContext::new(Hook::NewBooks, ids(&["a", "b"])), hote.clone());
     assert!(r.applied_live);
     assert_eq!(hote.direct.lock().unwrap().len(), r.changes.len());

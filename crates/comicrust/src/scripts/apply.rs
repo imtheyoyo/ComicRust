@@ -11,6 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use comicrust_core::db::{ComicDatabase, DbConfig, WriteReport};
 use comicrust_core::edit::{self, EditReport, EditTarget, FieldEdit, MoveReport, CUSTOM_VALUE_PREFIX};
@@ -153,13 +154,12 @@ pub fn field_label(field: &str) -> String {
     edit::field(field).map(|d| d.label.to_string()).unwrap_or_else(|| field.to_string())
 }
 
-/// Chemin cible d'un renommage : absolu, ou relatif au dossier actuel du fichier.
-pub fn resolve_rename(current: &Path, requested: &str) -> PathBuf {
-    let p = PathBuf::from(requested);
-    if p.is_absolute() || p.has_root() {
-        return p;
-    }
-    current.parent().map(|d| d.join(&p)).unwrap_or(p)
+/// Chemin cible d'un renommage, **normalisé** comme il sera écrit dans la fiche
+/// (`edit::files::normalize_rename` : chemin complet ou relatif au dossier actuel du
+/// fichier, séparateurs unifiés, `.`/`..` et chemins Windows sans lecteur refusés, style
+/// de la racine d'origine gardé). `Err` : chemin refusé (message pour l'aperçu).
+pub fn resolve_rename(current: &Path, requested: &str) -> Result<PathBuf, String> {
+    edit::files::normalize_rename(&current.to_string_lossy(), requested).map(PathBuf::from)
 }
 
 /// Textes d'un renommage pour l'aperçu : noms de fichiers seuls s'il reste dans son
@@ -245,7 +245,10 @@ impl Preview {
                         problem: Some("livre sans fichier".into()),
                     });
                 }
-                let to = resolve_rename(&from, req);
+                let to = match resolve_rename(&from, req) {
+                    Ok(to) => to,
+                    Err(e) => return Some(RenameRow { from, to: PathBuf::from(req), problem: Some(e) }),
+                };
                 if to == from {
                     return None; // déjà à cet emplacement
                 }
@@ -363,7 +366,9 @@ impl ApplyPlan {
                 ScriptChange::Rename { book_id, new_path } => {
                     if let Some(b) = book(book_id) {
                         let from = PathBuf::from(b.file.as_deref().unwrap_or_default());
-                        let to = resolve_rename(&from, new_path);
+                        // Chemin refusé : gardé tel quel, `rename_or_move` le refusera avec
+                        // le même message (bilan de l'automatisme).
+                        let to = resolve_rename(&from, new_path).unwrap_or_else(|_| PathBuf::from(new_path));
                         plan.renames.retain(|(x, _)| !x.id.eq_ignore_ascii_case(book_id));
                         plan.renames.push((b, to));
                     }
@@ -392,6 +397,8 @@ pub struct ApplyOutcome {
     pub write_info: Vec<String>,
     /// Base inaccessible, lecture seule… : rien (ou pas tout) n'a été appliqué.
     pub fatal: Option<String>,
+    /// Renommages non faits : arrêt demandé (fermeture de ComicRust) avant leur tour.
+    pub interrupted: usize,
 }
 
 impl ApplyOutcome {
@@ -455,6 +462,9 @@ impl ApplyOutcome {
             }));
         }
         out.extend(self.rename_errors.iter().map(|(id, m)| format!("{} : renommage refusé — {m}", caption(id))));
+        if self.interrupted > 0 {
+            out.push(format!("{} renommage(s) non fait(s) : arrêt demandé avant leur tour", self.interrupted));
+        }
         out
     }
 
@@ -478,6 +488,9 @@ impl ApplyOutcome {
         if errors > 0 {
             parts.push(format!("{errors} erreur(s)"));
         }
+        if self.interrupted > 0 {
+            parts.push(format!("{} renommage(s) non fait(s) (arrêt)", self.interrupted));
+        }
         if !self.write_info.is_empty() {
             parts.push(format!("écriture des infos lancée pour {} fichier(s)", self.write_info.len()));
         }
@@ -485,7 +498,10 @@ impl ApplyOutcome {
     }
 
     pub fn is_complete(&self) -> bool {
-        self.fatal.is_none() && self.rename_errors.is_empty() && self.edit.as_ref().is_none_or(|r| r.is_complete())
+        self.fatal.is_none()
+            && self.rename_errors.is_empty()
+            && self.interrupted == 0
+            && self.edit.as_ref().is_none_or(|r| r.is_complete())
     }
 }
 
@@ -499,7 +515,12 @@ fn edit_target<'a>(store: &'a mut Option<Store>, target: &'a ApplyTarget) -> Edi
 }
 
 /// Applique `plan` (dans un fil d'arrière-plan : accès à la base et aux fichiers).
-pub fn apply_plan(target: &ApplyTarget, plan: &ApplyPlan) -> ApplyOutcome {
+///
+/// `stop` (fermeture de ComicRust) est vérifié **entre deux livres**, jamais au milieu
+/// d'un renommage : un fichier déplacé a toujours sa fiche à jour (ou est remis à sa place).
+/// Les fiches (étape 1) sont écrites d'un seul tenant ; les renommages restants sont
+/// comptés dans [`ApplyOutcome::interrupted`].
+pub fn apply_plan(target: &ApplyTarget, plan: &ApplyPlan, stop: &AtomicBool) -> ApplyOutcome {
     let mut out = ApplyOutcome::default();
     if plan.is_empty() {
         return out;
@@ -533,7 +554,11 @@ pub fn apply_plan(target: &ApplyTarget, plan: &ApplyPlan) -> ApplyOutcome {
         }
     }
     // 2. Fichiers (fiche relue après l'étape 1 si elle a changé).
-    for (book, to) in &plan.renames {
+    for (i, (book, to)) in plan.renames.iter().enumerate() {
+        if stop.load(Ordering::SeqCst) {
+            out.interrupted = plan.renames.len() - i;
+            break;
+        }
         let current = fresh.get(&book.id.to_ascii_lowercase()).unwrap_or(book);
         match edit::rename_or_move(edit_target(&mut store, target), current, to) {
             Ok(m) => out.moves.push(m),

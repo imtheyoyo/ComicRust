@@ -83,6 +83,11 @@ pub struct ComicRustApp {
     pub(crate) bg_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     /// Enregistrer les réglages tout de suite (après l'assistant de configuration).
     pub(crate) save_now: bool,
+    /// Fermeture demandée pendant qu'un script tourne ou que ses modifications sont en
+    /// cours d'application : moment de la demande (la fenêtre se ferme quand tout est fini).
+    pub(crate) scripts_closing: Option<std::time::Instant>,
+    /// Attente des scripts terminée (ou abandonnée) : la fermeture suivante n'attend plus.
+    pub(crate) scripts_close_ready: bool,
     /// Transfert de la bibliothèque ComicRack vers la base de ComicRust.
     pub(crate) transfer: Option<crate::ui::transfer_window::TransferWindow>,
     /// Gestion des listes (v0.9.0) : opérations, éditeur, dialogues.
@@ -133,6 +138,8 @@ impl ComicRustApp {
             scan_manual: false,
             bg_errors: Default::default(),
             save_now: false,
+            scripts_closing: None,
+            scripts_close_ready: false,
             transfer: None,
             lists_ui: Default::default(),
             cr_writes: Default::default(),
@@ -525,7 +532,29 @@ impl eframe::App for ComicRustApp {
         // les écritures dans ComicRack en cours (lecture, fichiers) sont toujours attendues,
         // même sans livre ouvert ; leur bilan est appliqué aux réglages (enregistrés ensuite
         // par eframe) : une écriture non aboutie y reste gardée.
-        if ctx.input(|i| i.viewport().close_requested()) {
+        // Scripts : on ne quitte pas au milieu d'un livre. Le fil d'application s'arrête
+        // entre deux livres, les scripts et automatismes sont annulés (puis leur processus
+        // Python tué) ; la fenêtre se ferme ensuite d'elle-même.
+        let close_requested = ctx.input(|i| i.viewport().close_requested());
+        if close_requested && !self.scripts_close_ready && !self.scripts.idle() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.scripts_closing.is_none() {
+                self.scripts.shutdown();
+                self.scripts_closing = Some(std::time::Instant::now());
+            }
+        } else if let Some(t) = self.scripts_closing {
+            let applying = self.scripts.shutdown_status().is_some_and(|m| m.starts_with("Application"));
+            // Scripts seuls (pas d'application en cours) : attente bornée, le Job Object
+            // (Windows) ou la fermeture de stdin arrête ensuite Python avec ComicRust.
+            if self.scripts.idle() || (!applying && t.elapsed() > crate::scripts::SHUTDOWN_SCRIPTS_WAIT) {
+                self.scripts_closing = None;
+                self.scripts_close_ready = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+        }
+        if close_requested && self.scripts_closing.is_none() {
             self.remember_position();
             if let Some(h) = self.store_progress() {
                 let _ = h.join();
@@ -612,6 +641,7 @@ impl eframe::App for ComicRustApp {
         self.transfer_window(&ctx);
         self.lists_windows(&ctx);
         self.scripts_windows(&ctx);
+        self.scripts_closing_window(&ctx);
         self.scan_window(&ctx);
         self.update_window(&ctx);
         self.info_window(&ctx);
