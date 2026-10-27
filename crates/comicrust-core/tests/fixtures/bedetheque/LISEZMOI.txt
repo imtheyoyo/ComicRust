@@ -1,0 +1,13 @@
+Pages de bedetheque.com reconstituées pour le test tests/bedetheque.rs (portage de
+Bedetheque Scraper 2, scripts-exemples/exemples/bedetheque_scraper2.py).
+
+Elles reproduisent la structure que les expressions régulières de l'original (v6.08)
+attendent : liste par lettre (bdt-liste-libelle), résultats de recherche, page de série
+(bdt-sh-genre, bdt-sh-parution, bdt-sh-resume, Langue de parution, bdt-box-albums-liste),
+page d'album (bdt-ah-top, bdt-ah-sub, encart bdt-sheet, articles bdt-edition--detail avec
+Scénario, Dessin, Couleurs, Dépot légal, Editeur, Collection, Format, EAN/ISBN…), résumé
+« ajax/resume/album/<id> ». Le serveur de test remplace https://www.bedetheque.com par sa
+propre adresse. Contenu fictif ou abrégé, sans valeur documentaire.
+
+App.Config : réglages tels que les écrit l'original (AppSettings.Save : XmlTextWriter
+sur un StringWriter, d'où la déclaration « utf-16 » dans un fichier UTF-8).

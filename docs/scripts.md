@@ -26,7 +26,7 @@ script n'est exécuté que lorsqu'on le lance (menu) ou que son événement surv
 
 ## Scripts fournis
 
-Le zip Windows contient dans `scripts\exemples\` quatre scripts prêts à l'emploi (dans le
+Le zip Windows contient dans `scripts\exemples\` des scripts prêts à l'emploi (dans le
 dépôt : [`scripts-exemples/exemples/`](../scripts-exemples/exemples)), commentés pour
 servir de modèles. Aucun ne supprime de fichier ; ceux du menu passent par l'aperçu.
 
@@ -53,6 +53,8 @@ avant de le modifier (pensez à changer son `#@Key`).
 | `ranger_fichiers.py` | **Ranger les fichiers** (`Books`) | Renomme/déplace selon un modèle de nom (syntaxe de la fenêtre « Renommer » : `{series}[ v{volume}][ #{number:000}][ ({year})]`, `/` = sous-dossier), dans un dossier racine, avec sous-dossiers par série ou par éditeur/série. Deux livres de même nom ou un fichier déjà présent : suffixe « (2) », jamais d'écrasement ; chemin de plus de 259 caractères ignoré. | modèle, dossier racine (vide = dossier actuel ; un fichier déjà dans le bon sous-dossier n'y est pas remis une seconde fois), sous-dossiers |
 | `comic_vine.py` | **Infos depuis Comic Vine** (`Books`) | Cherche la série (nom + année) puis le numéro sur Comic Vine, demande de choisir si c'est ambigu, puis complète titre, résumé, scénaristes, dessinateurs, encreurs, coloristes, lettreurs, couverture, éditeurs, personnages, équipes, lieux, arcs, année/mois (date de couverture), éditeur, nombre de numéros, Web (page Comic Vine). Seuls les champs vides par défaut. | **clé d'API** (secrète), remplacer les champs remplis, écrire ComicInfo.xml |
 | `automatisme_nouveaux.py` | automatique (`NewBooks`) | Étiquette « à lire » et série/numéro/année depuis le nom du fichier sur les nouveaux livres. **Désactivé par défaut** (`#@Enabled false`) : le cocher dans « Gérer les scripts » (et cocher « Exécuter les automatismes »). | étiquette, complément depuis le nom |
+| `bedetheque_scraper2.py` | **Bedetheque Scraper 2** (`Books`, `Editor`), **QuickScrape BD2** (`Books`), **Configurer BD2** (`ConfigScript`, `Library`) | Portage Python 3 de *Bedetheque Scraper 2* (Franck, Mizio66, kiwi13 & maforget, v6.08) : cherche la série (liste par lettre, puis recherche du site) et l'album sur www.bedetheque.com, fenêtres de choix de la série / de l'album / de l'édition avec couvertures et fermeture automatique, puis série, numéro, titre, auteurs, éditeur, collection, format, ISBN, dépôt légal, évaluation, résumé, genre, langue, parution, nombre d'albums, lien Web, notes. QuickScrape : lien collé ; option « rescrape » depuis le lien Web. | réglages de l'original en 3 onglets (Préférences, Données, Logging), **import de l'`App.Config` de ComicRack**, « ne remplacer que les champs vides » (ajout) |
+| `library_organizer.py` | **Library Organizer**, **Library Organizer (Quick)** (`Books`), **Library Organizer (Quick) – toute la bibliothèque**, **Configurer Library Organizer**, **… annuler le dernier rangement**, **… supprimer les dossiers vides** (`Library`), réglages (`ConfigScript`) | Portage Python 3 de *Library Organizer* 2.1.13 (Stonepaw, Apache 2.0) : profils multiples, modèles de dossier/nom à la syntaxe de l'original, règles (champ/opérateur/valeur, groupes imbriqués, dossiers exclus), modes Déplacer / Copier (simulé) / Simuler, doublons, journal, annulation. Moteur dans `library_organizer_moteur.py` (module, pas un script). | fenêtre de configuration de l'original (Vue d'ensemble, Fichiers, Dossiers, Règles, Options, Jetons), import/export `.lop`, **import du `losettingsx.dat` de ComicRack** |
 
 ### Comic Vine
 
@@ -75,6 +77,68 @@ rafales : le script attend 1,5 s entre deux requêtes (2 à 3 requêtes par livr
 s'identifie par un `User-Agent`. Réponse `status_code` 100 (clé invalide) ou 107 (limite
 atteinte) : le script s'arrête avec un message. Pour les essais, l'adresse de l'API se
 change par le réglage `url_base` ou la variable d'environnement `COMICRUST_COMICVINE_URL`.
+
+### Bedetheque Scraper 2
+
+Portage du script de ComicRack (mentions (c) de l'original conservées en tête du fichier).
+Fichiers de l'original dans `scripts\exemples\bd2\` : `BDTranslations.Config` (textes
+français/anglais, option « Langue du plugin »), `bd2.png`, `bd2q.png`. Mêmes réglages (mêmes
+noms que l'`App.Config` de l'original : `CBSeries`, `CBStop`, `TIMEPOPUP`, `TIMEOUTS`…),
+mêmes expressions régulières (v6.08), mêmes en-têtes HTTP que son `BedethequeFetcher`
+(navigateur Chrome, cookies gardés et renouvelés après un 403 ; le Python de ComicRust fait
+les requêtes lui-même, sans « daemon »). Option « cloudscraper » : copier le module
+`cloudscraper` et ses dépendances dans `scripts\lib`. Journaux `BD2_Rename_Log.txt` et
+`BD2_Debug_Log.txt` à côté du script, comme l'original.
+
+« Configurer BD2 » ▸ « Importer les réglages de ComicRack… » : choisir l'`App.Config` du
+dossier du script dans ComicRack (par ex.
+`%AppData%\cYo\ComicRack\Scripts\Bedetheque Scraper 2\App.Config`).
+
+Différences : la couverture d'une fiche sans fichier n'est pas posée (seulement montrée dans
+la fenêtre d'avancement) et le nombre de planches n'est pas écrit (`PageCount` en lecture
+seule) ; le double-clic d'une fenêtre de choix choisit au lieu d'ouvrir la page dans le
+navigateur ; série et numéro « proposés » (fichier sans série/numéro) déduits du nom du
+fichier par le script. Pour les essais : réglage `url_base` ou variable
+`COMICRUST_BEDETHEQUE_URL`.
+
+### Library Organizer
+
+Profils enregistrés dans les réglages du script ; import et export au format de l'original
+(`losettingsx.dat` : racine `Profiles` et attribut `LastUsed`, ou profil `.lop` exporté ;
+format 1.7 `Settings/Setting` relu aussi). Syntaxe des modèles (celle de l'original, pas
+celle de la fenêtre « Renommer ») :
+
+| Jeton | Résultat |
+|---|---|
+| `{préfixe<champ>suffixe}` | valeur du champ entourée du préfixe et du suffixe ; rien si le champ est vide (ou la valeur de substitution des options) |
+| `{<number3>}`, `{<year0>}` | nombre complété sur 3 chiffres ; `0` = d'après le dernier numéro de la série |
+| `<month>` / `<month#>` / `<month#2>` | mois en texte (noms des options, 13-16 = saisons) / en nombre |
+| `<startyear>`, `<startmonth>`, `<startmonth#2>`, `<EndYear>`, `<EndMonth>`, `<firstissuenumber>`, `<lastissuenumber3>` | calculés sur la série (même éditeur, série, volume) parmi les livres transmis |
+| `<writer(, )(issue)>`, `<tags(, )(series)>` | champ multiple : choix des valeurs par numéro ou pour la série (fenêtre ; option « un dossier par valeur ») |
+| `<manga(Manga)>`, `<seriesComplete(Fini)(!)>` | texte si Oui (avec `(!)` : si Non) |
+| `<read(Lu)(=)(100)>` | texte selon le pourcentage lu (`=`, `>`, `<`) |
+| `<first(Series)>` | première lettre, sans article (the, le, la, les, der…) |
+| `<counter(1)(1)(3)>` | compteur : début, pas, chiffres |
+| `<AddedDate(dd/MM/yy)>`, `<ReleasedDate(D)>` | date au format .NET (culture française) |
+| `<Custom(clé)>` | valeur personnalisée |
+| `{texte<?series(Batman)>}`, `{texte<?series(!^Bat)>}` | conditionnel : préfixe+suffixe si égal / si l'expression correspond |
+| `{texte<!series>}`, `{texte<!series(X)>}` | inversé : si vide / si différent |
+| `\` (modèle de dossier) | sous-dossier |
+
+Les jetons s'imbriquent (`{ ({<month>, }<year>)}`). Caractères interdits remplacés selon
+la table des options (`:` → ` - `, `?` retiré…), espaces multiples réduites, niveaux de
+dossier vides retirés ou remplacés, chemin de plus de 259 caractères : fenêtre pour le
+raccourcir. Un livre déjà à l'emplacement calculé n'est pas déplacé.
+
+Ce que ComicRust ne permet pas à un script, et ce qui est fait à la place : copier un
+fichier (mode Copier → simulation signalée), créer l'image d'un livre sans fichier (échec
+signalé), écraser un fichier existant (fenêtre des doublons : « garder les deux » = suffixe
+« (1) », ou « ne pas déplacer »), supprimer les dossiers vides pendant l'application
+(listés dans le rapport et dans `data\library_organizer\dossiers_vides.txt` ; la commande
+« supprimer les dossiers vides » les supprime ensuite, après confirmation, s'ils sont
+vraiment vides). L'automatisme « Startup » de l'original devient la commande « Quick –
+toute la bibliothèque » (aucun livre n'est transmis au démarrage). Journal (10 derniers)
+et `annulation.dat` dans `data\library_organizer\` (ou le dossier choisi dans les options).
 
 ## En-têtes
 

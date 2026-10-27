@@ -175,8 +175,20 @@ fn decouverte_sans_avertissement() {
         entrees.iter().map(|e| (e.id(), e.rel_path.clone(), e.hooks.clone())).collect();
     vus.sort();
     let attendu = vec![
+        ("Bedetheque2".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::Books, Hook::Editor]),
+        ("Bedetheque2Config".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::ConfigScript]),
+        ("ConfigureBD2".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::Library]),
+        ("QuickScrapeBD2".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::Books]),
         ("comic-vine".into(), "exemples/comic_vine.py".into(), vec![Hook::Books]),
         ("comic-vine-reglages".into(), "exemples/comic_vine.py".into(), vec![Hook::ConfigScript]),
+        // Library Organizer : détail vérifié dans tests/library_organizer.rs.
+        ("library-organizer".into(), "exemples/library_organizer.py".into(), vec![Hook::Books]),
+        ("library-organizer-annuler".into(), "exemples/library_organizer.py".into(), vec![Hook::Library]),
+        ("library-organizer-bibliotheque".into(), "exemples/library_organizer.py".into(), vec![Hook::Library]),
+        ("library-organizer-configurer".into(), "exemples/library_organizer.py".into(), vec![Hook::Library]),
+        ("library-organizer-dossiers-vides".into(), "exemples/library_organizer.py".into(), vec![Hook::Library]),
+        ("library-organizer-quick".into(), "exemples/library_organizer.py".into(), vec![Hook::Books]),
+        ("library-organizer-reglages".into(), "exemples/library_organizer.py".into(), vec![Hook::ConfigScript]),
         ("nettoyage".into(), "exemples/nettoyage.py".into(), vec![Hook::Books, Hook::Library]),
         ("nettoyage-reglages".into(), "exemples/nettoyage.py".into(), vec![Hook::ConfigScript]),
         ("nouveaux-livres".into(), "exemples/automatisme_nouveaux.py".into(), vec![Hook::NewBooks]),
