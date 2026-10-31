@@ -500,7 +500,8 @@ fn annulation_boucle_infinie() {
     h.cancel();
     let r = h.wait();
     assert_eq!(r.state, RunState::Cancelled, "{:?}", r.failure);
-    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    // Marge pour les machines de CI chargées (Windows : ~2,6 s observées).
+    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
 
     // Appel bloquant (sleep) : arrêt forcé après le délai de grâce.
     let entry = fx.script("import time\ndef f():\n    time.sleep(120)\n", "f", Hook::Library);
