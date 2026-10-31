@@ -28,6 +28,8 @@ pub enum MissingRequest {
     Remove(Vec<String>),
     /// Vérifier tous les fichiers maintenant.
     Check,
+    /// Rouvrir ce livre (fenêtre « Fichier introuvable », disque injoignable : Réessayer).
+    Retry(String),
 }
 
 /// État du volume du fichier introuvable (vérifié dans un fil : un NAS éteint peut faire
@@ -349,6 +351,8 @@ impl ComicRustApp {
     pub(crate) fn handle_missing_request(&mut self, ctx: &Context, r: MissingRequest) {
         match r {
             MissingRequest::Check => self.start_missing_check(ctx, true),
+            // Disque revenu : le livre s'ouvre ; toujours absent : nouvelle vérification.
+            MissingRequest::Retry(id) => self.open_library_book(ctx, &id, crate::app::Start::Auto),
             MissingRequest::Locate(id) => {
                 if let Err(e) = self.missing_target() {
                     self.error = Some(e);
@@ -646,31 +650,41 @@ impl ComicRustApp {
                 }
             }
             ui.add_space(8.0);
+            // Disque injoignable : seulement Réessayer / Annuler (le fichier est peut-être
+            // toujours là : ni le chercher ailleurs ni retirer la fiche).
+            let offline = matches!(nf.volume, Volume::Unreachable(_));
+            let checking = nf.volume == Volume::Checking;
             ui.horizontal_wrapped(|ui| {
-                ui.add_enabled_ui(reason.is_none(), |ui| {
-                    if ui
-                        .button("📂 Retrouver le fichier…")
-                        .on_hover_text("Choisir le nouveau fichier du livre")
-                        .clicked()
-                    {
-                        req = Some(MissingRequest::Locate(nf.id.clone()));
+                if offline {
+                    if ui.button("↺ Réessayer").on_hover_text("Rouvrir le livre si le disque répond").clicked() {
+                        req = Some(MissingRequest::Retry(nf.id.clone()));
                     }
-                    if ui
-                        .button("🔍 Chercher dans un dossier…")
-                        .on_hover_text("Par nom de fichier (puis taille), dans un dossier et ses sous-dossiers")
-                        .clicked()
-                    {
-                        req = Some(MissingRequest::SearchFolder(vec![nf.id.clone()]));
-                    }
-                    if ui.button("🗑 Retirer de la bibliothèque…").clicked() {
-                        req = Some(MissingRequest::Remove(vec![nf.id.clone()]));
-                    }
-                });
-                if ui.button("Fermer").clicked() {
+                } else {
+                    ui.add_enabled_ui(reason.is_none() && !checking, |ui| {
+                        if ui
+                            .button("📂 Retrouver le fichier…")
+                            .on_hover_text("Choisir le nouveau fichier du livre")
+                            .clicked()
+                        {
+                            req = Some(MissingRequest::Locate(nf.id.clone()));
+                        }
+                        if ui
+                            .button("🔍 Chercher dans un dossier…")
+                            .on_hover_text("Par nom de fichier (puis taille), dans un dossier et ses sous-dossiers")
+                            .clicked()
+                        {
+                            req = Some(MissingRequest::SearchFolder(vec![nf.id.clone()]));
+                        }
+                        if ui.button("🗑 Retirer de la bibliothèque…").clicked() {
+                            req = Some(MissingRequest::Remove(vec![nf.id.clone()]));
+                        }
+                    });
+                }
+                if ui.button(if offline || checking { "Annuler" } else { "Fermer" }).clicked() {
                     close = true;
                 }
             });
-            if let Some(r) = &reason {
+            if let (Some(r), false) = (&reason, matches!(nf.volume, Volume::Unreachable(_))) {
                 ui.label(RichText::new(r).small().weak());
             }
         });

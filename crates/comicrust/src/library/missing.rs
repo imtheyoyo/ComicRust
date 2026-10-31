@@ -116,7 +116,10 @@ pub fn check_items<'a>(
         .filter_map(|b| {
             let f = b.file.clone().filter(|f| !f.is_empty())?;
             let path = comicrust_core::missing::real_file(&f, converted);
-            Some(CheckEntry { item: CheckItem { id: b.id.clone(), path, was_missing: b.missing == Some(true) }, file: f })
+            Some(CheckEntry {
+                item: CheckItem { id: b.id.clone(), path, was_missing: b.missing == Some(true) },
+                file: f,
+            })
         })
         .collect()
 }
@@ -486,11 +489,7 @@ fn file_name_key(p: &str) -> String {
 /// d'autres ne l'ont pas été.
 pub fn removed_from_mysql(r: comicrust_core::db::DeleteReport) -> OpResult {
     let error = r.failed.first().map(|(id, e)| {
-        format!(
-            "{} fiche(s) supprimée(s), {} en erreur (ex. {id} : {e})",
-            r.deleted.len(),
-            r.failed.len()
-        )
+        format!("{} fiche(s) supprimée(s), {} en erreur (ex. {id} : {e})", r.deleted.len(), r.failed.len())
     });
     OpResult::Removed { ids: r.deleted, absent: r.missing, error }
 }

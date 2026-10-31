@@ -205,6 +205,9 @@ pub enum ControlKind {
     /// Colonnes côte à côte.
     Columns {
         columns: Vec<Vec<Control>>,
+        /// Largeur de chaque colonne en pixels (v0.10.2) ; `None` : part égale de la place
+        /// restante. Vide : colonnes de même largeur.
+        widths: Vec<Option<f32>>,
     },
     Tabs {
         tabs: Vec<(String, Vec<Control>)>,
@@ -310,7 +313,7 @@ impl Control {
     pub fn children(&self) -> Vec<&Control> {
         match &self.kind {
             ControlKind::Group { controls, .. } => controls.iter().collect(),
-            ControlKind::Columns { columns } => columns.iter().flatten().collect(),
+            ControlKind::Columns { columns, .. } => columns.iter().flatten().collect(),
             ControlKind::Tabs { tabs } => tabs.iter().flat_map(|(_, c)| c.iter()).collect(),
             _ => Vec::new(),
         }
@@ -967,7 +970,19 @@ fn parse_control(v: &Value, r: &mut Reader, depth: usize) -> Result<Control, Str
                 let list = c.as_array().ok_or_else(|| ctx("colonne : liste de contrôles attendue".into()))?;
                 columns.push(parse_controls(list, r, depth + 1)?);
             }
-            ControlKind::Columns { columns }
+            // Largeurs facultatives : nombre (pixels) ou null par colonne.
+            let mut widths = Vec::new();
+            for w in get_array(m, "widths").map_err(ctx)? {
+                widths.push(match w {
+                    Value::Null => None,
+                    Value::Number(n) => n.as_f64().filter(|f| *f > 0.0).map(|f| f.min(4000.0) as f32),
+                    _ => return Err(ctx("« widths » : pixels ou None par colonne".into())),
+                });
+            }
+            if widths.len() > columns.len() {
+                return Err(ctx("« widths » : plus de largeurs que de colonnes".into()));
+            }
+            ControlKind::Columns { columns, widths }
         }
         "tabs" => {
             let list = get_array(m, "tabs").map_err(ctx)?;
@@ -1017,7 +1032,7 @@ fn walk<'a>(
         f(c, enabled);
         match &c.kind {
             ControlKind::Group { controls, .. } => walk(controls, values, enabled, f),
-            ControlKind::Columns { columns } => {
+            ControlKind::Columns { columns, .. } => {
                 for col in columns {
                     walk(col, values, enabled, f);
                 }

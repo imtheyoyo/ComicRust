@@ -223,7 +223,7 @@ impl FormState {
                         }
                     }
                     ControlKind::Group { controls, .. } => index(controls, path, out),
-                    ControlKind::Columns { columns } => {
+                    ControlKind::Columns { columns, .. } => {
                         for col in columns {
                             index(col, path, out);
                         }

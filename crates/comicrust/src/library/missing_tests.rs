@@ -204,11 +204,8 @@ fn comicrack_mysql_operations() {
             r#"<ComicBook Id="{id}" File="{file}"><Series>Marvel Team-Up</Series><Number>55</Number><CurrentPage>6</CurrentPage><Rating>4</Rating><FileSize>100</FileSize><Missing>true</Missing></ComicBook>"#
         )
     };
-    conn.exec_drop(
-        "Insert into comics values (?, 1, ?)",
-        (a, xml(a, r"\\NAS\Partage\BD\29 - Marvel Team-Up #55.cbz")),
-    )
-    .unwrap();
+    conn.exec_drop("Insert into comics values (?, 1, ?)", (a, xml(a, r"\\NAS\Partage\BD\29 - Marvel Team-Up #55.cbz")))
+        .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let kept = dir.path().join("b.cbz");
     let new_file = dir.path().join("Rangés/29 - Marvel Team-Up #55.cbz");

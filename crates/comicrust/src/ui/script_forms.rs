@@ -229,10 +229,27 @@ fn draw_control(
             });
             ui.add_space(4.0);
         }
-        ControlKind::Columns { columns } => {
+        ControlKind::Columns { columns, widths } if widths.iter().all(Option::is_none) => {
             ui.columns(columns.len(), |uis| {
                 for (u, col) in uis.iter_mut().zip(columns) {
                     draw_controls(u, col, st, values, enabled, clicked);
+                }
+            });
+        }
+        ControlKind::Columns { columns, widths } => {
+            // Largeurs imposées (pixels) ; les autres colonnes se partagent le reste.
+            let gap = ui.spacing().item_spacing.x;
+            let total = ui.available_width() - gap * (columns.len().saturating_sub(1)) as f32;
+            let fixes: f32 = widths.iter().flatten().sum();
+            let libres = columns.len() - widths.iter().flatten().count();
+            let part = ((total - fixes) / libres.max(1) as f32).max(40.0);
+            ui.horizontal_top(|ui| {
+                for (i, col) in columns.iter().enumerate() {
+                    let w = widths.get(i).copied().flatten().unwrap_or(part).min(total.max(40.0));
+                    ui.allocate_ui_with_layout(egui::vec2(w, 0.0), egui::Layout::top_down(egui::Align::Min), |u| {
+                        u.set_width(w);
+                        draw_controls(u, col, st, values, enabled, clicked);
+                    });
                 }
             });
         }

@@ -131,7 +131,8 @@ DELAI_RESEAU = 30
 
 # Vignettes des fenêtres de choix (limites de comicrust.choose) : images chargées d'office
 # au plus par fenêtre (les autres au survol), pause entre deux images téléchargées
-# (serveur d'images du site ; une image du cache disque n'attend pas).
+# (serveur d'images du site ; une image du cache disque n'attend pas). Miniatures du site
+# (cache/thb_couv) d'abord : voir _vignette.
 MAX_VIGNETTES = 24
 MAX_IMAGE = 2 * 1024 * 1024
 PAUSE_IMAGE = 0.15
@@ -632,11 +633,12 @@ def _hote_site():
 
 def _relatif(url):
     """Lien sans adresse du site : « www.bedetheque.com/BD--12.html » (liens Web
-    raccourcis) → « BD--12.html »."""
+    raccourcis) → « BD--12.html » ; avec ou sans « http(s):// »."""
     u = url.strip()
+    sans_schema = re.sub(r"(?i)^https?://", "", u)
     for prefixe in (_hote_site() + "/", "www.bedetheque.com/", "bedetheque.com/"):
-        if u.lower().startswith(prefixe.lower()):
-            return u[len(prefixe):]
+        if sans_schema.lower().startswith(prefixe.lower()):
+            return sans_schema[len(prefixe):]
     return u
 
 
@@ -873,14 +875,30 @@ def _grande(url):
     return None
 
 
+def _petite(url):
+    """Miniature du site d'une couverture (``/media/Couvertures/Couv_1.jpg`` →
+    ``/cache/thb_couv/Couv_1.jpg``, celles des listes d'albums du site : quelques Ko au
+    lieu de quelques centaines) ; None si l'adresse n'est pas une couverture du site."""
+    if url and re.search(r"(?i)/media/Couvertures/", url):
+        return re.sub(r"(?i)/media/Couvertures/", "/cache/thb_couv/", url)
+    return None
+
+
 def _vignette(url):
-    """Image d'une ligne de fenêtre de choix : la couverture en grand quand l'adresse est
-    une vignette du site (aperçu agrandi lisible), sinon (ou si elle manque) la vignette."""
+    """Image d'une ligne de fenêtre de choix, **petite** pour ménager le site : la
+    miniature du site (``cache/thb_couv``) d'abord, l'adresse trouvée dans la page si la
+    miniature n'existe pas, la couverture en grand en dernier recours (vignette absente)."""
     if not url or stop():
         return None
-    grande = _grande(url)
-    img = image(grande) if grande else None
-    return img if img is not None else image(url)
+    essais = []
+    for u in (_petite(url), url, _grande(url)):
+        if u and u not in essais:
+            essais.append(u)
+    for u in essais:
+        img = image(u)
+        if img is not None or stop():
+            return img
+    return None
 
 
 def _couverture_page(url, sorte):
@@ -2342,12 +2360,43 @@ def _lien_recherche(f):
         "&RechWhere=0"
 
 
+def _type_lien(lien):
+    """« album », « serie », « revue » ou None d'après l'adresse (mêmes motifs que l'aperçu
+    sous le champ)."""
+    for nom, motif in (("album", LIEN_ALBUM), ("serie", LIEN_SERIE), ("revue", LIEN_REVUE)):
+        if re.search(motif, lien.split("?")[0]):
+            return nom
+    return None
+
+
+def _apercu_lien(lien):
+    """Aperçu d'un lien collé dans QuickScrape : ``(titre, octets de la couverture ou None,
+    erreur ou None)``. La page est lue une fois et gardée : le scrape qui suit ne la
+    redemande pas (même adresse que _scrape_lien) ; couverture en miniature du site."""
+    url = GetFullURL(lien.strip())
+    sorte = _type_lien(url)
+    if sorte == "serie" and "__10000.html" not in url:
+        url = url.lower().replace(".html", "__10000.html")
+    page = _read_url(url, True, silencieux=True, garder=True)
+    if not page:
+        return None, None, _t("Page introuvable ou illisible (détails dans le journal de débogage).",
+                              "Page not found or unreadable (details in the debug log).")
+    m = re.search(r"<title>(.*?)</title>", page, I | D)
+    titre = checkWebChar(strip_tags(m.group(1))).strip() if m else ""
+    titre = re.sub(r"\s+-\s+BD, informations, cotes.*$", "", titre).strip()
+    couv = None
+    if sorte != "revue":
+        img = _couverture_page_serie(page) if sorte == "serie" else _couverture_page_album(page)
+        couv = _vignette(_url_image(img)) if img else None
+    return titre or _lien_court(url), couv, None
+
+
 def DirectScrape(f=None, i=0, n=1):
     """Fenêtre « Scrape directement un lien » (DirectScrape de l'original : un champ, OK,
     Annuler) : lien collé, '' (OK sans lien) ou None (Annuler). Le portage ajoute le livre
-    concerné, le bouton « Coller », le type de lien reconnu, un bouton qui ouvre la
-    recherche de la série sur le site, deux options pour ce livre et une aide courte.
-    Entrée = OK."""
+    concerné, le bouton « Coller », le type de lien reconnu, un aperçu (titre et
+    couverture de la page du lien), un bouton qui ouvre la recherche de la série sur le
+    site, deux options pour ce livre et des exemples de liens. Entrée = OK."""
     livre = S.dlgName or "?"
     if S.dlgNumber:
         livre += _t(" – n° ", " – #") + S.dlgNumber
@@ -2359,9 +2408,11 @@ def DirectScrape(f=None, i=0, n=1):
     livre_ctl = [ui.label(livre, style="bold")]
     if fichier:
         livre_ctl.append(ui.label(fichier, style="weak"))
-    controles = [
-        ui.group(_t("Livre %d sur %d", "Book %d of %d") % (i + 1, n), livre_ctl),
-        ui.group(Trans(102), [
+    nom_recherche = (S.dlgNameClean or S.dlgName or "?").strip()
+    valeurs = {"lien": "", "vides": bool(C("ChampsVidesSeulement")), "edition": bool(C("PopUpEditionForm"))}
+    apercu = None  # (lien, titre, couverture, erreur)
+    while True:
+        lien_ctl = [
             ui.text("lien", "", "", placeholder=URL_SITE + "/BD-…-12345.html", paste=True,
                     hints=[(LIEN_ALBUM, _t("Lien d'un album : ses infos seront lues", "Book link: its info will be read")),
                            (LIEN_SERIE, _t("Lien d'une série : l'album sera choisi dans la liste de la série",
@@ -2370,26 +2421,53 @@ def DirectScrape(f=None, i=0, n=1):
                     hint_none=_t("Lien non reconnu (ni album, ni série, ni revue) : il sera lu comme une page "
                                  "d'album.", "Unrecognised link (not a book, series or magazine): it will be read "
                                              "as a book page.")),
-            ui.button("chercher", _t("🔎 Chercher « %s » sur bedetheque.com", "🔎 Search “%s” on bedetheque.com")
-                      % ((S.dlgNameClean or S.dlgName or "?").strip()),
-                      help=_t("Ouvre la recherche dans le navigateur : copiez-y le lien de l'album, puis « Coller ».",
-                              "Opens the search in the browser: copy the book link there, then “Paste”.")),
-        ]),
-        ui.group(_t("Options pour ce passage", "Options for this run"), [
-            ui.checkbox("vides", _t("Ne remplir que les champs vides", "Only fill empty fields")),
-            ui.checkbox("edition", _t("Choisir l'édition dans une liste quand l'album en a plusieurs",
-                                      "Pick the edition from a list when the book has several")),
-        ]),
-        ui.label(_t("Liens complets ou sans « https://www.bedetheque.com/ » : album (…/BD-…-21.html), "
-                    "série (…/serie-59-BD-Blacksad.html) ou revue (…/revue-Spirou.html). OK sans lien ou "
-                    "Annuler : arrêter (les livres déjà traités restent dans l'aperçu).",
-                    "Full links or without “https://www.bedetheque.com/”: book (…/BD-…-21.html), series "
-                    "(…/serie-59-BD-Blacksad.html) or magazine (…/revue-Spirou.html). OK without a link or "
-                    "Cancel: stop (books already done stay in the preview)."), style="weak"),
-    ]
-    valeurs = {"lien": "", "vides": bool(C("ChampsVidesSeulement")), "edition": bool(C("PopUpEditionForm"))}
-    while True:
-        r = comicrust.form(Trans(103), controles, buttons=(Trans(92), Trans(93)), values=valeurs, width=820)
+            ui.columns(
+                [ui.button("apercu", _t("👁 Aperçu du lien", "👁 Preview link"),
+                           help=_t("Lit la page du lien (une seule fois : le scrape la réutilise) et montre son "
+                                   "titre et sa couverture.", "Reads the linked page (once: the scrape reuses it) "
+                                   "and shows its title and cover."))],
+                [ui.button("chercher", _t("🔎 Chercher « %s » sur le site", "🔎 Search “%s” on the site")
+                           % nom_recherche,
+                           help=_t("Ouvre la recherche dans le navigateur : copiez-y le lien de l'album, puis "
+                                   "« Coller ».", "Opens the search in the browser: copy the book link there, "
+                                   "then “Paste”."))],
+            ),
+        ]
+        if apercu is not None and apercu[0] == valeurs.get("lien", "").strip():
+            _, titre_a, couv_a, erreur_a = apercu
+            if erreur_a:
+                lien_ctl.append(ui.label("⚠ " + erreur_a, style="warning"))
+            else:
+                infos = [ui.label(titre_a, style="bold"),
+                         ui.label(_lien_court(GetFullURL(apercu[0])), style="weak")]
+                if couv_a is None:
+                    infos.append(ui.label(_t("(pas de couverture)", "(no cover)"), style="weak"))
+                    lien_ctl.extend(infos)
+                else:
+                    lien_ctl.append(ui.columns([ui.image(couv_a, max_width=110, max_height=150)], infos,
+                                               widths=[120, None]))
+        controles = [
+            ui.group(_t("Livre %d sur %d", "Book %d of %d") % (i + 1, n), livre_ctl),
+            ui.group(Trans(102), lien_ctl),
+            ui.group(_t("Liens acceptés (complets ou sans « https://www.bedetheque.com/ »)",
+                        "Accepted links (full or without “https://www.bedetheque.com/”)"), [
+                ui.label(_t("Album : …/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html",
+                            "Book: …/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html"), style="weak"),
+                ui.label(_t("Série : …/serie-59-BD-Blacksad.html (l'album est ensuite choisi dans la liste)",
+                            "Series: …/serie-59-BD-Blacksad.html (the book is then picked from the list)"),
+                         style="weak"),
+                ui.label(_t("Revue : …/revue-Spirou.html", "Magazine: …/revue-Spirou.html"), style="weak"),
+            ]),
+            ui.group(_t("Options pour ce passage", "Options for this run"), [
+                ui.checkbox("vides", _t("Ne remplir que les champs vides", "Only fill empty fields")),
+                ui.checkbox("edition", _t("Choisir l'édition dans une liste quand l'album en a plusieurs",
+                                          "Pick the edition from a list when the book has several")),
+            ]),
+        ]
+        r = comicrust.form(Trans(103), controles, buttons=(Trans(92), Trans(93)), values=valeurs, width=820,
+                           message=_t("OK sans lien ou Annuler : arrêter (les livres déjà traités restent dans "
+                                      "l'aperçu).", "OK without a link or Cancel: stop (books already done stay "
+                                      "in the preview)."))
         if r is None:
             return None
         bouton, valeurs = r[0], dict(r[1])
@@ -2398,6 +2476,13 @@ def DirectScrape(f=None, i=0, n=1):
         S.C["PopUpEditionForm"] = bool(valeurs.get("edition"))
         if bouton == "chercher":
             comicrust.open_url(_lien_recherche(f))
+            continue
+        if bouton == "apercu":
+            lien = (valeurs.get("lien") or "").strip()
+            if lien:
+                comicrust.progress(None, _t("Aperçu du lien…", "Previewing link…"), detail=_lien_court(lien))
+                apercu = (lien,) + _apercu_lien(lien)
+                comicrust.progress(S.fraction, Trans(62), detail=S.detail)
             continue
         return (valeurs.get("lien") or "").strip()
 

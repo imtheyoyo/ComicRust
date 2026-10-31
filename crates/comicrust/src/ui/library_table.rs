@@ -313,9 +313,9 @@ impl ComicRustApp {
                             top0 = Some(resp.rect.top() - d as f32 * pitch);
                         }
                         let resp = resp.on_hover_text(if in_list {
-                            format!("Clic : sélectionner {series_word} (Ctrl : ajouter) ; glisser pour la déplacer")
+                            format!("Clic : sélectionner {series_word} (Ctrl : ajouter, Maj : plage) ; glisser pour la déplacer")
                         } else {
-                            format!("Clic : sélectionner {series_word} (Ctrl : ajouter)")
+                            format!("Clic : sélectionner {series_word} (Ctrl : ajouter, Maj : plage)")
                         });
                         if resp.clicked() {
                             group_click = Some(gi);
@@ -473,7 +473,7 @@ impl ComicRustApp {
         }
         // Séries : clic (sélection), glisser, monter / descendre (v0.10.2).
         if let Some(gi) = group_click {
-            self.library.select_group(&groups[gi].1, mods.command);
+            self.library.click_group(&groups, gi, mods.command, mods.shift);
         }
         if let Some(gi) = group_drag_start {
             let ids = &groups[gi].1;

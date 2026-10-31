@@ -414,9 +414,7 @@ pub fn check_files_with(
         let roots: HashMap<&str, String> = missing
             .iter()
             .chain(&present)
-            .map(|b| {
-                (b.id.as_str(), guard_root(&b.path.to_string_lossy(), &folders))
-            })
+            .map(|b| (b.id.as_str(), guard_root(&b.path.to_string_lossy(), &folders)))
             .collect();
         for b in missing.iter().chain(&present).filter(|b| !b.was_missing) {
             guard.add_known(&roots[b.id.as_str()], &b.path.to_string_lossy());

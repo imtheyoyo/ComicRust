@@ -782,9 +782,12 @@ class ui:
         return _ctl("group", None, None, help, enabled_if, None, title=str(title or ""), controls=list(controls))
 
     @staticmethod
-    def columns(*columns, enabled_if=None):
-        """Colonnes côte à côte : ``ui.columns([contrôles…], [contrôles…])``."""
-        return _ctl("columns", None, None, None, enabled_if, None, columns=[list(c) for c in columns])
+    def columns(*columns, enabled_if=None, widths=None):
+        """Colonnes côte à côte : ``ui.columns([contrôles…], [contrôles…])``. ``widths``
+        (v0.10.2) : largeur de chaque colonne en pixels, ``None`` pour partager la place
+        restante (ex. ``widths=[120, None]`` : image étroite, texte à côté)."""
+        return _ctl("columns", None, None, None, enabled_if, None, columns=[list(c) for c in columns],
+                    widths=list(widths) if widths else None)
 
     @staticmethod
     def tabs(tabs, enabled_if=None):

@@ -166,6 +166,9 @@ fn formulaire_descriptions_refusees() {
     bad(json!({"controls": [{"type": "image", "data": "AAAA"}]}), "format d'image non reconnu");
     bad(json!({"controls": [], "buttons": ["OK", "OK"]}), "en double");
     bad(json!({"controls": [], "buttons": ["OK"], "cancel": "Non"}), "absent");
+    let col = |w: Value| json!({"controls": [{"type": "columns", "columns": [[], []], "widths": w}]});
+    bad(col(json!([1, 2, 3])), "plus de largeurs que de colonnes");
+    bad(col(json!(["large"])), "pixels ou None");
     let big = b64(&[PNG, &vec![0u8; MAX_IMAGE_BYTES]].concat());
     bad(json!({"controls": [{"type": "image", "data": big}]}), "image trop grosse");
     // Imbrication trop profonde.
@@ -174,6 +177,11 @@ fn formulaire_descriptions_refusees() {
         deep = json!({"type": "group", "controls": [deep]});
     }
     bad(json!({"controls": [deep]}), "trop profondément");
+    // Colonnes : largeurs facultatives (pixels ou null), sinon parts égales.
+    let f = FormSpec::parse(&obj(col(json!([120, null])))).unwrap();
+    assert!(matches!(&f.controls[0].kind, ControlKind::Columns { widths, .. } if *widths == [Some(120.0), None]));
+    let f = FormSpec::parse(&obj(col(Value::Null))).unwrap();
+    assert!(matches!(&f.controls[0].kind, ControlKind::Columns { widths, .. } if widths.is_empty()));
     // Sans boutons : OK / Annuler.
     let f = FormSpec::parse(&obj(json!({"controls": []}))).unwrap();
     assert_eq!(f.buttons, ["OK", "Annuler"]);

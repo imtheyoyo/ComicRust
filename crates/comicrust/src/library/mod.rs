@@ -234,6 +234,8 @@ pub struct LibraryState {
     /// Différent de `selected_book` après Maj+flèche (l'ancre reste `selected_book`) ou
     /// Ctrl+flèche (seul le curseur bouge).
     pub cursor: Option<String>,
+    /// Titre de la dernière série cliquée sans Maj (repère de Maj+clic sur une série).
+    pub group_anchor: Option<String>,
     /// Navigation au clavier : panneau actif, défilement, arbre des listes.
     pub nav: keynav::NavState,
     /// Livres manquants : vérification, résultats, opérations sur les fiches.
@@ -277,6 +279,7 @@ impl Default for LibraryState {
             scan: None,
             gesture: Gesture::None,
             cursor: None,
+            group_anchor: None,
             nav: Default::default(),
             missing: Default::default(),
             missing_only: false,
@@ -515,6 +518,33 @@ impl LibraryState {
             }
         }
         self.selected_books = set;
+    }
+
+    /// Clic sur la série `gi` de `groups` (titre, livres ; dans l'ordre de la vue) : Maj =
+    /// toutes les séries entre la dernière cliquée et celle-ci (ajoutées à la sélection avec
+    /// Ctrl) ; sinon [`Self::select_group`].
+    pub fn click_group(&mut self, groups: &[(String, Vec<String>)], gi: usize, ctrl: bool, shift: bool) {
+        let Some((title, ids)) = groups.get(gi) else { return };
+        let anchor = self.group_anchor.as_ref().and_then(|a| groups.iter().position(|(t, _)| t == a));
+        match (shift, anchor) {
+            (true, Some(a)) => {
+                let range: Vec<String> = groups[a.min(gi)..=a.max(gi)].iter().flat_map(|g| g.1.clone()).collect();
+                if ctrl {
+                    let mut set = self.selection_set();
+                    set.extend(range.iter().cloned());
+                    let keep: Vec<String> = set.into_iter().collect();
+                    self.select_group(&keep, false);
+                    // Livre courant : le premier de la série cliquée.
+                    self.selected_book = ids.first().cloned().or(self.selected_book.take());
+                } else {
+                    self.select_group(&range, false);
+                }
+            }
+            _ => {
+                self.select_group(ids, ctrl);
+                self.group_anchor = Some(title.clone());
+            }
+        }
     }
 
     /// Clic sur une série (titre de groupe, pile) : tous ses livres sélectionnés ; avec Ctrl,
@@ -1040,6 +1070,34 @@ mod tests {
         s.select_group(&g1, false);
         assert_eq!(s.selection(), ["e", "b"]);
         assert!(!s.group_selected(&[]));
+    }
+
+    /// Maj+clic sur une série : toutes les séries entre la dernière cliquée et celle-ci.
+    #[test]
+    fn group_range_selection() {
+        let mut s = state();
+        let g = |t: &str, b: &[&str]| (t.to_string(), b.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+        let groups = vec![g("A", &["a"]), g("B", &["b", "e"]), g("C", &["c"]), g("D", &["d"])];
+        let sel = |s: &LibraryState| {
+            let mut v: Vec<String> = s.selected_books.iter().cloned().collect();
+            v.sort();
+            v
+        };
+        // Maj sans repère : comme un clic simple.
+        s.click_group(&groups, 1, false, true);
+        assert_eq!(sel(&s), ["b", "e"]);
+        s.click_group(&groups, 3, false, true);
+        assert_eq!(sel(&s), ["b", "c", "d", "e"]);
+        // Vers le haut, depuis le même repère (B).
+        s.click_group(&groups, 0, false, true);
+        assert_eq!(sel(&s), ["a", "b", "e"]);
+        // Ctrl+Maj : la plage s'ajoute à la sélection.
+        s.click_group(&groups, 3, false, false);
+        s.click_group(&groups, 2, true, false);
+        assert_eq!(sel(&s), ["c", "d"]);
+        s.click_group(&groups, 0, true, true);
+        assert_eq!(sel(&s), ["a", "b", "c", "d", "e"]);
+        assert_eq!(s.selected_book.as_deref(), Some("a"));
     }
 
     #[test]

@@ -68,9 +68,9 @@ type Requete = (String, HashMap<String, String>);
 fn page(chemin: &str) -> Option<(&'static str, String)> {
     let html = "text/html; charset=utf-8";
     // Images : couvertures factices `images/couv_1.png` à `couv_6.png` selon le numéro de
-    // l'album ; Couv_802 n'existe qu'en vignette (repli sur la vignette testé).
+    // l'album ; Couv_802 n'existe qu'en grand (repli sur la grande image testé).
     if let Some(nom) = chemin.strip_prefix("/media/couvertures/").or_else(|| chemin.strip_prefix("/cache/thb_couv/")) {
-        if chemin == "/media/couvertures/couv_802.jpg" {
+        if chemin == "/cache/thb_couv/couv_802.jpg" {
             return None;
         }
         // Couverture « .jpg » servie en WebP (comme le fait le site selon l'en-tête Accept).
@@ -631,7 +631,8 @@ fn choix_ignorer_automatique_et_edition() {
 /// Fenêtres de choix avec couvertures (v0.10.2) : résultats de recherche sans image
 /// (drapeaux seulement, comme le site) → page des premières séries lue pour sa couverture
 /// pendant que la fenêtre est ouverte (premier album en « data-src », ou og:image), sans
-/// relire ensuite la page de la série choisie ; couverture en grand d'une vignette, repli sur la vignette ; réglages
+/// relire ensuite la page de la série choisie ; miniature du site (`cache/thb_couv`) plutôt que
+/// la couverture en grand, repli sur la grande si la miniature manque ; réglages
 /// « VignettesSeries » et « TailleVignettes ».
 #[test]
 fn couvertures_des_fenetres_de_choix() {
@@ -669,12 +670,13 @@ fn couvertures_des_fenetres_de_choix() {
     assert_eq!(n("/serie-81-bd-monde-de-thorgal-le-kriss-de-valnor__10000.html"), 1);
     assert_eq!(n("/serie-82-bd-mondes-de-thorgal-les-louve__10000.html"), 1);
     assert!(!chemins.iter().any(|c| c.contains("/flags/") || c.contains("blank.gif")), "{chemins:?}");
-    // Couverture en grand plutôt que la vignette ; vignette si la grande n'existe pas.
-    assert_eq!(n("/media/couvertures/couv_801.jpg"), 1);
-    assert_eq!(n("/cache/thb_couv/couv_801.jpg"), 0);
-    assert_eq!(n("/media/couvertures/couv_802.jpg"), 1);
+    // Miniature du site plutôt que la couverture en grand ; la grande si la miniature manque.
+    assert_eq!(n("/cache/thb_couv/couv_801.jpg"), 1);
+    assert_eq!(n("/media/couvertures/couv_801.jpg"), 0);
     assert_eq!(n("/cache/thb_couv/couv_802.jpg"), 1);
-    assert_eq!(n("/media/couvertures/couv_811.jpg"), 1, "og:image de la page de la série 81");
+    assert_eq!(n("/media/couvertures/couv_802.jpg"), 1, "repli sur la grande");
+    assert_eq!(n("/cache/thb_couv/couv_811.jpg"), 1, "og:image (grande) de la série 81 → miniature");
+    assert_eq!(n("/media/couvertures/couv_811.jpg"), 0);
     assert!(hote.messages.lock().unwrap().iter().all(|m| !m.contains("404")), "404 sans message");
 
     // Option décochée : aucune page de série lue avant le choix.
@@ -728,9 +730,10 @@ fn couvertures_progressives_cache_et_pauses() {
     assert_eq!(n("/serie-100-bd-lanfeust-de-troy__10000.html"), 1, "page gardée pour la suite : {chemins:?}");
     assert_eq!(n("/serie-101-bd-lanfeust-des-etoiles__10000.html"), 1);
     assert_eq!(n("/bd-lanfeust-de-troy-tome-3-castel-or-903.html"), 0, "album 3 : pas survolé, pas lu");
-    assert_eq!(n("/media/couvertures/couv_901.jpg"), 1, "une seule fois pour les deux fenêtres");
-    assert_eq!(n("/media/couvertures/couv_902.jpg"), 1, "adresse relative");
-    assert_eq!(n("/media/couvertures/couv_950.jpg"), 1, "adresse sans schéma");
+    assert_eq!(n("/cache/thb_couv/couv_901.jpg"), 1, "une seule fois pour les deux fenêtres");
+    assert_eq!(n("/cache/thb_couv/couv_902.jpg"), 1, "adresse relative");
+    assert_eq!(n("/cache/thb_couv/couv_950.jpg"), 1, "adresse sans schéma");
+    assert!(!chemins.iter().any(|c| c.starts_with("/media/")), "miniatures seulement : {chemins:?}");
     // Images demandées comme un navigateur : Referer du site, pas d'AVIF.
     for (c, h) in srv.releve.lock().unwrap().iter() {
         if c.starts_with("/media/") || c.starts_with("/cache/") {
@@ -769,7 +772,7 @@ fn couvertures_progressives_cache_et_pauses() {
     assert_eq!(n("/serie-100-bd-lanfeust-de-troy__10000.html"), 1, "page de la série choisie");
     assert_eq!(n("/bd-lanfeust-de-troy-tome-3-castel-or-903.html"), 1);
     let images: Vec<&String> = apres.iter().filter(|c| c.starts_with("/media/") || c.starts_with("/cache/")).collect();
-    assert_eq!(images, ["/media/couvertures/couv_903.jpg"], "seule l'image nouvelle");
+    assert_eq!(images, ["/cache/thb_couv/couv_903.jpg"], "seule l'image nouvelle (miniature)");
 }
 
 /// Réglages réels relevés à la recette de la v0.10.1 (fixture `App_EN.Config`, réduite) :
@@ -914,8 +917,8 @@ fn page_introuvable() {
     assert!(srv.chemins().iter().any(|c| c == "/search/tout?rechtexte=inconnue&rechwhere=7"));
 }
 
-/// QuickScrape : lien d'un album, puis lien (relatif) d'une série avec choix de l'album ;
-/// rescrape depuis le lien Web raccourci.
+/// QuickScrape : aperçu puis lien d'un album (page lue une seule fois), puis lien (relatif)
+/// d'une série avec choix de l'album ; rescrape depuis le lien Web raccourci.
 #[test]
 fn scrape_rapide_et_rescrape() {
     let py = need_python!();
@@ -926,7 +929,9 @@ fn scrape_rapide_et_rescrape() {
         Hote::avec(vec![livre("a", "", ""), livre("b", "", "")])
             .reglages(&srv, journaux.path(), json!({}))
             .formulaires(vec![
-                Some(("OK".into(), json!({"lien": lien_album}))),
+                // « Aperçu du lien » : titre et couverture de la page, puis OK.
+                Some(("apercu".into(), json!({"lien": lien_album}))),
+                Some(("OK".into(), json!({}))),
                 // « Chercher sur bedetheque.com » : la fenêtre revient avec le lien saisi.
                 Some(("chercher".into(), json!({"lien": "serie-1-BD-Spirou-et-Fantasio.html", "vides": true}))),
                 Some(("OK".into(), json!({}))),
@@ -945,9 +950,22 @@ fn scrape_rapide_et_rescrape() {
     assert_eq!(b["Number"], json!("2"));
     assert!(!b.contains_key("Count"), "lien direct : pas de nombre d'albums");
     let formulaires = hote.formulaires.lock().unwrap();
-    assert_eq!(formulaires.len(), 3);
-    assert_eq!(formulaires[2].values["lien"], json!("serie-1-BD-Spirou-et-Fantasio.html"), "lien gardé");
-    assert_eq!(formulaires[2].values["vides"], json!(true), "option gardée");
+    assert_eq!(formulaires.len(), 4);
+    assert_eq!(formulaires[3].values["lien"], json!("serie-1-BD-Spirou-et-Fantasio.html"), "lien gardé");
+    assert_eq!(formulaires[3].values["vides"], json!(true), "option gardée");
+    // Aperçu : couverture (miniature) à côté du titre de la page ; page de l'album lue une
+    // seule fois (gardée pour le scrape).
+    assert_eq!(formulaires[1].values["lien"], json!(lien_album));
+    let ControlKind::Group { controls, .. } = &formulaires[1].controls[1].kind else { panic!("groupe du lien") };
+    let ControlKind::Columns { columns, widths } = &controls[2].kind else { panic!("aperçu : {controls:?}") };
+    assert_eq!(*widths, [Some(120.0), None]);
+    assert!(matches!(columns[0][0].kind, ControlKind::Image { .. }));
+    let ControlKind::Label { text, .. } = &columns[1][0].kind else { panic!("titre") };
+    assert_eq!(text, "Blacksad -1- Quelque part entre les ombres");
+    let chemins = srv.chemins();
+    let n = |c: &str| chemins.iter().filter(|x| x.as_str() == c).count();
+    assert_eq!(n("/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html"), 1, "{chemins:?}");
+    assert_eq!(n("/cache/thb_couv/couv_21.jpg"), 1, "aperçu en miniature");
     assert_eq!(formulaires[0].title, "Scrape directement un lien");
     // Champ du lien : bouton « Coller » et aperçu du lien reconnu (expressions du script
     // évaluées par ComicRust).
@@ -970,9 +988,10 @@ fn scrape_rapide_et_rescrape() {
     };
     let groupes: Vec<(String, Vec<String>)> = formulaires[0].controls.iter().map(groupe).collect();
     assert_eq!(groupes[0].0, "Livre 1 sur 2");
-    assert_eq!(groupes[1].1, ["lien", "chercher"]);
-    assert_eq!(groupes[2].0, "Options pour ce passage");
-    assert_eq!(groupes[2].1, ["vides", "edition"]);
+    assert_eq!(groupes[1].1, ["lien", ""], "champ, puis boutons « Aperçu » et « Chercher » côte à côte");
+    assert!(groupes[2].0.starts_with("Liens acceptés"));
+    assert_eq!(groupes[3].0, "Options pour ce passage");
+    assert_eq!(groupes[3].1, ["vides", "edition"]);
     assert_eq!(formulaires[0].buttons, ["OK", "Annuler"]);
     let listes = hote.listes.lock().unwrap();
     assert_eq!(listes[0].rows.len(), 3, "toute la série est proposée");
@@ -1068,4 +1087,107 @@ fn reglages_et_import_comicrack() {
     assert_eq!(s["DBGLOGMAX"], json!(2097152));
     // Réglage du portage gardé.
     assert_eq!(s["ChampsVidesSeulement"], json!(false));
+}
+
+/// Lit les éléments enfants de `<configuration>` d'un App.Config : (nom, texte).
+fn elements_app_config(chemin: &Path) -> Vec<(String, String)> {
+    use quick_xml::events::Event;
+    let texte = std::fs::read_to_string(chemin).unwrap();
+    let mut lecteur = quick_xml::Reader::from_str(&texte);
+    let (mut out, mut pile, mut courant) = (Vec::new(), 0usize, None::<(String, String)>);
+    loop {
+        match lecteur.read_event().unwrap() {
+            Event::Start(e) => {
+                pile += 1;
+                if pile == 2 {
+                    courant = Some((String::from_utf8_lossy(e.name().as_ref()).into_owned(), String::new()));
+                }
+            }
+            Event::Empty(e) if pile == 1 => {
+                out.push((String::from_utf8_lossy(e.name().as_ref()).into_owned(), String::new()));
+            }
+            Event::Text(t) => {
+                if let Some((_, s)) = courant.as_mut() {
+                    s.push_str(&t.unescape().unwrap());
+                }
+            }
+            Event::End(_) => {
+                if pile == 2 {
+                    out.push(courant.take().unwrap());
+                }
+                pile -= 1;
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `App.Config` **réel** de l'utilisateur, hors du dépôt (données personnelles) : test lancé
+/// seulement si `COMICRUST_TEST_BD2_APPCONFIG` donne son chemin. Chaque réglage du fichier
+/// doit être repris (import, formulaire rouvert, OK, enregistrement) avec la valeur que lui
+/// donne LoadSetting de l'original : « 0 »/« 1 » → booléen, tailles des journaux en
+/// entiers, textes tels quels (contenu fait seulement d'espaces → vide, comme XmlDocument),
+/// CBWeb = 2 → lien raccourci, « One Shot » → format décoché. Aucun réglage inconnu.
+#[test]
+fn import_app_config_reel_hors_depot() {
+    let Some(chemin) = std::env::var_os("COMICRUST_TEST_BD2_APPCONFIG").filter(|v| !v.is_empty()) else {
+        eprintln!("COMICRUST_TEST_BD2_APPCONFIG absent : test ignoré");
+        return;
+    };
+    let chemin = PathBuf::from(chemin);
+    let py = need_python!();
+    let journaux = tempfile::tempdir().unwrap();
+    let mut hote = Hote::default().formulaires(vec![
+        Some(("importer".into(), json!({}))),
+        Some(("OK".into(), json!({"fichier": chemin.to_string_lossy()}))),
+        Some(("OK".into(), json!({}))),
+    ]);
+    hote.reglages.values.insert("dossier_journaux".into(), json!(journaux.path().to_string_lossy()));
+    let hote = Arc::new(hote);
+    let mut ctx = RunContext::new(Hook::ConfigScript, vec![]);
+    ctx.interactive = true;
+    let r = lancer(&py, "Bedetheque2Config", ctx, hote.clone());
+    assert!(hote.messages.lock().unwrap().is_empty(), "{:?}\n{}", hote.messages, r.journal_text());
+    let s = hote.enregistres.lock().unwrap().last().expect("réglages enregistrés").values.clone();
+
+    const TEXTES: [&str; 9] =
+        ["LANGENFR", "TBTags", "ARTICLES", "SUBPATT", "TIMEOUT", "TIMEOUTS", "TIMEPOPUP", "PadNumber", "CBStop"];
+    let elements = elements_app_config(&chemin);
+    assert!(!elements.is_empty(), "aucun réglage dans {chemin:?}");
+    let (mut attendu, mut ancien_lien) = (Map::new(), false);
+    for (cle, brut) in &elements {
+        let brut = if brut.trim().is_empty() { "" } else { brut.as_str() };
+        let v = if TEXTES.contains(&cle.as_str()) {
+            let t = if ["SUBPATT", "ARTICLES", "TBTags"].contains(&cle.as_str()) { brut } else { brut.trim() };
+            json!(t)
+        } else if cle == "DBGLOGMAX" || cle == "RENLOGMAX" {
+            json!(brut.trim().parse::<i64>().unwrap_or_else(|_| panic!("{cle} = {brut:?}")))
+        } else if cle == "CBWeb" && brut.trim() == "2" {
+            ancien_lien = true;
+            json!(true)
+        } else {
+            match brut.trim().to_lowercase().as_str() {
+                "1" | "true" => json!(true),
+                "0" | "false" | "" => json!(false),
+                autre => panic!("{cle} : valeur inattendue {autre:?}"),
+            }
+        };
+        attendu.insert(cle.clone(), v);
+    }
+    if ancien_lien {
+        attendu.insert("ShortWebLink".into(), json!(true));
+    }
+    if attendu.get("ONESHOTFORMAT") == Some(&json!(true)) {
+        attendu.insert("CBFormat".into(), json!(false));
+    }
+    let mut ecarts = Vec::new();
+    for (cle, v) in &attendu {
+        if s.get(cle) != Some(v) {
+            ecarts.push(format!("{cle} : fichier {v}, repris {:?}", s.get(cle)));
+        }
+    }
+    assert!(ecarts.is_empty(), "réglages mal repris :\n{}", ecarts.join("\n"));
+    eprintln!("{} réglages de l'App.Config repris à l'identique", attendu.len());
 }

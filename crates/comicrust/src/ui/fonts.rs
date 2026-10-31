@@ -12,22 +12,33 @@
 //! pour les titres en japonais, coréen, etc.) : l'affichage est le même sur toutes les
 //! machines.
 //!
-//! Sous Windows, **Segoe UI Symbol** (`seguisym.ttf`, monochrome) est ajoutée juste après
-//! les polices embarquées, avant la recherche automatique dans les polices du système : elle
-//! couvre les symboles que des scripts ou des fiches pourraient afficher en plus de ceux de
-//! l'interface (flèches, pictogrammes, formes géométriques…). **Segoe UI Emoji**
-//! (`seguiemj.ttf`) n'est volontairement pas chargée : ses emoji sont des calques en couleur
-//! (COLR) qu'egui ne sait pas peindre — c'est elle que la recherche automatique choisissait
-//! en v0.10.1, d'où les carrés. Le test `tous_les_caracteres_de_l_interface_ont_un_glyphe` vérifie que chaque
-//! caractère non ASCII des sources de l'interface et des scripts d'exemple y a un glyphe.
+//! Sous Windows, trois polices du système sont ajoutées **après** les polices embarquées
+//! (et avant la recherche automatique d'eframe dans les polices du système), si présentes
+//! dans `%WINDIR%\Fonts` :
+//! 1. **Segoe UI Symbol** (`seguisym.ttf`, monochrome) : flèches, pictogrammes, formes
+//!    géométriques que des scripts ou des fiches pourraient afficher ;
+//! 2. **Segoe UI** (`segoeui.ttf`) : lettres latines étendues, grecques, cyrilliques… des
+//!    titres et des noms ;
+//! 3. **Segoe UI Emoji** (`seguiemj.ttf`) en tout dernier : ses emoji sont des calques en
+//!    couleur (COLR) qu'egui, compilé sans `color_fonts`, dessine par leur contour
+//!    monochrome. Elle ne sert donc qu'aux caractères qu'aucune autre police n'a (emoji
+//!    d'un titre de livre, d'un script) ; les icônes de l'interface n'en dépendent jamais.
+//!    En v0.10.1, c'est elle que la recherche automatique choisissait pour **toutes** les
+//!    icônes (polices d'emoji d'egui absentes), d'où les carrés.
+//!
+//! Le test `tous_les_caracteres_de_l_interface_ont_un_glyphe` vérifie que chaque caractère
+//! non ASCII des sources de l'interface et des scripts d'exemple a un glyphe dans les
+//! polices **embarquées** seules : l'affichage ne dépend pas des polices de la machine.
 
 use eframe::egui::{self, FontDefinitions, FontFamily};
 
 /// Nom de la police à chasse fixe d'egui (Hack), reprise en repli de la proportionnelle.
 const HACK: &str = "Hack";
 
-/// Police de symboles de Windows, ajoutée en repli quand elle est présente.
-const SEGOE_SYMBOL: &str = "Segoe UI Symbol";
+/// Polices de Windows ajoutées en repli quand elles sont présentes (nom, fichier), dans
+/// l'ordre de recherche.
+const WINDOWS_FALLBACKS: [(&str, &str); 3] =
+    [("Segoe UI Symbol", "seguisym.ttf"), ("Segoe UI", "segoeui.ttf"), ("Segoe UI Emoji", "seguiemj.ttf")];
 
 /// Polices utilisées par l'application (avec les polices de symboles du système trouvées).
 pub fn definitions() -> FontDefinitions {
@@ -66,16 +77,18 @@ fn looks_like_font(data: &[u8]) -> bool {
     matches!(data.get(..4), Some([0, 1, 0, 0] | b"OTTO" | b"true" | b"ttcf"))
 }
 
-/// Polices de symboles du système à ajouter : Segoe UI Symbol sous Windows (dossier
-/// `%WINDIR%\Fonts`), rien ailleurs (les polices embarquées couvrent l'interface).
+/// Polices du système à ajouter : celles de [`WINDOWS_FALLBACKS`] trouvées dans
+/// `%WINDIR%\Fonts` sous Windows, rien ailleurs (les polices embarquées couvrent l'interface).
 fn system_symbol_fonts() -> Vec<(String, Vec<u8>)> {
     let mut out = Vec::new();
     if cfg!(windows) {
         let windir = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
-        let path = std::path::Path::new(&windir).join("Fonts").join("seguisym.ttf");
-        if let Ok(data) = std::fs::read(&path) {
-            if looks_like_font(&data) {
-                out.push((SEGOE_SYMBOL.to_owned(), data));
+        let dir = std::path::Path::new(&windir).join("Fonts");
+        for (name, file) in WINDOWS_FALLBACKS {
+            if let Ok(data) = std::fs::read(dir.join(file)) {
+                if looks_like_font(&data) {
+                    out.push((name.to_owned(), data));
+                }
             }
         }
     }
@@ -110,16 +123,23 @@ mod tests {
     #[test]
     fn polices_du_systeme_en_dernier_repli() {
         let hack = epaint_default_fonts_hack();
-        let defs =
-            definitions_with(vec![("Symboles".to_owned(), hack), ("Abîmée".to_owned(), b"pas une police".to_vec())]);
+        let defs = definitions_with(vec![
+            ("Symboles".to_owned(), hack.clone()),
+            ("Abîmée".to_owned(), b"pas une police".to_vec()),
+            ("Emoji".to_owned(), hack),
+        ]);
         for famille in [FontFamily::Proportional, FontFamily::Monospace] {
             let liste = &defs.families[&famille];
-            assert_eq!(liste.last().map(String::as_str), Some("Symboles"), "{famille:?} : {liste:?}");
+            // Dans l'ordre donné (Segoe UI Emoji en tout dernier sous Windows).
+            assert_eq!(liste[liste.len() - 2..], ["Symboles".to_owned(), "Emoji".to_owned()], "{famille:?}");
             assert!(liste.iter().position(|n| n == HACK) < liste.iter().position(|n| n == "Symboles"));
         }
         assert!(!defs.font_data.contains_key("Abîmée"));
         // Sans police du système : les polices embarquées seules.
-        assert!(!definitions_with(Vec::new()).font_data.contains_key(SEGOE_SYMBOL));
+        let seules = definitions_with(Vec::new());
+        for (nom, _) in WINDOWS_FALLBACKS {
+            assert!(!seules.font_data.contains_key(nom));
+        }
     }
 
     /// Octets de la police Hack d'egui (police valide pour les essais).

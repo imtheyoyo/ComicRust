@@ -23,7 +23,7 @@ couverture des séries vient de leur page (premier album en « data-src » avec 
 remplissage, ou og:image) ; la page de la troisième série n'existe pas (404 sans message).
 images/couv_*.png : couvertures factices servies pour toute adresse d'image
 (/media/Couvertures/Couv_N.jpg et /cache/thb_couv/Couv_N.jpg ; Couv_802 n'existe qu'en
-vignette).
+grand : pas de miniature).
 
 App_reel.Config : App.Config complet de l'utilisateur relevé à la recette de la v0.10.1
 (50 réglages ; aucun chemin ni nom personnel), relu en entier par l'import.

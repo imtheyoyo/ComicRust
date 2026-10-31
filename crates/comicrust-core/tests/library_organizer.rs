@@ -953,3 +953,214 @@ fn reglages_reels_de_l_utilisateur() {
         }
     }
 }
+
+/// Profil lu tel quel dans un `losettingsx.dat` : nom, éléments texte, listes d'`<Item
+/// Name= Value=>`, éléments vides, attributs de `<ExcludeRules>`.
+#[derive(Debug, Default)]
+struct ProfilBrut {
+    nom: String,
+    textes: Vec<(String, String)>,
+    items: Vec<(String, Vec<(String, String)>)>,
+    regles: Vec<(String, String)>,
+}
+
+/// Lecture indépendante (quick-xml) d'un `losettingsx.dat` : profils et `LastUsed`.
+fn profils_bruts(chemin: &Path) -> (Vec<ProfilBrut>, String) {
+    use quick_xml::events::{BytesStart, Event};
+    fn attr(e: &BytesStart, nom: &str) -> String {
+        e.attributes()
+            .flatten()
+            .find(|a| a.key.as_ref() == nom.as_bytes())
+            .map(|a| a.unescape_value().unwrap().into_owned())
+            .unwrap_or_default()
+    }
+    let texte = std::fs::read_to_string(chemin).unwrap();
+    let mut lecteur = quick_xml::Reader::from_str(texte.trim_start_matches('\u{feff}'));
+    let (mut profils, mut derniers) = (Vec::new(), String::new());
+    let mut p = ProfilBrut::default();
+    let mut elem: Option<String> = None;
+    let mut contenu = String::new();
+    let mut items: Option<Vec<(String, String)>> = None;
+    loop {
+        let ev = lecteur.read_event().unwrap();
+        match &ev {
+            Event::Start(e) | Event::Empty(e) => {
+                let nom = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                let vide = matches!(ev, Event::Empty(_));
+                match nom.as_str() {
+                    "Profiles" => derniers = attr(e, "LastUsed"),
+                    "Profile" => p = ProfilBrut { nom: attr(e, "Name"), ..Default::default() },
+                    "Item" => items.get_or_insert_with(Vec::new).push((attr(e, "Name"), attr(e, "Value"))),
+                    "ExcludeRules" => {
+                        p.regles = vec![
+                            ("ExcludeOperator".into(), attr(e, "Operator")),
+                            ("ExcludeMode".into(), attr(e, "ExcludeMode")),
+                        ];
+                        assert!(vide, "{} : règles d'exclusion non vides, à vérifier à la main", p.nom);
+                    }
+                    _ if vide => p.textes.push((nom, String::new())),
+                    _ => {
+                        elem = Some(nom);
+                        contenu.clear();
+                        items = None;
+                    }
+                }
+            }
+            Event::Text(t) => contenu.push_str(&t.unescape().unwrap()),
+            Event::End(e) => {
+                let nom = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                if nom == "Profile" {
+                    profils.push(std::mem::take(&mut p));
+                } else if elem.as_deref() == Some(nom.as_str()) {
+                    match items.take() {
+                        Some(i) => p.items.push((nom, i)),
+                        None => p.textes.push((nom, contenu.clone())),
+                    }
+                    elem = None;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    (profils, derniers)
+}
+
+/// `losettingsx.dat` **réel** de l'utilisateur, hors du dépôt (chemins du NAS) : test lancé
+/// seulement si `COMICRUST_TEST_LO_SETTINGS` donne son chemin. Import complet comparé à une
+/// lecture indépendante du fichier (chaque profil, chaque réglage, chaque préfixe, suffixe,
+/// séparateur, mois, texte Oui/Non, caractère interdit, règles), puis chemins calculés pour
+/// des livres factices par chaque profil (dossier de base remplacé par un dossier
+/// temporaire, mode Déplacer) : ceux que donne le `PathMaker` de `lobookmover.py` (original,
+/// exécuté avec des cales .NET sur ces mêmes livres), selon le modèle de dossier du profil.
+#[test]
+fn import_losettings_reel_hors_depot() {
+    let Some(dat) = std::env::var_os("COMICRUST_TEST_LO_SETTINGS").filter(|v| !v.is_empty()) else {
+        eprintln!("COMICRUST_TEST_LO_SETTINGS absent : test ignoré");
+        return;
+    };
+    let dat = PathBuf::from(dat);
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().join("data");
+    let hote = Arc::new(Hote::avec(&[], json!({"dossier_journal": data.to_string_lossy()})).formulaires(vec![
+        ("Library Organizer", "importer_cr", json!({})),
+        ("Importer les réglages", "Importer", json!({"fichier": dat.to_string_lossy(), "remplacer": true})),
+        ("Library Organizer", "OK", json!({})),
+    ]));
+    lancer(&py, "library-organizer-reglages", Hook::ConfigScript, &[], hote.clone());
+    let s = hote.derniers_reglages();
+    let profils = s["profils"].as_object().unwrap();
+    let (bruts, derniers) = profils_bruts(&dat);
+    let mut ecarts = Vec::new();
+    let mut noms_fichier: Vec<&str> = bruts.iter().map(|b| b.nom.as_str()).collect();
+    let mut noms_importes: Vec<&str> = profils.keys().map(String::as_str).collect();
+    noms_fichier.sort();
+    noms_importes.sort();
+    assert_eq!(noms_importes, noms_fichier, "tous les profils, rien de plus");
+    let derniers: Vec<&str> = derniers.split(',').filter(|x| !x.is_empty()).collect();
+    assert_eq!(s["derniers"], json!(derniers));
+    let mut n_valeurs = 0;
+    for b in &bruts {
+        let p = &profils[&b.nom];
+        for (cle, texte) in b.textes.iter().chain(b.regles.iter()) {
+            n_valeurs += 1;
+            let v = &p[cle.as_str()];
+            let ok = match v {
+                Value::Bool(x) => texte == if *x { "true" } else { "false" },
+                Value::String(x) => x == texte,
+                // Listes (dossiers exclus, champs en échec…) et dictionnaires vides.
+                Value::Array(a) => texte.is_empty() && a.is_empty(),
+                Value::Object(o) => texte.is_empty() && o.is_empty(),
+                _ => false,
+            };
+            if !ok {
+                ecarts.push(format!("{} / {cle} : fichier {texte:?}, importé {v}", b.nom));
+            }
+        }
+        for (cle, items) in &b.items {
+            for (nom, valeur) in items {
+                n_valeurs += 1;
+                if p[cle.as_str()][nom.as_str()] != json!(valeur) {
+                    ecarts.push(format!("{} / {cle}[{nom}] : fichier {valeur:?}, importé {}", b.nom, p[cle][nom]));
+                }
+            }
+        }
+    }
+    assert!(ecarts.is_empty(), "écarts d'import :\n{}", ecarts.join("\n"));
+    eprintln!("{} profils, {n_valeurs} valeurs reprises à l'identique", bruts.len());
+
+    // Chemins : livres factices, mêmes que ceux passés au PathMaker de l'original.
+    let entree = tmp.path().join("in");
+    let mk = |id: &str, f: &str, serie: &str, num: &str, titre: &str, complete: Option<&str>| {
+        let mut b = livre(id, &fichier(&entree.join(f)));
+        b.series = Some(serie.into());
+        b.number = (!num.is_empty()).then(|| num.into());
+        b.title = (!titre.is_empty()).then(|| titre.into());
+        b.series_complete = complete.map(Into::into);
+        b
+    };
+    let mut c = mk("c", "x3.cbz", "Thorgal: Les mondes", "3", "Kriss? <de> Valnor", Some("Yes"));
+    c.volume = Some(2);
+    let livres = [
+        mk("a", "x1.cbz", "Blacksad", "1", "Quelque part entre les ombres", Some("No")),
+        mk("b", "x2.cbr", "Blacksad", "12", "Fin", Some("No")),
+        c,
+        mk("d", "x4.pdf", "Astérix", "HS", "Le \"Livre\" d'or|1", None),
+        mk("e", "x5.cbz", "Spirou", "7.5", "", Some("Yes")),
+        mk("f", "x6.cbz", "Spirou", "10", "Z", Some("Yes")),
+        mk("g", "x7.cbz", "AC/DC*Live.", "", "Live...", Some("No")),
+    ];
+    let ids = ["a", "b", "c", "d", "e", "f", "g"];
+    // Fichiers communs à tous les profils (modèle de nom identique dans le fichier réel).
+    let fichiers = [
+        "Blacksad/Blacksad #01 - Quelque part entre les ombres.cbz",
+        "Blacksad/Blacksad #12 - Fin.cbr",
+        "Thorgal - Les mondes/Thorgal - Les mondes #3 - Kriss [de] Valnor Vol.2.cbz",
+        "Astérix/Astérix #HS - Le 'Livre' d'or!1.pdf",
+        "Spirou/Spirou #07.5.cbz",
+        "Spirou/Spirou #10 - Z.cbz",
+        "ACDCLive/ACDCLive. - Live....cbz",
+    ];
+    // Niveau ajouté devant, selon le modèle de dossier (original : PathMaker de lobookmover.py).
+    let en_cours = "{ <seriesComplete(Séries En cours)(!)>}";
+    let terminees = "{ <seriesComplete(Séries Terminées)>}";
+    let niveaux = |modele: &str| -> Option<[&str; 7]> {
+        let (t, c) = ("Séries Terminées/", "Séries En cours/");
+        Some(match modele {
+            m if m == format!("{terminees}{en_cours}\\{{<series>}}") => [c, c, t, "", t, t, c],
+            m if m == format!("{en_cours}\\{{<series>}}") => [c, c, "", "", "", "", c],
+            m if m == format!("{terminees}\\{{<series>}}") => ["", "", t, "", t, t, ""],
+            "{ <seriesComplete(Séries Terminées - Tomes Manquants)>}\\{<series>}" => {
+                let m = "Séries Terminées - Tomes Manquants/";
+                ["", "", m, "", m, m, ""]
+            }
+            "BD_X\\{<series>}" => ["BD_X/"; 7],
+            "Séries_Temp\\{<series>}" => ["Séries_Temp/"; 7],
+            _ => return None,
+        })
+    };
+    let modele_fichier = "{ <series>}{  #<number0>}{  - <title>}{  Vol.<volume0>}";
+    for (nom, p) in profils {
+        let Some(niv) = niveaux(p["FolderTemplate"].as_str().unwrap()) else {
+            eprintln!(
+                "{nom} : modèle de dossier non prévu par ce test ({}), chemins non vérifiés",
+                p["FolderTemplate"]
+            );
+            continue;
+        };
+        assert_eq!(p["FileTemplate"], json!(modele_fichier), "{nom}");
+        let sortie = tmp.path().join("sortie");
+        let mut p = p.clone();
+        p["BaseFolder"] = json!(sortie.to_string_lossy());
+        p["Mode"] = json!("Move");
+        let hote = Arc::new(Hote::avec(&livres, reglages(&data, p)));
+        let r = lancer(&py, "library-organizer-quick", Hook::Books, &ids, hote);
+        let ren = renommages(&r);
+        for ((id, n), f) in ids.iter().zip(niv).zip(fichiers) {
+            let attendu = sortie.join(format!("{n}{f}"));
+            assert_eq!(ren.get(*id), Some(&attendu), "{nom} / {id}\n{}", r.journal_text());
+        }
+        eprintln!("{nom} : 7 chemins conformes à l'original");
+    }
+}

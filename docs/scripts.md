@@ -103,8 +103,9 @@ alternatif), dépôt légal, éditeur, ISBN, identifiant), aperçu agrandi, curs
 La fenêtre s'ouvre **tout de suite** ; les couvertures arrivent ensuite, une à une (celle
 de la ligne survolée ou choisie d'abord), pendant que l'on lit la liste :
 
-- couvertures des albums et des éditions : celles que donnent les pages (vignette du site
-  remplacée par la couverture en grand `media/Couvertures/…` quand elle existe) ; adresses
+- **miniatures** du site (`cache/thb_couv/…`, quelques Ko) plutôt que les couvertures en
+  grand (`media/Couvertures/…`, prise seulement si la miniature manque) ;
+- couvertures des albums et des éditions : celles que donnent les pages ; adresses
   complètes, relatives ou sans schéma (`//www.bedetheque.com/…`), images chargées au
   défilement (`data-src`) ; dans la page d'une série, couverture, dépôt légal et éditeur
   de chaque album sont cherchés autour de son lien ; un album sans couverture dans cette
@@ -128,15 +129,18 @@ Réglages ajoutés (onglet Préférences, cadre « Fenêtres de choix (ComicRust
 des couvertures (`TailleVignettes`, 150 px), couvertures des séries oui/non
 (`VignettesSeries`) et nombre de séries lues d'office (`NbVignettesSeries`).
 
-QuickScrape BD2 (v0.10.2) : fenêtre en trois cadres — **livre concerné** (n° sur le
+QuickScrape BD2 (v0.10.2) : fenêtre en quatre cadres — **livre concerné** (n° sur le
 nombre de livres, série, numéro, titre, fichier) ; **lien** : champ sur toute la largeur
 avec bouton « 📋 Coller », type de lien reconnu (album, série — l'album sera choisi dans
 la liste de la série —, revue, ou non reconnu : lu comme une page d'album, comme
-l'original), bouton « 🔎 Chercher « série » sur bedetheque.com » (ouvre la recherche dans
-le navigateur ; la fenêtre revient avec le lien déjà saisi) ; **options pour ce passage**
-(« Ne remplir que les champs vides », « Choisir l'édition dans une liste », valables
-jusqu'à la fin du passage, réglages enregistrés inchangés) ; aide d'une ligne. Mêmes
-boutons que l'original : OK (sans lien : arrêt ; **Entrée** = OK) et Annuler (arrêt).
+l'original), boutons « 👁 Aperçu du lien » (titre et couverture en miniature de la page du
+lien ; la page lue n'est pas redemandée par le scrape qui suit) et « 🔎 Chercher « série »
+sur le site » (ouvre la recherche dans le navigateur ; la fenêtre revient avec le lien
+déjà saisi) ; **liens acceptés** (un exemple par sorte, adresses complètes — `https://`,
+`http://` ou sans schéma — ou relatives) ; **options pour ce passage** (« Ne remplir que
+les champs vides », « Choisir l'édition dans une liste », valables jusqu'à la fin du
+passage, réglages enregistrés inchangés). Mêmes boutons que l'original : OK (sans lien :
+arrêt ; **Entrée** = OK) et Annuler (arrêt).
 
 « Langue du plugin » (`LANGENFR`), comme dans l'original : langue des fenêtres et messages
 du script **et** du libellé ajouté au résumé (« Info édition: » / « Edition info: ») ; les
@@ -416,7 +420,7 @@ désactivé désactive son contenu), `width` (pixels).
 | `ui.separator()` | — | |
 | `ui.image(octets_ou_chemin, caption=None, max_width=240, max_height=320)` | — | couverture… (2 Mo au plus) |
 | `ui.group(titre, [contrôles])` | — | cadre titré |
-| `ui.columns([contrôles], [contrôles], …)` | — | colonnes côte à côte (2 couvertures à comparer…) |
+| `ui.columns([contrôles], [contrôles], …, widths=None)` | — | colonnes côte à côte (2 couvertures à comparer…) ; `widths` (v0.10.2) : largeur de chaque colonne en pixels, `None` pour partager la place restante (ex. `widths=[120, None]` : couverture étroite, texte à côté) ; sans `widths`, colonnes égales |
 | `ui.tabs({"Onglet": [contrôles], …})` | — | onglets |
 | `ui.button(key, label, validate=False)` | — | ferme le formulaire et rend `(key, valeurs)` (voir plus bas) |
 

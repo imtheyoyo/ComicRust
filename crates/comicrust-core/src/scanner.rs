@@ -811,8 +811,7 @@ pub fn scan_batched(
             }
         }
     }
-    let file_of: HashMap<&str, &str> =
-        known.iter().filter_map(|b| Some((b.id.as_str(), b.file.as_deref()?))).collect();
+    let file_of: HashMap<&str, &str> = known.iter().filter_map(|b| Some((b.id.as_str(), b.file.as_deref()?))).collect();
     for (i, id) in &candidates {
         if let (Some(i), Some(f)) = (i, file_of.get(id)) {
             guard.add_gone(&folder_text[*i], f);
