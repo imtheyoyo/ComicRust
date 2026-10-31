@@ -1,0 +1,13 @@
+Rapport de recette ComicRust v0.10.1 — 31/10/2026 14:09
+Résultat : 23 OK, 0 échec(s), 0 non testé(s) sur 23.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+Ajoute ces améliorations que j'ai relevé :
+- Les icones dans l'interface affice des carrés.
+- Sélectionner des séries dans les listes pour pouvoir changer l'ordre de trie.
+- Un livre est présent dans la base SQL mais n'existe plus physiquement (Fichier introuvable : \\SERVEURNAS\Disque_DATA_1\_BDZ\_BD\Séries_Temp\29 - Marvel Team-Up #55 - L'araignée #6 - Le Titan Vert.cbz Il a peut-être été déplacé ou supprimé, ou le NAS n'est pas accessible..)
+- Améliorer l'interface de Bedetheque Scraper 2 avec les photos des séries et des livres dans les résultats.
+- Améliorer l'interface de QuickScrape BD2, la mise en page n'est pas optimisée.

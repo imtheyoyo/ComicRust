@@ -52,7 +52,7 @@ et les deux scripts de ComicRack les plus utilisés.
 - Journaux de Bedetheque dans `data\bedetheque\`.
 
 ### Recette
-[recette/v0.10.1.md](recette/v0.10.1.md).
+[recette/v0.10.1.md](recette/v0.10.1.md) — GO (23/23 OK).
 
 ## [v0.10.0] — 2026-10-26
 
