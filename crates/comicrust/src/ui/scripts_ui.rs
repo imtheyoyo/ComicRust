@@ -1095,7 +1095,7 @@ fn preview_ui(ui: &mut Ui, run: &mut crate::scripts::ScriptRun, library: bool) -
                         Line::Field(i, k) => {
                             let f = &preview.books[i].fields[k];
                             let shown =
-                                |t: &str| if t.is_empty() { "(vide)".to_string() } else { t.replace('\n', " ⏎ ") };
+                                |t: &str| if t.is_empty() { "(vide)".to_string() } else { t.replace('\n', " ↵ ") };
                             ui.add_space(26.0);
                             cell(ui, 150.0, row_h, RichText::new(&f.label).weak());
                             cell(ui, col, row_h, shown(&f.before));

@@ -7,6 +7,8 @@
 //! - [`library`]    ↔ `ComicLibrary` / `ComicDatabase` (ComicDB.xml)
 //! - [`store`]      : base propre à ComicRust (SQLite ou MySQL, une colonne par champ)
 //! - [`scanner`]    ↔ `ComicScanner` (dossiers surveillés : ajout, mise à jour, manquants)
+//! - [`missing`]    ↔ `ComicBook.FileIsMissing` (vérification en arrière-plan, recherche des
+//!   fichiers déplacés)
 //! - [`comic_lists`], [`smart`] ↔ listes (`ComicListItem…`, `ComicBook…Matcher`) ; modification :
 //!   [`lists_edit`] ; critères pour l'éditeur : [`matcher_catalog`]
 //! - [`edit`] : modification des fiches (champs, aperçu, écriture) et des fichiers
@@ -23,6 +25,7 @@ pub mod library;
 pub mod lists_edit;
 pub mod locale;
 pub mod matcher_catalog;
+pub mod missing;
 pub mod name_info;
 pub mod providers;
 pub mod scanner;

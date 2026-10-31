@@ -1064,7 +1064,84 @@ fn bump_update_counter(tx: &mut mysql::Transaction<'_>) -> Result<i64, Error> {
     n.flatten().ok_or_else(|| Error::Database("compteur de la table « changes » illisible".into()))
 }
 
+// ---------------------------------------------------------------------------------------
+// Suppression (« Retirer de la bibliothèque »)
+// ---------------------------------------------------------------------------------------
+
+/// Bilan de [`delete_books`].
+#[derive(Debug, Clone, Default)]
+pub struct DeleteReport {
+    /// Fiches supprimées (identifiants en minuscules).
+    pub deleted: Vec<String>,
+    /// Déjà absentes de la base (supprimées par ComicRack entre-temps).
+    pub missing: Vec<String>,
+    /// Erreurs SQL : identifiant, message.
+    pub failed: Vec<(String, String)>,
+    /// `changes.delete_counter` après la dernière suppression.
+    pub delete_counter: Option<i64>,
+}
+
+/// Supprime des fiches de la base MySQL de ComicRack, **exactement comme**
+/// `ComicStorageBaseSql.Delete` : `Delete from comics where id='{0}'`, puis, si une ligne
+/// a été supprimée, `WriteDeleteCounter(ReadDeleteCounter() + 1)` (un incrément par livre,
+/// sur la ligne `StorageGuid` de `changes`, créée si elle manque comme le fait
+/// `WriteCounter`). ComicRust fait les deux dans une transaction par livre (incrément
+/// atomique). Une instance de ComicRack lancée voit `lastDelete < ReadDeleteCounter()` à
+/// son actualisation suivante, relit `Select id from comics` et retire les livres absents.
+///
+/// **Seule la fiche est supprimée, jamais le fichier.** `Err` seulement si la connexion
+/// échoue.
+pub fn delete_books(cfg: &DbConfig, ids: &[String]) -> Result<DeleteReport, Error> {
+    let mut report = DeleteReport::default();
+    if ids.is_empty() {
+        return Ok(report);
+    }
+    let mut conn = connect(cfg)?;
+    for id in ids {
+        let id = id.trim().to_ascii_lowercase();
+        match delete_one(&mut conn, &id) {
+            Ok(Some(counter)) => {
+                report.deleted.push(id);
+                report.delete_counter = Some(counter);
+            }
+            Ok(None) => report.missing.push(id),
+            Err(e) => report.failed.push((id, e.to_string())),
+        }
+    }
+    Ok(report)
+}
+
+/// Supprime une fiche ; renvoie le nouveau `delete_counter`, `None` si elle était absente.
+fn delete_one(conn: &mut Conn, id: &str) -> Result<Option<i64>, Error> {
+    let mut tx = conn.start_transaction(TxOpts::default()).map_err(db_err)?;
+    tx.exec_drop("DELETE FROM comics WHERE id = ?", (id,)).map_err(db_err)?;
+    if tx.affected_rows() == 0 {
+        tx.rollback().map_err(db_err)?;
+        return Ok(None);
+    }
+    const BUMP: &str = "UPDATE changes SET delete_counter = COALESCE(delete_counter, 0) + 1 WHERE id = ?";
+    tx.exec_drop(BUMP, (STORAGE_GUID,)).map_err(db_err)?;
+    if tx.affected_rows() == 0 {
+        tx.exec_drop("INSERT INTO changes VALUES (?, 0, 0)", (STORAGE_GUID,)).map_err(db_err)?;
+        tx.exec_drop(BUMP, (STORAGE_GUID,)).map_err(db_err)?;
+    }
+    let n: Option<Option<i64>> =
+        tx.exec_first("SELECT delete_counter FROM changes WHERE id = ?", (STORAGE_GUID,)).map_err(db_err)?;
+    let n = n.flatten().ok_or_else(|| Error::Database("compteur de la table « changes » illisible".into()))?;
+    tx.commit().map_err(db_err)?;
+    Ok(Some(n))
+}
+
 impl Watcher {
+    /// Livres supprimés par ce ComicRust ([`delete_books`]) : la surveillance ne renverra
+    /// pas leur disparition comme une suppression faite dans ComicRack. À signaler **avant**
+    /// la suppression (sinon une interrogation intercalée la verrait).
+    pub fn note_deleted<'a>(&mut self, ids: impl IntoIterator<Item = &'a str>) {
+        for id in ids {
+            self.rows.remove(&id.to_ascii_lowercase());
+        }
+    }
+
     /// Livres écrits par ce ComicRust (`id`, nouveau `comics.update_counter`) : ils ne
     /// seront pas renvoyés comme modifications extérieures (une réécriture ultérieure par
     /// ComicRack, avec un autre compteur, le sera).

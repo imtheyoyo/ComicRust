@@ -95,6 +95,37 @@ les requêtes lui-même, sans « daemon »). Option « cloudscraper » : copier 
 dossier du script dans ComicRack (par ex.
 `%AppData%\cYo\ComicRack\Scripts\Bedetheque Scraper 2\App.Config`).
 
+Fenêtres de choix de la série, de l'album et de l'édition (v0.10.2) : **fiches avec
+couverture** (titre en gras ; série : éditeur et pays du résultat, rang, lien ; album :
+rang, lien ; édition : numéro alternatif, dépôt légal, éditeur, ISBN, identifiant), aperçu
+agrandi, curseur « Taille ». Couvertures : celles que donnent les pages (vignette du site
+remplacée par la couverture en grand `media/Couvertures/…` quand elle existe), 24 au plus
+par fenêtre, 0,15 s entre deux images. Les résultats de recherche du site n'ont **pas** de
+couverture (un drapeau) et aucune adresse d'image ne se déduit du numéro de la série :
+la page des 6 premières séries proposées est donc lue (0,6 s entre deux pages, erreurs
+seulement notées au journal de débogage, revues exclues) pour prendre la couverture de leur
+premier album ; la page de la série choisie n'est pas relue ensuite. Réglages ajoutés
+(onglet Préférences, cadre « Fenêtres de choix (ComicRust) ») : hauteur des couvertures
+(`TailleVignettes`, 120 px), couvertures des séries oui/non (`VignettesSeries`) et nombre
+de séries (`NbVignettesSeries`, 12 au plus).
+
+QuickScrape BD2 (v0.10.2) : fenêtre refaite — livre concerné (série, numéro, titre,
+fichier), champ du lien sur toute la largeur avec bouton « 📋 Coller », aperçu du lien
+reconnu (album, série — l'album sera choisi dans la liste —, revue, ou non reconnu : lu
+comme une page d'album, comme l'original), aide. Mêmes boutons que l'original : OK (sans
+lien : arrêt) et Annuler (arrêt).
+
+« Langue du plugin » (`LANGENFR`), comme dans l'original : langue des fenêtres et messages
+du script **et** du libellé ajouté au résumé (« Info édition: » / « Edition info: ») ; les
+données lues sur le site ne changent pas. Un `App.Config` importé en anglais met donc le
+script en anglais : repasser « Français » dans Préférences si besoin.
+
+Import de l'`App.Config` : un réglage fait seulement d'espaces et de retours à la ligne
+(`<TBTags>⏎  </TBTags>`, écrit ainsi par l'indentation de l'original) est lu vide, comme le
+fait l'original (v0.10.1 : gardé tel quel, ce qui vidait les étiquettes des livres ; un
+réglage enregistré ainsi est corrigé à la lecture) ; les tailles des journaux restent à
+l'octet près si on ne les change pas.
+
 Différences : la couverture d'une fiche sans fichier n'est pas posée (seulement montrée dans
 la fenêtre d'avancement) et le nombre de planches n'est pas écrit (`PageCount` en lecture
 seule) ; le double-clic d'une fenêtre de choix choisit au lieu d'ouvrir la page dans le
@@ -315,7 +346,8 @@ ferme la fenêtre (Échap) ou clique sur « Arrêter le script ».
 
 ```python
 bouton_et_valeurs = comicrust.form(titre, controles, buttons=("OK", "Annuler"),
-                                   values=None, width=None, message=None, cancel=…)
+                                   values=None, width=None, message=None, cancel=…,
+                                   label_width=None)
 ```
 
 - Renvoie `(bouton, valeurs)` : `bouton` = libellé du bouton du bas cliqué, ou clé d'un
@@ -326,7 +358,10 @@ bouton_et_valeurs = comicrust.form(titre, controles, buttons=("OK", "Annuler"),
   `cancel=None` : aucun.
 - `values` : valeurs initiales qui remplacent les `default` (pour rouvrir un formulaire
   avec la saisie précédente) ; `width` : largeur en pixels (560 par défaut) ; `message` :
-  texte d'introduction. Un formulaire trop haut défile.
+  texte d'introduction ; `label_width` (v0.10.2) : largeur de la colonne des libellés à
+  gauche des champs (170 px par défaut, de 60 à 600 ; un libellé trop long est coupé et
+  montré en entier au survol ; un champ sans libellé n'est pas décalé). Un formulaire trop
+  haut défile.
 - Avant de fermer, ComicRust vérifie les champs **actifs** : champ `required` vide, nombre
   hors de `min`/`max`, doublon dans une `list_edit` ; l'erreur s'affiche sous le champ,
   l'onglet concerné s'ouvre (marqué ⚠), le formulaire reste ouvert.
@@ -341,9 +376,9 @@ désactivé désactive son contenu), `width` (pixels).
 
 | Fonction | Valeur rendue | Particularités |
 |---|---|---|
-| `ui.text(key, label, default="", placeholder=, required=, inserts=)` | `str` | `inserts` : menu « Insérer ▾ » qui insère au curseur, ex. `[("{series}", "Série"), ("{number}", "Numéro")]` (modèles de nom) ; par groupes : `{"Texte": [("{series}", "Série")], "Nombres": [...]}` (titre par groupe) ; au-delà de 8 morceaux, un champ « Filtrer… » en tête du menu |
+| `ui.text(key, label, default="", placeholder=, required=, inserts=, paste=False, hints=, hint_none=)` | `str` | `inserts` : menu « Insérer ▾ » qui insère au curseur, ex. `[("{series}", "Série"), ("{number}", "Numéro")]` (modèles de nom) ; par groupes : `{"Texte": [("{series}", "Série")], "Nombres": [...]}` (titre par groupe) ; au-delà de 8 morceaux, un champ « Filtrer… » en tête du menu. `paste=True` (v0.10.2) : bouton « 📋 Coller » (remplace le texte par celui du presse-papiers). `hints` (v0.10.2) : aperçu sous le champ pendant la saisie, paires `(expression_régulière, texte)` : la première qui correspond au texte saisi s'affiche (✔), sinon `hint_none` (⚠) si le champ n'est pas vide ; expressions de la caisse Rust `regex` (syntaxe de Python sans références arrière ni assertions avant/arrière), 32 au plus |
 | `ui.textarea(key, label, default="", rows=4, …)` | `str` | plusieurs lignes, `inserts` aussi |
-| `ui.secret(key, label, default=valeur_actuelle)` | `str` | saisie masquée ; la valeur actuelle n'est **ni affichée ni envoyée** à l'interface ; vide = valeur actuelle rendue |
+| `ui.secret(key, label, default=valeur_actuelle, paste=False)` | `str` | saisie masquée ; la valeur actuelle n'est **ni affichée ni envoyée** à l'interface ; vide = valeur actuelle rendue ; `paste=True` : bouton « Coller » |
 | `ui.checkbox(key, label, default=False)` | `bool` | |
 | `ui.number(key, label, default=0, min=, max=, step=1, decimals=0)` | `int` (ou `float` si `decimals`) | bornes vérifiées |
 | `ui.choice(key, label, choices, default=None, editable=False, required=False)` | valeur du choix | liste déroulante ; `editable` : saisie libre (texte rendu tel quel) |
@@ -443,13 +478,21 @@ r = comicrust.form("Ce fichier existe déjà", [
 
 ```python
 rang = comicrust.choose(titre, colonnes, lignes, images=None, multi=False, default=None,
-                        message=None, filter=None, timeout=None, thumb_size=None)
+                        message=None, filter=None, timeout=None, thumb_size=None,
+                        layout=None)
 ```
 
-- Tableau **triable** (clic sur un titre de colonne : numérique si les cellules sont des
-  nombres, sinon ordre « naturel » 2 < 10), avec une colonne de **vignettes** si `images`
-  est donné ; survoler une vignette l'agrandit, l'image de la ligne survolée ou choisie
-  est aussi montrée à droite. **Double-clic** (ou Entrée) = choisir.
+- Deux présentations (`layout`, v0.10.2) :
+  - `"cards"` (**fiches**, par défaut quand `images` est donné) : une fiche par résultat,
+    la couverture à gauche, la **première colonne en gras** puis les autres colonnes, une
+    par ligne (« Colonne : valeur », cellules vides omises) ; liste « Trier par » (ordre
+    d'origine ou une colonne, ⬆/⬇) ;
+  - `"table"` (par défaut sans image) : tableau **triable** (clic sur un titre de
+    colonne : numérique si les cellules sont des nombres, sinon ordre « naturel » 2 < 10),
+    avec une colonne de vignettes si `images` est donné (survoler une vignette l'agrandit).
+- L'image de la ligne survolée ou choisie est montrée en grand à droite, avec toutes ses
+  cellules. Curseur « Taille » : hauteur des vignettes (de 48 à 320 px). **Double-clic**
+  (ou Entrée) = choisir ; ↑/↓ (Page préc./suiv. : 5 lignes) changent de ligne.
 - `colonnes` : titres ; `lignes` : une liste de cellules par ligne (ou un simple texte).
 - `images` : une par ligne, `None` pour aucune : octets JPEG/PNG/WebP/GIF/BMP ou chemin de
   fichier ; **2 Mo au plus chacune et 12 Mo en tout** (`ValueError` sinon, avant tout
@@ -460,7 +503,10 @@ rang = comicrust.choose(titre, colonnes, lignes, images=None, multi=False, defau
   sans casse ; par défaut au-delà de 8 lignes) ; `timeout` : secondes après lesquelles la
   sélection est validée toute seule (option « choix automatique » de Bedetheque Scraper ;
   toute action de l'utilisateur arrête le compte à rebours ; sans sélection : `None`) ;
-  `thumb_size` : hauteur des vignettes (64 px).
+  `thumb_size` : hauteur des vignettes au départ (64 px par défaut, 320 au plus).
+- Les images sont toutes envoyées avec la liste (pas d'envoi après coup : le script attend
+  la réponse) : les télécharger avant, avec `comicrust.progress(..., detail=)` pour
+  patienter.
 
 ```python
 albums = chercher(book.series)               # [(titre, numéro, année, url_couv, url), …]

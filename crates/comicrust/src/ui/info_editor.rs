@@ -961,7 +961,7 @@ fn custom_values(ui: &mut Ui, ed: &mut InfoEditor) {
             egui::TextEdit::singleline(&mut ed.new_custom).hint_text("Nom de la nouvelle valeur").desired_width(220.0),
         );
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if (ui.button("＋ Ajouter").clicked() || enter) && !ed.new_custom.trim().is_empty() {
+        if (ui.button("➕ Ajouter").clicked() || enter) && !ed.new_custom.trim().is_empty() {
             match ed.form.add_custom(&ed.new_custom) {
                 Ok(()) => {
                     let key = ed.new_custom.trim().to_string();

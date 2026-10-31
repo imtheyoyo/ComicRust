@@ -67,7 +67,7 @@ impl ComicRustApp {
                 }
                 let (parent, position) = self.new_list_place();
                 let plus = ui.add_enabled_ui(reason.is_none(), |ui| {
-                    ui.menu_button(RichText::new("＋").strong(), |ui| {
+                    ui.menu_button(RichText::new("➕").strong(), |ui| {
                         new_menu(ui, &None, parent, position, &mut acts);
                     })
                     .response
@@ -101,9 +101,10 @@ impl ComicRustApp {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             let all = self.library.selected_list.is_none();
             let n = db.as_ref().map(|d| d.len()).unwrap_or(0);
-            let r = ui.selectable_label(all, format!("📚 Toute la bibliothèque ({n})"));
+            let r = ui.selectable_label(all && !self.library.missing_only, format!("📚 Toute la bibliothèque ({n})"));
             if r.clicked() {
                 chosen = Some(None);
+                self.library.missing_only = false;
             }
             tree.push(None, false, false);
             if all {
@@ -113,6 +114,8 @@ impl ComicRustApp {
                 self.lists_ui.drag_hint =
                     Some(DropHint::Refused("La bibliothèque contient déjà tous les livres".into()));
             }
+            // Livres manquants (v0.10.2) : filtre de la bibliothèque, comme une liste spéciale.
+            self.missing_list_entry(ui);
             ui.add_space(4.0);
             let items = std::mem::take(&mut self.library.lists.items);
             let mut nc = NodeCtx {
@@ -176,7 +179,7 @@ impl ComicRustApp {
                 if self.library.lists.items.is_empty() {
                     ui.label(
                         RichText::new(
-                            "Pas encore de listes : « ＋ » pour en créer, ou ⚙ → « Transférer la bibliothèque \
+                            "Pas encore de listes : « ➕ » pour en créer, ou ⚙ → « Transférer la bibliothèque \
                              ComicRack… ».",
                         )
                         .small()
@@ -341,6 +344,9 @@ impl ComicRustApp {
             }
             let cover = Rect::from_center_size(rect.center(), vec2(w, w / COVER_RATIO));
             let drawn = paint_cover(ui, self.covers.as_mut().unwrap(), &book, cover);
+            if crate::library::missing::is_missing(&book) {
+                crate::ui::missing_ui::paint_missing(ui, drawn);
+            }
             if let Some(pct) = self.read_percent(&book) {
                 let bar = Rect::from_min_size(
                     egui::pos2(drawn.min.x, drawn.max.y - 5.0),
@@ -353,6 +359,7 @@ impl ComicRustApp {
             if let Some(t) = book.title.as_deref().filter(|t| !t.is_empty()) {
                 ui.label(RichText::new(t).italics());
             }
+            self.missing_details(ui, &book);
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 let resume = book.current_page.filter(|p| *p > 0);

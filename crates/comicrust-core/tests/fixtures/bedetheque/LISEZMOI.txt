@@ -11,3 +11,16 @@ propre adresse. Contenu fictif ou abrégé, sans valeur documentaire.
 
 App.Config : réglages tels que les écrit l'original (AppSettings.Save : XmlTextWriter
 sur un StringWriter, d'où la déclaration « utf-16 » dans un fichier UTF-8).
+
+App_EN.Config : cas relevé à la recette de la v0.10.1 (réglages réels, réduits) : plugin
+en anglais (LANGENFR = EN) et étiquettes vides écrites sur deux lignes par l'indentation
+d'AppSettings.Save (« <TBTags>⏎  </TBTags> ») : l'original les lit vides (XmlDocument sans
+PreserveWhitespace) ; tailles des journaux en octets non multiples de 0,01 Mo.
+
+Recherche « thorgal monde » (lettre_t.html, recherche_thorgal.html, serie_thorgal.html,
+serie_kriss.html) : résultats sans couverture (drapeaux seulement, comme le site) ; la
+couverture des séries vient de leur page (premier album en « data-src » avec une image de
+remplissage, ou og:image) ; la page de la troisième série n'existe pas (404 sans message).
+images/couv_*.png : couvertures factices servies pour toute adresse d'image
+(/media/Couvertures/Couv_N.jpg et /cache/thb_couv/Couv_N.jpg ; Couv_802 n'existe qu'en
+vignette).

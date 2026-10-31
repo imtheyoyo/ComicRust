@@ -646,12 +646,21 @@ class ui:
 
     @staticmethod
     def text(key, label="", default="", help=None, placeholder=None, required=False, enabled_if=None,
-             width=None, inserts=None):
+             width=None, inserts=None, paste=False, hints=None, hint_none=None):
         """Texte d'une ligne. ``inserts`` : morceaux à insérer par un menu « Insérer »
         (textes ou paires ``(texte_inséré, libellé)``, ex. ``("{series}", "Série")``), ou
-        dictionnaire ``{"Groupe": [morceaux…]}`` : menu par groupes, avec un filtre."""
+        dictionnaire ``{"Groupe": [morceaux…]}`` : menu par groupes, avec un filtre.
+
+        ``paste=True`` : bouton « Coller » (remplace le texte par celui du presse-papiers).
+        ``hints`` : indications affichées sous le champ pendant la saisie, liste de paires
+        ``(expression_régulière, texte)`` : la première qui correspond au texte saisi
+        s'affiche (ex. ``(r"(?i)/BD-.+-\\d+\\.html", "Lien d'un album")``) ; sinon
+        ``hint_none`` (si le texte n'est pas vide). Expressions de la caisse Rust ``regex``
+        (pas de références arrière ni d'assertions avant/arrière)."""
         return _ctl("text", key, label, help, enabled_if, width, default=str(default or ""),
-                    placeholder=placeholder, required=bool(required) or None, inserts=_inserts(inserts) or None)
+                    placeholder=placeholder, required=bool(required) or None, inserts=_inserts(inserts) or None,
+                    paste=bool(paste) or None, hints=[[str(r), str(t)] for r, t in hints] if hints else None,
+                    hint_none=None if hint_none is None else str(hint_none))
 
     @staticmethod
     def textarea(key, label="", default="", rows=4, help=None, placeholder=None, required=False,
@@ -661,10 +670,11 @@ class ui:
                     placeholder=placeholder, required=bool(required) or None, inserts=_inserts(inserts) or None)
 
     @staticmethod
-    def secret(key, label="", default=None, help=None, enabled_if=None, width=None):
+    def secret(key, label="", default=None, help=None, enabled_if=None, width=None, paste=False):
         """Saisie masquée (clé d'API, mot de passe) : ``default`` (valeur actuelle) n'est
-        ni affiché ni envoyé à l'interface ; une saisie vide le rend tel quel."""
-        c = _ctl("secret", key, label, help, enabled_if, width)
+        ni affiché ni envoyé à l'interface ; une saisie vide le rend tel quel.
+        ``paste=True`` : bouton « Coller »."""
+        c = _ctl("secret", key, label, help, enabled_if, width, paste=bool(paste) or None)
         c["_secret_default"] = default
         return c
 
@@ -808,13 +818,15 @@ def _prepare_controls(controls, secrets):
 _UNSET = object()
 
 
-def form(title, controls, buttons=("OK", "Annuler"), values=None, width=None, message=None, cancel=_UNSET):
+def form(title, controls, buttons=("OK", "Annuler"), values=None, width=None, message=None, cancel=_UNSET,
+         label_width=None):
     """Affiche un formulaire et attend la réponse.
 
     ``controls`` : liste de contrôles (:class:`ui`) ; ``buttons`` : boutons du bas ;
     ``cancel`` : bouton qui annule (par défaut le dernier s'il y en a plusieurs ;
     ``None`` = aucun) ; ``values`` : valeurs initiales (remplacent les ``default``, pour
-    rouvrir un formulaire) ; ``width`` : largeur en pixels ; ``message`` : texte en tête.
+    rouvrir un formulaire) ; ``width`` : largeur en pixels ; ``message`` : texte en tête ;
+    ``label_width`` : largeur de la colonne des libellés (pixels, 170 par défaut).
 
     Renvoie ``(bouton, valeurs)`` — ``bouton`` : libellé du bouton du bas ou clé d'un
     :func:`ui.button` ; ``valeurs`` : dictionnaire clé → valeur — ou ``None`` si
@@ -828,6 +840,8 @@ def form(title, controls, buttons=("OK", "Annuler"), values=None, width=None, me
     params = {"title": str(title), "controls": ctrls, "buttons": [str(b) for b in buttons], "values": vals}
     if width is not None:
         params["width"] = width
+    if label_width is not None:
+        params["label_width"] = label_width
     if message is not None:
         params["message"] = str(message)
     if cancel is not _UNSET:
@@ -843,7 +857,7 @@ def form(title, controls, buttons=("OK", "Annuler"), values=None, width=None, me
 
 
 def choose(title, columns, rows, images=None, multi=False, default=None, message=None, filter=None,
-           timeout=None, thumb_size=None):
+           timeout=None, thumb_size=None, layout=None):
     """Liste de choix (tableau triable, vignettes facultatives) ; double-clic = choisir.
 
     ``columns`` : titres des colonnes ; ``rows`` : une liste de cellules par ligne (ou
@@ -852,7 +866,10 @@ def choose(title, columns, rows, images=None, multi=False, default=None, message
     sinon) ; ``multi`` : plusieurs lignes ; ``default`` : rang (ou liste de rangs) choisi
     au départ ; ``filter`` : champ de filtre (par défaut au-delà de 8 lignes) ; ``timeout``
     : secondes après lesquelles ``default`` est validé tout seul (toute action arrête le
-    compte à rebours) ; ``thumb_size`` : hauteur des vignettes (64 px par défaut).
+    compte à rebours) ; ``thumb_size`` : hauteur des vignettes (64 px par défaut, 320 au
+    plus) ; ``layout`` : ``"cards"`` (fiches : vignette, première colonne en gras, autres
+    colonnes en dessous — par défaut avec des images) ou ``"table"`` (tableau — par défaut
+    sans image).
 
     Renvoie le rang choisi (liste de rangs avec ``multi``), ou ``None`` (annulé, arrêté,
     script sans interface)."""
@@ -885,6 +902,10 @@ def choose(title, columns, rows, images=None, multi=False, default=None, message
         params["timeout"] = float(timeout)
     if thumb_size is not None:
         params["thumb_size"] = thumb_size
+    if layout is not None:
+        if layout not in ("cards", "table"):
+            raise ValueError("choose : layout « %s » inconnu (cards ou table)" % (layout,))
+        params["layout"] = layout
     return _session().ch.request("choose", **params)
 
 

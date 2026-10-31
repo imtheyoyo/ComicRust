@@ -89,12 +89,17 @@ DEFAUTS = {
     "FORMATARTICLES": True, "PopUpEditionForm": False, "SerieResumeEverywhere": True,
     "PadNumber": "0", "ONESHOTFORMAT": False, "AlwaysChooseSerie": False,
     "AcceptGenericArtists": False,
-    # Ajouts du portage (absents de l'original).
-    "ChampsVidesSeulement": False, "url_base": "", "dossier_journaux": "",
+    # Ajouts du portage (absents de l'original) : champs vides seulement ; fenêtres de choix
+    # (hauteur des vignettes, couvertures des séries lues sur la page des premières séries).
+    "ChampsVidesSeulement": False, "TailleVignettes": 120, "VignettesSeries": True, "NbVignettesSeries": 6,
+    "url_base": "", "dossier_journaux": "",
 }
 TEXTES = {"LANGENFR", "TBTags", "ARTICLES", "SUBPATT", "TIMEOUT", "TIMEOUTS", "TIMEPOPUP", "PadNumber",
           "CBStop", "url_base", "dossier_journaux"}
-ENTIERS = {"DBGLOGMAX", "RENLOGMAX"}
+ENTIERS = {"DBGLOGMAX", "RENLOGMAX", "TailleVignettes", "NbVignettesSeries"}
+# Réglages du portage : jamais lus dans l'App.Config de l'original.
+AJOUTS = {"ChampsVidesSeulement", "TailleVignettes", "VignettesSeries", "NbVignettesSeries", "url_base",
+          "dossier_journaux"}
 
 # Liste « Données » de l'onglet 2 : clé de la liste → (réglage, n° de texte), dans l'ordre
 # de l'original (BDConfigForm._scrapedData).
@@ -120,10 +125,16 @@ EN_TETES = [
 ]
 DELAI_RESEAU = 30
 
-# Vignettes des fenêtres de choix (limites de comicrust.choose).
-MAX_VIGNETTES = 20
+# Vignettes des fenêtres de choix (limites de comicrust.choose) : nombre d'images
+# téléchargées au plus par fenêtre, pause entre deux images (serveur d'images du site).
+MAX_VIGNETTES = 24
 MAX_IMAGE = 2 * 1024 * 1024
 MAX_IMAGES = 12 * 1024 * 1024
+PAUSE_IMAGE = 0.15
+# Couvertures des séries : pages de séries lues au plus (réglage NbVignettesSeries) et
+# pause entre deux pages.
+MAX_PAGES_SERIES = 12
+PAUSE_PAGE_SERIE = 0.6
 
 
 class _Etat:
@@ -152,7 +163,10 @@ class _Etat:
         self.nRenamed = 0
         self.nIgnored = 0
         self.images = {}
+        self.pages = {}
         self.couverture = None
+        self.fraction = 0.0
+        self.detail = ""
 
 
 S = _Etat()
@@ -229,6 +243,18 @@ REVUE_PERIOD = re.compile(r'<label>P.riodicit.\s:\s??</label>(.*?)</', I | M | D
 REVUE_EDITEUR = re.compile(r'<label>Editeur\s:\s?</label>(.*?)</', I | M | D)
 
 IMG_SRC = re.compile(r'<img[^>]+?src="([^"]+?)"', I)
+# Ajouts du portage (vignettes des fenêtres de choix) : balises <img> (adresse dans src ou,
+# images chargées au défilement, data-src / data-original / data-lazy-src), drapeaux et
+# icônes écartés ; infos d'un résultat de recherche ; couverture d'une page de série.
+IMG_TAG = re.compile(r'<img\b[^>]*>', I)
+IMG_ATTR = re.compile(r'\b(data-src|data-original|data-lazy-src|src)\s*=\s*"([^"]+)"', I)
+IMG_PAS_COUV = re.compile(r'(?i)/flags/|^data:|\.svg(?:\?|$)|blank\.gif|spacer|pixel\.gif|/static\d*/')
+IMG_CLASSE = re.compile(r'\bclass\s*=\s*"([^"]*)"', I)
+IMG_CLASSE_PAS_COUV = re.compile(r'(?i)\b(?:flag|ico|icon|avatar|logo)\b')
+LISTE_INFO = re.compile(r'class="bdt-liste-info"[^>]*>(.*?)</span>', I | D)
+LISTE_DRAPEAU = re.compile(r'/flags/([A-Za-z_-]+)\.(?:png|gif|jpg|svg)', I)
+PAGE_OG_IMAGE = re.compile(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', I)
+PAGE_COUV = re.compile(r'<a[^>]+class="bdt-img bdt-ecov[^"]*"[^>]+href="([^"]+)"', I)
 
 # Langue de parution (2 premières lettres du libellé) → code ISO. L'original avait « du »
 # pour le néerlandais : ComicRust n'accepte que les codes ISO, d'où « nl ».
@@ -253,6 +279,12 @@ def Translate():
 
 def Trans(n):
     return S.mots[n - 1] if 0 < n <= len(S.mots) else ""
+
+
+def _t(fr, en):
+    """Texte ajouté par le portage (absent de BDTranslations.Config), dans la langue du
+    plugin (LANGENFR), comme les textes de l'original."""
+    return en if str(S.C.get("LANGENFR", "FR")).upper() == "EN" else fr
 
 
 def _lire_xml(chemin):
@@ -319,6 +351,13 @@ def LoadSetting():
         cfg["CBStop"] = "2"
     if cfg["ONESHOTFORMAT"] and cfg["CBFormat"]:
         cfg["CBFormat"] = False
+    # Étiquettes faites seulement d'espaces (App.Config importé par la v0.10.1, qui gardait
+    # l'indentation du fichier) : vides, comme dans l'original. Sinon les étiquettes des
+    # livres auraient été effacées (texte blanc → champ vidé).
+    if not str(cfg["TBTags"]).strip():
+        cfg["TBTags"] = ""
+    cfg["TailleVignettes"] = min(320, max(48, cfg["TailleVignettes"]))
+    cfg["NbVignettesSeries"] = min(MAX_PAGES_SERIES, max(0, cfg["NbVignettesSeries"]))
     S.C = cfg
     base = cfg["url_base"] or os.environ.get("COMICRUST_BEDETHEQUE_URL") or URL_SITE
     S.base = base.strip().rstrip("/")
@@ -359,9 +398,15 @@ def lire_app_config(chemin):
     ancien_lien = False
     for noeud in racine:
         cle = noeud.tag
-        if cle not in DEFAUTS or cle in ("ChampsVidesSeulement", "url_base", "dossier_journaux"):
+        if cle not in DEFAUTS or cle in AJOUTS:
             continue
-        texte = (noeud.text or "").strip() if cle not in ("SUBPATT", "ARTICLES", "TBTags") else (noeud.text or "")
+        brut = "".join(noeud.itertext())
+        # XmlDocument de .NET (PreserveWhitespace faux) : un contenu fait seulement
+        # d'espaces et de retours à la ligne (« <TBTags>⏎  </TBTags> » écrit par l'indentation
+        # d'AppSettings.Save) est lu vide ; un texte est gardé tel quel (SUBPATT « - - »).
+        if not brut.strip():
+            brut = ""
+        texte = brut.strip() if cle not in ("SUBPATT", "ARTICLES", "TBTags") else brut
         if cle == "CBWeb" and texte == "2":  # compatibilité avec les anciennes versions
             ancien_lien = True
             continue
@@ -569,9 +614,12 @@ def GetFullURL(url):
     return ""
 
 
-def _read_url(url, bSingle):
+def _read_url(url, bSingle, silencieux=False, garder=False):
     """Page du site (``url`` complète ou relative) ; '' en cas d'erreur (message affiché,
-    comme l'original)."""
+    comme l'original ; seulement noté au journal de débogage si ``silencieux``).
+
+    ``garder`` : page gardée pour la prochaine demande de la même adresse (pages des séries
+    lues pour leur couverture : la page de la série choisie n'est pas redemandée)."""
     page = ""
     if stop():
         debuglog("Cancelled from _read_url Start")
@@ -582,15 +630,23 @@ def _read_url(url, bSingle):
         target_url = url_fix(url)
     else:
         target_url = url_fix(S.base + "/" + _relatif(url).lstrip("/"))
+    if target_url in S.pages:
+        debuglog("Page déjà lue : " + target_url)
+        return S.pages[target_url] if garder else S.pages.pop(target_url)
     debuglog("Final fetcher URL: " + target_url)
     try:
         page = S.web.page(target_url)
         if stop():
             debuglog("Cancelled from _read_url End")
             return ""
+        if garder:
+            S.pages[target_url] = page
     except NoContentError as nce:
         debuglog("No content returned for URL: " + target_url + ": " + str(nce))
     except Exception as e:
+        if silencieux:
+            debuglog("%s : %s" % (target_url, _texte_erreur(e)))
+            return ""
         debuglog(Trans(60))
         debuglog(Trans(61), e)
         cError = debuglogOnError()
@@ -623,15 +679,43 @@ def image(url):
     return donnees
 
 
+def _grande(url):
+    """Couverture en grand d'une vignette du site (``/cache/thb_couv/Couv_1.jpg`` →
+    ``/media/Couvertures/Couv_1.jpg``, l'adresse que donnent les pages d'album) ; None si
+    l'adresse n'est pas une vignette."""
+    if url and re.search(r"(?i)/cache/thb_couv/", url):
+        return re.sub(r"(?i)/cache/thb_couv/", "/media/Couvertures/", url)
+    return None
+
+
 def vignettes(urls):
-    """Images des lignes d'une fenêtre de choix (20 au plus, 12 Mo en tout)."""
-    out, total = [], 0
+    """Images des lignes d'une fenêtre de choix : MAX_VIGNETTES au plus, 2 Mo chacune et
+    12 Mo en tout ; couverture en grand quand l'adresse est une vignette du site (aperçu
+    agrandi lisible), sinon la vignette. Courte pause entre deux téléchargements ; l'arrêt
+    du script est guetté."""
+    out, total, n = [], 0, 0
+    a_lire = sum(1 for i, u in enumerate(urls) if u and i < MAX_VIGNETTES and (_grande(u) or u) not in S.images)
     for i, u in enumerate(urls):
-        img = image(u) if (u and i < MAX_VIGNETTES and not stop()) else None
+        img = None
+        if u and i < MAX_VIGNETTES and not stop():
+            deja = (_grande(u) or u) in S.images
+            if not deja:
+                n += 1
+                if a_lire > 1:
+                    comicrust.progress(S.fraction, Trans(62), detail=_t("Couvertures %d/%d…", "Covers %d/%d…")
+                                       % (n, a_lire))
+            grande = _grande(u)
+            img = image(grande) if grande else None
+            if img is None:
+                img = image(u)
+            if not deja and n < a_lire:
+                time.sleep(PAUSE_IMAGE)
         if img is not None and total + len(img) > MAX_IMAGES:
             img = None
         total += len(img or b"")
         out.append(img)
+    if a_lire > 1:
+        comicrust.progress(S.fraction, Trans(62), detail=S.detail)
     return out if any(out) else None
 
 
@@ -904,26 +988,51 @@ def _proposition(book):
 SERIE, ALBUM, EDITION = 1, 2, 3
 
 
+def _lien_court(lien):
+    """Lien affiché dans une fenêtre de choix : sans l'adresse du site."""
+    u = str(lien or "")
+    if _sur_le_site(u):
+        u = u[len(S.base) + 1:]
+    return _relatif(u)
+
+
+def _infos_edition(info):
+    """Dépôt légal, éditeur et ISBN d'une édition (encart de la page de l'album), pour
+    distinguer les éditions dans la fenêtre de choix."""
+    def champ(regex):
+        m = regex.search(info or "")
+        return checkWebChar(strip_tags(m.group(1))).strip() if m else ""
+    depot = ALBUM_DEPOT.search(info or "")
+    depot = (depot.group(0).split("<dd>")[-1].strip() if depot else "")
+    return depot, champ(ALBUM_EDITEUR), champ(ALBUM_ISBN)
+
+
 def SeriesForm(serie, liste, formType):
     """Fenêtre de choix ; renvoie le rang choisi ou ``None`` (annulé ou délai expiré sans
     sélection). Avec le choix automatique (CBStop = "2"), la fenêtre se ferme toute seule
     après TIMEPOPUP secondes : pour une série, rien n'est choisi (comme l'original) ;
-    pour un album ou une édition, la première ligne."""
+    pour un album ou une édition, la première ligne.
+
+    Fiches avec couverture (comicrust.choose, présentation « cards ») : titre en gras puis
+    les infos utiles au choix ; l'original n'avait qu'une liste de textes
+    « (001) - titre (lien) »."""
     auto = AllowUserChoice() == "2"
     if formType == SERIE:
         titre = Trans(132) + serie
-        colonnes = ["N°", "Série", "Lien"]
-        lignes = [[x[2], x[1], x[0]] for x in liste]
+        colonnes = [_t("Série", "Series"), _t("Infos", "Info"), _t("Résultat", "Result"), _t("Lien", "Link")]
+        lignes = [[x[1], x[4] if len(x) > 4 else "", x[2], _lien_court(x[0])] for x in liste]
         defaut = None
     elif formType == EDITION:
         titre = Trans(145) + serie
-        colonnes = ["N°", "Titre", "Numéro alternatif", "Identifiant"]
-        lignes = [[x[2], x[1].Title, x[1].A, x[1].ID] for x in liste]
+        colonnes = [_t("Titre", "Title"), _t("Numéro alternatif", "Alternate number"),
+                    _t("Dépôt légal", "Legal deposit"), _t("Éditeur", "Publisher"), "ISBN",
+                    _t("Identifiant", "Id")]
+        lignes = [[x[1].Title, x[1].A] + list(_infos_edition(x[1].Info)) + [x[1].ID] for x in liste]
         defaut = 0
     else:
         titre = Trans(146) + serie
-        colonnes = ["N°", "Album", "Lien"]
-        lignes = [[x[2], x[1], x[0]] for x in liste]
+        colonnes = [_t("Album", "Book"), _t("Rang", "Rank"), _t("Lien", "Link")]
+        lignes = [[x[1], x[2], _lien_court(x[0])] for x in liste]
         defaut = 0
     images = vignettes([x[3] if len(x) > 3 else None for x in liste])
     try:
@@ -932,7 +1041,10 @@ def SeriesForm(serie, liste, formType):
         delai = 30
     return comicrust.choose(titre, colonnes, lignes, images=images, default=defaut,
                             timeout=delai if delai and delai > 0 else None,
-                            message="Double-clic ou Entrée pour choisir ; Annuler pour ignorer.")
+                            thumb_size=C("TailleVignettes"), layout="cards",
+                            message=_t("Double-clic ou Entrée pour choisir, ↑/↓ pour changer de ligne ; Annuler "
+                                       "pour ignorer ce livre.",
+                                       "Double-click or Enter to pick, ↑/↓ to move; Cancel to skip this book."))
 
 
 # ---------------------------------------------------------------------------------------
@@ -986,12 +1098,12 @@ def SetSerieId(f, serie, num, nBooksIn):
         i = 1
         for m in re.finditer(SERIE_LIST_PATTERN % re.escape(S.base), request, I | D):
             ListSeries.append(["serie-" + m.group(1), checkWebChar(strip_tags(m.group(2))), str(i).zfill(3),
-                               _img(m.group(0))])
+                               _img(m.group(0)), _infos_resultat(m.group(0))])
             i += 1
         if REVUE_LIST_EXISTS.search(request):
             for m in re.finditer(REVUE_LIST_PATTERN % re.escape(S.base), request, I | D):
                 ListSeries.append(["revue-" + m.group(1), checkWebChar(strip_tags(m.group(2))), str(i).zfill(3),
-                                   _img(m.group(0))])
+                                   _img(m.group(0)), _infos_resultat(m.group(0)) or "Revue"])
                 i += 1
         ListSeries.sort(key=lambda x: x[2])
 
@@ -1025,6 +1137,7 @@ def SetSerieId(f, serie, num, nBooksIn):
                     journal_choix(ListSeries[nItem][1], ListSeries[nItem][0])
                     S.RenameSeries = ListSeries[nItem][1]
                     return ListSeries[nItem][0]
+                _couvertures_series(ListSeries)
                 rang = SeriesForm(serie, ListSeries, SERIE)
                 if rang is None:
                     debuglog(Trans(24) + checkWebChar(serie) + "]")
@@ -1046,8 +1159,67 @@ def SetSerieId(f, serie, num, nBooksIn):
 
 
 def _img(fragment):
-    m = IMG_SRC.search(fragment or "")
-    return checkWebChar(m.group(1)) if m else None
+    """Première image d'un morceau de page qui peut être une couverture (pas un drapeau,
+    une icône ou une image de remplissage) ; adresse complète, ou None."""
+    for balise in IMG_TAG.finditer(fragment or ""):
+        tag = balise.group(0)
+        classe = IMG_CLASSE.search(tag)
+        if classe and IMG_CLASSE_PAS_COUV.search(classe.group(1)):
+            continue
+        attrs = {m.group(1).lower(): m.group(2) for m in IMG_ATTR.finditer(tag)}
+        for nom in ("data-src", "data-original", "data-lazy-src", "src"):
+            u = attrs.get(nom, "").strip()
+            if u and not IMG_PAS_COUV.search(u):
+                return checkWebChar(u)
+    return None
+
+
+def _infos_resultat(fragment):
+    """Infos secondaires d'un résultat de recherche (éditeur… de « bdt-liste-info », pays
+    d'après le drapeau), pour les fiches de la fenêtre de choix."""
+    morceaux = [checkWebChar(strip_tags(m.group(1))).strip() for m in LISTE_INFO.finditer(fragment or "")]
+    drapeau = LISTE_DRAPEAU.search(fragment or "")
+    if drapeau:
+        morceaux.append(drapeau.group(1).replace("_", " "))
+    return " · ".join(x for x in morceaux if x)
+
+
+def _couverture_page_serie(page):
+    """Couverture d'une série d'après sa page : celle du premier album de la liste, sinon
+    celle de l'album affiché, sinon l'image de partage (og:image)."""
+    r = SERIE_ALBUMS.search(page or "")
+    img = _img(r.group(0)) if r else None
+    if not img:
+        m = PAGE_COUV.search(page or "")
+        img = checkWebChar(m.group(1)) if m else None
+    if not img:
+        m = PAGE_OG_IMAGE.search(page or "")
+        img = checkWebChar(m.group(1)) if m and not IMG_PAS_COUV.search(m.group(1)) else None
+    return img
+
+
+def _couvertures_series(liste):
+    """Couvertures des séries d'une fenêtre de choix sans image : les pages de recherche
+    n'en donnent pas (un drapeau seulement). Lit la page des ``NbVignettesSeries``
+    premières séries (pas les revues), avec une pause, sans message en cas d'erreur ; ces
+    pages sont gardées, la série choisie n'est pas relue. Désactivé par le réglage
+    « VignettesSeries »."""
+    if not C("VignettesSeries") or C("NbVignettesSeries") <= 0:
+        return
+    if len(S.pages) > 3 * MAX_PAGES_SERIES:  # mémoire bornée sur une longue sélection
+        S.pages.clear()
+    a_lire = [x for x in liste[:C("NbVignettesSeries")] if not x[3] and x[0].lower().startswith("serie-")]
+    for k, x in enumerate(a_lire):
+        if stop():
+            break
+        comicrust.progress(S.fraction, Trans(62), detail=_t("Couvertures des séries %d/%d…",
+                                                            "Series covers %d/%d…") % (k + 1, len(a_lire)))
+        url = GetFullURL(x[0]).lower().replace(".html", "__10000.html")
+        x[3] = _couverture_page_serie(_read_url(url, False, silencieux=True, garder=True))
+        if k + 1 < len(a_lire):
+            time.sleep(PAUSE_PAGE_SERIE)
+    if a_lire:
+        comicrust.progress(S.fraction, Trans(62), detail=S.detail)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1713,7 +1885,8 @@ def _verifier_journaux():
 def _avancement(i, n, f):
     texte = "[" + str(i + 1) + "/" + str(n) + "] : " + S.dlgName + " - " + S.dlgNumber + \
         if_else(S.dlgAltNumber == "", "", " AltNo.[" + S.dlgAltNumber + "]") + " - " + titlize(f.Title)
-    comicrust.progress(i / max(n, 1), Trans(62), detail=texte)
+    S.fraction, S.detail = i / max(n, 1), texte
+    comicrust.progress(S.fraction, Trans(62), detail=texte)
 
 
 def _montrer_couverture():
@@ -1884,13 +2057,52 @@ def _scrape_lien(f, lien):
     return bool(RetVal)
 
 
-def DirectScrape():
-    """Fenêtre « Scrape directement un lien » : lien collé, ou None (Annuler)."""
-    r = comicrust.form(Trans(103), [
-        ui.columns([ui.image(os.path.join(FICHIERS, "bd2q.png"), max_width=72, max_height=64)],
-                   [ui.label(Trans(102), style="bold"),
-                    ui.text("lien", "", "", placeholder=URL_SITE + "/BD-…-12345.html")]),
-    ], buttons=(Trans(92), Trans(93)), width=720)
+# Liens reconnus par QuickScrape (aperçu sous le champ) : mêmes distinctions que
+# QuickScrapeBD2 de l'original (« /serie- », « /revue- », sinon page d'album), complets ou
+# relatifs (« serie-59-BD-Blacksad.html »).
+LIEN_SERIE = r"(?i)(^|/)serie-\d+[^/]*\.html(#.*)?$"
+LIEN_REVUE = r"(?i)(^|/)revue-[^/]+\.html(#.*)?$"
+LIEN_ALBUM = r"(?i)(^|/)BD-[^/]*-\d+\.html(#.*)?$"
+
+
+def DirectScrape(f=None, i=0, n=1):
+    """Fenêtre « Scrape directement un lien » (DirectScrape de l'original : un champ, OK,
+    Annuler) : lien collé, '' (OK sans lien) ou None (Annuler). Le portage ajoute le livre
+    concerné, un bouton « Coller », l'aperçu du lien reconnu et une aide."""
+    livre = S.dlgName or "?"
+    if S.dlgNumber:
+        livre += " – " + S.dlgNumber
+    if S.dlgAltNumber:
+        livre += " (" + S.dlgAltNumber + ")"
+    if f is not None and f.Title:
+        livre += " – " + titlize(f.Title)
+    fichier = os.path.basename(str(f.FilePath).replace("\\", "/")) if f is not None and f.FilePath else ""
+    entete = [ui.label(_t("Livre %d sur %d : ", "Book %d of %d: ") % (i + 1, n) + livre, style="bold")]
+    if fichier:
+        entete.append(ui.label(fichier, style="weak"))
+    aide = _t("Liens acceptés, complets ou sans « https://www.bedetheque.com/ » :\n"
+              "• album : …/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html (infos de l'album) ;\n"
+              "• série : …/serie-59-BD-Blacksad.html (choix de l'album dans la série) ;\n"
+              "• revue : …/revue-Spirou.html.\n"
+              "OK sans lien ou Annuler : arrêter ici (les livres déjà traités restent dans l'aperçu).",
+              "Accepted links, full or without “https://www.bedetheque.com/”:\n"
+              "• book: …/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html (book info);\n"
+              "• series: …/serie-59-BD-Blacksad.html (pick the book in the series);\n"
+              "• magazine: …/revue-Spirou.html.\n"
+              "OK without a link or Cancel: stop here (books already done stay in the preview).")
+    r = comicrust.form(Trans(103), entete + [
+        ui.separator(),
+        ui.label(Trans(102)),
+        ui.text("lien", "", "", placeholder=URL_SITE + "/BD-…-12345.html", paste=True,
+                hints=[(LIEN_ALBUM, _t("Lien d'un album", "Book link")),
+                       (LIEN_SERIE, _t("Lien d'une série : l'album sera choisi dans la liste de la série",
+                                       "Series link: the book will be picked from the series list")),
+                       (LIEN_REVUE, _t("Lien d'une revue", "Magazine link"))],
+                hint_none=_t("Lien non reconnu (ni album, ni série, ni revue) : il sera lu comme une page "
+                             "d'album.", "Unrecognised link (not a book, series or magazine): it will be read "
+                                         "as a book page.")),
+        ui.label(aide, style="small"),
+    ], buttons=(Trans(92), Trans(93)), width=780)
     if r is None:
         return None
     return (r[1].get("lien") or "").strip()
@@ -1918,10 +2130,11 @@ def QuickScrapeBD2(books):
                 break
             f = Fiche(book)
             _preparer(book, r".,\\/-")
-            comicrust.progress(i / max(n, 1), Trans(62), detail=S.dlgName + if_else(S.dlgNumber != "", " - " +
-                               S.dlgNumber, " ") + if_else(S.dlgAltNumber == "", "", " AltNo.[" + S.dlgAltNumber + "]")
-                               + " - " + titlize(f.Title))
-            lien = DirectScrape()
+            S.fraction = i / max(n, 1)
+            S.detail = S.dlgName + if_else(S.dlgNumber != "", " - " + S.dlgNumber, " ") + \
+                if_else(S.dlgAltNumber == "", "", " AltNo.[" + S.dlgAltNumber + "]") + " - " + titlize(f.Title)
+            comicrust.progress(S.fraction, Trans(62), detail=S.detail)
+            lien = DirectScrape(f, i, n)
             if not lien:
                 break
             debuglog(Trans(104), lien)
@@ -1999,72 +2212,117 @@ def _depuis_formulaire(v, cfg):
     out["PadNumber"] = str(nombre("PadNumber")) if nombre("PadNumber") >= 0 else "0"
     for k in ("RENLOGMAX", "DBGLOGMAX"):
         try:
-            out[k] = int(float(v.get(k)) * 1024 * 1024)
+            mo = float(v.get(k))
         except (TypeError, ValueError):
-            pass
+            continue
+        # Valeur affichée inchangée : la taille exacte est gardée (20000 octets restent
+        # 20000, au lieu de 0,02 Mo × 1 048 576 = 20971 comme dans l'original).
+        if round(cfg[k] / (1024 * 1024), 2) != round(mo, 2):
+            out[k] = int(mo * 1024 * 1024)
+    def entier(cle):
+        try:
+            return int(float(v.get(cle)))
+        except (TypeError, ValueError):
+            return cfg[cle]
+
+    out["TailleVignettes"] = min(320, max(48, entier("TailleVignettes")))
+    out["VignettesSeries"] = bool(v.get("VignettesSeries"))
+    out["NbVignettesSeries"] = min(MAX_PAGES_SERIES, max(1, entier("NbVignettesSeries")))
     return out
 
 
 def BDConfigForm(valeurs):
-    """Formulaire à trois onglets de l'original (Préférences, Données, Logging)."""
+    """Formulaire à trois onglets de l'original (Préférences, Données, Logging), mêmes
+    options, regroupées en cadres titrés ; options du portage à part (« ComicRust »)."""
     en = S.C["LANGENFR"] == "EN"
     importer = "Import settings from ComicRack…" if en else "Importer les réglages de ComicRack…"
     vides = ("Only fill empty fields (ComicRust)" if en
              else "Ne remplacer que les champs vides (ajout ComicRust)")
     preferences = [
-        ui.columns(
-            [ui.radio("LANGENFR", Trans(112), [("EN", "English"), ("FR", "Français")], horizontal=True),
-             ui.checkbox("FORMATARTICLES", Trans(144)),
-             ui.text("ARTICLES", Trans(109)),
-             ui.checkbox("TITLEIT", Trans(127)),
-             ui.checkbox("AlwaysChooseSerie", Trans(151)),
-             ui.checkbox("ChoixAutoEdition", Trans(147))],
-            [ui.image(os.path.join(FICHIERS, "bd2.png"), max_width=72, max_height=64)],
-        ),
+        ui.group(_t("Langue et noms", "Language and names"), [
+            ui.radio("LANGENFR", Trans(112), [("FR", "Français"), ("EN", "English")], horizontal=True,
+                     help=_t("Langue des fenêtres du script et du libellé « Info édition » ajouté au résumé.",
+                             "Language of the script windows and of the “Edition info” label added to the "
+                             "summary.")),
+            ui.checkbox("FORMATARTICLES", Trans(144)),
+            ui.text("ARTICLES", Trans(109), enabled_if="FORMATARTICLES"),
+            ui.checkbox("TITLEIT", Trans(127)),
+        ]),
         ui.group(Trans(141), [
-            ui.radio("ChoixUtilisateur", "", [("0", Trans(45)), ("1", Trans(46))], horizontal=True),
+            ui.radio("ChoixUtilisateur", "", [("0", Trans(45)), ("1", Trans(46))]),
             ui.group("", [
                 ui.checkbox("FermetureAuto", Trans(44)),
-                ui.number("TIMEPOPUP", "", 30, min=1, max=999, enabled_if="FermetureAuto"),
+                ui.number("TIMEPOPUP", _t("Délai (s)", "Delay (s)"), 30, min=1, max=999, enabled_if="FermetureAuto"),
             ], enabled_if="ChoixUtilisateur=1"),
+            ui.checkbox("AlwaysChooseSerie", Trans(151)),
+            ui.checkbox("ChoixAutoEdition", Trans(147)),
         ]),
-        ui.number("TIMEOUTS", Trans(129), 7, min=1, max=999),
-        ui.number("TIMEOUT", Trans(128), 1000, min=1, max=1000000),
-        ui.checkbox("CBRescrape", Trans(137)),
-        ui.checkbox("use_cloudscraper", Trans(152),
-                    help="Module « cloudscraper » (et ses dépendances) à copier dans scripts\\lib."),
+        ui.group(_t("Traitement", "Processing"), [
+            ui.number("TIMEOUTS", Trans(129), 7, min=1, max=999),
+            ui.number("TIMEOUT", Trans(128), 1000, min=1, max=1000000),
+            ui.checkbox("CBRescrape", Trans(137)),
+            ui.checkbox("use_cloudscraper", Trans(152),
+                        help=_t("Module « cloudscraper » (et ses dépendances) à copier dans scripts\\lib.",
+                                "Copy the “cloudscraper” module (and its dependencies) into scripts\\lib.")),
+        ]),
+        ui.group(_t("Fenêtres de choix (ComicRust)", "Choice windows (ComicRust)"), [
+            ui.number("TailleVignettes", _t("Hauteur des couvertures (pixels)", "Cover height (pixels)"), 120,
+                      min=48, max=320, step=4,
+                      help=_t("Aussi réglable dans la fenêtre de choix (curseur « Taille »).",
+                              "Can also be changed in the choice window (“Size” slider).")),
+            ui.checkbox("VignettesSeries", _t("Couvertures des séries : lire la page des premières séries proposées",
+                                              "Series covers: read the page of the first proposed series"),
+                        help=_t("Les résultats de recherche du site n'ont pas de couverture : la page des "
+                                "premières séries est lue (une requête par série, avec une pause) ; la page de la "
+                                "série choisie n'est pas relue ensuite.",
+                                "The site's search results have no cover: the page of the first series is read "
+                                "(one request per series, with a pause); the chosen series page is not read "
+                                "again afterwards.")),
+            ui.number("NbVignettesSeries", _t("Nombre de séries", "Number of series"), 6, min=1,
+                      max=MAX_PAGES_SERIES, enabled_if="VignettesSeries"),
+        ]),
     ]
     donnees = [
         ui.columns(
-            [ui.multichoice("Donnees", "", [(cle, Trans(n)) for cle, _, n in DONNEES], height=360)],
-            [ui.checkbox("ONESHOTFORMAT", Trans(150)),
+            [ui.multichoice("Donnees", _t("Champs à récupérer", "Fields to scrape"),
+                            [(cle, Trans(n)) for cle, _, n in DONNEES], height=330)],
+            [ui.label(_t("Options", "Options"), style="bold"),
+             ui.checkbox("ONESHOTFORMAT", Trans(150)),
              ui.checkbox("CBDefault", Trans(136)),
              ui.checkbox("COUNTOF", Trans(110)),
              ui.checkbox("COUNTFINIE", Trans(126)),
              ui.checkbox("ResumePremierTome", Trans(149)),
              ui.checkbox("ShortWebLink", Trans(48)),
-             ui.text("TBTags", Trans(91), help="« DEL » : vide les étiquettes" if not en else "“DEL”: clear tags"),
-             ui.text("SUBPATT", Trans(37)),
-             ui.number("PadNumber", Trans(148), 0, min=0, max=9),
              ui.checkbox("AcceptGenericArtists", Trans(74)),
              ui.separator(),
              ui.checkbox("ChampsVidesSeulement", vides)],
         ),
+        ui.group("", [
+            ui.text("TBTags", Trans(91), help="« DEL » : vide les étiquettes" if not en else "“DEL”: clear tags",
+                    placeholder=_t("vide = étiquettes inchangées ; DEL = les effacer",
+                                   "empty = tags unchanged; DEL = clear them")),
+            ui.text("SUBPATT", Trans(37)),
+            ui.number("PadNumber", Trans(148), 0, min=0, max=9),
+        ]),
     ]
     logging_ = [
-        ui.checkbox("SHOWRENLOG", Trans(66)),
-        ui.checkbox("DBGONOFF", Trans(68)),
-        ui.checkbox("SHOWDBGLOG", Trans(67)),
-        ui.number("RENLOGMAX", Trans(70), 0.01, min=0.01, max=100, step=0.01, decimals=2),
-        ui.number("DBGLOGMAX", Trans(69), 0.01, min=0.01, max=100, step=0.01, decimals=2),
+        ui.group("", [
+            ui.checkbox("SHOWRENLOG", Trans(66)),
+            ui.checkbox("DBGONOFF", Trans(68)),
+            ui.checkbox("SHOWDBGLOG", Trans(67)),
+            ui.number("RENLOGMAX", Trans(70), 0.01, min=0.01, max=100, step=0.01, decimals=2),
+            ui.number("DBGLOGMAX", Trans(69), 0.01, min=0.01, max=100, step=0.01, decimals=2),
+        ]),
         ui.label("%s : %s" % ("Folder" if en else "Dossier", S.journaux.dossier), style="weak"),
     ]
     return comicrust.form("Bedetheque Scraper 2", [
         ui.tabs([(Trans(95), preferences), (Trans(96), donnees), (Trans(47), logging_)]),
-        ui.button("importer", importer),
+        ui.button("importer", importer,
+                  help=_t("App.Config du dossier du script dans ComicRack", "App.Config from the script folder in "
+                                                                             "ComicRack")),
         ui.label("Version " + VERSION + " (c) 2021 kiwi13 & maforget — portage Python 3 pour ComicRust",
                  style="small"),
-    ], buttons=(Trans(92), Trans(93)), values=valeurs, width=780)
+    ], buttons=(Trans(92), Trans(93)), values=valeurs, width=840, label_width=360)
 
 
 def _demander_fichier():

@@ -102,6 +102,7 @@ impl ComicRustApp {
                         ui.close();
                     }
                 }
+                self.missing_files_menu(ui);
             });
         });
     }

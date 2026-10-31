@@ -7,6 +7,7 @@ pub mod files;
 pub mod info_form;
 pub mod keynav;
 pub mod lists_ops;
+pub mod missing;
 pub mod mouse;
 pub mod scan;
 pub mod sorting;
@@ -186,7 +187,7 @@ impl Lists {
 
 /// Ce dont dépend la vue : recherche, options, liste, version de la base et des listes,
 /// pile ouverte.
-type ViewKey = (String, ViewOptions, Option<String>, u64, Option<String>);
+type ViewKey = (String, ViewOptions, Option<String>, u64, Option<String>, bool);
 
 /// Options d'affichage qui déterminent la vue (cache invalidé quand elles changent).
 #[derive(Debug, Clone, PartialEq)]
@@ -235,6 +236,10 @@ pub struct LibraryState {
     pub cursor: Option<String>,
     /// Navigation au clavier : panneau actif, défilement, arbre des listes.
     pub nav: keynav::NavState,
+    /// Livres manquants : vérification, résultats, opérations sur les fiches.
+    pub missing: missing::MissingState,
+    /// Filtre « Livres manquants » : seuls les livres manquants de la bibliothèque.
+    pub missing_only: bool,
 }
 
 /// Sélection à la souris en cours.
@@ -273,6 +278,8 @@ impl Default for LibraryState {
             gesture: Gesture::None,
             cursor: None,
             nav: Default::default(),
+            missing: Default::default(),
+            missing_only: false,
         }
     }
 }
@@ -298,6 +305,12 @@ impl LibraryState {
             })
             .expect("fil de chargement de la base");
         self.status = Status::Loading { rx, progress, what: what.clone() };
+        // Vérification des fichiers de l'ancienne bibliothèque : abandonnée.
+        if let Some(job) = self.missing.check.take() {
+            job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.missing = Default::default();
+        self.missing_only = false;
         self.forget_view();
         self.source = Some(source);
         self.watcher = None;
@@ -309,6 +322,7 @@ impl LibraryState {
     pub fn replace(&mut self, db: ComicDatabase) {
         if matches!(self.status, Status::Loaded(_)) {
             self.status = Status::Loaded(Arc::new(db));
+            self.reapply_missing();
             self.generation += 1;
             // Même bibliothèque relue : la sélection est gardée, seuls les rangs sont oubliés.
             self.view.clear();
@@ -363,6 +377,7 @@ impl LibraryState {
     pub fn apply_changes(&mut self, ch: comicrust_core::db::Changes) -> Applied {
         let Status::Loaded(db) = &mut self.status else { return Applied::default() };
         let applied = Arc::make_mut(db).apply(ch);
+        self.reapply_missing();
         self.generation += 1;
         self.last_refresh = Some(applied);
         applied
@@ -378,6 +393,7 @@ impl LibraryState {
         let db = Arc::make_mut(db);
         let counters = db.counters;
         db.apply(comicrust_core::db::Changes { updated: books, rows, counters, present: None });
+        self.reapply_missing();
         self.generation += 1;
         self.view_key = None;
     }
@@ -390,6 +406,7 @@ impl LibraryState {
             return 0;
         }
         let n = Arc::make_mut(db).apply_written(report);
+        self.reapply_missing();
         self.generation += 1;
         self.view_key = None;
         n
@@ -688,6 +705,7 @@ impl LibraryState {
             self.selected_list.clone(),
             self.generation + self.lists.version,
             self.open_stack.clone(),
+            self.missing_only,
         );
         if self.view_key.as_ref() == Some(&key) {
             return &self.view;
@@ -702,8 +720,10 @@ impl LibraryState {
         self.positions = base.iter().enumerate().map(|(pos, &i)| (i, pos)).collect();
         let words: Vec<String> = self.search.to_lowercase().split_whitespace().map(str::to_string).collect();
         let stack = self.open_stack.clone();
+        let missing_only = self.missing_only;
         let mut v: Vec<usize> = base
             .into_iter()
+            .filter(|&i| !missing_only || missing::is_missing(&db.books[i]))
             .filter(|&i| sorting::matches(&db.books[i], &words))
             .filter(|&i| stack.as_ref().is_none_or(|s| GroupKey::Series.label(&db.books[i]) == *s))
             .collect();

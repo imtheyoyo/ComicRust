@@ -122,7 +122,8 @@ impl ComicRustApp {
         if view.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
-                ui.label("Aucun livre ne correspond.");
+                let none = self.library.missing_only && self.library.search.is_empty();
+                ui.label(if none { "Aucun livre manquant." } else { "Aucun livre ne correspond." });
             });
             return;
         }
@@ -138,6 +139,9 @@ impl ComicRustApp {
         let mut select_plain: Option<String> = None;
         let mut list_request: Option<(BookListAction, Vec<String>)> = None;
         let scripts_menu = self.book_scripts();
+        let missing_menu = self.missing_menu_data();
+        let selection_missing = selection.iter().any(|id| db.get(id).is_some_and(crate::library::missing::is_missing));
+        let mut missing_request: Option<crate::ui::missing_ui::MissingRequest> = None;
         let mut script_request: Option<(String, Vec<String>)> = None;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         // Clavier : déplacement dans les lignes.
@@ -250,7 +254,9 @@ impl ComicRustApp {
                             ui.label(self.library.position(bi).map(|p| (p + 1).to_string()).unwrap_or_default());
                         });
                     }
-                    for c in &COLS {
+                    // Livre manquant : ligne grisée, « ⚠ » devant la première colonne.
+                    let missing = crate::library::missing::is_missing(book);
+                    for (k, c) in COLS.iter().enumerate() {
                         row.col(|ui| {
                             // « Lu » : le plus avancé entre ComicRack et ComicRust.
                             let text = if c.sort == Some(SortKey::ReadPercent) {
@@ -258,7 +264,13 @@ impl ComicRustApp {
                             } else {
                                 (c.cell)(book)
                             };
-                            ui.label(text);
+                            if missing {
+                                let text = if k == 0 { format!("⚠ {text}") } else { text };
+                                ui.label(RichText::new(text).color(ui.visuals().weak_text_color()).italics())
+                                    .on_hover_text("Fichier introuvable");
+                            } else {
+                                ui.label(text);
+                            }
                         });
                     }
                     let resp = row.response();
@@ -280,6 +292,8 @@ impl ComicRustApp {
                         crate::ui::library_view::info_menu_item(ui, &books, &mut info_request);
                         book_lists_menu(ui, &lists_menu, &books, &mut list_request);
                         crate::ui::scripts_ui::book_scripts_menu(ui, &scripts_menu, &books, &mut script_request);
+                        let any = if selected { selection_missing } else { missing };
+                        crate::ui::missing_ui::missing_menu(ui, &missing_menu, book, &books, any, &mut missing_request);
                     });
                     if resp.double_clicked() {
                         open = Some(book.id.clone());
@@ -371,6 +385,9 @@ impl ComicRustApp {
         }
         if let Some(books) = info_request {
             self.open_info_editor(books);
+        }
+        if missing_request.is_some() {
+            self.missing_ui.pending = missing_request;
         }
     }
 }

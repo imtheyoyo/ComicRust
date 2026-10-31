@@ -10,6 +10,9 @@ repository.workspace = true
 comicrust-core = { version = "0.10.1", path = "../comicrust-core" }
 eframe = { version = "0.37", features = ["persistence"] }
 egui_extras = { version = "0.37", default-features = false }
+# Polices d'emoji monochromes (Noto Emoji, emoji-icon-font), plus chargées par défaut depuis
+# egui 0.37 : sans elles les icônes de l'interface s'affichent en carrés sous Windows.
+egui = { version = "0.37", default-features = false, features = ["monochrome_emoji_fonts"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 natord = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -29,6 +32,8 @@ winresource = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
+# Tests des livres manquants sur une base MySQL de ComicRack (création des tables de test).
+mysql = { version = "28", default-features = false, features = ["default-rust"] }
 
 [package.metadata.winresource]
 ProductName = "ComicRust"

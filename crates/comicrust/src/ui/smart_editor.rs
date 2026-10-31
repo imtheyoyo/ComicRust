@@ -777,10 +777,10 @@ impl SmartEditor {
                     ui.label(RichText::new("Aucun critère : tous les livres de la liste de départ.").weak());
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("＋ Critère").on_hover_text("Nouvelle règle").clicked() {
+                    if ui.button("➕ Critère").on_hover_text("Nouvelle règle").clicked() {
                         actions.push(NodeAction::AddRule(Vec::new()));
                     }
-                    if ui.button("＋ Groupe").on_hover_text("Nouveau groupe de critères").clicked() {
+                    if ui.button("➕ Groupe").on_hover_text("Nouveau groupe de critères").clicked() {
                         actions.push(NodeAction::AddGroup(Vec::new()));
                     }
                 });
@@ -1025,10 +1025,10 @@ fn nodes_ui(ui: &mut Ui, serial: u64, items: &mut [Node], path: &mut Vec<usize>,
                     ui.indent(("groupe", serial, path.clone()), |ui| {
                         nodes_ui(ui, serial, items, path, actions);
                         ui.horizontal(|ui| {
-                            if ui.small_button("＋ Critère").clicked() {
+                            if ui.small_button("➕ Critère").clicked() {
                                 actions.push(NodeAction::AddRule(path.clone()));
                             }
-                            if ui.small_button("＋ Groupe").clicked() {
+                            if ui.small_button("➕ Groupe").clicked() {
                                 actions.push(NodeAction::AddGroup(path.clone()));
                             }
                         });

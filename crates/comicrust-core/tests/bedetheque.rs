@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use comicrust_core::library::LibraryBook;
+use comicrust_core::scripting::forms::{text_hint, ChooseLayout, Control, ControlKind};
 use comicrust_core::scripting::{
     book_json, discover_with_warnings, ChooseSpec, FormAnswer, FormSpec, Hook, Question, QuestionKind, RunContext,
     RunOptions, RunResult, RunState, ScriptEntry, ScriptHost, ScriptRunner, ScriptSettings,
@@ -64,26 +65,41 @@ macro_rules! need_python {
 type Requete = (String, HashMap<String, String>);
 
 /// Fichier servi pour un chemin (en minuscules, requête comprise).
-fn page(chemin: &str) -> Option<(&'static str, &'static str)> {
+fn page(chemin: &str) -> Option<(&'static str, String)> {
     let html = "text/html; charset=utf-8";
-    Some(match chemin {
-        "/" => (html, "accueil.html"),
-        "/bandes_dessinees_b.html" => (html, "lettre_b.html"),
-        "/bandes_dessinees_s.html" => (html, "lettre_s.html"),
-        "/bandes_dessinees_i.html" => (html, "lettre_i.html"),
-        "/search/tout?rechtexte=spirou&rechwhere=7" => (html, "recherche_spirou.html"),
-        "/search/tout?rechtexte=inconnue&rechwhere=7" => (html, "recherche_vide.html"),
-        "/serie-59-bd-blacksad__10000.html" => (html, "serie_blacksad.html"),
-        "/serie-1-bd-spirou-et-fantasio__10000.html" => (html, "serie_spirou.html"),
-        "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html" | "/bd--21.html" => (html, "album_blacksad_1.html"),
-        "/bd-blacksad-hs-l-integrale-555.html" => (html, "album_blacksad_hs.html"),
-        "/bd-spirou-et-fantasio-tome-2-il-y-a-un-sorcier-a-champignac-1002.html" => (html, "album_spirou_2.html"),
-        "/ajax/resume/album/21" => (html, "resume_21.html"),
-        "/ajax/resume/album/555" => (html, "resume_555.html"),
-        "/ajax/resume/album/1002" => (html, "resume_1002.html"),
-        c if c.starts_with("/media/couvertures/") => ("image/png", "bd2.png"),
+    // Images : couvertures factices `images/couv_1.png` à `couv_6.png` selon le numéro de
+    // l'album ; Couv_802 n'existe qu'en vignette (repli sur la vignette testé).
+    if let Some(nom) = chemin.strip_prefix("/media/couvertures/").or_else(|| chemin.strip_prefix("/cache/thb_couv/")) {
+        if chemin == "/media/couvertures/couv_802.jpg" {
+            return None;
+        }
+        let n: u64 = nom.trim_start_matches("couv_").trim_end_matches(".jpg").parse().unwrap_or(1);
+        return Some(("image/png", format!("images/couv_{}.png", n % 6 + 1)));
+    }
+    let f = match chemin {
+        "/" => "accueil.html",
+        "/bandes_dessinees_b.html" => "lettre_b.html",
+        "/bandes_dessinees_s.html" => "lettre_s.html",
+        "/bandes_dessinees_i.html" => "lettre_i.html",
+        "/search/tout?rechtexte=spirou&rechwhere=7" => "recherche_spirou.html",
+        "/search/tout?rechtexte=inconnue&rechwhere=7" => "recherche_vide.html",
+        "/serie-59-bd-blacksad__10000.html" => "serie_blacksad.html",
+        "/serie-1-bd-spirou-et-fantasio__10000.html" => "serie_spirou.html",
+        "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html" | "/bd--21.html" => "album_blacksad_1.html",
+        "/bd-blacksad-hs-l-integrale-555.html" => "album_blacksad_hs.html",
+        "/bd-spirou-et-fantasio-tome-2-il-y-a-un-sorcier-a-champignac-1002.html" => "album_spirou_2.html",
+        "/ajax/resume/album/21" => "resume_21.html",
+        "/ajax/resume/album/555" => "resume_555.html",
+        "/ajax/resume/album/1002" => "resume_1002.html",
+        "/bandes_dessinees_t.html" => "lettre_t.html",
+        "/search/tout?rechtexte=thorgal%20monde&rechwhere=7" | "/search/tout?rechtexte=thorgal+monde&rechwhere=7" => {
+            "recherche_thorgal.html"
+        }
+        "/serie-80-bd-thorgal__10000.html" => "serie_thorgal.html",
+        "/serie-81-bd-monde-de-thorgal-le-kriss-de-valnor__10000.html" => "serie_kriss.html",
         _ => return None,
-    })
+    };
+    Some((html, f.to_string()))
 }
 
 struct Serveur {
@@ -124,11 +140,7 @@ fn serveur() -> Serveur {
             r2.lock().unwrap().push((cible.clone(), entetes));
             let (statut, type_, corps): (&str, &str, Vec<u8>) = match page(&cible.to_lowercase()) {
                 Some((t, f)) => {
-                    let chemin = if f == "bd2.png" {
-                        dossier_exemples().join("exemples/bd2/bd2.png")
-                    } else {
-                        fixtures().join(f)
-                    };
+                    let chemin = fixtures().join(f);
                     let mut octets = std::fs::read(chemin).unwrap();
                     if t.starts_with("text/") {
                         octets =
@@ -422,9 +434,14 @@ fn recherche_choix_et_fiche_complete() {
     assert_eq!(listes.len(), 1);
     assert_eq!(listes[0].title, "Choisissez une série pour Spirou");
     assert_eq!(listes[0].rows.len(), 3);
-    assert_eq!(listes[0].rows[0][1], "Spirou et Fantasio");
+    assert_eq!(listes[0].columns, ["Série", "Infos", "Résultat", "Lien"]);
+    assert_eq!(listes[0].rows[0], ["Spirou et Fantasio", "Dupuis", "001", "serie-1-BD-Spirou-et-Fantasio.html"]);
     assert_eq!(listes[0].timeout, Some(30.0));
     assert!(listes[0].default.is_empty());
+    assert_eq!(listes[0].layout, ChooseLayout::Cards);
+    assert_eq!(listes[0].thumb_size, 120.0);
+    // Deux couvertures dans les résultats ; la page de la troisième série (pour sa
+    // couverture) n'existe pas : rien, et aucun message d'erreur.
     assert_eq!(listes[0].images.iter().filter(|i| i.is_some()).count(), 2);
 
     // Requêtes : mêmes en-têtes que le fetcher de l'original, accueil avant la recherche.
@@ -527,7 +544,119 @@ fn choix_ignorer_automatique_et_edition() {
     let listes = hote.listes.lock().unwrap();
     assert_eq!(listes[0].title, "Choisissez une édition pour 1");
     assert_eq!(listes[0].timeout, None);
-    assert_eq!(listes[0].rows[1][2], "a2005");
+    assert_eq!(listes[0].columns, ["Titre", "Numéro alternatif", "Dépôt légal", "Éditeur", "ISBN", "Identifiant"]);
+    assert_eq!(listes[0].rows[0], ["Quelque part entre les ombres", "", "11/2000", "Dargaud", "2-205-04969-8", "21"]);
+    assert_eq!(listes[0].rows[1][1], "a2005");
+    assert_eq!(listes[0].images.iter().filter(|i| i.is_some()).count(), 2);
+}
+
+/// Fenêtres de choix avec couvertures (v0.10.2) : résultats de recherche sans image
+/// (drapeaux seulement, comme le site) → page des premières séries lue pour sa couverture
+/// (premier album en « data-src », ou og:image), sans relire ensuite la page de la série
+/// choisie ; couverture en grand d'une vignette, repli sur la vignette ; réglages
+/// « VignettesSeries » et « TailleVignettes ».
+#[test]
+fn couvertures_des_fenetres_de_choix() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("t", "Thorgal Monde", "99")])
+            .reglages(&srv, journaux.path(), json!({"TailleVignettes": 180}))
+            .choix(vec![Choix::Rang(0), Choix::Annuler]),
+    );
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t"]), hote.clone());
+    assert_eq!(r.return_value, json!({"traites": 0, "ignores": 1}), "{}", r.journal_text());
+    let listes = hote.listes.lock().unwrap();
+    assert_eq!(listes.len(), 2, "série, puis album (numéro 99 absent : toute la série)");
+    let series = &listes[0];
+    assert_eq!(series.title, "Choisissez une série pour Thorgal Monde");
+    assert_eq!(series.rows[0], ["Thorgal", "Le Lombard · Belgique", "001", "serie-80-BD-Thorgal.html"]);
+    assert_eq!(series.rows[2][1], "France");
+    assert_eq!(series.thumb_size, 180.0);
+    let avec: Vec<bool> = series.images.iter().map(Option::is_some).collect();
+    assert_eq!(avec, [true, true, false]);
+    let albums = &listes[1];
+    assert_eq!(albums.title, "Choisissez un album pour 99");
+    assert_eq!(albums.columns, ["Album", "Rang", "Lien"]);
+    assert_eq!(albums.rows[0][0], "1. La Magicienne trahie");
+    assert_eq!(albums.rows[0][2], "BD-Thorgal-Tome-1-La-Magicienne-trahie-801.html");
+    assert_eq!(albums.images.iter().filter(|i| i.is_some()).count(), 2);
+    drop(listes);
+    let chemins = srv.chemins();
+    let n = |c: &str| chemins.iter().filter(|x| x.as_str() == c).count();
+    assert_eq!(n("/serie-80-bd-thorgal__10000.html"), 1, "page gardée : {chemins:?}");
+    assert_eq!(n("/serie-81-bd-monde-de-thorgal-le-kriss-de-valnor__10000.html"), 1);
+    assert_eq!(n("/serie-82-bd-mondes-de-thorgal-les-louve__10000.html"), 1);
+    assert!(!chemins.iter().any(|c| c.contains("/flags/") || c.contains("blank.gif")), "{chemins:?}");
+    // Couverture en grand plutôt que la vignette ; vignette si la grande n'existe pas.
+    assert_eq!(n("/media/couvertures/couv_801.jpg"), 1);
+    assert_eq!(n("/cache/thb_couv/couv_801.jpg"), 0);
+    assert_eq!(n("/media/couvertures/couv_802.jpg"), 1);
+    assert_eq!(n("/cache/thb_couv/couv_802.jpg"), 1);
+    assert_eq!(n("/media/couvertures/couv_811.jpg"), 1, "og:image de la page de la série 81");
+    assert!(hote.messages.lock().unwrap().iter().all(|m| !m.contains("404")), "404 sans message");
+
+    // Option décochée : aucune page de série lue avant le choix.
+    let srv = serveur();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("t", "Thorgal Monde", "99")])
+            .reglages(&srv, journaux.path(), json!({"VignettesSeries": false}))
+            .choix(vec![Choix::Annuler]),
+    );
+    lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t"]), hote.clone());
+    let listes = hote.listes.lock().unwrap();
+    assert!(listes[0].images.is_empty(), "aucune couverture");
+    assert_eq!(listes[0].layout, ChooseLayout::Cards);
+    assert_eq!(listes[0].thumb_size, 120.0);
+    assert!(!srv.chemins().iter().any(|c| c.starts_with("/serie-")), "{:?}", srv.chemins());
+}
+
+/// Réglages réels relevés à la recette de la v0.10.1 (fixture `App_EN.Config`, réduite) :
+/// étiquettes vides écrites sur deux lignes → vides (l'original les lit vides), plugin en
+/// anglais → fenêtres en anglais et « Edition info: » dans le résumé (comme l'original),
+/// tailles des journaux gardées à l'octet près.
+#[test]
+fn import_reglages_reels_anglais() {
+    let py = need_python!();
+    let journaux = tempfile::tempdir().unwrap();
+    let mut hote = Hote::default().formulaires(vec![
+        Some(("importer".into(), json!({}))),
+        Some(("OK".into(), json!({"fichier": fixtures().join("App_EN.Config").to_string_lossy()}))),
+        Some(("OK".into(), json!({}))),
+    ]);
+    hote.reglages.values.insert("dossier_journaux".into(), json!(journaux.path().to_string_lossy()));
+    let hote = Arc::new(hote);
+    let mut ctx = RunContext::new(Hook::ConfigScript, vec![]);
+    ctx.interactive = true;
+    lancer(&py, "Bedetheque2Config", ctx, hote.clone());
+    let s = hote.enregistres.lock().unwrap().last().expect("réglages enregistrés").values.clone();
+    assert_eq!(s["TBTags"], json!(""), "« <TBTags>⏎  </TBTags> » lu vide");
+    assert_eq!(s["LANGENFR"], json!("EN"));
+    assert_eq!(s["DBGLOGMAX"], json!(20000), "taille gardée (pas 20971)");
+    assert_eq!(s["RENLOGMAX"], json!(20000));
+    assert_eq!(s["SUBPATT"], json!(" - - "));
+    assert_eq!(s["TIMEOUT"], json!("70"));
+    assert_eq!(s["CBStop"], json!("2"));
+    let f = hote.formulaires.lock().unwrap();
+    assert_eq!(f[2].buttons, vec!["OK", "Cancel"]);
+    assert_eq!(f[2].label_width, Some(360.0));
+
+    // Réglages enregistrés par la v0.10.1 (étiquettes « ⏎   ») : les étiquettes du livre
+    // ne sont pas effacées ; résumé avec « Edition info: » (plugin en anglais).
+    let srv = serveur();
+    let mut b = livre("b1", "Blacksad", "1");
+    b.tags = Some("À lire".into());
+    let hote = Arc::new(Hote::avec(vec![b]).reglages(
+        &srv,
+        journaux.path(),
+        json!({"LANGENFR": "EN", "TBTags": "\n  ", "TITLEIT": false}),
+    ));
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b1"]), hote.clone());
+    let c = champs(&r, "b1");
+    assert!(!c.contains_key("Tags"), "étiquettes gardées : {c:?}");
+    assert!(c["Summary"].as_str().unwrap().ends_with("Edition info: Premier tirage avec ex-libris."), "{c:?}");
+    assert!(hote.messages.lock().unwrap().last().unwrap().contains("Processed: 1"), "{:?}", hote.messages);
 }
 
 /// Hook `Editor` (fenêtre « Infos du livre ») : même traitement, sur le livre affiché.
@@ -616,6 +745,25 @@ fn scrape_rapide_et_rescrape() {
     let formulaires = hote.formulaires.lock().unwrap();
     assert_eq!(formulaires.len(), 2);
     assert_eq!(formulaires[0].title, "Scrape directement un lien");
+    // Champ du lien : bouton « Coller » et aperçu du lien reconnu (expressions du script
+    // évaluées par ComicRust).
+    let ControlKind::Text { paste, hints, hint_none, .. } = &formulaires[0].control("lien").unwrap().kind else {
+        panic!("champ du lien")
+    };
+    assert!(*paste);
+    let apercu = |t: &str| text_hint(hints, hint_none, t).map(|(ok, h)| (ok, h.to_string()));
+    assert_eq!(apercu(&lien_album), Some((true, "Lien d'un album".into())));
+    assert_eq!(apercu("www.bedetheque.com/BD--21.html#reed").unwrap().1, "Lien d'un album");
+    assert!(apercu(" serie-1-BD-Spirou-et-Fantasio.html ").unwrap().1.starts_with("Lien d'une série"));
+    assert_eq!(apercu("https://www.bedetheque.com/revue-Spirou.html").unwrap().1, "Lien d'une revue");
+    assert!(!apercu("https://example.com/").unwrap().0);
+    assert_eq!(apercu("  "), None);
+    let texte = |c: &Control| match &c.kind {
+        ControlKind::Label { text, .. } => text.clone(),
+        _ => String::new(),
+    };
+    let textes: Vec<String> = formulaires[0].controls.iter().map(texte).collect();
+    assert!(textes[0].starts_with("Livre 1 sur 2 : "), "{textes:?}");
     let listes = hote.listes.lock().unwrap();
     assert_eq!(listes[0].rows.len(), 3, "toute la série est proposée");
     drop((formulaires, listes));

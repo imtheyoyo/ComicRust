@@ -98,6 +98,8 @@ pub struct ComicRustApp {
     pub(crate) scripts: crate::scripts::ScriptsState,
     /// Fenêtre « Infos du livre » (v0.10.1) : modification manuelle des fiches.
     pub(crate) info_editor: Option<crate::ui::info_editor::InfoEditor>,
+    /// Livres manquants (v0.10.2) : fenêtres et demandes.
+    pub(crate) missing_ui: crate::ui::missing_ui::MissingUi,
 }
 
 impl ComicRustApp {
@@ -109,6 +111,7 @@ impl ComicRustApp {
             settings.set_current_view(v);
         }
         settings.theme.apply(&cc.egui_ctx);
+        crate::ui::fonts::install(&cc.egui_ctx);
         let mut app = Self {
             settings,
             book: None,
@@ -147,6 +150,7 @@ impl ComicRustApp {
             cr_writes: Default::default(),
             scripts: crate::scripts::ScriptsState::new(Default::default()),
             info_editor: None,
+            missing_ui: Default::default(),
         };
         app.scripts = crate::scripts::ScriptsState::new(app.settings.script_settings.clone());
         crate::update::cleanup_previous_install();
@@ -320,6 +324,7 @@ impl ComicRustApp {
         };
         self.settings.set_current_view(view);
         self.library.selected_list = id;
+        self.library.missing_only = false;
         self.library.open_stack = None;
         self.library.selected_stack = None;
         if let Some(c) = &mut self.covers {
@@ -652,6 +657,7 @@ impl eframe::App for ComicRustApp {
         self.update_window(&ctx);
         self.info_window(&ctx);
         self.about_window(&ctx);
+        self.missing_windows(&ctx);
         self.error_window(&ctx);
         // Les textures nouvellement demandées arriveront par `request_repaint`.
     }

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use comicrust_core::scripting::forms::{Control, ControlKind, LabelStyle};
+use comicrust_core::scripting::forms::{ChooseLayout, Control, ControlKind, LabelStyle, MAX_THUMB_SIZE};
 use comicrust_core::scripting::FormAnswer;
 use eframe::egui::{self, Context, Id, RichText, Ui};
 use egui_extras::{Column, TableBuilder};
@@ -46,14 +46,21 @@ fn styled(text: &str, style: LabelStyle, ui: &Ui) -> RichText {
     }
 }
 
-/// Libellé à gauche d'un champ (largeur fixe, infobulle d'aide).
-fn label_cell(ui: &mut Ui, label: &str, help: &str) {
+/// Libellé à gauche d'un champ (largeur fixe `width`, infobulle d'aide ; un libellé trop
+/// long est coupé et montré en entier au survol). Libellé vide : rien (le champ n'est pas
+/// décalé).
+fn label_cell(ui: &mut Ui, width: f32, label: &str, help: &str) {
+    if label.is_empty() {
+        return;
+    }
     let h = ui.spacing().interact_size.y;
-    ui.allocate_ui_with_layout(egui::vec2(LABEL_W, h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.set_min_width(LABEL_W);
+    ui.allocate_ui_with_layout(egui::vec2(width, h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_width(width);
+        ui.set_max_width(width);
         let r = ui.add(egui::Label::new(label).truncate());
-        if !help.is_empty() {
-            r.on_hover_text(help);
+        let full = if help.is_empty() { label.to_string() } else { format!("{label}\n\n{help}") };
+        if r.hovered() && (r.rect.width() + 1.0 >= width || !help.is_empty()) {
+            r.on_hover_text(full);
         }
     });
 }
@@ -301,9 +308,10 @@ fn inserts_menu(ui: &mut Ui, id: Id, text: &mut String, inserts: &[comicrust_cor
 fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
     let help = c.help.as_str();
     let key = c.key.clone();
+    let lw = st.spec.label_width.unwrap_or(LABEL_W);
     let Some(field) = st.fields.get_mut(&key) else { return };
     match (&c.kind, field) {
-        (ControlKind::Text { placeholder, rows, secret, inserts, .. }, Field::Text(text)) => {
+        (ControlKind::Text { placeholder, rows, secret, inserts, paste, hints, hint_none, .. }, Field::Text(text)) => {
             let id = ui.scope_id().with("texte");
             let hint = if *secret && placeholder.is_empty() { "vide = garder la valeur actuelle" } else { placeholder };
             if *rows > 1 {
@@ -321,23 +329,51 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
                 hover(ui.add(edit), help);
             } else {
                 ui.horizontal(|ui| {
-                    label_cell(ui, &c.label, help);
-                    let extra = if inserts.is_empty() { 0.0 } else { 90.0 };
+                    label_cell(ui, lw, &c.label, help);
+                    let extra = if inserts.is_empty() { 0.0 } else { 90.0 } + if *paste { 100.0 } else { 0.0 };
                     let w = c.width.unwrap_or((ui.available_width() - extra).max(80.0));
                     let mut edit = egui::TextEdit::singleline(text).id(id).desired_width(w).hint_text(hint);
                     if *secret {
                         edit = edit.password(true);
                     }
                     hover(ui.add(edit), help);
+                    if *paste
+                        && ui.button("📋 Coller").on_hover_text("Remplacer par le texte du presse-papiers").clicked()
+                    {
+                        // Le texte du presse-papiers arrive au champ (qui reprend le focus,
+                        // tout son texte sélectionné) à l'image suivante.
+                        let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+                        let all = egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(text.chars().count()),
+                        );
+                        state.cursor.set_char_range(Some(all));
+                        state.store(ui.ctx(), id);
+                        ui.ctx().memory_mut(|m| m.request_focus(id));
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                    }
                     if !inserts.is_empty() {
                         inserts_menu(ui, id, text, inserts);
                     }
                 });
+                if let Some((ok, t)) = comicrust_core::scripting::forms::text_hint(hints, hint_none, text) {
+                    ui.horizontal(|ui| {
+                        if !c.label.is_empty() {
+                            ui.add_space(lw + ui.spacing().item_spacing.x);
+                        }
+                        let rt = if ok {
+                            RichText::new(format!("✔ {t}")).color(crate::ui::theme::ok(ui))
+                        } else {
+                            RichText::new(format!("⚠ {t}")).color(crate::ui::theme::warning(ui))
+                        };
+                        ui.add(egui::Label::new(rt).wrap());
+                    });
+                }
             }
         }
         (ControlKind::Path { folder, save, filters, .. }, Field::Text(text)) => {
             ui.horizontal(|ui| {
-                label_cell(ui, &c.label, help);
+                label_cell(ui, lw, &c.label, help);
                 let w = c.width.unwrap_or((ui.available_width() - 100.0).max(80.0));
                 hover(ui.add(egui::TextEdit::singleline(text).desired_width(w)), help);
                 if ui.button("📁 Parcourir…").clicked() {
@@ -371,7 +407,7 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
         }
         (ControlKind::Number { min, max, step, decimals, .. }, Field::Number(n)) => {
             ui.horizontal(|ui| {
-                label_cell(ui, &c.label, help);
+                label_cell(ui, lw, &c.label, help);
                 let mut dv = egui::DragValue::new(n)
                     .range(min.unwrap_or(-1e15)..=max.unwrap_or(1e15))
                     .speed(*step)
@@ -387,7 +423,7 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
         }
         (ControlKind::Choice { choices, editable: true, .. }, Field::Choice { text, .. }) => {
             ui.horizontal(|ui| {
-                label_cell(ui, &c.label, help);
+                label_cell(ui, lw, &c.label, help);
                 let w = c.width.unwrap_or((ui.available_width() - 40.0).max(80.0));
                 hover(ui.add(egui::TextEdit::singleline(text).desired_width(w)), help);
                 ui.menu_button("▾", |ui| {
@@ -404,7 +440,7 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
         }
         (ControlKind::Choice { choices, .. }, Field::Choice { index, .. }) => {
             ui.horizontal(|ui| {
-                label_cell(ui, &c.label, help);
+                label_cell(ui, lw, &c.label, help);
                 let shown = match choice_label(choices, *index) {
                     "" => "—",
                     l => l,
@@ -423,7 +459,7 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
         }
         (ControlKind::Radio { choices, horizontal, .. }, Field::Choice { index, .. }) => {
             ui.horizontal(|ui| {
-                label_cell(ui, &c.label, help);
+                label_cell(ui, lw, &c.label, help);
                 let mut radios = |ui: &mut Ui| {
                     for (i, ch) in choices.iter().enumerate() {
                         hover(ui.radio_value(index, Some(i), &ch.label), help);
@@ -604,20 +640,38 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
     error_line(ui, st, &key);
 }
 
-/// Liste de choix d'un script (fenêtre modale) : tableau triable, filtre, vignettes avec
-/// aperçu agrandi, double-clic = choisir.
+/// Liste de choix d'un script (fenêtre modale) : tableau triable ou fiches (vignette,
+/// titre en gras, autres colonnes en dessous), filtre, taille des vignettes réglable, aperçu
+/// agrandi à droite, double-clic ou Entrée = choisir, flèches ↑/↓ pour changer de ligne.
 pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -> Action<Vec<usize>> {
     if let Some(expired) = st.expired() {
         return Action::Reply(expired);
     }
     let images = !st.images.is_empty();
-    let (width, max_h) = sized(ctx, if images { 900.0 } else { 640.0 });
+    let cards = st.spec.layout == ChooseLayout::Cards;
+    let (width, max_h) = sized(
+        ctx,
+        if cards {
+            1000.0
+        } else if images {
+            900.0
+        } else {
+            640.0
+        },
+    );
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+    let arrows = ctx.input(|i| {
+        i.key_pressed(egui::Key::ArrowDown) as i32 - i.key_pressed(egui::Key::ArrowUp) as i32
+            + 5 * (i.key_pressed(egui::Key::PageDown) as i32 - i.key_pressed(egui::Key::PageUp) as i32)
+    });
     let mut action = Action::Nothing;
     let mut validate = false;
     let mut hovered: Option<usize> = None;
     let view = st.view();
+    if arrows != 0 {
+        st.step(&view, arrows);
+    }
     egui::Modal::new(Id::unique("comicrust-script-choix")).show(ctx, |ui| {
         ui.set_width(width);
         ui.label(RichText::new(format!("📜 {script}")).weak().small());
@@ -627,12 +681,13 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
         if !st.spec.message.is_empty() {
             ui.label(&st.spec.message);
         }
-        if st.spec.filter {
-            ui.horizontal(|ui| {
+        // Barre d'outils : filtre, tri (fiches), taille des vignettes.
+        ui.horizontal(|ui| {
+            if st.spec.filter {
                 ui.label("🔍");
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut st.filter)
-                        .desired_width(280.0)
+                        .desired_width(240.0)
                         .hint_text("filtrer (tous les mots)"),
                 );
                 if r.changed() {
@@ -642,8 +697,22 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
                     st.filter.clear();
                 }
                 ui.label(RichText::new(format!("{} / {}", view.len(), st.spec.rows.len())).small().weak());
-            });
-        }
+                ui.separator();
+            }
+            if cards {
+                sort_menu(ui, st);
+            }
+            if images {
+                ui.separator();
+                ui.label("Taille");
+                let r = ui
+                    .add(egui::Slider::new(&mut st.zoom, 48.0..=MAX_THUMB_SIZE).show_value(false))
+                    .on_hover_text("Hauteur des vignettes");
+                if r.changed() {
+                    st.deadline = None;
+                }
+            }
+        });
         if let Some(s) = st.remaining() {
             ui.label(
                 RichText::new(format!("Choix automatique dans {s} s (toute action l'annule)"))
@@ -652,29 +721,51 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
             ui.ctx().request_repaint_after(Duration::from_millis(250));
         }
         ui.add_space(4.0);
-        let preview_w = if images { 250.0 } else { 0.0 };
-        let table_h = (max_h - 120.0).clamp(140.0, 480.0);
+        let preview_w = if images {
+            if cards {
+                300.0
+            } else {
+                250.0
+            }
+        } else {
+            0.0
+        };
+        let table_h = (max_h - 120.0).clamp(160.0, if cards { 620.0 } else { 480.0 });
         ui.horizontal_top(|ui| {
             let table_w = (ui.available_width() - preview_w - 12.0).max(200.0);
             ui.allocate_ui_with_layout(egui::vec2(table_w, table_h), egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.set_min_size(egui::vec2(table_w, table_h));
-                choose_table(ui, st, &view, table_h, &mut hovered, &mut validate);
+                if cards {
+                    choose_cards(ui, st, &view, table_h, &mut hovered, &mut validate);
+                } else {
+                    choose_table(ui, st, &view, table_h, &mut hovered, &mut validate);
+                }
             });
             if images {
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
                     ui.set_width(preview_w);
                     let shown = hovered.or(st.current);
-                    match shown.and_then(|i| st.texture(ui.ctx(), i).map(|t| (i, t))) {
-                        Some((i, tex)) => {
-                            ui.add(
-                                egui::Image::from_texture(egui::load::SizedTexture::from_handle(&tex))
-                                    .max_size(egui::vec2(preview_w, table_h - 40.0)),
-                            );
-                            ui.label(RichText::new(st.spec.rows[i].first().cloned().unwrap_or_default()).strong());
+                    match shown {
+                        Some(i) => {
+                            let lines = (st.spec.columns.len().saturating_sub(1) as f32 + 2.0) * 18.0;
+                            match st.texture(ui.ctx(), i) {
+                                Some(tex) => {
+                                    ui.add(
+                                        egui::Image::from_texture(egui::load::SizedTexture::from_handle(&tex))
+                                            .max_size(egui::vec2(preview_w, (table_h - lines).max(120.0))),
+                                    );
+                                }
+                                None => {
+                                    ui.label(RichText::new("(pas d'image)").weak().small());
+                                }
+                            }
+                            card_text(ui, &st.spec.columns, &st.spec.rows[i], true);
                         }
                         None => {
-                            ui.label(RichText::new("Survoler une ligne pour voir son image.").weak().small());
+                            ui.label(
+                                RichText::new("Survoler ou choisir une ligne pour voir son image.").weak().small(),
+                            );
                         }
                     }
                 });
@@ -725,6 +816,188 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
     Action::Nothing
 }
 
+/// « Trier par » des fiches : ordre d'origine (celui du script) ou une colonne, croissant
+/// ou décroissant.
+fn sort_menu(ui: &mut Ui, st: &mut ChooseState) {
+    ui.label("Trier par");
+    let current = match st.sort {
+        Some((c, _)) => {
+            st.spec.columns.get(c).cloned().filter(|t| !t.is_empty()).unwrap_or(format!("colonne {}", c + 1))
+        }
+        None => "ordre d'origine".to_string(),
+    };
+    let mut wanted = st.sort.map(|(c, _)| c);
+    egui::ComboBox::from_id_salt("choix-tri").selected_text(current).width(150.0).show_ui(ui, |ui| {
+        ui.selectable_value(&mut wanted, None, "ordre d'origine");
+        for (i, title) in st.spec.columns.iter().enumerate() {
+            let t = if title.is_empty() { format!("colonne {}", i + 1) } else { title.clone() };
+            ui.selectable_value(&mut wanted, Some(i), t);
+        }
+    });
+    if wanted != st.sort.map(|(c, _)| c) {
+        st.sort = wanted.map(|c| (c, false));
+        st.deadline = None;
+    }
+    if let Some((c, desc)) = st.sort {
+        let r = ui.small_button(if desc { "⬇" } else { "⬆" }).on_hover_text("Inverser l'ordre");
+        if r.clicked() {
+            st.sort = Some((c, !desc));
+            st.deadline = None;
+        }
+    }
+}
+
+/// Texte d'une fiche : première cellule en gras, puis « Colonne : valeur » pour les autres
+/// cellules non vides (une par ligne, coupées si trop longues).
+fn card_text(ui: &mut Ui, columns: &[String], row: &[String], wrap: bool) {
+    let title = row.first().map(String::as_str).unwrap_or_default();
+    let t = egui::Label::new(RichText::new(title).strong().size(15.0)).selectable(false);
+    ui.add(if wrap { t.wrap() } else { t.truncate() });
+    for (col, cell) in columns.iter().zip(row.iter()).skip(1) {
+        if cell.trim().is_empty() {
+            continue;
+        }
+        let mut job = egui::text::LayoutJob::default();
+        let small = egui::TextStyle::Small.resolve(ui.style());
+        let body = egui::TextStyle::Body.resolve(ui.style());
+        if !col.is_empty() {
+            job.append(
+                &format!("{col} : "),
+                0.0,
+                egui::TextFormat::simple(small.clone(), ui.visuals().weak_text_color()),
+            );
+        }
+        job.append(cell, 0.0, egui::TextFormat::simple(body, ui.visuals().text_color()));
+        if !wrap {
+            job.wrap = egui::text::TextWrapping::truncate_at_width(ui.available_width());
+        }
+        let l = egui::Label::new(job).selectable(false);
+        ui.add(if wrap { l.wrap() } else { l });
+    }
+}
+
+/// Fiches de la liste de choix : une par ligne, à hauteur fixe (défilement rapide même
+/// avec des centaines de résultats : seules les fiches visibles sont dessinées).
+fn choose_cards(
+    ui: &mut Ui,
+    st: &mut ChooseState,
+    view: &[usize],
+    height: f32,
+    hovered: &mut Option<usize>,
+    validate: &mut bool,
+) {
+    let images = !st.images.is_empty();
+    let thumb = if images { st.zoom } else { 0.0 };
+    let text_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+    let lines = st.spec.columns.len().max(1) as f32;
+    // Hauteur d'une fiche : la vignette, ou assez pour toutes les lignes de texte.
+    let row_h = thumb.max(text_h * (lines + 0.3)) + 10.0;
+    let thumb_w = (thumb * 0.72).round();
+    let pos = st.scroll_to.take().and_then(|i| view.iter().position(|&v| v == i));
+    let mut area = egui::ScrollArea::vertical().id_salt("fiches-choix").max_height(height).auto_shrink([false, false]);
+    if let Some(p) = pos {
+        // Ligne amenée dans la partie visible si elle n'y est pas.
+        let offset = egui::scroll_area::State::load(ui.ctx(), ui.make_persistent_id("fiches-choix"))
+            .map(|s| s.clamped_offset().y)
+            .unwrap_or(0.0);
+        let top = p as f32 * row_h;
+        if top < offset {
+            area = area.vertical_scroll_offset(top);
+        } else if top + row_h > offset + height {
+            area = area.vertical_scroll_offset(top + row_h - height);
+        }
+    }
+    let mut click = None;
+    let mut double = None;
+    area.show_rows(ui, row_h, view.len(), |ui, range| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for k in range {
+            let i = view[k];
+            let w = ui.available_width();
+            let (rect, r) = ui.allocate_exact_size(egui::vec2(w, row_h), egui::Sense::click());
+            let selected = st.selected[i];
+            let visuals = ui.visuals();
+            let fill = if selected {
+                visuals.selection.bg_fill
+            } else if r.hovered() {
+                visuals.widgets.hovered.weak_bg_fill
+            } else if k % 2 == 1 {
+                visuals.faint_bg_color
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 1.0)), 4.0, fill);
+            let inner = rect.shrink(5.0);
+            let mut x = inner.left();
+            if st.spec.multi {
+                let mark = if selected { "☑" } else { "☐" };
+                ui.painter().text(
+                    egui::pos2(x + 8.0, inner.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    mark,
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    ui.visuals().text_color(),
+                );
+                x += 22.0;
+            }
+            if images {
+                let slot = egui::Rect::from_min_size(egui::pos2(x, inner.top()), egui::vec2(thumb_w, inner.height()));
+                match st.texture(ui.ctx(), i) {
+                    Some(tex) => {
+                        let size = tex.size_vec2();
+                        let scale = (slot.width() / size.x).min(slot.height() / size.y);
+                        let shown = egui::Rect::from_center_size(slot.center(), size * scale);
+                        ui.painter().image(
+                            tex.id(),
+                            shown,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                    None => {
+                        ui.painter().rect_filled(slot, 2.0, crate::ui::theme::placeholder(ui));
+                        ui.painter().text(
+                            slot.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "—",
+                            egui::TextStyle::Body.resolve(ui.style()),
+                            ui.visuals().weak_text_color(),
+                        );
+                    }
+                }
+                x += thumb_w + 10.0;
+            }
+            let text_rect = egui::Rect::from_min_max(egui::pos2(x, inner.top()), inner.right_bottom());
+            let mut child = ui
+                .new_child(egui::UiBuilder::new().max_rect(text_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+            child.set_clip_rect(text_rect.intersect(ui.clip_rect()));
+            child.spacing_mut().item_spacing.y = 2.0;
+            card_text(&mut child, &st.spec.columns, &st.spec.rows[i], false);
+            if pos == Some(k) {
+                r.scroll_to_me(None);
+            }
+            if r.hovered() {
+                *hovered = Some(i);
+            }
+            if r.double_clicked() {
+                double = Some(i);
+            } else if r.clicked() {
+                click = Some(i);
+            }
+        }
+    });
+    if view.is_empty() {
+        ui.label(RichText::new("Aucun résultat (filtre ?)").weak());
+    }
+    if let Some(i) = click {
+        st.click(i);
+    }
+    if let Some(i) = double.filter(|_| !st.spec.multi) {
+        st.click(i);
+        *validate = true;
+    }
+}
+
 fn choose_table(
     ui: &mut Ui,
     st: &mut ChooseState,
@@ -734,7 +1007,7 @@ fn choose_table(
     validate: &mut bool,
 ) {
     let images = !st.images.is_empty();
-    let thumb = st.spec.thumb_size;
+    let thumb = st.zoom;
     let row_h = if images { thumb } else { ui.text_style_height(&egui::TextStyle::Body) + 6.0 };
     let n_cols = st.spec.columns.len();
     let header_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
@@ -756,6 +1029,9 @@ fn choose_table(
         .min_scrolled_height(height - 30.0)
         .auto_shrink([false, false])
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+    if let Some(p) = st.scroll_to.take().and_then(|i| view.iter().position(|&v| v == i)) {
+        t = t.scroll_to_row(p, None);
+    }
     if st.spec.multi {
         t = t.column(Column::exact(26.0));
     }

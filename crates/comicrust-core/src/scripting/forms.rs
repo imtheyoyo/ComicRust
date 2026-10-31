@@ -51,6 +51,39 @@ pub struct InsertGroup {
     pub items: Vec<ChoiceItem>,
 }
 
+/// Indication sous un champ texte (v0.10.2) : quand le texte saisi correspond à
+/// l'expression régulière, `text` est affiché sous le champ (« ✔ Lien d'un album »…).
+#[derive(Debug, Clone)]
+pub struct TextHint {
+    pub pattern: String,
+    pub regex: regex::Regex,
+    pub text: String,
+}
+
+impl PartialEq for TextHint {
+    fn eq(&self, o: &TextHint) -> bool {
+        self.pattern == o.pattern && self.text == o.text
+    }
+}
+
+/// Nombre maximal d'indications d'un champ texte.
+pub const MAX_HINTS: usize = 32;
+
+/// Indication à afficher sous un champ texte : première expression qui correspond au texte
+/// (débarrassé de ses espaces autour), sinon `none` si le texte n'est pas vide ; `None` pour
+/// un texte vide ou sans indication. Le booléen dit si une expression a correspondu.
+pub fn text_hint<'a>(hints: &'a [TextHint], none: &'a str, text: &str) -> Option<(bool, &'a str)> {
+    let t = text.trim();
+    if t.is_empty() || (hints.is_empty() && none.is_empty()) {
+        return None;
+    }
+    match hints.iter().find(|h| h.regex.is_match(t)) {
+        Some(h) => Some((true, h.text.as_str())),
+        None if !none.is_empty() => Some((false, none)),
+        None => None,
+    }
+}
+
 /// Type d'une colonne de tableau éditable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnKind {
@@ -87,7 +120,8 @@ pub enum LabelStyle {
 pub enum ControlKind {
     /// Texte (`rows` > 1 : plusieurs lignes ; `secret` : saisie masquée, jamais pré-remplie ;
     /// `inserts` : menu « Insérer » de morceaux de texte, ex. `{series}` dans un modèle,
-    /// éventuellement par groupes).
+    /// éventuellement par groupes ; `paste` : bouton « Coller » (presse-papiers) ; `hints` /
+    /// `hint_none` : indication sous le champ selon le texte saisi, v0.10.2).
     Text {
         default: String,
         placeholder: String,
@@ -95,6 +129,9 @@ pub enum ControlKind {
         rows: u32,
         secret: bool,
         inserts: Vec<InsertGroup>,
+        paste: bool,
+        hints: Vec<TextHint>,
+        hint_none: String,
     },
     Checkbox {
         default: bool,
@@ -443,6 +480,8 @@ pub struct FormSpec {
     pub cancel: Option<usize>,
     /// Largeur souhaitée de la fenêtre (pixels).
     pub width: Option<f32>,
+    /// Largeur de la colonne des libellés (pixels ; `None` : valeur de l'interface).
+    pub label_width: Option<f32>,
     /// Valeurs initiales données par le script (remplacent les valeurs par défaut).
     pub values: Map<String, Value>,
     /// Nombre total de contrôles (imbriqués compris).
@@ -538,6 +577,31 @@ fn parse_choices(m: &Map<String, Value>, k: &str) -> Result<Vec<ChoiceItem>, Str
                 Ok(ChoiceItem { value: c.clone(), label: value_text(c) })
             }
             _ => Err(format!("« {k} » : choix illisible ({c})")),
+        })
+        .collect()
+}
+
+/// Indications d'un champ texte : `[[expression, texte], …]` (expressions de la caisse
+/// `regex`, compatibles avec les expressions simples de Python ; taille bornée).
+fn parse_hints(m: &Map<String, Value>) -> Result<Vec<TextHint>, String> {
+    let a = get_array(m, "hints")?;
+    if a.len() > MAX_HINTS {
+        return Err(format!("« hints » : plus de {MAX_HINTS} indications"));
+    }
+    a.iter()
+        .map(|h| {
+            let (p, t) = match h {
+                Value::Array(p) if p.len() == 2 => (value_text(&p[0]), value_text(&p[1])),
+                _ => return Err(format!("« hints » : paire [expression, texte] attendue ({h})")),
+            };
+            if p.len() > 4096 || t.len() > 4096 {
+                return Err("« hints » : expression ou texte trop long".into());
+            }
+            let regex = regex::RegexBuilder::new(&p)
+                .size_limit(1 << 20)
+                .build()
+                .map_err(|e| format!("« hints » : expression invalide « {p} » : {e}"))?;
+            Ok(TextHint { pattern: p, regex, text: t })
         })
         .collect()
 }
@@ -718,13 +782,19 @@ fn parse_control(v: &Value, r: &mut Reader, depth: usize) -> Result<Control, Str
                 None => 1,
             };
             let inserts = parse_inserts(m).map_err(ctx)?;
+            let secret = kind_name == "secret" || get_bool(m, "secret", false);
             ControlKind::Text {
                 default: get_str(m, "default").map_err(ctx)?,
                 placeholder: get_str(m, "placeholder").map_err(ctx)?,
                 required,
                 rows,
-                secret: kind_name == "secret" || get_bool(m, "secret", false),
+                secret,
                 inserts,
+                // Une ligne seulement ; pas d'indication pour une saisie masquée (elle
+                // révélerait la forme du secret).
+                paste: get_bool(m, "paste", false) && rows == 1,
+                hints: if secret { Vec::new() } else { parse_hints(m).map_err(ctx)? },
+                hint_none: if secret { String::new() } else { get_str(m, "hint_none").map_err(ctx)? },
             }
         }
         "checkbox" => ControlKind::Checkbox { default: get_bool(m, "default", false) },
@@ -1009,6 +1079,7 @@ impl FormSpec {
             buttons,
             cancel,
             width: get_size(p, "width")?,
+            label_width: get_size(p, "label_width")?.map(|w| w.clamp(60.0, 600.0)),
             values,
             count: r.count,
         })
@@ -1192,7 +1263,22 @@ pub struct ChooseSpec {
     pub timeout: Option<f64>,
     /// Hauteur des vignettes (pixels).
     pub thumb_size: f32,
+    /// Présentation (v0.10.2) : tableau, ou fiches (vignette et lignes de texte).
+    pub layout: ChooseLayout,
 }
+
+/// Présentation d'une liste de choix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChooseLayout {
+    /// Tableau triable (une ligne de texte par résultat).
+    Table,
+    /// Fiches : vignette à gauche, première colonne en gras puis les autres colonnes,
+    /// une par ligne (« Colonne : valeur ») ; tri par une liste « Trier par ».
+    Cards,
+}
+
+/// Hauteur maximale des vignettes d'une liste de choix (pixels).
+pub const MAX_THUMB_SIZE: f32 = 320.0;
 
 impl ChooseSpec {
     /// Lit la demande `choose` du script.
@@ -1248,6 +1334,20 @@ impl ChooseSpec {
             default.truncate(1);
         }
         let timeout = get_f64(p, "timeout")?.filter(|t| *t > 0.0).map(|t| t.min(3600.0));
+        // Par défaut : fiches dès qu'il y a des vignettes (une couverture se reconnaît mieux
+        // en grand, à côté du titre), tableau sinon.
+        let layout = match get_str(p, "layout")?.as_str() {
+            "" => {
+                if images.is_empty() {
+                    ChooseLayout::Table
+                } else {
+                    ChooseLayout::Cards
+                }
+            }
+            "table" => ChooseLayout::Table,
+            "cards" => ChooseLayout::Cards,
+            other => return Err(format!("« layout » inconnu « {other} » (table ou cards)")),
+        };
         Ok(ChooseSpec {
             title: get_str(p, "title")?,
             message: get_str(p, "message")?,
@@ -1258,7 +1358,8 @@ impl ChooseSpec {
             multi,
             default,
             timeout,
-            thumb_size: get_size(p, "thumb_size")?.unwrap_or(64.0).clamp(24.0, 256.0),
+            thumb_size: get_size(p, "thumb_size")?.unwrap_or(64.0).clamp(24.0, MAX_THUMB_SIZE),
+            layout,
         })
     }
 

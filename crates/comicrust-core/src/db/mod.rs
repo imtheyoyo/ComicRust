@@ -33,8 +33,8 @@ use mysql::{Conn, OptsBuilder};
 
 pub use config::DbConfig;
 pub use write::{
-    net_datetime, net_datetime_utc, patch_comic_book_xml, update_books, BookEdit, Change, FileState, Value,
-    WriteReport, Written,
+    delete_books, net_datetime, net_datetime_utc, patch_comic_book_xml, update_books, BookEdit, Change, DeleteReport,
+    FileState, Value, WriteReport, Written,
 };
 
 use crate::cbl::ReadingList;
@@ -177,7 +177,15 @@ impl Watcher {
                     self.rows.insert(id.clone(), *c);
                 }
                 if let Some(present) = &ch.present {
-                    self.rows.retain(|id, _| present.contains(id));
+                    if self.rows.keys().all(|id| present.contains(id)) {
+                        // Seulement nos propres suppressions (`note_deleted`).
+                        ch.present = None;
+                        if ch.is_empty() {
+                            return Ok(None);
+                        }
+                    } else {
+                        self.rows.retain(|id, _| present.contains(id));
+                    }
                 }
                 Ok(Some(ch))
             }
@@ -369,6 +377,20 @@ impl ComicDatabase {
         }
         self.counters = ch.counters;
         out
+    }
+
+    /// Retire des livres de la base en mémoire (fiches supprimées par ComicRust lui-même).
+    /// Renvoie le nombre de livres retirés.
+    pub fn remove(&mut self, ids: &[String]) -> usize {
+        let gone: HashSet<String> = ids.iter().map(|i| i.trim().to_ascii_lowercase()).collect();
+        let before = self.books.len();
+        self.books.retain(|b| !gone.contains(&b.id.to_ascii_lowercase()));
+        self.rows.retain(|id, _| !gone.contains(id));
+        let n = before - self.books.len();
+        if n > 0 {
+            self.reindex();
+        }
+        n
     }
 
     pub fn get(&self, id: &str) -> Option<&LibraryBook> {

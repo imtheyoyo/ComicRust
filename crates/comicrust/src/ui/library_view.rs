@@ -83,6 +83,9 @@ pub(crate) fn book_tooltip(ui: &mut Ui, book: &LibraryBook) {
     if let Some(arc) = &book.story_arc {
         ui.label(format!("Arc : {arc}"));
     }
+    if crate::library::missing::is_missing(book) {
+        ui.label(RichText::new("⚠ Fichier introuvable").color(crate::ui::theme::error(ui)));
+    }
     if let Some(f) = &book.file {
         ui.label(RichText::new(f).weak().small());
     }
@@ -201,9 +204,8 @@ impl ComicRustApp {
         };
         // Absent mais « .tmp » présent : ComicRack réécrit le fichier, le lecteur patiente.
         if !path.exists() && !comicrust_core::providers::is_being_rewritten(&path) {
-            self.error = Some(format!(
-                "Fichier introuvable :\n{file}\n\nIl a peut-être été déplacé ou supprimé, ou le NAS n'est pas accessible."
-            ));
+            // Fenêtre « Fichier introuvable » : retrouver le fichier ou retirer le livre (v0.10.2).
+            self.missing_not_found(id);
             return;
         }
         self.open_book_at(ctx, path, start);
@@ -249,7 +251,7 @@ impl ComicRustApp {
             }
             if !self.settings.library_table
                 && ui
-                    .toggle_value(&mut self.settings.library_stack, "🗂 Empiler par série")
+                    .toggle_value(&mut self.settings.library_stack, "📚 Empiler par série")
                     .on_hover_text("Une pile par série ; double-clic sur une pile pour voir ses livres")
                     .changed()
             {
@@ -358,6 +360,7 @@ impl ComicRustApp {
                 });
             }
             Status::Loaded(_) => {
+                self.missing_view_header(ui);
                 if let Some(list) = self.library.selected_list() {
                     let unknown = match self
                         .library
@@ -410,7 +413,7 @@ impl ComicRustApp {
                             if ui.button("◀ Toutes les piles").on_hover_text("Retour (Échap)").clicked() {
                                 self.library.open_stack = None;
                             }
-                            ui.label(RichText::new(format!("🗂 {series}")).strong());
+                            ui.label(RichText::new(format!("📚 {series}")).strong());
                         });
                     }
                 }
@@ -449,6 +452,11 @@ impl ComicRustApp {
             if self.book_menu_data(ui.ctx()).reason.is_none() {
                 self.book_list_request(ui.ctx(), BookListAction::Remove, books);
             }
+        } else if delete && books_focus && !self.library.reading_list_shown() && self.library.selected_book.is_some() {
+            // Suppr ailleurs (bibliothèque, liste intelligente) : retirer de la bibliothèque,
+            // après confirmation (comme ComicRack) ; jamais les fichiers.
+            let books = self.library.selection();
+            self.missing_ui.pending = Some(crate::ui::missing_ui::MissingRequest::Remove(books));
         }
         let stacked = self.settings.library_stack && !self.settings.library_table && self.library.open_stack.is_none();
         if enter && stacked {
@@ -475,6 +483,8 @@ impl ComicRustApp {
             ui.add_space(40.0);
             ui.label(if db_empty {
                 "La base ne contient aucun livre."
+            } else if self.library.missing_only && self.library.search.is_empty() {
+                "Aucun livre manquant."
             } else if self.library.selected_list.is_some() && self.library.search.is_empty() {
                 "Aucun livre de cette liste n'est dans la base."
             } else {
@@ -598,6 +608,9 @@ impl ComicRustApp {
         let mut list_request: Option<(BookListAction, Vec<String>)> = None;
         let scripts_menu = self.book_scripts();
         let mut script_request: Option<(String, Vec<String>)> = None;
+        let missing_menu = self.missing_menu_data();
+        let selection_missing = selection.iter().any(|id| db.get(id).is_some_and(crate::library::missing::is_missing));
+        let mut missing_request: Option<crate::ui::missing_ui::MissingRequest> = None;
 
         // Souris : géométrie des rangées de couvertures (coordonnées du contenu), glisser en
         // cours, réordonnancement possible ou non.
@@ -710,7 +723,10 @@ impl ComicRustApp {
                                 );
                             }
                             let covers = self.covers.as_mut().unwrap();
-                            paint_cover(ui, covers, book, cover_rect);
+                            let drawn = paint_cover(ui, covers, book, cover_rect);
+                            if crate::library::missing::is_missing(book) {
+                                crate::ui::missing_ui::paint_missing(ui, drawn);
+                            }
                             let painter = ui.painter();
                             // Avancement de lecture enregistré par ComicRack.
                             if let Some(pct) = self.read_percent(book) {
@@ -764,6 +780,19 @@ impl ComicRustApp {
                                     &scripts_menu,
                                     &books,
                                     &mut script_request,
+                                );
+                                let any = if selected {
+                                    selection_missing
+                                } else {
+                                    crate::library::missing::is_missing(book)
+                                };
+                                crate::ui::missing_ui::missing_menu(
+                                    ui,
+                                    &missing_menu,
+                                    book,
+                                    &books,
+                                    any,
+                                    &mut missing_request,
                                 );
                             });
                             if resp.double_clicked() {
@@ -944,6 +973,9 @@ impl ComicRustApp {
         }
         if let Some(books) = info_request {
             self.open_info_editor(books);
+        }
+        if missing_request.is_some() {
+            self.missing_ui.pending = missing_request;
         }
     }
 }

@@ -211,6 +211,48 @@ fn liste_de_choix_description() {
     assert!(e.contains("base64"), "{e}");
 }
 
+/// v0.10.2 : présentation en fiches (par défaut avec des vignettes), taille des vignettes
+/// bornée ; champ texte avec « Coller » et indications ; largeur des libellés.
+#[test]
+fn fiches_coller_indications_et_libelles() {
+    let c = ChooseSpec::parse(&obj(json!({"rows": ["a"], "images": [b64(PNG)], "thumb_size": 900}))).unwrap();
+    assert_eq!(c.layout, ChooseLayout::Cards);
+    assert_eq!(c.thumb_size, MAX_THUMB_SIZE);
+    let c = ChooseSpec::parse(&obj(json!({"rows": ["a"]}))).unwrap();
+    assert_eq!((c.layout, c.thumb_size), (ChooseLayout::Table, 64.0));
+    let c = ChooseSpec::parse(&obj(json!({"rows": ["a"], "layout": "cards"}))).unwrap();
+    assert_eq!(c.layout, ChooseLayout::Cards);
+    let e = ChooseSpec::parse(&obj(json!({"rows": ["a"], "layout": "grille"}))).unwrap_err();
+    assert!(e.contains("layout"), "{e}");
+
+    let f = FormSpec::parse(&obj(json!({"label_width": 20, "controls": [
+        {"type": "text", "key": "lien", "paste": true, "hint_none": "inconnu",
+         "hints": [["(?i)/BD-[^/]*-\\d+\\.html$", "album"], ["(?i)serie-\\d+", "série"]]},
+        {"type": "secret", "key": "cle", "paste": true, "hints": [[".", "x"]]},
+        {"type": "textarea", "key": "notes", "paste": true},
+    ]}))).unwrap();
+    assert_eq!(f.label_width, Some(60.0), "bornée");
+    let ControlKind::Text { paste, hints, hint_none, .. } = &f.control("lien").unwrap().kind else { panic!() };
+    assert!(*paste);
+    assert_eq!(text_hint(hints, hint_none, " https://x/BD-Blacksad-21.html "), Some((true, "album")));
+    assert_eq!(text_hint(hints, hint_none, "serie-59-BD.html"), Some((true, "série")));
+    assert_eq!(text_hint(hints, hint_none, "autre"), Some((false, "inconnu")));
+    assert_eq!(text_hint(hints, hint_none, "  "), None);
+    assert_eq!(text_hint(&[], "", "autre"), None);
+    // Saisie masquée : « Coller » permis (clé d'API copiée d'une page), mais pas
+    // d'indication (rien ne doit révéler la forme du secret).
+    let ControlKind::Text { paste, hints, .. } = &f.control("cle").unwrap().kind else { panic!() };
+    assert!(*paste && hints.is_empty());
+    let ControlKind::Text { paste, .. } = &f.control("notes").unwrap().kind else { panic!() };
+    assert!(!*paste, "plusieurs lignes : pas de bouton");
+    assert!(FormSpec::parse(&obj(json!({"controls": []}))).unwrap().label_width.is_none());
+    let e = FormSpec::parse(&obj(json!({"controls": [{"type": "text", "key": "t", "hints": [["(", "x"]]}]})))
+        .unwrap_err();
+    assert!(e.contains("expression invalide"), "{e}");
+    let e = FormSpec::parse(&obj(json!({"controls": [{"type": "text", "key": "t", "hints": ["x"]}]}))).unwrap_err();
+    assert!(e.contains("paire"), "{e}");
+}
+
 #[test]
 fn base64_et_adresses() {
     assert_eq!(decode_base64(&b64(b"ComicRust!")).unwrap(), b"ComicRust!");

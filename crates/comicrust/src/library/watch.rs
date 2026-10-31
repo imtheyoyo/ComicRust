@@ -57,12 +57,18 @@ impl ListsSource {
 /// pour des modifications faites dans ComicRack (`Watcher::note_written`).
 pub type WrittenSink = Arc<Mutex<Vec<(String, i64)>>>;
 
+/// Livres que ComicRust va supprimer de la bibliothèque (« Retirer de la bibliothèque »),
+/// signalés **avant** la suppression (`Watcher::note_deleted`, `StoreWatcher::note_deleted`).
+pub type DeletedSink = Arc<Mutex<Vec<String>>>;
+
 /// Arrête le fil quand elle est libérée.
 pub struct WatchHandle {
     pub rx: Receiver<WatchEvent>,
     stop: Arc<AtomicBool>,
     /// Écritures de ComicRust à signaler (prises en compte avant chaque interrogation).
     pub written: WrittenSink,
+    /// Suppressions de ComicRust à signaler (idem).
+    pub deleted: DeletedSink,
 }
 
 impl Drop for WatchHandle {
@@ -110,6 +116,19 @@ impl DbWatch {
         }
     }
 
+    /// Suppressions faites par ComicRust (« Retirer de la bibliothèque »).
+    fn note_deleted(&mut self, sink: &DeletedSink) {
+        let deleted: Vec<String> = std::mem::take(&mut *sink.lock().unwrap());
+        if deleted.is_empty() {
+            return;
+        }
+        match self {
+            DbWatch::MySql(w) => w.note_deleted(deleted.iter().map(String::as_str)),
+            DbWatch::Store(w) => w.note_deleted(deleted.iter().map(String::as_str)),
+            DbWatch::Xml(..) => {}
+        }
+    }
+
     fn poll(&mut self) -> Result<Option<WatchEvent>, String> {
         match self {
             DbWatch::MySql(w) => w.poll().map(|c| c.map(WatchEvent::Db)).map_err(|e| e.to_string()),
@@ -144,6 +163,8 @@ pub fn spawn(
     let s = stop.clone();
     let written: WrittenSink = Default::default();
     let sink = written.clone();
+    let deleted: DeletedSink = Default::default();
+    let deleted_sink = deleted.clone();
     let ctx = ctx.clone();
     std::thread::Builder::new()
         .name("comicrust-surveillance".into())
@@ -204,6 +225,7 @@ pub fn spawn(
                 }
                 if let Some(w) = watcher.as_mut() {
                     w.note_written(&sink);
+                    w.note_deleted(&deleted_sink);
                 }
                 if let Some(w) = watcher.as_mut().filter(|_| now >= next_db) {
                     next_db = now + DB_INTERVAL;
@@ -235,5 +257,5 @@ pub fn spawn(
             }
         })
         .expect("fil de surveillance");
-    WatchHandle { rx, stop, written }
+    WatchHandle { rx, stop, written, deleted }
 }

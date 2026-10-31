@@ -377,7 +377,7 @@ fn trim_pages(b: &mut LibraryBook) {
     }
 }
 
-fn set_file_props(b: &mut LibraryBook, meta: &Metadata) {
+pub(crate) fn set_file_props(b: &mut LibraryBook, meta: &Metadata) {
     b.file_size = Some(meta.len());
     b.file_modified_time = meta.modified().ok().map(iso_time);
     b.file_creation_time = meta.created().ok().map(iso_time);

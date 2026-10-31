@@ -1,5 +1,5 @@
 //! Gestion des listes dans l'interface (v0.9.0) : commandes du panneau des listes (bouton
-//! « ＋ », menu contextuel, renommage, glisser-déposer), fenêtres de confirmation et de
+//! « ➕ », menu contextuel, renommage, glisser-déposer), fenêtres de confirmation et de
 //! propriétés, éditeur de listes intelligentes, et commandes des livres (« Ajouter à la
 //! liste ▸ », « Retirer de la liste », « Monter / Descendre »).
 //!
@@ -226,7 +226,7 @@ pub fn list_menu(ui: &mut Ui, l: &ComicList, nc: &mut NodeCtx) {
     if cmd(ui, &reason, true, "Renommer (F2)") {
         nc.acts.push(PanelAction::Rename(l.id.clone()));
     }
-    if cmd(ui, &reason, true, "⧉ Dupliquer") {
+    if cmd(ui, &reason, true, "⎘ Dupliquer") {
         nc.acts.push(PanelAction::Duplicate(l.id.clone()));
     }
     if cmd(ui, &reason, true, "🗑 Supprimer…") {

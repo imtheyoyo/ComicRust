@@ -337,6 +337,11 @@ pub struct ChooseState {
     pub current: Option<usize>,
     /// Validation automatique (option `timeout`) ; `None` dès que l'utilisateur agit.
     pub deadline: Option<Instant>,
+    /// Hauteur des vignettes choisie dans la fenêtre (curseur « Taille »), au départ
+    /// `thumb_size` du script.
+    pub zoom: f32,
+    /// Ligne à amener dans la partie visible (déplacement au clavier).
+    pub scroll_to: Option<usize>,
 }
 
 impl ChooseState {
@@ -356,7 +361,32 @@ impl ChooseState {
             sort: None,
             selected,
             deadline,
+            zoom: 0.0,
+            scroll_to: None,
         }
+        .with_zoom()
+    }
+
+    fn with_zoom(mut self) -> ChooseState {
+        self.zoom = self.spec.thumb_size;
+        self
+    }
+
+    /// Flèches du clavier (choix simple) : ligne affichée suivante (`delta` > 0) ou
+    /// précédente, bornée ; sans ligne choisie, la première (ou la dernière). La ligne est
+    /// choisie et sera amenée dans la partie visible.
+    pub fn step(&mut self, view: &[usize], delta: i32) {
+        if view.is_empty() || self.spec.multi {
+            return;
+        }
+        let pos = self.current.and_then(|c| view.iter().position(|&i| i == c));
+        let next = match pos {
+            None if delta >= 0 => 0,
+            None => view.len() - 1,
+            Some(p) => (p as i64 + delta as i64).clamp(0, view.len() as i64 - 1) as usize,
+        };
+        self.click(view[next]);
+        self.scroll_to = Some(view[next]);
     }
 
     /// Rangs des lignes affichées : filtre (tous les mots, sans casse, dans une cellule
@@ -576,6 +606,20 @@ mod tests {
         assert_eq!(st.view(), [2, 1, 0], "tri naturel : Hors-série, Tome 2, Tome 10");
         st.click(0);
         assert_eq!(st.picked(), [0]);
+
+        // Flèches : à partir de la ligne choisie, dans l'ordre affiché, bornées.
+        let view = st.view();
+        assert_eq!(view, [2, 1, 0]);
+        st.step(&view, 1);
+        assert_eq!((st.picked(), st.scroll_to), (vec![0], Some(0)), "déjà la dernière");
+        st.step(&view, -1);
+        assert_eq!(st.picked(), [1]);
+        st.step(&view, -5);
+        assert_eq!(st.picked(), [2]);
+        st.current = None;
+        st.step(&view, -1);
+        assert_eq!(st.picked(), [0], "sans ligne courante : la dernière");
+        assert_eq!(st.zoom, 64.0, "taille des vignettes par défaut");
 
         let m = ChooseSpec::parse(json!({"rows": ["a", "b"], "multi": true}).as_object().unwrap()).unwrap();
         let mut st = ChooseState::new(m, vec![]);

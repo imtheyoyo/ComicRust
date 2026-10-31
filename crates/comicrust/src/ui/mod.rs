@@ -2,12 +2,14 @@
 
 pub mod book_drag;
 mod files_window;
+pub mod fonts;
 pub mod info_editor;
 mod library_panels;
 mod library_table;
 mod library_view;
 pub mod list_panel;
 pub mod lists_ui;
+pub mod missing_ui;
 mod script_forms;
 pub mod scripts_ui;
 pub mod setup_window;

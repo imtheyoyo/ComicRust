@@ -476,3 +476,102 @@ fn mysql_write() {
     assert_eq!(report.missing, [DEMO_ID]);
     assert_eq!(counters(&mut conn), (1, 0));
 }
+
+/// Relocalisation d'un livre manquant (nouveau fichier, `Missing` retiré, lecture gardée)
+/// et suppression de fiches comme `ComicStorageBaseSql.Delete`, vues par une autre instance.
+#[test]
+fn mysql_relocate_and_delete() {
+    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
+        eprintln!("COMICRUST_TEST_MYSQL absent : test de suppression MySQL ignoré");
+        return;
+    };
+    let _lock = mysql_lock();
+    let cfg = DbConfig::from_connection_string(&url).unwrap();
+    let mut conn = connect(&cfg).unwrap();
+    conn.query_drop("DROP TABLE IF EXISTS comics").unwrap();
+    conn.query_drop("DROP TABLE IF EXISTS changes").unwrap();
+    conn.query_drop("Create table changes (id varchar(40) not null primary key, update_counter bigint default 0, delete_counter bigint default 0)").unwrap();
+    conn.query_drop(
+        "Create table comics (id varchar(40) not null primary key, update_counter bigint default 0, data mediumtext)",
+    )
+    .unwrap();
+    conn.exec_drop("Insert into changes values (?, 10, 3)", (STORAGE_GUID,)).unwrap();
+    // Fiche marquée manquante par ComicRack (`<Missing>` entre `FileSize` et `FileModifiedTime`).
+    let ce_missing = CE.replace("<FileSize>1234</FileSize>", "<FileSize>1234</FileSize><Missing>true</Missing>");
+    for (id, counter, data) in
+        [(DEMO_ID, 5, DEMO), (CE_ID, 10, ce_missing.as_str()), ("30815f16-abb9-4c38-8c24-ecae11e25b1b", 7, SAMPLE)]
+    {
+        conn.exec_drop("Insert into comics values (?, ?, ?)", (id, counter, data)).unwrap();
+    }
+    let mut mine = ComicDatabase::load(&cfg, None).unwrap();
+    assert_eq!(mine.get(CE_ID).unwrap().missing, Some(true), "<Missing> de ComicRack lu");
+    let mut w_mine = Watcher::new(cfg.clone(), &mine);
+    let mut other = ComicDatabase::load(&cfg, None).unwrap();
+    let mut w_other = Watcher::new(cfg.clone(), &other);
+
+    // « Retrouver le fichier… » : nouveau chemin, taille et date ; `Missing` retiré ;
+    // lecture, note et éléments inconnus gardés.
+    let f = FileState {
+        path: r"\\SERVEURNAS\BD\Rangés\Batman & Robin 01.cbr".into(),
+        size: 4321,
+        modified: Some(date("2026-10-30T10:00:00+01:00")),
+        created: None,
+        page_count: None,
+        pages: None,
+    };
+    let reloc = update_books(&cfg, &[BookEdit::new(CE_ID).file(&f).remove("Missing")]).unwrap();
+    assert_eq!(reloc.written.len(), 1, "{}", reloc.summary());
+    let (counter, data) = row(&mut conn, CE_ID);
+    assert_eq!(counter, 11);
+    assert!(data.contains(r#"File="\\SERVEURNAS\BD\Rangés\Batman &amp; Robin 01.cbr""#), "{data}");
+    assert!(!data.contains("<Missing>"));
+    for kept in ["<OpenCount>3</OpenCount>", "<CurrentPage>1</CurrentPage>", "<Rating>4</Rating>", "<MyExtra a=\"1\">"]
+    {
+        assert!(data.contains(kept), "{kept} gardé : {data}");
+    }
+    assert!(data.contains("<FileSize>4321</FileSize><FileModifiedTime>2026-10-30T09:00:00Z</FileModifiedTime>"));
+    let b = &reloc.written[0].book;
+    assert_eq!((b.missing, b.file_size, b.last_page_read), (None, Some(4321), Some(2)));
+    w_mine.note_report(&reloc);
+    mine.apply_written(&reloc);
+
+    // « Retirer de la bibliothèque… » : signalé avant, supprimé comme ComicRack.
+    let absent = "deadbeef-0000-0000-0000-000000000000".to_string();
+    w_mine.note_deleted([DEMO_ID]);
+    let report = delete_books(&cfg, &[DEMO_ID.to_uppercase(), absent.clone()]).unwrap();
+    assert_eq!(report.deleted, [DEMO_ID]);
+    assert_eq!(report.missing, [absent]);
+    assert!(report.failed.is_empty());
+    assert_eq!(report.delete_counter, Some(4));
+    assert_eq!(counters(&mut conn), (11, 4), "delete_counter + 1 par livre supprimé, update_counter inchangé");
+    let n: i64 = conn.query_first("SELECT COUNT(*) FROM comics").unwrap().unwrap();
+    assert_eq!(n, 2);
+    assert_eq!(mine.remove(&report.deleted), 1);
+    assert!(mine.get(DEMO_ID).is_none() && mine.get(CE_ID).is_some());
+
+    // Notre propre surveillance ne voit ni la relocalisation ni la suppression…
+    assert!(w_mine.poll().unwrap().is_none(), "suppression faite par nous : pas une modification extérieure");
+    assert!(w_mine.full_check().unwrap().is_none());
+    // … l'autre instance voit les deux.
+    let ch = w_other.poll().unwrap().expect("l'autre instance voit les changements");
+    let applied = other.apply(ch);
+    assert_eq!((applied.modified, applied.removed), (1, 1));
+    assert!(other.get(DEMO_ID).is_none());
+    assert_eq!(other.get(CE_ID).unwrap().file_size, Some(4321));
+    // ComicRack (`Refresh`) : `lastDelete < ReadDeleteCounter()` → relit les identifiants.
+    let ids: Vec<String> = conn.query("Select id from comics").unwrap();
+    assert!(!ids.iter().any(|i| i.eq_ignore_ascii_case(DEMO_ID)));
+
+    // Suppression extérieure (ComicRack) : bien vue par notre surveillance.
+    conn.exec_drop("Delete from comics where id=?", (CE_ID,)).unwrap();
+    conn.exec_drop("Update changes set delete_counter=? where id=?", (5, STORAGE_GUID)).unwrap();
+    let ch = w_mine.poll().unwrap().expect("suppression faite par ComicRack");
+    assert_eq!(mine.apply(ch).removed, 1);
+
+    // Sans ligne dans `changes` : créée comme le fait WriteCounter.
+    conn.query_drop("DELETE FROM changes").unwrap();
+    let report = delete_books(&cfg, &["30815f16-abb9-4c38-8c24-ecae11e25b1b".to_string()]).unwrap();
+    assert_eq!(report.delete_counter, Some(1));
+    assert_eq!(counters(&mut conn), (0, 1));
+    assert!(delete_books(&cfg, &[]).unwrap().deleted.is_empty());
+}

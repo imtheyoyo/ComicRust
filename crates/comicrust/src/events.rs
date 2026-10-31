@@ -58,6 +58,7 @@ impl ComicRustApp {
             self.cr_writes.library_loaded();
             self.library.apply_info_written(&mut self.settings.info_written);
             self.restart_watch(ctx);
+            self.missing_after_load(ctx);
             if std::mem::take(&mut self.scan_after_load) {
                 self.start_scan(ctx, false);
             }
@@ -65,6 +66,7 @@ impl ComicRustApp {
         }
         self.poll_scan();
         self.poll_files();
+        self.poll_missing(ctx);
         self.poll_comicrack_writes(ctx);
         self.poll_scripts(ctx);
         let errs: Vec<String> = std::mem::take(&mut *self.bg_errors.lock().unwrap());
