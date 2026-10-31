@@ -49,7 +49,7 @@ __all__ = [
     "form", "choose", "ui", "open_url", "clipboard_set",
 ]
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 # Taille maximale d'une image envoyée à l'interface (formulaire, liste de choix,
 # progression) et taille cumulée des images d'une fenêtre.
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
@@ -187,6 +187,7 @@ class _Session:
         self.cache = {}
         self.pending = []
         self.book_list = None
+        self.library_list = None
         st = run.get("settings") or {}
         self.settings = Settings(st.get("values") or {}, st.get("secret") or [])
 
@@ -369,8 +370,9 @@ class BookList:
     coûte que ce qui est parcouru). Se comporte comme une liste en lecture : ``len()``,
     ``books[i]``, ``for book in books``."""
 
-    def __init__(self, ids):
+    def __init__(self, ids, method="books"):
         self._ids = list(ids)
+        self._method = method
 
     def __len__(self):
         return len(self._ids)
@@ -379,7 +381,7 @@ class BookList:
         s = _session()
         chunk = [i for i in self._ids[start:start + BATCH] if i not in s.cache]
         if chunk:
-            for d in s.ch.request("books", ids=chunk) or []:
+            for d in s.ch.request(self._method, ids=chunk) or []:
                 b = Book(d)
                 s.cache[b.id] = b
 
@@ -418,6 +420,33 @@ def books():
     if s.book_list is None:
         s.book_list = BookList(s.ids)
     return s.book_list
+
+
+def library_books():
+    """**Toute** la bibliothèque, en lecture seule, lue par lots à la demande comme
+    :func:`books` (pour des calculs sur une série entière, des doublons…). Les livres du
+    contexte y sont les mêmes objets que dans :func:`books`. Modifier un livre hors du
+    contexte est refusé par ComicRust (modification rejetée, signalée au journal).
+
+    Lève :class:`ScriptError` si ComicRust ne peut pas fournir la bibliothèque."""
+    s = _session()
+    if s.library_list is None:
+        s.library_list = BookList(s.ch.request("library_ids") or [], method="library_books")
+    return s.library_list
+
+
+def in_context(book):
+    """Vrai si le livre fait partie du contexte du script (modifiable)."""
+    return _book_id(book) in _session().id_set
+
+
+def applied_renames():
+    """Bilan des renommages **réellement appliqués** lors de la dernière application d'une
+    exécution d'un script de ce fichier (aperçu puis « Appliquer » dans ComicRust), ou
+    ``None`` : ``{"script", "entry", "function", "date", "renames": [{"book", "from",
+    "to"}]}``. Seuls les renommages réussis y figurent ; ComicRust remplace le bilan à
+    chaque application qui renomme au moins un fichier."""
+    return _session().ch.request("applied_renames")
 
 
 def book():
@@ -587,6 +616,14 @@ def _choices(choices):
     return out
 
 
+def _inserts(inserts):
+    """Menu « Insérer » : choix (comme :func:`_choices`), ou dictionnaire
+    ``{"Groupe": [choix…]}`` (un sous-ensemble titré par groupe, dans l'ordre)."""
+    if isinstance(inserts, dict) and inserts and all(isinstance(v, (list, tuple)) for v in inserts.values()):
+        return [{"group": str(g), "items": _choices(v)} for g, v in inserts.items()]
+    return _choices(inserts)
+
+
 def _ctl(type_, key=None, label=None, help=None, enabled_if=None, width=None, **extra):
     c = {"type": type_}
     for k, v in (("key", key), ("label", label), ("help", help), ("enabled_if", enabled_if), ("width", width)):
@@ -611,16 +648,17 @@ class ui:
     def text(key, label="", default="", help=None, placeholder=None, required=False, enabled_if=None,
              width=None, inserts=None):
         """Texte d'une ligne. ``inserts`` : morceaux à insérer par un menu « Insérer »
-        (textes ou paires ``(texte_inséré, libellé)``, ex. ``("{series}", "Série")``)."""
+        (textes ou paires ``(texte_inséré, libellé)``, ex. ``("{series}", "Série")``), ou
+        dictionnaire ``{"Groupe": [morceaux…]}`` : menu par groupes, avec un filtre."""
         return _ctl("text", key, label, help, enabled_if, width, default=str(default or ""),
-                    placeholder=placeholder, required=bool(required) or None, inserts=_choices(inserts) or None)
+                    placeholder=placeholder, required=bool(required) or None, inserts=_inserts(inserts) or None)
 
     @staticmethod
     def textarea(key, label="", default="", rows=4, help=None, placeholder=None, required=False,
                  enabled_if=None, width=None, inserts=None):
         """Texte de plusieurs lignes."""
         return _ctl("textarea", key, label, help, enabled_if, width, default=str(default or ""), rows=rows,
-                    placeholder=placeholder, required=bool(required) or None, inserts=_choices(inserts) or None)
+                    placeholder=placeholder, required=bool(required) or None, inserts=_inserts(inserts) or None)
 
     @staticmethod
     def secret(key, label="", default=None, help=None, enabled_if=None, width=None):

@@ -143,6 +143,11 @@ struct TestHost {
     urls: Mutex<Vec<String>>,
     clipboard: Mutex<Vec<String>>,
     details: Mutex<Vec<ProgressDetails>>,
+    /// Toute la bibliothèque (`library_ids`) ; `None` : non prise en charge.
+    library: Option<Vec<String>>,
+    /// Bilan rendu à `applied_renames` (clé des réglages reçue notée).
+    applied: Value,
+    applied_keys: Mutex<Vec<String>>,
 }
 
 impl ScriptHost for TestHost {
@@ -200,6 +205,13 @@ impl ScriptHost for TestHost {
     fn clipboard_set(&self, text: &str) -> bool {
         self.clipboard.lock().unwrap().push(text.into());
         true
+    }
+    fn library_ids(&self) -> Option<Vec<String>> {
+        self.library.clone()
+    }
+    fn applied_renames(&self, settings_key: &str) -> Value {
+        self.applied_keys.lock().unwrap().push(settings_key.into());
+        self.applied.clone()
     }
 }
 
@@ -335,6 +347,72 @@ def nettoyer(books):
     assert!(!r.applied_live);
     assert!(host.live.lock().unwrap().is_empty());
     assert_eq!(host.progress.lock().unwrap().len(), 5);
+}
+
+/// Toute la bibliothèque en lecture seule (`library_books`, protocole 3) : lue par lots,
+/// mêmes objets que `books()` pour le contexte ; modifications hors contexte refusées.
+#[test]
+fn bibliotheque_entiere_en_lecture_seule() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let mut host = library(1200);
+    let mut all: Vec<String> = host.books.keys().cloned().collect();
+    all.sort();
+    host.library = Some(all);
+    host.applied = json!({"entry": "x", "renames": []});
+    let host = Arc::new(host);
+    let code = r#"
+import comicrust
+def f(books):
+    premier = books[0]
+    lib = comicrust.library_books()
+    assert lib is comicrust.library_books()
+    assert len(lib) == 1200 and len(books) == 2
+    par_id = {b.id: b for b in lib}
+    assert par_id["id-0"] is premier, "mêmes objets"
+    assert comicrust.in_context(books[1]) and not comicrust.in_context(par_id["id-500"])
+    annees = sorted({b.year for b in lib})
+    print("années", annees[0], annees[-1])
+    par_id["id-500"].series = "Hors contexte"
+    books[0].series = "Dans le contexte"
+    try:
+        comicrust._session().ch.request("library_books", ids=["inconnu"])
+    except comicrust.ScriptError as e:
+        print("refus :", e)
+    return comicrust.applied_renames()
+"#;
+    let r = fx.run(code, "f", RunContext::new(Hook::Books, ids(2)), host.clone());
+    assert_eq!(r.state, RunState::Finished, "{:?}\n{}", r.failure, r.journal_text());
+    let text = r.journal_text();
+    assert!(text.contains("années 2000 2019"), "{text}");
+    assert!(text.contains("refus : livre inconnu absent de la bibliothèque"), "{text}");
+    assert_eq!(
+        r.changes,
+        vec![ScriptChange::SetField {
+            book_id: "id-0".into(),
+            field: "Series".into(),
+            value: json!("Dans le contexte")
+        }]
+    );
+    assert_eq!(r.rejected.len(), 1);
+    assert!(r.rejected[0].reason.contains("hors du contexte"));
+    // Contexte (2 livres) puis 1 200 livres par lots de 500 (contexte déjà en cache).
+    assert_eq!(*host.book_requests.lock().unwrap(), 1 + 3);
+    assert_eq!(r.return_value, json!({"entry": "x", "renames": []}));
+    assert_eq!(host.applied_keys.lock().unwrap().len(), 1);
+
+    // Hôte sans bibliothèque : erreur claire, que le script peut intercepter.
+    let host = Arc::new(library(3));
+    let code = r#"
+import comicrust
+def f(books):
+    try:
+        comicrust.library_books()
+    except comicrust.ScriptError as e:
+        return str(e)
+"#;
+    let r = fx.run(code, "f", RunContext::new(Hook::Books, ids(1)), host);
+    assert_eq!(r.return_value, json!("lecture de toute la bibliothèque non prise en charge ici"));
 }
 
 #[test]

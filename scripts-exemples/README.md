@@ -55,7 +55,11 @@ de l'original. Différences imposées par ComicRust :
   supprimés) ;
 - année/mois de début, dernier numéro… : calculés sur les livres transmis (lancer depuis
   le menu « bibliothèque » pour tenir compte de toute la bibliothèque) ;
-- journal (10 derniers), fichier d'annulation : `data\library_organizer\`.
+- journal (10 derniers), rangement demandé, dossiers vides : `data\library_organizer\` ;
+  l'annulation part du bilan des renommages réellement appliqués écrit par ComicRust
+  (`data\renommages\`) ;
+- valeurs calculées sur la série (année de début, dernier numéro…) : sur toute la
+  bibliothèque, comme l'original.
 
 ## Modules partagés
 

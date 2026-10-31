@@ -315,6 +315,21 @@ pub trait ScriptHost: Send + Sync {
         Err("réglages non pris en charge".into())
     }
 
+    /// Identifiants de **toute** la bibliothèque (`comicrust.library_books()`, protocole 3),
+    /// dans l'ordre de la bibliothèque ; `None` = lecture de la bibliothèque non prise en
+    /// charge (le script reçoit une erreur). Les fiches sont ensuite lues par lots avec
+    /// [`books`](ScriptHost::books), qui doit donc accepter tout livre de la bibliothèque.
+    fn library_ids(&self) -> Option<Vec<String>> {
+        None
+    }
+
+    /// Bilan des renommages **réellement appliqués** lors de la dernière application d'une
+    /// exécution de ce script (`comicrust.applied_renames()`, protocole 3), au format de
+    /// [`AppliedRenames`](super::AppliedRenames) ; `Null` si aucun.
+    fn applied_renames(&self, _settings_key: &str) -> Value {
+        Value::Null
+    }
+
     /// Applique tout de suite des modifications (contexte « au fil de l'eau » : automatismes).
     fn apply_live(&self, _changes: &[ScriptChange]) -> Result<(), String> {
         Err("application immédiate non prise en charge".into())
@@ -543,6 +558,16 @@ enum Ev {
 }
 
 /// Lit une ligne d'au plus `max` octets. `Ok(None)` en fin de flux.
+/// Liste « ids » d'une demande de livres.
+fn id_list(p: &Map<String, Value>) -> Result<Vec<String>, String> {
+    p.get("ids")
+        .and_then(Value::as_array)
+        .ok_or("liste « ids » attendue")?
+        .iter()
+        .map(|v| v.as_str().map(str::to_string).ok_or_else(|| "identifiant non textuel".to_string()))
+        .collect()
+}
+
 fn read_line_bounded<R: BufRead>(r: &mut R, max: usize, buf: &mut Vec<u8>) -> std::io::Result<Option<bool>> {
     buf.clear();
     loop {
@@ -630,6 +655,9 @@ struct Session {
     host: Arc<dyn ScriptHost>,
     opts: RunOptions,
     allowed: HashSet<String>,
+    /// Identifiants de toute la bibliothèque (`library_ids`, lus une fois à la première
+    /// demande) : lecture seule, les modifications restent limitées à `allowed`.
+    library: Option<(Vec<String>, HashSet<String>)>,
     stdin: Option<ChildStdin>,
     journal: Arc<Mutex<Journal>>,
     changes: Vec<ScriptChange>,
@@ -760,6 +788,7 @@ fn run_inner(
         host,
         opts,
         allowed,
+        library: None,
         stdin,
         journal: journal.clone(),
         changes: Vec::new(),
@@ -1062,13 +1091,7 @@ impl Session {
     fn request(&mut self, method: &str, p: &Map<String, Value>) -> Result<Value, String> {
         match method {
             "books" => {
-                let ids: Vec<String> = p
-                    .get("ids")
-                    .and_then(Value::as_array)
-                    .ok_or("liste « ids » attendue")?
-                    .iter()
-                    .map(|v| v.as_str().map(str::to_string).ok_or("identifiant non textuel"))
-                    .collect::<Result<_, _>>()?;
+                let ids = id_list(p)?;
                 if ids.len() > MAX_BOOKS_PER_REQUEST {
                     return Err(format!("au plus {MAX_BOOKS_PER_REQUEST} livres par demande"));
                 }
@@ -1077,6 +1100,20 @@ impl Session {
                 }
                 Ok(Value::Array(self.host.books(&ids)))
             }
+            "library_ids" => Ok(json!(self.library_ids()?.0)),
+            "library_books" => {
+                let ids = id_list(p)?;
+                if ids.len() > MAX_BOOKS_PER_REQUEST {
+                    return Err(format!("au plus {MAX_BOOKS_PER_REQUEST} livres par demande"));
+                }
+                self.library_ids()?;
+                let library = &self.library.as_ref().expect("identifiants lus").1;
+                if let Some(bad) = ids.iter().find(|id| !library.contains(*id) && !self.allowed.contains(*id)) {
+                    return Err(format!("livre {bad} absent de la bibliothèque"));
+                }
+                Ok(Value::Array(self.host.books(&ids)))
+            }
+            "applied_renames" => Ok(self.host.applied_renames(&self.entry.settings_key())),
             "ask" => {
                 let kind = match p.get("kind").and_then(Value::as_str).unwrap_or("text") {
                     "choice" => QuestionKind::Choice,
@@ -1177,6 +1214,16 @@ impl Session {
             }
             other => Err(format!("demande inconnue « {other} »")),
         }
+    }
+
+    /// Identifiants de toute la bibliothèque (demandés une fois à l'hôte, dans son ordre).
+    fn library_ids(&mut self) -> Result<&(Vec<String>, HashSet<String>), String> {
+        if self.library.is_none() {
+            let ids = self.host.library_ids().ok_or("lecture de toute la bibliothèque non prise en charge ici")?;
+            let set = ids.iter().cloned().collect();
+            self.library = Some((ids, set));
+        }
+        Ok(self.library.as_ref().expect("identifiants lus"))
     }
 
     fn changes(&mut self, p: &Map<String, Value>) -> Result<Value, String> {

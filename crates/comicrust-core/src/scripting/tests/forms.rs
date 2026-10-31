@@ -222,6 +222,37 @@ fn base64_et_adresses() {
     }
 }
 
+/// Menu « Insérer » : choix simples (groupe sans titre) et groupes, filtre.
+#[test]
+fn inserts_par_groupes_et_filtre() {
+    let f = FormSpec::parse(&obj(json!({"title": "T", "controls": [
+        {"type": "text", "key": "m", "inserts": [
+            ["{a}", "Avant"],
+            {"group": "Texte", "items": [["{series}", "Série"], "{title}"]},
+            {"group": "Nombres", "items": [["{number}", "Numéro"], ["{count}", "Nombre de numéros"]]},
+            {"group": "Vide", "items": []},
+        ]},
+    ]})))
+    .unwrap();
+    let ControlKind::Text { inserts, .. } = &f.control("m").unwrap().kind else { panic!() };
+    let titres: Vec<&str> = inserts.iter().map(|g| g.title.as_str()).collect();
+    assert_eq!(titres, ["", "Texte", "Nombres"], "groupe vide retiré");
+    assert_eq!(inserts[1].items[1].label, "{title}");
+    let tout = filter_inserts(inserts, "");
+    assert_eq!(tout.iter().map(|(_, i)| i.len()).sum::<usize>(), 5);
+    // Par libellé ou par texte inséré, casse ignorée ; groupes sans résultat retirés.
+    let n = filter_inserts(inserts, "NUM");
+    assert_eq!(n.len(), 1);
+    assert_eq!(n[0].0, "Nombres");
+    assert_eq!(n[0].1.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Numéro", "Nombre de numéros"]);
+    assert_eq!(filter_inserts(inserts, "{series")[0].1[0].label, "Série");
+    assert!(filter_inserts(inserts, "zzz").is_empty());
+    // Groupe illisible.
+    let e = FormSpec::parse(&obj(json!({"title": "T", "controls": [
+        {"type": "text", "key": "m", "inserts": [{"group": "G", "items": [[{"x": 1}, "y"]]}]}]})));
+    assert!(e.is_err());
+}
+
 // ---------------------------------------------------------------------------------------
 // Avec python3
 // ---------------------------------------------------------------------------------------
@@ -237,6 +268,7 @@ def formulaire(books):
         ui.tabs({
             "Général": [
                 ui.text("nom", "Nom", "défaut", required=True, inserts=[("{series}", "Série")]),
+                ui.text("modele", "Modèle", inserts={"Texte": [("{series}", "Série")], "Nombres": ["{number}"]}),
                 ui.checkbox("debug", "Journal"),
                 ui.number("max", "Max", 5, min=1, max=10, enabled_if="debug"),
                 ui.secret("cle", "Clé d'API", default="ANCIENNE"),
@@ -348,8 +380,12 @@ fn formulaire_avec_python() {
     assert!(matches!(&cle.kind, ControlKind::Text { secret: true, default, .. } if default.is_empty()));
     assert_eq!(f.images().len(), 1);
     assert!(
-        matches!(&f.control("nom").unwrap().kind, ControlKind::Text { inserts, .. } if inserts[0].label == "Série")
+        matches!(&f.control("nom").unwrap().kind, ControlKind::Text { inserts, .. } if inserts[0].items[0].label == "Série")
     );
+    // `inserts` en dictionnaire {groupe: [...]} : groupes dans l'ordre du script.
+    let ControlKind::Text { inserts, .. } = &f.control("modele").unwrap().kind else { panic!() };
+    assert_eq!(inserts.iter().map(|g| g.title.as_str()).collect::<Vec<_>>(), ["Texte", "Nombres"]);
+    assert_eq!(inserts[1].items[0].label, "{number}");
 }
 
 #[test]

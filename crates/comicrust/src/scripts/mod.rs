@@ -140,6 +140,8 @@ pub struct ScriptRun {
     /// Modifications abandonnées par l'utilisateur.
     pub discarded: bool,
     pub stopping: bool,
+    /// Dossier des bilans de renommages appliqués ([`host::record_applied_renames`]).
+    renames_dir: PathBuf,
 }
 
 impl ScriptRun {
@@ -271,6 +273,19 @@ impl ScriptRun {
         let rx = self.applying.as_ref()?;
         let outcome = rx.try_recv().ok()?;
         self.applying = None;
+        // Bilan des renommages réellement faits, relu par le script à l'exécution suivante
+        // (annulation d'un rangement : `comicrust.applied_renames()`).
+        match host::record_applied_renames(&self.renames_dir, &self.entry, &outcome) {
+            Ok(Some(f)) => self.journal.push(JournalLine {
+                kind: JournalKind::Info,
+                text: format!("Bilan des renommages appliqués : {}", f.display()),
+            }),
+            Ok(None) => {}
+            Err(e) => self.journal.push(JournalLine {
+                kind: JournalKind::Warning,
+                text: format!("Bilan des renommages appliqués non enregistré : {e}"),
+            }),
+        }
         Some(outcome)
     }
 
@@ -373,6 +388,8 @@ pub struct ScriptsState {
     /// Livres dont les infos sont à écrire dans le fichier dès que le travail « Fichiers »
     /// en cours sera fini (`true` : montrer la fenêtre du travail).
     pub pending_write_info: Vec<(String, bool)>,
+    /// `data\renommages\` : bilans des renommages appliqués des scripts.
+    pub renames_dir: PathBuf,
 }
 
 impl ScriptsState {
@@ -392,6 +409,7 @@ impl ScriptsState {
             startup_done: false,
             warned: HashSet::new(),
             pending_write_info: Vec::new(),
+            renames_dir: crate::paths::exe_dir().join("data").join("renommages"),
         };
         s.reload();
         s
@@ -460,7 +478,8 @@ impl ScriptsState {
             self.stored.clone(),
             self.settings_dirty.clone(),
             None,
-        );
+        )
+        .with_renames_dir(self.renames_dir.clone());
         let mut context = RunContext::new(hook, book_ids);
         context.interactive = true;
         context.live = false;
@@ -493,6 +512,7 @@ impl ScriptsState {
             report: None,
             discarded: false,
             stopping: false,
+            renames_dir: self.renames_dir.clone(),
         });
         Ok(())
     }
@@ -569,7 +589,8 @@ impl ScriptsState {
                 self.stored.clone(),
                 self.settings_dirty.clone(),
                 Some(live),
-            );
+            )
+            .with_renames_dir(self.renames_dir.clone());
             let context = RunContext::new(job.hook, job.book_ids.clone());
             self.auto_log(format!(
                 "« {} » ({}) lancé{}",

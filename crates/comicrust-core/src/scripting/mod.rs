@@ -36,6 +36,7 @@
 //! Voir [`find_python`] : `COMICRUST_PYTHON`, puis `python\python.exe` à côté de
 //! l'exécutable (Python embarqué du zip Windows), puis, hors Windows, `python3` du système.
 
+mod applied;
 mod discover;
 pub mod forms;
 pub mod protocol;
@@ -44,6 +45,7 @@ mod runner;
 #[cfg(test)]
 mod tests;
 
+pub use applied::{AppliedRename, AppliedRenames};
 pub use discover::{discover, discover_with_warnings, entries_for_hook, parse_script, DiscoveryWarning, ScriptEntry};
 pub use forms::{ChooseSpec, FormAnswer, FormSpec, ProgressDetails};
 pub use runner::{
@@ -59,8 +61,14 @@ pub const PYTHON_MODULE: &str = include_str!("comicrust.py");
 
 /// Version du protocole échangée au démarrage (`hello` du script). 2 (v0.10.1) :
 /// formulaires (`form`), listes de choix avec vignettes (`choose`), `open_url`,
-/// `clipboard_set`, sous-texte et image de la progression.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// `clipboard_set`, sous-texte et image de la progression. 3 (v0.10.1, après relecture) :
+/// lecture seule de toute la bibliothèque (`library_ids`, `library_books`) et bilan des
+/// renommages appliqués (`applied_renames`).
+///
+/// Le module Python est écrit par ComicRust à chaque lancement (même version que
+/// l'exécutable) : un écart signale un autre `comicrust.py` importé à sa place, refusé
+/// des deux côtés avec un message clair (voir `runner`).
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Moments où ComicRust appelle un script (en-tête `#@Hook`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]

@@ -46,6 +46,7 @@ Modifications par rapport à l'original :
 """
 
 import glob
+import json
 import os
 import re
 import time
@@ -59,6 +60,9 @@ import library_organizer_moteur as lo
 TITRE = "Library Organizer %s (ComicRust)" % lo.VERSION_ORIGINALE
 NOM_DEFAUT = "Défaut"
 NB_JOURNAUX = 10
+# Déplacements demandés par le dernier rangement (profils), relus par l'annulation.
+FICHIER_DEMANDE = "rangement_demande.json"
+CLE_ANNULER = "library-organizer-annuler"
 
 
 # ---------------------------------------------------------------------------------------
@@ -94,7 +98,7 @@ def enregistrer(profils, derniers):
 
 
 def dossier_donnees():
-    """Dossier du journal, du fichier d'annulation et de la liste des dossiers vides :
+    """Dossier du journal, du rangement demandé et de la liste des dossiers vides :
     réglage « Dossier du journal », sinon ``data\\library_organizer`` à côté de
     ComicRust.exe (le module comicrust est dans ``data\\python``) : ComicRust reste
     portable."""
@@ -129,6 +133,38 @@ def _lire(nom):
 
 def _livres(books):
     return [lo.Livre(b.to_dict(), b) for b in books]
+
+
+def _bibliotheque(livres):
+    """Toute la bibliothèque, pour les valeurs calculées sur une série entière (année et
+    mois de début, de fin, premier et dernier numéro, ``<number0>``, valeurs « series » des
+    champs multiples) et la recherche des doublons, comme ``locommon.get_earliest_book`` /
+    ``get_last_book`` de l'original (``ComicRack.App.GetLibraryBooks()``).
+
+    Rend une fonction qui lit la bibliothèque **à la première demande** seulement (lecture
+    seule, par lots : ``comicrust.library_books()``) puis la garde ; les livres traités
+    (``livres``) y sont les mêmes objets. Sans accès à la bibliothèque : les livres traités
+    seulement (signalé au journal)."""
+    cache = []
+
+    def charger():
+        if cache:
+            return cache[0]
+        par_id = {l.id: l for l in livres}
+        try:
+            tous = []
+            for b in comicrust.library_books():
+                l = par_id.pop(b.id, None)
+                tous.append(l if l is not None else lo.Livre(b.to_dict(), b))
+            tous.extend(par_id.values())
+        except comicrust.ScriptError as ex:
+            comicrust.log("Bibliothèque non lue (%s) : valeurs de série calculées sur les livres traités "
+                          "seulement." % ex, level="warning")
+            tous = list(livres)
+        cache.append(tous)
+        return tous
+
+    return charger
 
 
 # ---------------------------------------------------------------------------------------
@@ -343,12 +379,17 @@ def executer(books, profils, noms):
     interface = InterfaceComicRust(comicrust.interactive())
     mover = lo.BookMover(logger, interface,
                          renommer=lambda livre, chemin: comicrust.rename_file(livre.objet, chemin),
-                         tous_les_livres=livres, annule=comicrust.cancelled,
+                         tous_les_livres=_bibliotheque(livres), annule=comicrust.cancelled,
                          progression=lambda f, t: comicrust.progress(f, "Library Organizer", t))
     entete = mover.process_books(livres, utilises)
     comicrust.progress(1.0, "Library Organizer")
     if len(mover.undo_collection):
-        _ecrire("annulation.dat", mover.undo_collection.texte())
+        # Rangement *demandé* (profil de chaque déplacement) : l'annulation part du bilan
+        # des renommages *appliqués* écrit par ComicRust après « Appliquer »
+        # (comicrust.applied_renames()) et n'y prend que le nom des profils.
+        _ecrire(FICHIER_DEMANDE, json.dumps({"date": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                             "entrees": mover.undo_collection.to_json()},
+                                            ensure_ascii=False, indent=1))
     vides = lo.dossiers_qui_seront_vides(mover.deplacements, mover.dossiers_retirer)
     return _terminer(logger, entete, entete_sup, vides, mover.failed_or_skipped,
                      any(p.Mode != lo.Mode.Move for p in utilises),
@@ -360,7 +401,7 @@ def _terminer(logger, entete, entete_sup, vides, echecs, simulation, resultat):
     """Journal, dossiers vides, rapport final."""
     if vides:
         anciens = [x for x in (_lire("dossiers_vides.txt") or "").splitlines() if x.strip()]
-        _ecrire("dossiers_vides.txt", "\n".join(dict.fromkeys(anciens + vides)) + "\n")
+        _ecrire("dossiers_vides.txt", "\n".join(lo.nettoyer_liste_dossiers(anciens + vides)) + "\n")
         texte = ("Dossiers qui seront vides une fois les déplacements appliqués (%d) : ComicRust ne "
                  "supprime pas de dossier pendant l'application ; lancez ensuite « Library Organizer – "
                  "supprimer les dossiers vides ».\n  " % len(vides)) + "\n  ".join(vides)
@@ -549,8 +590,26 @@ def inserts(profil, livres, dossier):
         ("{texte<!series(!^expression)>}", "Inversé : texte si Série ne correspond pas à l'expression"),
     ]
     if dossier:
-        out.insert(0, ("\\", "Séparateur de dossier « \\ »"))
-    return out
+        out.insert(0, ("\\", "Dossiers : séparateur de dossier « \\ »"))
+    return grouper_inserts(out)
+
+
+# Groupes du menu « Insérer ▾ » (catégories de jetons de l'original, onglets de la
+# fenêtre d'insertion), dans l'ordre d'affichage.
+GROUPES_JETONS = {"Conditionnel": "Conditions", "Inversé": "Conditions", "Multiples": "Valeurs multiples"}
+
+
+def grouper_inserts(morceaux):
+    """[(jeton, « Catégorie : libellé »)] → {catégorie: [(jeton, libellé)]} (menu par
+    groupes de ComicRust, avec filtre) ; l'ordre des catégories est celui des morceaux."""
+    groupes = {}
+    for jeton, libelle in morceaux:
+        cat, sep, reste = libelle.partition(" : ")
+        if not sep:
+            cat, reste = "Divers", libelle
+        groupe = GROUPES_JETONS.get(cat, cat)
+        groupes.setdefault(groupe, []).append((jeton, libelle if groupe == "Conditions" else reste))
+    return groupes
 
 
 # --- profil ↔ valeurs du formulaire ---
@@ -752,13 +811,14 @@ def verifier(v):
     return erreurs
 
 
-def apercu(profil, livres, n, interactive=False):
+def apercu(profil, livres, n, interactive=False, bibliotheque=None):
     """(dossier, fichier) calculés pour le livre n° ``n`` (1 = premier), comme les zones
-    « Aperçu » de l'original ; None sans livre."""
+    « Aperçu » de l'original ; None sans livre. ``bibliotheque`` : fonction rendant toute la
+    bibliothèque (:func:`_bibliotheque`) pour les valeurs calculées sur la série."""
     if not livres:
         return None
     livre = livres[max(1, min(int(n or 1), len(livres))) - 1]
-    calculs = lo.Calculs(livres)
+    calculs = lo.Calculs(bibliotheque or livres)
     if not (lo.check_excluded_folders(livre.FilePath, profil)
             and lo.check_metadata_rules(livre, profil, calculs)):
         return livre.FileDirectory, livre.FileNameWithExtension + "   (livre exclu par les règles)"
@@ -994,6 +1054,7 @@ def configurer(books):
     s = comicrust.settings()
     globaux = {"dossier_journal": s.get("dossier_journal") or ""}
     livres = _livres(books) if books else []
+    bibliotheque = _bibliotheque(livres)
     n_apercu = 1
     valeurs = None
     message = None
@@ -1007,7 +1068,7 @@ def configurer(books):
         valeurs["livre_apercu"] = n_apercu
         if texte_apercu is None and livres:
             temp = profil_depuis_valeurs(p.duplicate(), valeurs)
-            texte_apercu = apercu(temp, livres, n_apercu)
+            texte_apercu = apercu(temp, livres, n_apercu, bibliotheque=bibliotheque)
         noms = sorted(travail)
         r = comicrust.form(TITRE, formulaire(p, noms, livres, n_apercu, globaux,
                                              inserts(p, livres, False), inserts(p, livres, True), texte_apercu),
@@ -1084,7 +1145,8 @@ def configurer(books):
                                 bouton == "exporter_tout")
         elif bouton == "apercu":
             if livres:
-                texte_apercu = apercu(travail[courant], livres, n_apercu, interactive=True)
+                texte_apercu = apercu(travail[courant], livres, n_apercu, interactive=True,
+                                      bibliotheque=bibliotheque)
 
 
 def _importer(depuis_comicrack, travail, courant, derniers):
@@ -1209,14 +1271,23 @@ def reglages():
 #@Description Remet à leur ancien emplacement les livres du dernier rangement (déplacements
 #@Description proposés dans l'aperçu).
 def annuler(books):
-    texte = _lire("annulation.dat")
-    if not texte:
-        comicrust.message("Rien à annuler.")
+    # Seuls les renommages réellement appliqués comptent (bilan écrit par ComicRust après
+    # « Appliquer ») : un aperçu abandonné ou un renommage refusé n'est jamais « annulé ».
+    bilan = comicrust.applied_renames()
+    if not bilan or not bilan.get("renames"):
+        comicrust.message("Rien à annuler : aucun rangement appliqué n'est connu (un rangement n'est "
+                          "enregistré qu'une fois ses déplacements appliqués dans ComicRust).")
         return None
-    undo = lo.UndoCollection.depuis_texte(texte)
-    if not len(undo):
-        comicrust.message("Le fichier d'annulation est illisible.")
-        return None
+    quand = (bilan.get("date") or "").replace("T", " ")[:19]
+    if bilan.get("entry") == CLE_ANNULER:
+        comicrust.message("Le dernier rangement a déjà été annulé (annulation appliquée le %s)." % quand)
+        return {"deja_annule": True}
+    demande = None
+    try:
+        demande = json.loads(_lire(FICHIER_DEMANDE) or "null")
+    except ValueError:
+        comicrust.log("%s illisible : profils inconnus pour l'annulation." % FICHIER_DEMANDE, level="warning")
+    undo = lo.UndoCollection.depuis_renommages(bilan["renames"], (demande or {}).get("entrees"))
     profils, _derniers = charger()
     livres = _livres(books)
     logger = lo.Logger()
@@ -1225,6 +1296,7 @@ def annuler(books):
                          tous_les_livres=livres, annule=comicrust.cancelled,
                          progression=lambda f, t: comicrust.progress(f, "Annulation", t))
     entete = mover.process_books()
+    logger.add_header("\nRangement annulé : %d déplacement(s) appliqué(s) le %s." % (len(undo), quand))
     vides = lo.dossiers_qui_seront_vides(mover.deplacements, mover.dossiers_retirer)
     return _terminer(logger, entete, [], vides, mover.failed_or_skipped, False,
                      {"succes": mover.success, "echecs": mover.failed, "ignores": mover.skipped,
@@ -1237,7 +1309,10 @@ def annuler(books):
 #@Description Supprime, après confirmation, les dossiers laissés vides par les derniers rangements
 #@Description (seulement s'ils sont vraiment vides : aucun fichier n'est supprimé).
 def supprimer_dossiers_vides(books):
-    liste = list(dict.fromkeys(x.strip() for x in (_lire("dossiers_vides.txt") or "").splitlines() if x.strip()))
+    # Normalisés, sans doublon ni racine (lecteur, partage) : même une liste modifiée à la
+    # main ne fait jamais proposer « D:\\ ».
+    liste = lo.nettoyer_liste_dossiers(x.strip() for x in (_lire("dossiers_vides.txt") or "").splitlines()
+                                       if x.strip())
     # Les plus profonds d'abord : un parent dont le seul contenu est un dossier vide de la
     # liste sera vide à son tour.
     candidats = sorted(liste, key=lambda d: -len(d.rstrip("\\/")))

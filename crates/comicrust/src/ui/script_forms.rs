@@ -251,24 +251,47 @@ fn controls_keys(controls: &[Control]) -> Vec<String> {
     out
 }
 
-/// Menu « Insérer » d'un champ texte : insère au curseur (à la fin si le champ n'a jamais
-/// eu le focus).
-fn inserts_menu(ui: &mut Ui, id: Id, text: &mut String, inserts: &[comicrust_core::scripting::forms::ChoiceItem]) {
+/// Menu « Insérer » d'un champ texte : champ de filtre en tête (libellé ou texte inséré),
+/// puis les morceaux, sous le titre de leur groupe s'il en a un. Insère au curseur (à la
+/// fin si le champ n'a jamais eu le focus).
+fn inserts_menu(ui: &mut Ui, id: Id, text: &mut String, inserts: &[comicrust_core::scripting::forms::InsertGroup]) {
+    use comicrust_core::scripting::forms::{filter_inserts, value_text};
     ui.menu_button("Insérer ▾", |ui| {
-        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-            for ins in inserts {
-                let snippet = comicrust_core::scripting::forms::value_text(&ins.value);
-                let r = ui.button(&ins.label);
-                let r = if ins.label != snippet { r.on_hover_text(&snippet) } else { r };
-                if r.clicked() {
-                    let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
-                    let at = state.cursor.char_range().map(|r| usize::from(r.primary.index));
-                    let after = insert_at(text, at, &snippet);
-                    let cursor = egui::text::CCursor::new(after);
-                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(cursor)));
-                    state.store(ui.ctx(), id);
-                    ui.ctx().memory_mut(|m| m.request_focus(id));
-                    ui.close();
+        let filter_id = id.with("filtre-insertions");
+        let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
+        let total: usize = inserts.iter().map(|g| g.items.len()).sum();
+        if total > 8 {
+            let r = ui.add(egui::TextEdit::singleline(&mut filter).hint_text("🔍 Filtrer…").desired_width(220.0));
+            if r.changed() {
+                ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+            }
+            ui.separator();
+        }
+        let shown = filter_inserts(inserts, &filter);
+        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+            if shown.is_empty() {
+                ui.weak("Aucun élément");
+            }
+            for (title, items) in shown {
+                if !title.is_empty() {
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(title).strong().small());
+                }
+                for ins in items {
+                    let snippet = value_text(&ins.value);
+                    let r = ui.button(&ins.label);
+                    let r = if ins.label != snippet { r.on_hover_text(&snippet) } else { r };
+                    if r.clicked() {
+                        let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+                        let at = state.cursor.char_range().map(|r| usize::from(r.primary.index));
+                        let after = insert_at(text, at, &snippet);
+                        let cursor = egui::text::CCursor::new(after);
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(cursor)));
+                        state.store(ui.ctx(), id);
+                        ui.ctx().memory_mut(|m| m.request_focus(id));
+                        ui.data_mut(|d| d.remove::<String>(filter_id));
+                        ui.close();
+                    }
                 }
             }
         });

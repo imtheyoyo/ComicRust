@@ -43,6 +43,14 @@ pub struct ChoiceItem {
     pub label: String,
 }
 
+/// Groupe du menu « Insérer ▾ » d'un champ texte : titre (vide = sans titre) et morceaux
+/// de texte proposés.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsertGroup {
+    pub title: String,
+    pub items: Vec<ChoiceItem>,
+}
+
 /// Type d'une colonne de tableau éditable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnKind {
@@ -78,14 +86,15 @@ pub enum LabelStyle {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlKind {
     /// Texte (`rows` > 1 : plusieurs lignes ; `secret` : saisie masquée, jamais pré-remplie ;
-    /// `inserts` : menu « Insérer » de morceaux de texte, ex. `{series}` dans un modèle).
+    /// `inserts` : menu « Insérer » de morceaux de texte, ex. `{series}` dans un modèle,
+    /// éventuellement par groupes).
     Text {
         default: String,
         placeholder: String,
         required: bool,
         rows: u32,
         secret: bool,
-        inserts: Vec<ChoiceItem>,
+        inserts: Vec<InsertGroup>,
     },
     Checkbox {
         default: bool,
@@ -533,6 +542,62 @@ fn parse_choices(m: &Map<String, Value>, k: &str) -> Result<Vec<ChoiceItem>, Str
         .collect()
 }
 
+/// Menu « Insérer » : liste de choix (un groupe sans titre) et/ou de groupes
+/// `{"group": "Titre", "items": [choix…]}` ; au plus [`MAX_CHOICES`] morceaux en tout.
+fn parse_inserts(m: &Map<String, Value>) -> Result<Vec<InsertGroup>, String> {
+    let mut groups: Vec<InsertGroup> = Vec::new();
+    let mut total = 0usize;
+    for raw in get_array(m, "inserts")? {
+        let (title, items) = match raw {
+            Value::Object(o) if o.contains_key("items") => {
+                let title = o.get("group").map(value_text).unwrap_or_default();
+                (Some(title), parse_choices(o, "items").map_err(|e| format!("inserts : {e}"))?)
+            }
+            single => {
+                let mut one = Map::new();
+                one.insert("c".into(), Value::Array(vec![single.clone()]));
+                (None, parse_choices(&one, "c").map_err(|_| format!("« inserts » : choix illisible ({single})"))?)
+            }
+        };
+        total += items.len();
+        if total > MAX_CHOICES {
+            return Err(format!("« inserts » : plus de {MAX_CHOICES} choix"));
+        }
+        match title {
+            Some(title) => groups.push(InsertGroup { title, items }),
+            // Choix hors groupe : ajoutés au groupe sans titre en cours (ou nouveau).
+            None => match groups.last_mut().filter(|g| g.title.is_empty()) {
+                Some(g) => g.items.extend(items),
+                None => groups.push(InsertGroup { title: String::new(), items }),
+            },
+        }
+    }
+    groups.retain(|g| !g.items.is_empty());
+    Ok(groups)
+}
+
+/// Morceaux du menu « Insérer » qui contiennent `filter` (libellé ou texte inséré, casse
+/// ignorée), par groupe ; groupes vides retirés. Filtre vide : tout.
+pub fn filter_inserts<'a>(groups: &'a [InsertGroup], filter: &str) -> Vec<(&'a str, Vec<&'a ChoiceItem>)> {
+    let f = filter.trim().to_lowercase();
+    groups
+        .iter()
+        .map(|g| {
+            let items = g
+                .items
+                .iter()
+                .filter(|i| {
+                    f.is_empty()
+                        || i.label.to_lowercase().contains(&f)
+                        || value_text(&i.value).to_lowercase().contains(&f)
+                })
+                .collect::<Vec<_>>();
+            (g.title.as_str(), items)
+        })
+        .filter(|(_, items)| !items.is_empty())
+        .collect()
+}
+
 /// Décode le base64 standard (avec ou sans `=`, blancs ignorés).
 pub fn decode_base64(text: &str) -> Result<Vec<u8>, String> {
     fn val(c: u8) -> Option<u32> {
@@ -652,7 +717,7 @@ fn parse_control(v: &Value, r: &mut Reader, depth: usize) -> Result<Control, Str
                 None if kind_name == "textarea" => 4,
                 None => 1,
             };
-            let inserts = parse_choices(m, "inserts").map_err(ctx)?;
+            let inserts = parse_inserts(m).map_err(ctx)?;
             ControlKind::Text {
                 default: get_str(m, "default").map_err(ctx)?,
                 placeholder: get_str(m, "placeholder").map_err(ctx)?,

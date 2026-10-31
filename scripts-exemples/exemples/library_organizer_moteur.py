@@ -811,12 +811,23 @@ def chemin_enracine(chemin, p):
 # ---------------------------------------------------------------------------------------
 
 class Calculs(object):
-    """Premier et dernier numéro d'une série parmi les livres transmis au script."""
+    """Premier et dernier numéro d'une série parmi **toute la bibliothèque**, comme
+    l'original (``GetLibraryBooks()``). ``livres`` : liste, ou fonction sans argument qui la
+    rend (appelée à la première demande seulement : une bibliothèque n'est lue que si un
+    modèle utilise une valeur calculée)."""
 
     def __init__(self, livres):
-        self.livres = list(livres)
+        self._source = livres
+        self._livres = None
         self._debut = {}
         self._fin = {}
+
+    @property
+    def livres(self):
+        if self._livres is None:
+            src = self._source
+            self._livres = list(src() if callable(src) else (src or []))
+        return self._livres
 
     @staticmethod
     def _cle(b):
@@ -1536,20 +1547,27 @@ class UndoCollection(object):
     def entries(self):
         return list(zip(self._profiles, self._current_paths, self._undo_paths))
 
-    def texte(self):
-        return "".join("%s|%s|%s\n" % e for e in self.entries())
+    def to_json(self):
+        """Forme enregistrée (JSON : aucun caractère à échapper, même « | » dans un nom
+        de profil ou un chemin)."""
+        return [{"profil": p, "nouveau": c, "ancien": a} for p, c, a in self.entries()]
 
     @classmethod
-    def depuis_texte(cls, texte):
+    def depuis_renommages(cls, renommages, profils=None):
+        """Annulation des renommages **appliqués** par ComicRust (``applied_renames()`` :
+        ``[{"from", "to"}]``). ``profils`` : rangement demandé (:meth:`to_json`), pour
+        retrouver le profil de chaque déplacement (même ancien et nouveau chemin)."""
+        index = {}
+        for e in profils or []:
+            p = module_chemins(e.get("ancien"), e.get("nouveau"))
+            index[(cle_chemin(e.get("ancien"), p), cle_chemin(e.get("nouveau"), p))] = e.get("profil") or ""
         u = cls()
-        for ligne in texte.splitlines():
-            parts = ligne.strip().split("|")
-            if len(parts) == 3:
-                u.append(parts[2], parts[1], parts[0])
-        # Ordre inverse : un livre déplacé par plusieurs profils revient à sa place.
-        u._current_paths.reverse()
-        u._profiles.reverse()
-        u._undo_paths.reverse()
+        for r in renommages or []:
+            ancien, nouveau = r.get("from") or "", r.get("to") or ""
+            if not ancien or not nouveau:
+                continue
+            p = module_chemins(ancien, nouveau)
+            u.append(ancien, nouveau, index.get((cle_chemin(ancien, p), cle_chemin(nouveau, p)), ""))
         return u
 
 
@@ -1616,8 +1634,10 @@ class BookMover(object):
         self.annule = annule or (lambda: False)
         self.progression = progression or (lambda fraction, texte: None)
         self.existe = existe or os.path.lexists
-        self.tous = list(tous_les_livres or [])
-        self.calculs = Calculs(self.tous)
+        # Toute la bibliothèque (liste, ou fonction appelée à la première demande).
+        self._tous_source = tous_les_livres
+        self._tous = None
+        self.calculs = Calculs(lambda: self.tous)
         self.pathmaker = None
         self.failed_or_skipped = False
         self.HeldDuplicateBooks = []
@@ -1632,6 +1652,13 @@ class BookMover(object):
         self.profile = None
         self.profile_reports = []
         self.annulation = False
+
+    @property
+    def tous(self):
+        if self._tous is None:
+            src = self._tous_source
+            self._tous = list(src() if callable(src) else (src or []))
+        return self._tous
 
     # Les livres déjà traités par l'original via le système de fichiers : ici, les
     # destinations demandées pendant cette exécution comptent comme occupées.
@@ -1912,9 +1939,42 @@ def _noms(fields):
 # Dossiers vides
 # ---------------------------------------------------------------------------------------
 
+def est_racine(chemin, p=None):
+    """Racine d'un lecteur (``D:``, ``D:\\``), d'un partage (``\\\\serveur\\partage``) ou
+    ``/`` : jamais proposée à la suppression."""
+    p = p or module_chemins(chemin)
+    if p is ntpath:
+        _lecteur, reste = ntpath.splitdrive(chemin or "")
+        return not reste.strip("\\/")
+    return not (chemin or "").strip("/")
+
+
+def normaliser_dossier(chemin, p=None):
+    """Dossier sans barre finale (sauf une racine) et sans ``.``/``..`` ; ``""`` si vide."""
+    chemin = (chemin or "").strip()
+    if not chemin:
+        return ""
+    p = p or module_chemins(chemin)
+    n = p.normpath(chemin)
+    if est_racine(n, p):
+        return n
+    return n.rstrip("\\/")
+
+
+def _sous(cle, base_cle, p):
+    sep = "\\" if p is ntpath else "/"
+    return bool(base_cle) and cle != base_cle and cle.startswith(base_cle.rstrip(sep) + sep)
+
+
 def dossiers_qui_seront_vides(deplacements, retirer, listdir=os.listdir, isdir=os.path.isdir):
-    """Dossiers qui seront vides une fois les déplacements appliqués (et leurs parents
-    devenus vides, comme lobookmover.remove_empty_folders), hors exceptions du profil.
+    """Dossiers qui seront vides une fois les déplacements appliqués, hors exceptions du
+    profil (lobookmover.remove_empty_folders).
+
+    Plus prudent que l'original, qui remontait sans limite : on ne remonte aux parents
+    devenus vides **qu'à l'intérieur du dossier de base** du profil (``BaseFolder``, jamais
+    proposé lui-même ni rien au-dessus) ; hors du dossier de base, seul le dossier qui
+    contenait le livre est proposé. Une racine (lecteur, partage) ne l'est jamais. Chemins
+    normalisés (pas de barre finale), sans doublon.
 
     ``deplacements`` : [(livre, ancien, nouveau, profil)] ; ``retirer`` : [(dossier, Profile)]."""
     partis = set()
@@ -1939,13 +1999,20 @@ def dossiers_qui_seront_vides(deplacements, retirer, listdir=os.listdir, isdir=o
         return True
 
     for dossier, profil in retirer:
-        p = module_chemins(dossier)
+        p = module_chemins(dossier, profil.BaseFolder)
         exclus = {cle_chemin(x, p) for x in profil.ExcludedEmptyFolder if x}
-        d = dossier
+        base = normaliser_dossier(profil.BaseFolder, p)
+        base_cle = cle_chemin(base, p) if base else ""
+        d = normaliser_dossier(dossier, p)
         while d:
             cle = cle_chemin(d, p)
+            if est_racine(d, p) or (base_cle and cle == base_cle):
+                break
             if cle in vus:
-                d = p.dirname(d)
+                # Déjà proposé : on continue vers le parent (dans le dossier de base).
+                if not _sous(cle, base_cle, p):
+                    break
+                d = normaliser_dossier(p.dirname(d), p)
                 continue
             if cle in exclus or not isdir(d):
                 break
@@ -1956,11 +2023,30 @@ def dossiers_qui_seront_vides(deplacements, retirer, listdir=os.listdir, isdir=o
                 break
             vus.add(cle)
             vides.append(d)
-            parent = p.dirname(d.rstrip("\\/"))
+            if not _sous(cle, base_cle, p):
+                break  # hors du dossier de base : pas de remontée
+            parent = normaliser_dossier(p.dirname(d), p)
             if not parent or cle_chemin(parent, p) == cle:
                 break
             d = parent
     return vides
+
+
+def nettoyer_liste_dossiers(dossiers):
+    """Liste de dossiers vides à proposer : normalisés, sans doublon (casse ignorée sous
+    Windows), sans racine."""
+    out = []
+    vus = set()
+    for d in dossiers:
+        p = module_chemins(d)
+        n = normaliser_dossier(d, p)
+        if not n or est_racine(n, p):
+            continue
+        cle = cle_chemin(n, p)
+        if cle not in vus:
+            vus.add(cle)
+            out.append(n)
+    return out
 
 
 # ---------------------------------------------------------------------------------------

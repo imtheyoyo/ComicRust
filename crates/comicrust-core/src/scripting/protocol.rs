@@ -7,15 +7,22 @@
 //! - **stderr** : journal libre du script (`print()`, tracebacks imprévus…).
 //!
 //! Déroulement :
-//! 1. le script envoie `{"t":"hello","protocol":2,"python":"3.13.1"}` ; une autre version
+//! 1. le script envoie `{"t":"hello","protocol":3,"python":"3.13.1"}` ; une autre version
 //!    est refusée (module plus ancien ou plus récent que ComicRust) ;
-//! 2. ComicRust répond `{"t":"run", "protocol":2, "script":…, "function":…, "hook":…,
+//! 2. ComicRust répond `{"t":"run", "protocol":3, "script":…, "function":…, "hook":…,
 //!    "book_ids":[…], "interactive":…, "live":…, "settings":{"values":{…},"secret":[…]},
 //!    "fields":{"editable":[…],"read_only":[…]}, "lib_dirs":[…], "args":…}` ;
 //! 3. pendant l'exécution, le script envoie des **demandes** `{"t":"req","id":N,"m":…}`
 //!    auxquelles ComicRust répond `{"t":"reply","id":N,"ok":true,"value":…}` ou
 //!    `{"t":"reply","id":N,"ok":false,"error":"…"}` :
 //!    - `books` `{"ids":[…]}` → fiches JSON ([`book_json`](super::book_json)) ;
+//!    - `library_ids` `{}` → identifiants de **toute** la bibliothèque (lecture seule ; les
+//!      modifications restent limitées aux livres du contexte) ;
+//!    - `library_books` `{"ids":[…]}` → fiches de livres de la bibliothèque (5 000 au plus
+//!      par demande) ;
+//!    - `applied_renames` `{}` → bilan des renommages réellement appliqués lors de la
+//!      dernière application d'une exécution de ce script, ou `null`
+//!      ([`AppliedRenames`](super::AppliedRenames)) ;
 //!    - `ask` `{"kind":"text"|"choice"|"confirm","question":…,"default":…,"choices":[…]}` ;
 //!    - `message` `{"text":…}` ;
 //!    - `changes` `{"items":[{"op":"set","book":…,"field":…,"value":…},

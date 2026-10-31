@@ -4,6 +4,7 @@
 //! réponse (ou l'arrêt du script : valeur par défaut).
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -12,8 +13,8 @@ use std::time::Duration;
 use comicrust_core::db::ComicDatabase;
 use comicrust_core::library::LibraryBook;
 use comicrust_core::scripting::{
-    book_json, ChooseSpec, FormAnswer, FormSpec, JournalLine, ProgressDetails, Question, ScriptChange, ScriptHost,
-    ScriptSettings,
+    book_json, AppliedRename, AppliedRenames, ChooseSpec, FormAnswer, FormSpec, JournalLine, ProgressDetails, Question,
+    ScriptChange, ScriptHost, ScriptSettings,
 };
 use eframe::egui::{self, ColorImage};
 use serde_json::Value;
@@ -36,6 +37,30 @@ pub fn load_settings(stored: &BTreeMap<String, String>, key: &str) -> ScriptSett
 /// Forme enregistrée des réglages d'un script (valeurs secrètes chiffrées).
 pub fn store_settings(s: &ScriptSettings) -> String {
     s.to_stored().to_string()
+}
+
+/// Enregistre le bilan des renommages **réussis** d'une application (fenêtre d'aperçu →
+/// « Appliquer ») dans `dir`, pour `comicrust.applied_renames()` : seulement si au moins
+/// un fichier a été renommé (une application sans renommage ne fait pas oublier le
+/// rangement précédent). Rend le fichier écrit.
+pub fn record_applied_renames(
+    dir: &Path,
+    entry: &comicrust_core::scripting::ScriptEntry,
+    outcome: &ApplyOutcome,
+) -> std::io::Result<Option<PathBuf>> {
+    let renames: Vec<AppliedRename> = outcome
+        .moves
+        .iter()
+        .map(|m| AppliedRename {
+            book: m.book.id.clone(),
+            from: m.moved.from.to_string_lossy().into_owned(),
+            to: m.moved.to.to_string_lossy().into_owned(),
+        })
+        .collect();
+    if renames.is_empty() {
+        return Ok(None);
+    }
+    AppliedRenames::new(entry, renames).save(dir).map(Some)
 }
 
 /// Message du fil du script vers l'interface.
@@ -100,6 +125,9 @@ pub struct UiHost {
     stored: SharedSettings,
     settings_dirty: Arc<AtomicBool>,
     live: Option<Live>,
+    /// Dossier des bilans de renommages appliqués (`data\renommages\`), relus par
+    /// `comicrust.applied_renames()` ; `None` : aucun bilan.
+    renames_dir: Option<PathBuf>,
 }
 
 impl UiHost {
@@ -112,7 +140,13 @@ impl UiHost {
         settings_dirty: Arc<AtomicBool>,
         live: Option<Live>,
     ) -> UiHost {
-        UiHost { db, fresh: Mutex::new(HashMap::new()), tx, ctx, stop, stored, settings_dirty, live }
+        UiHost { db, fresh: Mutex::new(HashMap::new()), tx, ctx, stop, stored, settings_dirty, live, renames_dir: None }
+    }
+
+    /// Dossier où relire les bilans de renommages appliqués ([`AppliedRenames`]).
+    pub fn with_renames_dir(mut self, dir: PathBuf) -> UiHost {
+        self.renames_dir = Some(dir);
+        self
     }
 
     fn send(&self, ev: HostEvent) {
@@ -143,6 +177,20 @@ impl UiHost {
 impl ScriptHost for UiHost {
     fn books(&self, ids: &[String]) -> Vec<Value> {
         ids.iter().filter_map(|id| self.book(id)).map(|b| book_json(&b)).collect()
+    }
+
+    /// Toute la bibliothèque au lancement du script (lecture seule pour le script : le
+    /// cœur ne laisse modifier que les livres du contexte).
+    fn library_ids(&self) -> Option<Vec<String>> {
+        Some(self.db.books.iter().map(|b| b.id.clone()).collect())
+    }
+
+    fn applied_renames(&self, settings_key: &str) -> Value {
+        self.renames_dir
+            .as_deref()
+            .and_then(|d| AppliedRenames::load(d, settings_key))
+            .and_then(|b| serde_json::to_value(b).ok())
+            .unwrap_or(Value::Null)
     }
 
     fn ask(&self, question: &Question) -> Option<Value> {
@@ -386,6 +434,49 @@ mod tests {
         assert!(text.contains("formulaire ('OK', {'nom': 'Yoyo'})"), "{text}");
         assert!(text.contains("choix 1"), "{text}");
         assert!(text.contains("second None"), "{text}");
+    }
+
+    /// Bilan des renommages appliqués : écrit seulement si un fichier a été renommé, relu
+    /// par `applied_renames` (clé du fichier de script) ; `library_ids` rend toute la base.
+    #[test]
+    fn bilan_des_renommages_appliques_et_bibliotheque() {
+        use comicrust_core::edit::files::MovedFile;
+        use comicrust_core::edit::MoveReport;
+        let dir = tempfile::tempdir().unwrap();
+        let code = "#@Name LO\n#@Hook Books\n#@Key lo\ndef ranger(books):\n    pass\n";
+        let entry = parse_script(code, Path::new("/s/lo.py"), "exemples/lo.py").0.remove(0);
+        // Rien de renommé (tout refusé) : pas de bilan, le précédent reste valable.
+        let mut outcome = ApplyOutcome::default();
+        outcome.rename_errors.push(("b".into(), "destination occupée".into()));
+        assert!(record_applied_renames(dir.path(), &entry, &outcome).unwrap().is_none());
+        let book = LibraryBook { id: "a".into(), file: Some("/BD/a.cbz".into()), ..Default::default() };
+        outcome.moves.push(MoveReport {
+            moved: MovedFile { from: "/in/a.cbz".into(), to: "/BD/a.cbz".into(), copied: false, created_dirs: vec![] },
+            book: book.clone(),
+            store_counter: None,
+            comicrack: None,
+        });
+        let f = record_applied_renames(dir.path(), &entry, &outcome).unwrap().expect("bilan écrit");
+        assert!(f.starts_with(dir.path()));
+
+        let mut db = ComicDatabase::default();
+        db.books.push(book);
+        let host = UiHost::new(
+            Arc::new(db),
+            mpsc::channel().0,
+            egui::Context::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            None,
+        );
+        assert_eq!(host.applied_renames("exemples/lo.py"), Value::Null, "dossier non donné : aucun bilan");
+        assert_eq!(host.library_ids(), Some(vec!["a".to_string()]));
+        let host = host.with_renames_dir(dir.path().to_path_buf());
+        let v = host.applied_renames("exemples/lo.py");
+        assert_eq!(v["entry"], "lo");
+        assert_eq!(v["renames"], serde_json::json!([{"book": "a", "from": "/in/a.cbz", "to": "/BD/a.cbz"}]));
+        assert_eq!(host.applied_renames("exemples/autre.py"), Value::Null);
     }
 
     fn scripting_python() -> Option<std::path::PathBuf> {

@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use comicrust_core::library::LibraryBook;
+use comicrust_core::scripting::forms::ControlKind;
 use comicrust_core::scripting::{
     book_json, discover_with_warnings, FormAnswer, FormSpec, Hook, Question, RunContext, RunOptions, RunResult,
     RunState, ScriptChange, ScriptEntry, ScriptHost, ScriptRunner, ScriptSettings,
@@ -53,6 +54,10 @@ macro_rules! need_python {
 #[derive(Default)]
 struct Hote {
     livres: HashMap<String, Value>,
+    /// Ordre de la bibliothèque (`library_ids`).
+    ordre: Vec<String>,
+    /// Bilan des renommages appliqués rendu à `applied_renames` (`Null` : aucun).
+    bilan: Value,
     /// Réponses aux formulaires, dans l'ordre : (début du titre attendu, bouton, valeurs).
     formulaires: Mutex<Vec<(String, String, Value)>>,
     vus: Mutex<Vec<FormSpec>>,
@@ -66,6 +71,13 @@ struct Hote {
 impl ScriptHost for Hote {
     fn books(&self, ids: &[String]) -> Vec<Value> {
         ids.iter().filter_map(|i| self.livres.get(i).cloned()).collect()
+    }
+    fn library_ids(&self) -> Option<Vec<String>> {
+        Some(self.ordre.clone())
+    }
+    fn applied_renames(&self, settings_key: &str) -> Value {
+        assert_eq!(settings_key, "exemples/library_organizer.py");
+        self.bilan.clone()
     }
     fn ask(&self, _q: &Question) -> Option<Value> {
         let mut r = self.reponses.lock().unwrap();
@@ -99,8 +111,11 @@ impl ScriptHost for Hote {
 
 impl Hote {
     fn avec(livres: &[LibraryBook], reglages: Value) -> Hote {
-        let mut h =
-            Hote { livres: livres.iter().map(|b| (b.id.clone(), book_json(b))).collect(), ..Default::default() };
+        let mut h = Hote {
+            livres: livres.iter().map(|b| (b.id.clone(), book_json(b))).collect(),
+            ordre: livres.iter().map(|b| b.id.clone()).collect(),
+            ..Default::default()
+        };
         if let Value::Object(m) = reglages {
             h.reglages.values = m;
         }
@@ -108,6 +123,16 @@ impl Hote {
     }
     fn formulaires(self, f: Vec<(&str, &str, Value)>) -> Hote {
         *self.formulaires.lock().unwrap() = f.into_iter().map(|(t, b, v)| (t.into(), b.into(), v)).collect();
+        self
+    }
+    /// Bilan des renommages appliqués par ComicRust (`entree` : point d'entrée appliqué).
+    fn bilan(mut self, entree: &str, renommages: &[(&str, &Path, &Path)]) -> Hote {
+        self.bilan = json!({
+            "script": "exemples/library_organizer.py", "entry": entree, "function": "f",
+            "date": "2026-10-31T10:20:30+01:00",
+            "renames": renommages.iter().map(|(id, de, vers)| json!({
+                "book": id, "from": de.to_string_lossy(), "to": vers.to_string_lossy()})).collect::<Vec<_>>(),
+        });
         self
     }
     fn reponses(self, r: Vec<Value>) -> Hote {
@@ -257,9 +282,14 @@ fn modeles_par_defaut_et_second_passage() {
     // Rien n'a bougé ; journal et fichier d'annulation écrits dans le dossier choisi.
     assert!(entree_dir.join("a.cbz").is_file());
     assert!(r.return_value["journal"].as_str().unwrap().starts_with(&*data.to_string_lossy()));
-    let undo = std::fs::read_to_string(data.join("annulation.dat")).unwrap();
-    assert_eq!(undo.lines().count(), 3);
-    assert!(undo.contains(&format!("P|{}|{}", ren["a"].display(), entree_dir.join("a.cbz").display())));
+    // Rangement demandé (profils) : l'annulation ne s'en sert que pour les profils.
+    let demande: Value =
+        serde_json::from_str(&std::fs::read_to_string(data.join("rangement_demande.json")).unwrap()).unwrap();
+    let entrees = demande["entrees"].as_array().unwrap();
+    assert_eq!(entrees.len(), 3);
+    assert!(entrees.contains(&json!({"profil": "P", "nouveau": ren["a"].to_string_lossy(),
+                                      "ancien": entree_dir.join("a.cbz").to_string_lossy()})));
+    assert!(!data.join("annulation.dat").exists());
     // Dossier « entree » vide après application : listé pour la suppression.
     assert_eq!(r.return_value["dossiers_vides"], json!([entree_dir.to_string_lossy()]));
     assert_eq!(r.return_value["profils"]["P"]["succes"], json!(3));
@@ -286,13 +316,147 @@ fn modeles_par_defaut_et_second_passage() {
     assert!(!entree_dir.exists());
     assert!(sortie.join("DC Comics").is_dir());
 
-    // Annulation du rangement : retour aux anciens chemins (demandé, pas fait).
-    let hote4 = Arc::new(Hote::avec(&deplaces, reglages(&data, json!({"Name": "P"}))));
+    // Annulation du rangement d'après le bilan des renommages appliqués : retour aux
+    // anciens chemins (demandé, pas fait).
+    let appliques: Vec<(&str, &Path, &Path)> =
+        livres.iter().map(|l| (l.id.as_str(), Path::new(l.file.as_deref().unwrap()), ren[&l.id].as_path())).collect();
+    let hote4 = Arc::new(
+        Hote::avec(&deplaces, reglages(&data, json!({"Name": "P"}))).bilan("library-organizer-quick", &appliques),
+    );
     let r4 = lancer(&py, "library-organizer-annuler", Hook::Library, &["a", "b", "c"], hote4);
     let ren4 = renommages(&r4);
     assert_eq!(ren4["a"], entree_dir.join("a.cbz"));
     assert_eq!(ren4["c"], entree_dir.join("c.cbz"));
     assert_eq!(r4.return_value["succes"], json!(3));
+}
+
+/// Annulation : seuls les renommages **appliqués** (bilan de ComicRust) sont annulés, avec
+/// le profil du rangement demandé (« | » dans son nom compris) ; rien sans bilan ; une
+/// annulation appliquée n'est pas rejouée.
+#[test]
+fn annulation_des_renommages_appliques() {
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let entree_dir = tmp.path().join("entree");
+    let sortie = tmp.path().join("sortie");
+    let data = tmp.path().join("data");
+    let livres = [
+        batman("a", &fichier(&entree_dir.join("a.cbz")), "1", 2011, 9),
+        batman("b", &fichier(&entree_dir.join("b.cbz")), "2", 2011, 10),
+    ];
+    let profil = json!({"Name": "Mes|BD", "BaseFolder": sortie.to_string_lossy(), "Mode": "Move",
+                        "FolderTemplate": "{<series>}", "FileTemplate": "{<series>} {<number>}"});
+    let hote = Arc::new(Hote::avec(&livres, reglages(&data, profil.clone())));
+    let r = lancer(&py, "library-organizer-quick", Hook::Books, &["a", "b"], hote);
+    let ren = renommages(&r);
+    assert_eq!(ren.len(), 2);
+
+    // Aperçu abandonné (aucun bilan) : rien à annuler, même si le rangement a été demandé.
+    let hote = Arc::new(Hote::avec(&livres, reglages(&data, profil.clone())));
+    let r = lancer(&py, "library-organizer-annuler", Hook::Library, &["a", "b"], hote.clone());
+    assert!(r.changes.is_empty(), "{:?}", r.changes);
+    assert!(hote.messages.lock().unwrap()[0].contains("Rien à annuler"));
+
+    // Seul « a » a réellement été déplacé (b refusé à l'application).
+    let mut a = livres[0].clone();
+    std::fs::create_dir_all(ren["a"].parent().unwrap()).unwrap();
+    std::fs::rename(a.file.as_ref().unwrap(), &ren["a"]).unwrap();
+    a.file = Some(ren["a"].to_string_lossy().into_owned());
+    let bib = [a, livres[1].clone()];
+    let hote = Arc::new(
+        Hote::avec(&bib, reglages(&data, profil.clone()))
+            .bilan("library-organizer-quick", &[("a", &entree_dir.join("a.cbz"), &ren["a"])]),
+    );
+    let r = lancer(&py, "library-organizer-annuler", Hook::Library, &["a", "b"], hote);
+    let ren2 = renommages(&r);
+    assert_eq!(ren2.len(), 1, "{ren2:?}");
+    assert_eq!(ren2["a"], entree_dir.join("a.cbz"));
+    assert_eq!(r.return_value["succes"], json!(1));
+    assert!(r.journal_text().contains("[Mes|BD] Déplacement demandé"), "{}", r.journal_text());
+
+    // L'annulation a été appliquée (bilan de « annuler ») : pas rejouée.
+    let hote = Arc::new(
+        Hote::avec(&livres, reglages(&data, profil))
+            .bilan("library-organizer-annuler", &[("a", &ren["a"], &entree_dir.join("a.cbz"))]),
+    );
+    let r = lancer(&py, "library-organizer-annuler", Hook::Library, &["a", "b"], hote.clone());
+    assert!(r.changes.is_empty());
+    assert_eq!(r.return_value, json!({"deja_annule": true}));
+    assert!(hote.messages.lock().unwrap()[0].contains("déjà été annulé"));
+}
+
+/// Valeurs calculées sur la série : toute la bibliothèque compte, pas seulement les livres
+/// sélectionnés (GetLibraryBooks de l'original).
+#[test]
+fn valeurs_calculees_sur_toute_la_bibliotheque() {
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let sortie = tmp.path().join("sortie");
+    let data = tmp.path().join("data");
+    let mut b1 = livre("b1", &fichier(&tmp.path().join("in").join("b1.cbz")));
+    let mut b2 = livre("b2", &fichier(&tmp.path().join("in").join("b2.cbz")));
+    for (b, n, an) in [(&mut b1, "1", 2000), (&mut b2, "2", 1999)] {
+        b.series = Some("Blacksad".into());
+        b.publisher = Some("Dargaud".into());
+        b.number = Some(n.into());
+        b.year = Some(an);
+    }
+    let profil = json!({"Name": "P", "BaseFolder": sortie.to_string_lossy(), "Mode": "Move",
+                        "FolderTemplate": "{<series>}{ (<startyear>)}",
+                        "FileTemplate": "{<series>} {<number>} sur {<lastissuenumber>}"});
+    let livres = [b1, b2];
+    let attendu = sortie.join("Blacksad (1999)").join("Blacksad 1 sur 2.cbz");
+    // Les deux sélectionnés.
+    let hote = Arc::new(Hote::avec(&livres, reglages(&data, profil.clone())));
+    let r = lancer(&py, "library-organizer-quick", Hook::Books, &["b1", "b2"], hote);
+    assert_eq!(renommages(&r)["b1"], attendu);
+    // Blacksad 1 seul sélectionné, Blacksad 2 seulement dans la bibliothèque : même résultat.
+    let hote = Arc::new(Hote::avec(&livres, reglages(&data, profil)));
+    let r = lancer(&py, "library-organizer-quick", Hook::Books, &["b1"], hote);
+    let ren = renommages(&r);
+    assert_eq!(ren.len(), 1);
+    assert_eq!(ren["b1"], attendu, "{}", r.journal_text());
+}
+
+/// Dossiers vides : jamais au-dessus du dossier de base du profil, ni le dossier de base
+/// lui-même, ni une racine ; chemins normalisés, sans doublon.
+#[test]
+fn dossiers_vides_bornes_au_dossier_de_base() {
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("BD");
+    let ancien = base.join("A trier").join("Vrac");
+    let a = batman("a", &fichier(&ancien.join("a.cbz")), "1", 2011, 9);
+    // Dossier de base donné avec une barre finale.
+    let profil = json!({"Name": "P", "BaseFolder": format!("{}/", base.to_string_lossy()), "Mode": "Move",
+                        "RemoveEmptyFolder": true,
+                        "FolderTemplate": "{<series>}", "FileTemplate": "{<series>} {<number>}"});
+    let data = tmp.path().join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    // Liste existante : doublon avec barre finale et racine (ajoutée à la main).
+    std::fs::write(data.join("dossiers_vides.txt"), format!("{}/\n/\n", ancien.to_string_lossy())).unwrap();
+    let hote = Arc::new(Hote::avec(&[a], reglages(&data, profil)));
+    let r = lancer(&py, "library-organizer-quick", Hook::Books, &["a"], hote);
+    assert_eq!(renommages(&r)["a"], base.join("Batman").join("Batman 1.cbz"));
+    // « Vrac » puis « A trier » (devenu vide), mais pas « BD » ni au-dessus.
+    assert_eq!(
+        r.return_value["dossiers_vides"],
+        json!([ancien.to_string_lossy(), base.join("A trier").to_string_lossy()])
+    );
+    let liste = std::fs::read_to_string(data.join("dossiers_vides.txt")).unwrap();
+    assert_eq!(
+        liste,
+        format!("{}\n{}\n", ancien.to_string_lossy(), base.join("A trier").to_string_lossy()),
+        "normalisée, sans doublon ni racine"
+    );
+    // Hors du dossier de base : seul le dossier du livre, sans remonter.
+    let ailleurs = tmp.path().join("ailleurs").join("sous");
+    let b = batman("b", &fichier(&ailleurs.join("b.cbz")), "2", 2011, 9);
+    let profil = json!({"Name": "P", "BaseFolder": base.to_string_lossy(), "Mode": "Move", "RemoveEmptyFolder": true,
+                        "FolderTemplate": "{<series>}", "FileTemplate": "{<series>} {<number>}"});
+    let hote = Arc::new(Hote::avec(&[b], reglages(&data, profil)));
+    let r = lancer(&py, "library-organizer-quick", Hook::Books, &["b"], hote);
+    assert_eq!(r.return_value["dossiers_vides"], json!([ailleurs.to_string_lossy()]));
 }
 
 #[test]
@@ -583,6 +747,22 @@ fn configuration_et_apercu() {
     lancer(&py, "library-organizer-configurer", Hook::Library, &["a"], hote.clone());
     let vus = hote.vus.lock().unwrap();
     assert_eq!(vus.len(), 4, "{:?}", vus.iter().map(|f| &f.title).collect::<Vec<_>>());
+    // Menu « Insérer ▾ » par catégorie de jetons (groupes de l'interface, avec filtre).
+    let groupes = |cle: &str| -> Vec<String> {
+        let ControlKind::Text { inserts, .. } = &vus[0].control(cle).unwrap().kind else { panic!("{cle}") };
+        inserts.iter().map(|g| g.title.clone()).collect()
+    };
+    assert_eq!(
+        groupes("modele_fichier"),
+        ["Texte", "Nombres", "Oui/Non", "Valeurs multiples", "Calculées", "Conditions"]
+    );
+    assert_eq!(groupes("modele_dossier")[0], "Dossiers");
+    let ControlKind::Text { inserts, .. } = &vus[0].control("modele_fichier").unwrap().kind else { panic!() };
+    let calc = inserts.iter().find(|g| g.title == "Calculées").unwrap();
+    assert!(
+        calc.items.iter().any(|i| i.label == "Année de début" && i.value.as_str().unwrap().contains("<startyear>")),
+        "{calc:?}"
+    );
     // Aperçu affiché dans les onglets Fichiers / Dossiers.
     let texte = format!("{:?}", vus[1].controls);
     assert!(texte.contains("Batman #007.cbz"), "{texte}");

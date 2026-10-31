@@ -42,9 +42,9 @@ aperçu (menu) ou remplit la fenêtre « Infos du livre » (hook ``Editor``).
 
 Fichiers à côté du script, dans ``bd2/`` : ``BDTranslations.Config`` (textes français et
 anglais de l'original, option « Langue du plugin »), ``bd2.png`` et ``bd2q.png`` (icônes).
-Les journaux de l'original (``BD2_Rename_Log.txt``, ``BD2_Debug_Log.txt``) sont écrits à
-côté du script (ou dans le dossier du réglage ``dossier_journaux``) ; leur contenu va aussi
-dans le journal du script de ComicRust.
+Les journaux de l'original (``BD2_Rename_Log.txt``, ``BD2_Debug_Log.txt``) sont écrits dans
+``data\\bedetheque\\`` à côté de ComicRust.exe (ou dans le dossier du réglage
+``dossier_journaux``) ; leur contenu va aussi dans le journal du script de ComicRust.
 
 Réglages avancés (``comicrust.settings()``, sans interface) : ``url_base`` (autre adresse du
 site, pour les essais ; aussi variable d'environnement ``COMICRUST_BEDETHEQUE_URL``),
@@ -300,6 +300,14 @@ def _convertir(cle, v):
     return _bool(v, defaut)
 
 
+def dossier_donnees():
+    """Dossier des journaux par défaut : ``data\\bedetheque`` à côté de ComicRust.exe (le
+    module comicrust est dans ``data\\python``), comme ``data\\library_organizer`` :
+    ComicRust reste portable et le dossier des scripts n'est pas encombré."""
+    data = os.path.dirname(os.path.dirname(os.path.abspath(comicrust.__file__)))
+    return os.path.join(data, "bedetheque")
+
+
 def LoadSetting():
     """Réglages enregistrés (comicrust.settings()), avec les corrections de LoadSetting."""
     s = comicrust.settings()
@@ -314,7 +322,7 @@ def LoadSetting():
     S.C = cfg
     base = cfg["url_base"] or os.environ.get("COMICRUST_BEDETHEQUE_URL") or URL_SITE
     S.base = base.strip().rstrip("/")
-    dossier = cfg["dossier_journaux"] or DOSSIER
+    dossier = (cfg["dossier_journaux"] or "").strip() or dossier_donnees()
     S.journaux = Journaux(dossier)
     try:
         S.mots = Translate()
@@ -398,6 +406,7 @@ class Journaux:
 
     def ecrire(self, chemin, texte):
         try:
+            os.makedirs(os.path.dirname(chemin), exist_ok=True)
             with open(chemin, "a", encoding="utf-8") as fic:
                 fic.write(texte)
         except OSError as e:  # dossier en lecture seule : le journal du script suffit

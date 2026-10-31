@@ -87,8 +87,9 @@ noms que l'`App.Config` de l'original : `CBSeries`, `CBStop`, `TIMEPOPUP`, `TIME
 mêmes expressions régulières (v6.08), mêmes en-têtes HTTP que son `BedethequeFetcher`
 (navigateur Chrome, cookies gardés et renouvelés après un 403 ; le Python de ComicRust fait
 les requêtes lui-même, sans « daemon »). Option « cloudscraper » : copier le module
-`cloudscraper` et ses dépendances dans `scripts\lib`. Journaux `BD2_Rename_Log.txt` et
-`BD2_Debug_Log.txt` à côté du script, comme l'original.
+`cloudscraper` et ses dépendances dans `scripts\lib`. Journaux de l'original
+`BD2_Rename_Log.txt` et `BD2_Debug_Log.txt` dans `data\bedetheque\` à côté de
+`ComicRust.exe` (réglage avancé `dossier_journaux` pour un autre dossier).
 
 « Configurer BD2 » ▸ « Importer les réglages de ComicRack… » : choisir l'`App.Config` du
 dossier du script dans ComicRack (par ex.
@@ -137,8 +138,26 @@ signalé), écraser un fichier existant (fenêtre des doublons : « garder les d
 (listés dans le rapport et dans `data\library_organizer\dossiers_vides.txt` ; la commande
 « supprimer les dossiers vides » les supprime ensuite, après confirmation, s'ils sont
 vraiment vides). L'automatisme « Startup » de l'original devient la commande « Quick –
-toute la bibliothèque » (aucun livre n'est transmis au démarrage). Journal (10 derniers)
-et `annulation.dat` dans `data\library_organizer\` (ou le dossier choisi dans les options).
+toute la bibliothèque » (aucun livre n'est transmis au démarrage). Journal (10 derniers),
+`rangement_demande.json` et `dossiers_vides.txt` dans `data\library_organizer\` (ou le
+dossier choisi dans les options).
+
+Valeurs calculées sur la série (`<startyear>`, `<startmonth>`, `<EndYear>`,
+`<firstissuenumber>`, `<lastissuenumber>`, `<number0>`, valeurs « series » des champs
+multiples) : calculées sur **toute la bibliothèque**, comme l'original, même si un seul livre
+est sélectionné (`comicrust.library_books()`, lue seulement si un modèle en a besoin).
+
+Annulation (« … annuler le dernier rangement ») : elle part du **bilan des renommages
+réellement appliqués** que ComicRust écrit après « Appliquer » (`comicrust.applied_renames()`,
+voir plus bas) : un aperçu abandonné ou un renommage refusé n'est jamais « annulé », et un
+livre qui n'est plus à sa destination est signalé en échec. `rangement_demande.json` ne sert
+qu'à retrouver le profil de chaque déplacement. Une annulation appliquée remplace le bilan :
+la relancer répond « déjà annulé » au lieu de refaire le rangement.
+
+Dossiers vides : on ne remonte aux dossiers parents devenus vides qu'**à l'intérieur du
+dossier de base** du profil (jamais le dossier de base lui-même ni au-dessus) ; hors du
+dossier de base, seul le dossier qui contenait le livre est proposé ; une racine (`D:\`,
+`\\serveur\partage`, `/`) n'est jamais proposée, même ajoutée à la main à la liste.
 
 ## En-têtes
 
@@ -199,6 +218,17 @@ import comicrust
   livres). Se parcourt comme une liste (`len`, `books[i]`, `for`), lue par lots de 500 :
   une bibliothèque de 5 000 livres ne pose pas de problème.
 - `comicrust.book()` : premier livre du contexte (le livre ouvert).
+- `comicrust.library_books()` : **toute** la bibliothèque, en **lecture seule**, lue par lots
+  de 500 à la demande comme `books()` (calculs sur une série entière, doublons…). Les livres
+  du contexte y sont les mêmes objets que dans `books()` ; modifier un autre livre est
+  refusé par ComicRust (modification rejetée, signalée au journal).
+  `comicrust.in_context(book)` dit si un livre est modifiable.
+- `comicrust.applied_renames()` : bilan des renommages **réellement appliqués** lors de la
+  dernière application (aperçu ▸ « Appliquer ») d'une exécution d'un script **du même
+  fichier**, ou `None` : `{"script", "entry", "function", "date", "renames": [{"book",
+  "from", "to"}]}`. ComicRust l'écrit dans `data\renommages\` après chaque application qui
+  renomme au moins un fichier (seuls les renommages réussis y figurent) ; utile pour
+  proposer d'annuler un rangement.
 - Champs : `book.series` ou `book["Series"]` (noms en snake_case ou noms ComicRack :
   `book.language_iso` = `book["LanguageISO"]`). Champ vide → `None`.
 - `book.id` (identifiant), `book.file` (chemin complet du fichier), `book.to_dict()`.
@@ -311,7 +341,7 @@ désactivé désactive son contenu), `width` (pixels).
 
 | Fonction | Valeur rendue | Particularités |
 |---|---|---|
-| `ui.text(key, label, default="", placeholder=, required=, inserts=)` | `str` | `inserts` : menu « Insérer ▾ » qui insère au curseur, ex. `[("{series}", "Série"), ("{number}", "Numéro")]` (modèles de nom) |
+| `ui.text(key, label, default="", placeholder=, required=, inserts=)` | `str` | `inserts` : menu « Insérer ▾ » qui insère au curseur, ex. `[("{series}", "Série"), ("{number}", "Numéro")]` (modèles de nom) ; par groupes : `{"Texte": [("{series}", "Série")], "Nombres": [...]}` (titre par groupe) ; au-delà de 8 morceaux, un champ « Filtrer… » en tête du menu |
 | `ui.textarea(key, label, default="", rows=4, …)` | `str` | plusieurs lignes, `inserts` aussi |
 | `ui.secret(key, label, default=valeur_actuelle)` | `str` | saisie masquée ; la valeur actuelle n'est **ni affichée ni envoyée** à l'interface ; vide = valeur actuelle rendue |
 | `ui.checkbox(key, label, default=False)` | `bool` | |
@@ -582,9 +612,11 @@ def ouvert(book):
   fait pas tomber ComicRust.
 - Dialogue en JSON par lignes : entrée standard (ComicRust → script) et sortie standard
   d'origine (script → ComicRust). `print()` est redirigé vers le journal (stderr). Le
-  protocole porte un numéro de version (2 depuis la v0.10.1 : formulaires, listes de
-  choix, `open_url`, presse-papiers, image de progression) : un module `comicrust.py` plus
-  ancien ou plus récent que ComicRust est refusé avec un message clair. Les images
+  protocole porte un numéro de version (3 depuis la v0.10.1 : formulaires, listes de
+  choix, `open_url`, presse-papiers, image de progression, lecture de toute la
+  bibliothèque, bilan des renommages appliqués) : un module `comicrust.py` plus ancien ou
+  plus récent que ComicRust est refusé avec un message clair (le module est réécrit par
+  ComicRust à chaque lancement, il a donc toujours la bonne version). Les images
   voyagent en base64 (un message fait 20 Mo au plus).
 - Le module `comicrust.py` est intégré à ComicRust et écrit à chaque lancement dans
   `data\python\` à côté de `ComicRust.exe` (ComicRust est portable : rien n'est écrit

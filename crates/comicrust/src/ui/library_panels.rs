@@ -88,6 +88,7 @@ impl ComicRustApp {
         if reason.is_none()
             && self.lists_ui.renaming.is_none()
             && !ctx.egui_wants_keyboard_input()
+            && !self.keys_blocked(&ctx)
             && ctx.input(|i| i.key_pressed(egui::Key::F2))
         {
             if let Some(id) = self.library.selected_list().filter(|l| l.kind != ListKind::Library).map(|l| l.id.clone())

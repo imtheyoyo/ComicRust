@@ -15,7 +15,8 @@ impl ComicRustApp {
         if let Some(p) = dropped.into_iter().next() {
             self.open_path(ctx, p);
         }
-        if ctx.egui_wants_keyboard_input() {
+        // Fenêtre modale (script, erreur, confirmation…) : le clavier est à elle seule.
+        if ctx.egui_wants_keyboard_input() || self.keys_blocked(ctx) {
             return;
         }
         if self.mode == crate::app::Mode::Library {

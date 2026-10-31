@@ -281,9 +281,14 @@ fn entree(cle: &str) -> ScriptEntry {
 
 fn lancer(py: &Path, cle: &str, ctx: RunContext, hote: Arc<Hote>) -> RunResult {
     let module = tempfile::tempdir().unwrap();
+    lancer_dans(py, cle, ctx, hote, module.path())
+}
+
+/// Comme [`lancer`], avec le dossier du module `comicrust` (`data\python` dans ComicRust).
+fn lancer_dans(py: &Path, cle: &str, ctx: RunContext, hote: Arc<Hote>, module: &Path) -> RunResult {
     let options = RunOptions {
         python: Some(py.to_path_buf()),
-        module_dir: Some(module.path().to_path_buf()),
+        module_dir: Some(module.to_path_buf()),
         scripts_dir: Some(dossier_exemples()),
         timeout: Some(Duration::from_secs(120)),
         ..Default::default()
@@ -537,6 +542,27 @@ fn hook_editor() {
     assert_eq!(c["Series"], json!("Blacksad"));
     assert_eq!(c["Title"], json!("Quelque Part Entre Les Ombres"));
     assert!(!r.applied_live);
+}
+
+/// Sans réglage `dossier_journaux` : journaux de l'original dans `data\bedetheque\` (le
+/// module est dans `data\python\`), jamais dans le dossier des scripts.
+#[test]
+fn journaux_dans_data_bedetheque() {
+    let py = need_python!();
+    let srv = serveur();
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().join("data");
+    let hote = Arc::new(Hote::avec(vec![livre("b1", "blacksad", "1")]).reglages(
+        &srv,
+        tmp.path(),
+        json!({"dossier_journaux": ""}),
+    ));
+    let r = lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b1"]), hote, &data.join("python"));
+    assert_eq!(r.return_value, json!({"traites": 1, "ignores": 0}), "{}", r.journal_text());
+    let rapport = std::fs::read_to_string(data.join("bedetheque").join("BD2_Rename_Log.txt")).unwrap();
+    assert!(rapport.contains("** Traité **"), "{rapport}");
+    assert!(!dossier_exemples().join("exemples").join("BD2_Rename_Log.txt").exists());
+    assert!(!tmp.path().join("BD2_Rename_Log.txt").exists());
 }
 
 /// Page de série introuvable (404) et série inconnue : livres ignorés, message d'erreur.

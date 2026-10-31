@@ -105,11 +105,35 @@ pub(crate) fn nav_presses(ctx: &egui::Context) -> (Vec<(NavKey, egui::Modifiers)
     })
 }
 
+/// Une fenêtre modale empêche-t-elle le clavier d'agir sur la bibliothèque (ou le lecteur)
+/// derrière elle ? `app_modal` : fenêtre modale connue de l'application (voir
+/// [`ComicRustApp::app_modal_open`]) ; sinon, toute fenêtre `egui::Modal` affichée à
+/// l'image précédente (erreur, confirmation, dialogue des listes…). Les fenêtres sont
+/// dessinées après la bibliothèque : sans ce contrôle, Entrée validerait le formulaire
+/// d'un script **et** ouvrirait le livre sélectionné.
+pub(crate) fn modal_blocks_keys(ctx: &egui::Context, app_modal: bool) -> bool {
+    app_modal || ctx.memory(|m| m.top_modal_layer().is_some())
+}
+
 impl ComicRustApp {
+    /// Fenêtre modale de l'application ouverte : fenêtre d'un script (formulaire, liste de
+    /// choix, question, message), assistant de démarrage, fermeture en attente des scripts.
+    pub(crate) fn app_modal_open(&self) -> bool {
+        self.scripts.run.as_ref().is_some_and(|r| r.pending.is_some())
+            || self.setup.is_some()
+            || self.scripts_closing.is_some()
+    }
+
+    /// Clavier réservé à une fenêtre modale (voir [`modal_blocks_keys`]).
+    pub(crate) fn keys_blocked(&self, ctx: &egui::Context) -> bool {
+        modal_blocks_keys(ctx, self.app_modal_open())
+    }
+
     /// Les touches de déplacement vont-elles au panneau `focus` ? Pas pendant une saisie,
-    /// un menu ouvert, un glisser, ni avec la fenêtre d'infos ouverte.
+    /// un menu ouvert, un glisser, une fenêtre modale, ni avec la fenêtre d'infos ouverte.
     pub(crate) fn nav_keys_for(&self, ctx: &egui::Context, focus: KeyFocus) -> bool {
         self.library.nav.focus == focus
+            && !self.keys_blocked(ctx)
             && self.info_editor.is_none()
             && ctx.memory(|m| m.focused().is_none())
             && !ctx.egui_wants_keyboard_input()
@@ -402,8 +426,8 @@ impl ComicRustApp {
 
     /// Entrée ouvre le livre sélectionné ; Échap le désélectionne ; Ctrl+I modifie les infos.
     fn library_keys(&mut self, ui: &mut Ui) {
-        if ui.ctx().memory(|m| m.focused().is_some()) || self.info_editor.is_some() {
-            return; // saisie dans la recherche, fenêtre d'infos ouverte
+        if ui.ctx().memory(|m| m.focused().is_some()) || self.info_editor.is_some() || self.keys_blocked(ui.ctx()) {
+            return; // saisie dans la recherche, fenêtre d'infos ou fenêtre modale ouverte
         }
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::I)) {
             let books = self.info_editor_books();
@@ -936,4 +960,38 @@ pub(crate) fn info_menu_item(ui: &mut Ui, books: &[String], request: &mut Option
         ui.close();
     }
     ui.separator();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::modal_blocks_keys;
+    use eframe::egui;
+
+    /// Le clavier de la bibliothèque est bloqué pendant une fenêtre modale : celle de
+    /// l'application (fenêtre de script en attente) tout de suite, toute `egui::Modal` dès
+    /// l'image suivante, et rendu une fois la fenêtre fermée.
+    #[test]
+    fn clavier_bloque_par_une_fenetre_modale() {
+        let ctx = egui::Context::default();
+        let mut vu = Vec::new();
+        let image = |montrer: bool, app_modal: bool, vu: &mut Vec<bool>| {
+            let mut sortie = ctx.run_ui(egui::RawInput::default(), |ui| {
+                vu.push(modal_blocks_keys(ui.ctx(), app_modal));
+                if montrer {
+                    egui::Modal::new(egui::Id::unique("essai-modal")).show(ui.ctx(), |ui| {
+                        ui.label("Formulaire");
+                    });
+                }
+            });
+            // Textures (police) non envoyées à un moteur de rendu : rien à appliquer.
+            sortie.textures_delta.clear();
+        };
+        image(false, false, &mut vu); // rien d'ouvert
+        image(false, true, &mut vu); // fenêtre de script en attente
+        image(true, false, &mut vu); // modale ouverte à cette image…
+        image(true, false, &mut vu); // …vue dès l'image suivante
+        image(false, false, &mut vu); // fermée à l'image précédente : encore bloqué
+        image(false, false, &mut vu); // rendu
+        assert_eq!(vu, [false, true, false, true, true, false]);
+    }
 }
