@@ -766,7 +766,9 @@ fn configuration_et_apercu() {
     // Aperçu affiché dans les onglets Fichiers / Dossiers.
     let texte = format!("{:?}", vus[1].controls);
     assert!(texte.contains("Batman #007.cbz"), "{texte}");
-    assert!(texte.contains(&*base.join("Batman").to_string_lossy()), "{texte}");
+    // `{:?}` double les `\` sous Windows : chercher le chemin sous sa forme échappée.
+    let dossier = format!("{:?}", base.join("Batman").to_string_lossy());
+    assert!(texte.contains(dossier.trim_matches('"')), "{texte}");
     assert_eq!(vus[2].values["profil"], json!("Séries"));
     assert!(vus[3].message.contains("dossier de base"), "{}", vus[3].message);
     let s = hote.derniers_reglages();
