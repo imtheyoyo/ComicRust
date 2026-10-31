@@ -677,6 +677,19 @@ impl LibraryState {
         }
     }
 
+    /// Livres sélectionnés **et affichés**, dans l'ordre de la vue, sans repli sur
+    /// `selected_book` : pour les actions destructives (retrait de la bibliothèque, d'une
+    /// liste), qui ne doivent jamais viser un livre masqué (recherche, filtre, autre liste).
+    pub fn visible_selection(&self) -> Vec<String> {
+        let Some(db) = self.database() else { return Vec::new() };
+        self.view
+            .iter()
+            .filter_map(|&i| db.books.get(i))
+            .filter(|b| self.is_selected(&b.id))
+            .map(|b| b.id.clone())
+            .collect()
+    }
+
     /// Nombre de livres affichés lors du dernier calcul de la vue.
     pub fn shown(&self) -> usize {
         self.view.len()

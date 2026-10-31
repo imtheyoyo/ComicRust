@@ -3,16 +3,18 @@
 //! « Rechercher les fichiers manquants dans un dossier… », « Retirer de la
 //! bibliothèque… ». Logique et opérations : `library/missing.rs`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
 
 use comicrust_core::library::LibraryBook;
 use comicrust_core::missing::{volume_root, CheckReport, Progress};
 use comicrust_core::providers::BOOK_EXTENSIONS;
 use eframe::egui::{self, Color32, Context, FontId, Rect, RichText, Ui};
 
-use crate::app::ComicRustApp;
+use crate::app::{ComicRustApp, Start};
 use crate::library::missing::{
     check_items, is_missing, remove_allowed, remove_needs_confirmation, OpKind, OpResult, Proposal, SearchJob, Target,
 };
@@ -48,9 +50,50 @@ pub struct NotFound {
     pub id: String,
     pub caption: String,
     pub file: String,
+    /// `Checking` : nouvelle vérification en cours (« ↺ Réessayer »).
     pub volume: Volume,
-    rx: Option<Receiver<Volume>>,
 }
+
+/// Résultat de l'examen du fichier d'un livre avant son ouverture (dans un fil).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Probe {
+    /// Le fichier existe (ou ComicRack le réécrit : `.tmp` présent) : fichier à ouvrir.
+    Exists(PathBuf),
+    /// Fichier introuvable ; état de son volume.
+    Missing(Volume),
+}
+
+/// Examine le fichier du livre de chemin `file` dans la fiche (`converted` : son CBZ
+/// converti par ComicRust, ouvert si l'original a été rangé, comme
+/// `Settings::effective_path`) : jamais sur le fil de l'interface (un NAS éteint fait
+/// attendre plusieurs secondes).
+pub fn probe_file(file: &str, converted: Option<&Path>) -> Probe {
+    let path = PathBuf::from(file);
+    let path = match converted {
+        Some(cbz) if !path.exists() && cbz.exists() => cbz.to_path_buf(),
+        _ => path,
+    };
+    if path.exists() || comicrust_core::providers::is_being_rewritten(&path) {
+        return Probe::Exists(path);
+    }
+    match volume_root(file) {
+        Some(root) if std::fs::read_dir(&root).is_err() => Probe::Missing(Volume::Unreachable(root)),
+        _ => Probe::Missing(Volume::Reachable),
+    }
+}
+
+/// Ouverture d'un livre de la bibliothèque en attente de l'examen de son fichier.
+pub struct OpenCheck {
+    pub id: String,
+    /// Chemin de la fiche examiné.
+    pub file: String,
+    pub start: Start,
+    pub since: Instant,
+    rx: Receiver<Probe>,
+}
+
+/// Délai avant d'afficher « Vérification… » (disque local : réponse immédiate).
+const PROBE_HINT_AFTER: Duration = Duration::from_millis(300);
 
 /// Confirmation du retrait.
 pub struct RemoveDialog {
@@ -84,6 +127,10 @@ pub struct MissingUi {
     pub show_check: bool,
     /// Message d'information (résultat d'une opération).
     pub info: Option<String>,
+    /// Ouverture d'un livre en attente de l'examen de son fichier (une seule à la fois).
+    pub opening: Option<OpenCheck>,
+    /// Fichier choisi par « Retrouver le fichier… » en cours d'examen (taille, doublon).
+    pub choosing: Option<(Instant, Receiver<Option<Proposal>>)>,
 }
 
 /// Données des menus contextuels (calculées avant le dessin).
@@ -186,26 +233,47 @@ impl ComicRustApp {
         MissingMenu { reason: self.missing_target().err().or(busy) }
     }
 
-    /// Ouverture d'un livre de la bibliothèque dont le fichier est introuvable.
-    pub(crate) fn missing_not_found(&mut self, id: &str) {
-        let Some(book) = self.library.database().and_then(|db| db.get(id).cloned()) else { return };
-        let file = book.file.clone().unwrap_or_default();
+    /// Ouvre un livre de la bibliothèque après avoir examiné son fichier dans un fil
+    /// (`file` : chemin de la fiche ; voir [`probe_file`]). Sans effet si un examen est
+    /// déjà en cours (double clic, Entrée répétée). Fenêtre « Fichier introuvable » de ce
+    /// livre ouverte (« ↺ Réessayer ») : elle affiche « Vérification… » en attendant.
+    pub(crate) fn open_after_probe(&mut self, ctx: &Context, id: &str, file: String, start: Start) {
+        if self.missing_ui.opening.is_some() {
+            return;
+        }
+        if let Some(nf) = self.missing_ui.not_found.as_mut().filter(|nf| nf.id == id) {
+            nf.volume = Volume::Checking;
+        }
         let (tx, rx) = mpsc::channel();
-        let f = file.clone();
-        std::thread::spawn(move || {
-            let v = match volume_root(&f) {
-                Some(root) if std::fs::read_dir(&root).is_err() => Volume::Unreachable(root),
-                _ => Volume::Reachable,
-            };
-            let _ = tx.send(v);
-        });
-        self.missing_ui.not_found = Some(NotFound {
-            id: book.id.clone(),
-            caption: book.caption(),
-            file,
-            volume: Volume::Checking,
-            rx: Some(rx),
-        });
+        let converted = self.settings.converted.get(Path::new(&file)).cloned();
+        let (f, ctx2) = (file.clone(), ctx.clone());
+        std::thread::Builder::new()
+            .name("comicrust-examen-fichier".into())
+            .spawn(move || {
+                let _ = tx.send(probe_file(&f, converted.as_deref()));
+                ctx2.request_repaint();
+            })
+            .expect("fil d'examen du fichier");
+        self.missing_ui.opening = Some(OpenCheck { id: id.to_string(), file, start, since: Instant::now(), rx });
+    }
+
+    /// Ouverture d'un livre de la bibliothèque dont le fichier est introuvable (`file` :
+    /// chemin de la fiche examiné, `volume` : état de son volume). Volume joignable : le
+    /// livre est marqué manquant (base ComicRust : enregistré si la fiche a encore ce
+    /// chemin).
+    pub(crate) fn missing_not_found(&mut self, ctx: &Context, id: &str, file: String, volume: Volume) {
+        let Some(book) = self.library.database().and_then(|db| db.get(id).cloned()) else { return };
+        if volume == Volume::Reachable {
+            let checked = [(book.id.clone(), file.clone())];
+            self.library.set_missing_files(&checked, true);
+            if let Some(cfg) = self.library.standalone().cloned() {
+                let sink = self.library.watcher.as_ref().map(|w| w.written.clone());
+                let seen: HashMap<String, String> = [(book.id.to_ascii_lowercase(), file.clone())].into();
+                let rx = crate::library::missing::persist_marks(cfg, vec![book.id.clone()], vec![], seen, sink, ctx);
+                self.library.missing.push_op(rx);
+            }
+        }
+        self.missing_ui.not_found = Some(NotFound { id: book.id.clone(), caption: book.caption(), file, volume });
     }
 
     /// Vérification automatique après le chargement (bibliothèque ComicRack : la base
@@ -218,7 +286,7 @@ impl ComicRustApp {
 
     fn start_missing_check(&mut self, ctx: &Context, manual: bool) {
         let folders = self.lists_source();
-        self.library.start_check(&self.settings.converted, folders, manual, ctx);
+        self.library.start_check(&self.settings.converted, folders, ctx);
         if manual {
             self.missing_ui.show_check = true;
         }
@@ -226,8 +294,10 @@ impl ComicRustApp {
 
     /// Résultats des fils : vérification, volume, recherche, opérations sur les fiches.
     pub(crate) fn poll_missing(&mut self, ctx: &Context) {
-        if let Some((report, _manual)) = self.library.poll_check() {
-            // Base ComicRust : le résultat est enregistré (comme l'analyse des dossiers).
+        if let Some(done) = self.library.poll_check() {
+            // Base ComicRust : le résultat est enregistré (comme l'analyse des dossiers), pour
+            // les seules fiches qui ont encore le chemin vérifié (`done.files`).
+            let report = &done.report;
             if let (Some(cfg), false) = (self.library.standalone().cloned(), report.cancelled) {
                 let db = self.library.database();
                 let was = |id: &String| db.as_ref().and_then(|d| d.get(id)).map(|b| b.missing);
@@ -236,26 +306,40 @@ impl ComicRustApp {
                     report.present.iter().filter(|id| was(id).flatten().is_some()).cloned().collect();
                 if !missing.is_empty() || !back.is_empty() {
                     let sink = self.library.watcher.as_ref().map(|w| w.written.clone());
-                    let rx = crate::library::missing::persist_marks(cfg, missing, back, sink, ctx);
+                    let rx = crate::library::missing::persist_marks(cfg, missing, back, done.files, sink, ctx);
                     self.library.missing.push_op(rx);
                 }
             }
         }
-        if let Some(nf) = &mut self.missing_ui.not_found {
-            if let Some(v) = nf.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-                nf.rx = None;
-                nf.volume = v.clone();
-                if v == Volume::Reachable {
-                    let id = nf.id.clone();
-                    self.library.set_missing(std::slice::from_ref(&id), true);
-                    if let Some(cfg) = self.library.standalone().cloned() {
-                        let sink = self.library.watcher.as_ref().map(|w| w.written.clone());
-                        let rx = crate::library::missing::persist_marks(cfg, vec![id], vec![], sink, ctx);
-                        self.library.missing.push_op(rx);
+        if let Some(o) = &self.missing_ui.opening {
+            match o.rx.try_recv() {
+                Ok(probe) => {
+                    let o = self.missing_ui.opening.take().unwrap();
+                    match probe {
+                        Probe::Exists(path) => {
+                            if self.missing_ui.not_found.as_ref().is_some_and(|nf| nf.id == o.id) {
+                                self.missing_ui.not_found = None;
+                            }
+                            self.open_book_at(ctx, path, o.start);
+                        }
+                        Probe::Missing(v) => self.missing_not_found(ctx, &o.id, o.file, v),
                     }
                 }
-            } else if nf.rx.is_some() {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => self.missing_ui.opening = None,
+            }
+        }
+        if let Some((_, rx)) = &self.missing_ui.choosing {
+            match rx.try_recv() {
+                Ok(p) => {
+                    self.missing_ui.choosing = None;
+                    if let Some(p) = p {
+                        self.missing_ui.relocate =
+                            Some(RelocateDialog { proposals: vec![p], not_found: 0, source: "fichier choisi".into() });
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => self.missing_ui.choosing = None,
             }
         }
         if let Some(d) = &mut self.missing_ui.remove {
@@ -351,12 +435,16 @@ impl ComicRustApp {
     pub(crate) fn handle_missing_request(&mut self, ctx: &Context, r: MissingRequest) {
         match r {
             MissingRequest::Check => self.start_missing_check(ctx, true),
-            // Disque revenu : le livre s'ouvre ; toujours absent : nouvelle vérification.
-            MissingRequest::Retry(id) => self.open_library_book(ctx, &id, crate::app::Start::Auto),
+            // Disque revenu : le livre s'ouvre ; toujours absent : la fenêtre le redit
+            // (examen dans un fil, « Vérification… » en attendant).
+            MissingRequest::Retry(id) => self.open_library_book(ctx, &id, Start::Auto),
             MissingRequest::Locate(id) => {
                 if let Err(e) = self.missing_target() {
                     self.error = Some(e);
                     return;
+                }
+                if self.missing_ui.choosing.is_some() {
+                    return; // un fichier choisi est déjà en cours d'examen
                 }
                 let Some(old) = self.library.database().and_then(|db| db.get(&id).and_then(|b| b.file.clone())) else {
                     return;
@@ -374,11 +462,10 @@ impl ComicRustApp {
                 }
                 let Some(new) = dlg.pick_file() else { return };
                 self.settings.last_dir = new.parent().map(Path::to_path_buf);
-                let size = std::fs::metadata(&new).map(|m| m.len()).unwrap_or(0);
-                if let Some(p) = self.library.chosen_proposal(&id, new, size) {
-                    self.missing_ui.relocate =
-                        Some(RelocateDialog { proposals: vec![p], not_found: 0, source: "fichier choisi".into() });
-                }
+                // Taille et doublons (même fichier physique sous un autre chemin) : dans un fil.
+                let Some(db) = self.library.database() else { return };
+                let rx = crate::library::missing::check_chosen(db, id, new, ctx);
+                self.missing_ui.choosing = Some((Instant::now(), rx));
             }
             MissingRequest::SearchFolder(ids) => {
                 if let Err(e) = self.missing_target() {
@@ -594,7 +681,8 @@ impl ComicRustApp {
             self.missing_ui.pending = Some(MissingRequest::SearchFolder(ids));
             ui.close();
         }
-        let sel = self.library.selection();
+        // Seulement les livres affichés (jamais un livre masqué par la recherche ou la liste).
+        let sel = self.library.visible_selection();
         let r = ui.add_enabled(
             reason.is_none() && !sel.is_empty(),
             egui::Button::new(format!("🗑 Retirer la sélection de la bibliothèque ({})…", sel.len())),
@@ -609,12 +697,40 @@ impl ComicRustApp {
     }
 
     pub(crate) fn missing_windows(&mut self, ctx: &Context) {
+        self.probe_hint(ctx);
         self.not_found_window(ctx);
         self.remove_window(ctx);
         self.relocate_window(ctx);
         self.search_window(ctx);
         self.check_window(ctx);
         self.missing_info_window(ctx);
+    }
+
+    /// « Vérification… » pendant l'examen d'un fichier (ouverture d'un livre, fichier choisi)
+    /// quand il tarde (NAS qui se réveille).
+    fn probe_hint(&self, ctx: &Context) {
+        let opening = self.missing_ui.opening.as_ref().filter(|o| {
+            !self.missing_ui.not_found.as_ref().is_some_and(|nf| nf.id == o.id) && o.since.elapsed() > PROBE_HINT_AFTER
+        });
+        let choosing = self.missing_ui.choosing.as_ref().filter(|(since, _)| since.elapsed() > PROBE_HINT_AFTER);
+        let text = if opening.is_some() {
+            "Vérification du fichier…"
+        } else if choosing.is_some() {
+            "Vérification du fichier choisi…"
+        } else {
+            return;
+        };
+        egui::Area::new(egui::Id::unique("comicrust-examen-fichier"))
+            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -40.0])
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(text);
+                    });
+                });
+            });
     }
 
     fn not_found_window(&mut self, ctx: &Context) {
@@ -633,7 +749,7 @@ impl ComicRustApp {
                 Volume::Checking => {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Vérification de l'accès au disque…");
+                        ui.label("Vérification…");
                     });
                 }
                 Volume::Reachable => {
@@ -691,12 +807,18 @@ impl ComicRustApp {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             close = true;
         }
-        if req.is_some() {
-            self.missing_ui.pending = req;
-            close = true;
+        if let Some(r) = req {
+            // Réessayer : la fenêtre reste ouverte (« Vérification… », puis le livre s'ouvre
+            // ou la fenêtre le redit) ; les autres actions la ferment.
+            close |= !matches!(r, MissingRequest::Retry(_));
+            self.missing_ui.pending = Some(r);
         }
         if close {
-            self.missing_ui.not_found = None;
+            // Annuler pendant « Réessayer » : l'ouverture en attente est abandonnée.
+            let id = self.missing_ui.not_found.take().map(|nf| nf.id);
+            if self.missing_ui.opening.as_ref().is_some_and(|o| Some(&o.id) == id.as_ref()) {
+                self.missing_ui.opening = None;
+            }
         }
     }
 
@@ -801,7 +923,12 @@ impl ComicRustApp {
                     }
                     if remove_needs_confirmation(n, r) {
                         ui.add_space(4.0);
-                        let text = if r.is_conclusive() {
+                        let text = if r.is_conclusive() && !r.present.is_empty() {
+                            format!(
+                                "Je confirme vouloir retirer {} de la bibliothèque, même si des fichiers existent encore",
+                                if n > 1 { format!("ces {n} livres") } else { "ce livre".to_string() }
+                            )
+                        } else if r.is_conclusive() {
                             format!("Je confirme vouloir retirer ces {n} livres")
                         } else {
                             "Je confirme que ces fichiers ont bien disparu (ou que je veux retirer ces fiches quand \
@@ -1026,5 +1153,27 @@ impl ComicRustApp {
         if close || ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter)) {
             self.missing_ui.info = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Examen du fichier avant l'ouverture (fait dans un fil) : fichier présent, CBZ
+    /// converti si l'original a été rangé, introuvable sur un volume joignable.
+    #[test]
+    fn probe_finds_the_file_to_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let orig = dir.path().join("a.cbr");
+        let cbz = dir.path().join("a.cbz");
+        std::fs::write(&cbz, b"BD").unwrap();
+        let file = orig.to_string_lossy().into_owned();
+        assert_eq!(probe_file(&file, Some(&cbz)), Probe::Exists(cbz.clone()), "original rangé : le CBZ");
+        std::fs::write(&orig, b"BD").unwrap();
+        assert_eq!(probe_file(&file, Some(&cbz)), Probe::Exists(orig.clone()), "original présent");
+        assert_eq!(probe_file(&file, None), Probe::Exists(orig));
+        let gone = dir.path().join("parti.cbz").to_string_lossy().into_owned();
+        assert_eq!(probe_file(&gone, None), Probe::Missing(Volume::Reachable));
     }
 }

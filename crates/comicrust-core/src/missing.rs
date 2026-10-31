@@ -563,8 +563,10 @@ fn ext(p: &str) -> String {
     Path::new(p).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
-fn name_key(p: &str) -> String {
-    p.rsplit(['/', '\\']).next().unwrap_or(p).to_lowercase()
+/// Clé du nom de fichier d'un chemin (séparateurs `\` et `/`) : NFC (comme
+/// [`check_files`] : un nom écrit en NFD par macOS ou un NAS reste le même nom), minuscules.
+pub fn name_key(p: &str) -> String {
+    p.rsplit(['/', '\\']).next().unwrap_or(p).nfc().collect::<String>().to_lowercase()
 }
 
 /// Dossiers parents d'un chemin, du plus proche au plus lointain (minuscules, texte).
@@ -1266,5 +1268,9 @@ mod tests {
         assert_eq!(chosen_kind("/bd/Thanos 01.cbz", None, p, 5), MatchKind::Name);
         assert_eq!(chosen_kind("/bd/autre.cbz", Some(5), p, 5), MatchKind::Size);
         assert_eq!(chosen_kind("/bd/autre.cbz", None, p, 5), MatchKind::Chosen);
+        // Nom en NFD (macOS, NAS) contre NFC : même nom (comme `check_files`).
+        let nfc = Path::new("/rangé/Thanos é.cbz");
+        assert_eq!(chosen_kind("/bd/Thanos e\u{301}.cbz", Some(5), nfc, 5), MatchKind::NameAndSize);
+        assert_eq!(name_key("Z:\\BD\\E\u{301}TÉ.cbz"), name_key("/x/été.CBZ"));
     }
 }

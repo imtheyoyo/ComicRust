@@ -46,7 +46,8 @@ Les journaux de l'original (``BD2_Rename_Log.txt``, ``BD2_Debug_Log.txt``) sont 
 ``data\\bedetheque\\`` à côté de ComicRust.exe (ou dans le dossier du réglage
 ``dossier_journaux``) ; leur contenu va aussi dans le journal du script de ComicRust.
 Couvertures des fenêtres de choix : chargées pendant que la fenêtre est ouverte (survol
-d'abord), gardées dans ``cache\\`` de ce dossier (borné, voir ``CacheDisque``).
+d'abord), gardées dans ``data\\bedetheque\\cache\\`` à côté de ComicRust.exe, quel que soit
+``dossier_journaux`` (borné, voir ``CacheDisque``).
 
 Réglages avancés (``comicrust.settings()``, sans interface) : ``url_base`` (autre adresse du
 site, pour les essais ; aussi variable d'environnement ``COMICRUST_BEDETHEQUE_URL``),
@@ -132,10 +133,12 @@ DELAI_RESEAU = 30
 # Vignettes des fenêtres de choix (limites de comicrust.choose) : images chargées d'office
 # au plus par fenêtre (les autres au survol), pause entre deux images téléchargées
 # (serveur d'images du site ; une image du cache disque n'attend pas). Miniatures du site
-# (cache/thb_couv) d'abord : voir _vignette.
+# (cache/thb_couv) d'abord, la grande image seulement si la miniature manque : deux
+# requêtes au plus par vignette (voir _vignette) ; une image absente du site (404) n'est
+# plus redemandée pendant COUV_ABSENTE_JOURS jours (cache disque).
 MAX_VIGNETTES = 24
 MAX_IMAGE = 2 * 1024 * 1024
-PAUSE_IMAGE = 0.15
+PAUSE_IMAGE = 0.4
 # Couvertures des séries (et des albums sans couverture dans la page de la série) : lues
 # sur leur page, **pendant** que la fenêtre de choix est ouverte, une page à la fois, avec
 # au moins PAUSE_PAGE_SERIE secondes entre deux pages ; NbVignettesSeries pages d'office
@@ -143,8 +146,9 @@ PAUSE_IMAGE = 0.15
 MAX_PAGES_SERIES = 12
 PAUSE_PAGE_SERIE = 1.0
 # Cache disque des vignettes (data\bedetheque\cache\) : nombre de fichiers et taille au
-# plus (les moins récemment utilisés sont supprimés) ; adresses des couvertures des pages
-# gardées COUV_JOURS jours (COUV_ABSENTE_JOURS si la page n'en avait pas).
+# plus, jamais dépassés (les moins récemment utilisés sont supprimés avant d'écrire) ;
+# adresses des couvertures des pages gardées COUV_JOURS jours (COUV_ABSENTE_JOURS si la
+# page n'en avait pas, ou pour une image absente du site).
 MAX_CACHE_FICHIERS = 800
 MAX_CACHE_OCTETS = 120 * 1024 * 1024
 MAX_CACHE_COUVERTURES = 5000
@@ -732,19 +736,23 @@ def _attendre(sorte, pause):
 
 
 class CacheDisque:
-    """Cache des vignettes des fenêtres de choix, dans ``cache\\`` du dossier des journaux
-    (``data\\bedetheque\\cache\\`` à côté de ComicRust.exe) : images téléchargées
-    (``<empreinte SHA-1 de l'adresse>.img``) et adresse de la couverture de chaque page de
-    série ou d'album déjà lue (``couvertures.json``). Une série déjà proposée n'est donc
-    plus relue. Borné : MAX_CACHE_FICHIERS images et MAX_CACHE_OCTETS au plus (les moins
-    récemment utilisées partent d'abord). Toute erreur disque est ignorée (cache vide)."""
+    """Cache des vignettes des fenêtres de choix, dans ``data\\bedetheque\\cache\\`` à côté
+    de ComicRust.exe (jamais dans ``dossier_journaux`` : un dossier de journaux sur un
+    partage ne reçoit pas des centaines d'images) : images téléchargées (``<empreinte
+    SHA-1 de l'adresse>.img``), adresse de la couverture de chaque page de série ou d'album
+    déjà lue et images absentes du site (404) (``couvertures.json``). Une série déjà
+    proposée n'est donc plus relue, une image absente plus redemandée. Borné :
+    MAX_CACHE_FICHIERS images et MAX_CACHE_OCTETS au plus, **jamais dépassés** (avant
+    d'écrire une image, les moins récemment utilisées partent pour lui faire la place).
+    Toute erreur disque est ignorée (cache vide)."""
 
     def __init__(self, dossier):
         self.dossier = dossier
         self.index_chemin = os.path.join(dossier, "couvertures.json")
         self.index = None
         self.modifie = False
-        self.ecrits = 0
+        # (nombre de fichiers, octets) du dossier, tenu à jour après une purge.
+        self.etat = None
 
     def _chemin(self, url):
         return os.path.join(self.dossier, hashlib.sha1(url.encode("utf-8")).hexdigest() + ".img")
@@ -760,16 +768,34 @@ class CacheDisque:
             return None
 
     def garder_image(self, url, donnees):
+        """Garde une image, après avoir fait la place (bornes jamais dépassées) ; rien si la
+        place n'a pas pu être faite."""
+        taille = len(donnees)
+        if taille > MAX_CACHE_OCTETS:
+            return
+        if self.etat is None:
+            self.purger()
+        nb, octets = self.etat or (0, 0)
+        if nb + 1 > MAX_CACHE_FICHIERS or octets + taille > MAX_CACHE_OCTETS:
+            self.purger(place=taille)
+            nb, octets = self.etat or (0, 0)
+            if nb + 1 > MAX_CACHE_FICHIERS or octets + taille > MAX_CACHE_OCTETS:
+                debuglog("Cache : plein (fichiers non supprimables), image non gardée")
+                return
         try:
             os.makedirs(self.dossier, exist_ok=True)
-            tmp = self._chemin(url) + ".tmp"
+            chemin = self._chemin(url)
+            ancien = os.path.getsize(chemin) if os.path.exists(chemin) else None
+            tmp = chemin + ".tmp"
             with open(tmp, "wb") as f:
                 f.write(donnees)
-            os.replace(tmp, self._chemin(url))
-            self.ecrits += 1
-            if self.ecrits % 50 == 1:
-                self.purger()
+            os.replace(tmp, chemin)
+            if ancien is None:
+                self.etat = (nb + 1, octets + taille)
+            else:
+                self.etat = (nb, octets - ancien + taille)
         except OSError as e:
+            self.etat = None  # recompté à la prochaine écriture
             debuglog("Cache : %s" % e)
 
     def _index(self):
@@ -791,6 +817,16 @@ class CacheDisque:
         if not isinstance(quand, (int, float)) or time.time() - quand > jours * 86400:
             return False, None
         return True, img or None
+
+    def absente(self, url):
+        """Image ``url`` absente du site (404) il y a moins de COUV_ABSENTE_JOURS jours ?"""
+        e = self._index().get("absente:" + url)
+        return (isinstance(e, list) and len(e) == 2 and isinstance(e[1], (int, float))
+                and time.time() - e[1] <= COUV_ABSENTE_JOURS * 86400)
+
+    def garder_absence(self, url):
+        self.garder_couverture("absente:" + url, None)
+        self.enregistrer()
 
     def garder_couverture(self, page, img):
         idx = self._index()
@@ -814,8 +850,10 @@ class CacheDisque:
         except OSError as e:
             debuglog("Cache : %s" % e)
 
-    def purger(self):
-        """Supprime les images les moins récemment utilisées au-delà des bornes."""
+    def purger(self, place=0):
+        """Supprime les images les moins récemment utilisées au-delà des bornes ; avec
+        ``place`` (taille d'une image à écrire), assez pour qu'elle tienne sans les dépasser.
+        Tient ``etat`` à jour (fichiers non supprimables comptés)."""
         try:
             fichiers = []
             for n in os.listdir(self.dossier):
@@ -824,16 +862,23 @@ class CacheDisque:
                     st = os.stat(c)
                     fichiers.append((st.st_mtime, st.st_size, c))
         except OSError:
+            self.etat = (0, 0) if not os.path.isdir(self.dossier) else None
             return
         fichiers.sort()
         total = sum(f[1] for f in fichiers)
-        while fichiers and (len(fichiers) > MAX_CACHE_FICHIERS or total > MAX_CACHE_OCTETS):
-            _, taille, c = fichiers.pop(0)
+        nb = len(fichiers)
+        max_nb = MAX_CACHE_FICHIERS - (1 if place else 0)
+        max_octets = MAX_CACHE_OCTETS - place
+        for _, taille, c in fichiers:
+            if nb <= max_nb and total <= max_octets:
+                break
             try:
                 os.remove(c)
+                nb -= 1
                 total -= taille
             except OSError:
                 pass
+        self.etat = (nb, total)
 
 
 def image(url, referer=None):
@@ -848,6 +893,9 @@ def image(url, referer=None):
     if len(S.images) > 200:  # mémoire bornée sur une longue sélection
         S.images.clear()
     donnees = S.cache.image(url) if S.cache else None
+    if donnees is None and S.cache and S.cache.absente(url):
+        S.images[url] = None  # absente du site il y a peu : pas redemandée
+        return None
     if donnees is None:
         _attendre("image", PAUSE_IMAGE)
         try:
@@ -862,8 +910,18 @@ def image(url, referer=None):
                 S.cache.garder_image(url, donnees)
         except Exception as e:
             debuglog("Image %s : %s" % (url, _texte_erreur(e)))
+            if S.cache and _code_http(e) in (404, 410):
+                S.cache.garder_absence(url)  # erreurs passagères : jamais gardées
     S.images[url] = donnees
     return donnees
+
+
+def _code_http(e):
+    """Code HTTP d'une erreur (urllib ou cloudscraper/requests), sinon None."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code
+    rep = getattr(e, "response", None)
+    return getattr(rep, "status_code", None)
 
 
 def _grande(url):
@@ -886,14 +944,14 @@ def _petite(url):
 
 def _vignette(url):
     """Image d'une ligne de fenêtre de choix, **petite** pour ménager le site : la
-    miniature du site (``cache/thb_couv``) d'abord, l'adresse trouvée dans la page si la
-    miniature n'existe pas, la couverture en grand en dernier recours (vignette absente)."""
+    miniature du site (``cache/thb_couv``) d'abord, la couverture en grand
+    (``media/Couvertures``) seulement si la miniature manque — deux requêtes au plus.
+    Adresse qui n'est ni l'une ni l'autre (autre serveur) : elle seule."""
     if not url or stop():
         return None
-    essais = []
-    for u in (_petite(url), url, _grande(url)):
-        if u and u not in essais:
-            essais.append(u)
+    petite = _petite(url) or (url if _grande(url) else None)
+    grande = _grande(url) or (url if _petite(url) else None)
+    essais = [u for u in (petite, grande) if u] or [url]
     for u in essais:
         img = image(u)
         if img is not None or stop():
@@ -2155,7 +2213,9 @@ def _initialiser():
     if not LoadSetting():
         return False
     S.web = Web(S.base, C("use_cloudscraper"))
-    S.cache = CacheDisque(os.path.join(S.journaux.dossier, "cache"))
+    # Toujours à côté de ComicRust.exe, même si les journaux sont ailleurs (réglage
+    # ``dossier_journaux``, par exemple sur un partage).
+    S.cache = CacheDisque(os.path.join(dossier_donnees(), "cache"))
     S.cache.purger()
     return True
 

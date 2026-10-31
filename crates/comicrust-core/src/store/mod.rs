@@ -48,6 +48,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::db::{Changes, ComicDatabase, Counters, DbConfig, LoadProgress, FULL_CHECK};
 use crate::library::LibraryBook;
@@ -698,17 +699,28 @@ fn write_rows(conn: &mut Conn, books: &[&LibraryBook], counter: i64, verb: &str)
     Ok(())
 }
 
+/// Clé de comparaison des fichiers à l'ajout : [`scanner::path_key`] (sans casse,
+/// `\\` = `/`) en NFC (un chemin écrit en NFD par macOS ou un NAS est le même fichier).
+fn added_file_key(f: &str) -> String {
+    scanner::path_key(f).nfc().collect()
+}
+
 /// Sépare les livres `added` à insérer de ceux déjà présents en base (même identifiant,
-/// ou même fichier au sens de [`scanner::path_key`] : sans casse, `\\` = `/`) ou en double
-/// dans la liste.
+/// ou même fichier au sens de [`added_file_key`]) ou en double dans la liste. Appelée
+/// dans la transaction d'écriture, après le verrou pris par l'incrément du compteur (que
+/// toute écriture prend d'abord) : la base lue est celle **du moment de l'écriture**, pas
+/// la copie de début d'analyse ; un fichier enregistré entre-temps dans une autre fiche
+/// (autre poste, script, lot précédent) ne donne donc pas de seconde fiche.
 ///
 /// Recherche des fichiers déjà connus :
 /// - SQLite (base locale) : tous les chemins sont relus (un parcours de table, quelques
-///   dizaines de millisecondes pour 50 000 livres) et comparés par `path_key`, ce qui
-///   traite aussi la casse des lettres accentuées (que `COLLATE NOCASE` ignore) ;
-/// - MySQL : chaque chemin est cherché tel quel et avec les séparateurs `/` et `\\`,
-///   par l'index `file`(191) ; l'interclassement de la colonne (insensible à la casse et
-///   aux accents) ramène les candidats, `path_key` tranche ensuite.
+///   dizaines de millisecondes pour 50 000 livres) et comparés par `added_file_key`, ce
+///   qui traite aussi la casse des lettres accentuées (que `COLLATE NOCASE` ignore) ;
+/// - MySQL : chaque chemin est cherché séparateurs ramenés à `/` (`REPLACE` côté serveur,
+///   chemins aux séparateurs mélangés compris), en NFC et en NFD ; l'interclassement de
+///   la colonne (insensible à la casse) ramène les candidats, `added_file_key` tranche.
+///   La comparaison par `REPLACE` parcourt la table côté serveur (quelques dizaines de
+///   millisecondes pour 50 000 livres, par paquet de 200 ajouts), sans rien transférer.
 fn new_books<'a>(conn: &mut Conn, added: &'a [LibraryBook]) -> Result<(Vec<&'a LibraryBook>, Vec<String>), Error> {
     let mut known_ids: HashSet<String> = HashSet::new();
     let mut known_keys: HashSet<String> = HashSet::new();
@@ -719,7 +731,7 @@ fn new_books<'a>(conn: &mut Conn, added: &'a [LibraryBook]) -> Result<(Vec<&'a L
     if !mysql {
         conn.query_each(&format!("SELECT `file` FROM {BOOKS} WHERE `file` IS NOT NULL"), &[], |r| {
             if let Some(f) = r.into_iter().next().and_then(Val::into_text) {
-                known_keys.insert(scanner::path_key(&f));
+                known_keys.insert(added_file_key(&f));
             }
             Ok(())
         })?;
@@ -735,29 +747,31 @@ fn new_books<'a>(conn: &mut Conn, added: &'a [LibraryBook]) -> Result<(Vec<&'a L
         if !mysql {
             continue;
         }
-        let mut files: Vec<Val> = Vec::new();
+        let mut files: Vec<Val> = vec![Val::Text("\\".into())];
         for f in chunk.iter().filter_map(|b| b.file.as_deref()) {
-            for v in [f.to_string(), f.replace('\\', "/"), f.replace('/', "\\")] {
+            let slash = f.replace('\\', "/");
+            for v in [slash.nfc().collect::<String>(), slash.nfd().collect()] {
                 let v = Val::Text(v);
                 if !files.contains(&v) {
                     files.push(v);
                 }
             }
         }
-        if files.is_empty() {
+        if files.len() == 1 {
             continue;
         }
-        let marks = vec!["?"; files.len()].join(",");
-        for r in conn.query(&format!("SELECT `file` FROM {BOOKS} WHERE `file` IN ({marks})"), &files)? {
+        let marks = vec!["?"; files.len() - 1].join(",");
+        let sql = format!("SELECT `file` FROM {BOOKS} WHERE REPLACE(`file`, ?, '/') IN ({marks})");
+        for r in conn.query(&sql, &files)? {
             if let Some(f) = r.into_iter().next().and_then(Val::into_text) {
-                known_keys.insert(scanner::path_key(&f));
+                known_keys.insert(added_file_key(&f));
             }
         }
     }
     let (mut insert, mut skipped) = (Vec::new(), Vec::new());
     for b in added {
         let new_id = known_ids.insert(b.id.to_ascii_lowercase());
-        let new_file = b.file.as_deref().is_none_or(|f| known_keys.insert(scanner::path_key(f)));
+        let new_file = b.file.as_deref().is_none_or(|f| known_keys.insert(added_file_key(f)));
         if new_id && new_file {
             insert.push(b);
         } else {

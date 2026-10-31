@@ -434,6 +434,54 @@ fn sqlite_targeted_writes_keep_reading_progress() {
     targeted_writes_scenario(&cfg);
 }
 
+/// Ajouts d'une analyse dont le fichier a été enregistré **entre-temps** dans une autre
+/// fiche (script qui a rangé un livre, autre poste, lot précédent) : comparés à la base au
+/// moment de l'écriture, par chemin sans casse, `\\` = `/` et NFC / NFD : pas de seconde
+/// fiche (v0.10.2).
+fn added_files_known_meanwhile_scenario(cfg: &StoreConfig) {
+    let mut s = Store::open(cfg).unwrap();
+    let mut x = simple(1);
+    x.file = Some(r"Z:\BD\Séries\Été 01.cbz".into());
+    s.upsert(&[x.clone()]).unwrap();
+    // L'analyse a commencé avant : sa copie ne connaît que X à son ancien chemin…
+    let seen: HashMap<String, String> = [(x.id.to_ascii_lowercase(), x.file.clone().unwrap())].into();
+    // … pendant qu'un script range X ailleurs ; l'analyse trouve ce fichier « nouveau »,
+    // écrit autrement (casse, séparateurs mélangés, NFD).
+    let mut moved = x.clone();
+    moved.file = Some(r"Z:\BD\Rangés\Été 01.cbz".into());
+    s.upsert(&[moved]).unwrap();
+    let variants = [
+        "z:/bd/rangés/ÉTÉ 01.CBZ".to_string(),
+        r"Z:\BD/Rangés\Été 01.cbz".to_string(),
+        "Z:\\BD\\Range\u{301}s\\E\u{301}te\u{301} 01.cbz".to_string(),
+    ];
+    let added: Vec<LibraryBook> = variants
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let mut b = simple(100 + i);
+            b.file = Some(f.clone());
+            b
+        })
+        .collect();
+    let mut fresh = simple(200);
+    fresh.file = Some(r"Z:\BD\Rangés\Été 02.cbz".into());
+    let report = ScanReport { added: [added.clone(), vec![fresh.clone()]].concat(), ..Default::default() };
+    let w = s.apply_scan_seen(&report, Some(&seen)).unwrap();
+    let skipped: HashSet<&str> = w.skipped.iter().map(String::as_str).collect();
+    for b in &added {
+        assert!(skipped.contains(b.id.as_str()), "{:?} : seconde fiche pour un fichier connu", b.file);
+    }
+    assert_eq!(w.books.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), [fresh.id.as_str()]);
+    assert_eq!(s.count().unwrap(), 2, "X et le seul vrai nouveau livre");
+}
+
+#[test]
+fn sqlite_added_files_known_meanwhile_are_skipped() {
+    let (_dir, cfg) = temp_cfg();
+    added_files_known_meanwhile_scenario(&cfg);
+}
+
 /// CBZ minimal d'une page.
 fn tiny_cbz(path: &Path) {
     use std::io::Write;
@@ -794,6 +842,8 @@ fn mysql_store() {
     // Écritures ciblées.
     drop_tables(&db_cfg);
     targeted_writes_scenario(&cfg);
+    drop_tables(&db_cfg);
+    added_files_known_meanwhile_scenario(&cfg);
 
     // Modification des fiches et déplacement des fichiers (module `edit`).
     drop_tables(&db_cfg);

@@ -120,9 +120,9 @@ fn proposals_from_search_and_chosen_file() {
     assert!(!p[2].checked, "même nom, taille différente : à cocher soi-même");
     assert!(!p[3].checked, "plusieurs fichiers de même nom : à cocher soi-même");
     // Fichier choisi déjà dans la bibliothèque (doublon) : décoché, signalé.
-    let p = s.chosen_proposal("b", "/rangé/x.cbz".into(), 3).unwrap();
+    let p = chosen_proposal(&s.database().unwrap(), "b", "/rangé/x.cbz".into(), 3).unwrap();
     assert!(!p.checked && p.duplicate.is_some());
-    let p = s.chosen_proposal("a", "/ailleurs/29 - marvel team-up #55.CBZ".into(), 100).unwrap();
+    let p = chosen_proposal(&s.database().unwrap(), "a", "/ailleurs/29 - marvel team-up #55.CBZ".into(), 100).unwrap();
     assert_eq!((p.kind, p.checked), (MatchKind::NameAndSize, true));
     let known = s.known_files();
     assert!(known.contains(std::path::Path::new("/RANGÉ/x.cbz")) && !known.contains(std::path::Path::new("/y.cbz")));
@@ -150,7 +150,8 @@ fn standalone_operations() {
     let wait = |rx: std::sync::mpsc::Receiver<OpDone>| rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
     let sink: crate::library::watch::WrittenSink = Default::default();
 
-    let done = wait(persist_marks(cfg.clone(), vec!["a".into()], vec![], Some(sink.clone()), &ctx));
+    let seen_a: HashMap<String, String> = [("a".to_string(), a.file.clone().unwrap())].into();
+    let done = wait(persist_marks(cfg.clone(), vec!["a".into()], vec![], seen_a, Some(sink.clone()), &ctx));
     assert_eq!(done.kind, OpKind::Mark);
     let Ok(OpResult::Store { books, counter }) = done.result else { panic!() };
     assert_eq!((books.len(), books[0].missing), (1, Some(true)));
@@ -287,6 +288,13 @@ fn removal_needs_a_finished_and_safe_check() {
     assert!(!remove_allowed(Some(&massive), 30, false));
     let unreadable = CheckReport { unknown: vec!["x".into()], ..Default::default() };
     assert!(!remove_allowed(Some(&unreadable), 1, false));
+    // Fichiers encore présents (livre non manquant) : confirmation exigée, même pour un seul.
+    let present = CheckReport { present: vec!["a".into()], ..Default::default() };
+    assert!(remove_needs_confirmation(1, &present));
+    assert!(!remove_allowed(Some(&present), 1, false));
+    assert!(remove_allowed(Some(&present), 1, true));
+    let some = CheckReport { missing: vec!["a".into()], present: vec!["b".into()], ..Default::default() };
+    assert!(!remove_allowed(Some(&some), 2, false), "un des deux existe encore");
 }
 
 /// Un seul calcul du fichier réel (CBZ converti) pour la vérification et le retrait.
@@ -341,9 +349,138 @@ fn chosen_file_already_in_library_under_an_alias() {
     std::os::unix::fs::symlink(dir.path().join("réel"), dir.path().join("alias")).unwrap();
     let alias = dir.path().join("alias/Série/Tome 01.cbz");
     let s = state(vec![book("a", "/ancien/Tome 01.cbz"), book("b", &alias.to_string_lossy())]);
-    let p = s.chosen_proposal("a", real.clone(), 2).unwrap();
+    let p = chosen_proposal(&s.database().unwrap(), "a", real.clone(), 2).unwrap();
     assert!(p.duplicate.is_some() && !p.checked, "{p:?}");
     let other = dir.path().join("réel/Série/Tome 02.cbz");
     std::fs::write(&other, b"BD").unwrap();
-    assert!(s.chosen_proposal("a", other, 2).unwrap().duplicate.is_none());
+    assert!(chosen_proposal(&s.database().unwrap(), "a", other, 2).unwrap().duplicate.is_none());
+}
+
+/// Base ComicRust : une fiche déplacée (script, autre poste) **pendant** une vérification
+/// longue n'est pas marquée manquante à son nouveau chemin ; une relocalisation ne touche
+/// pas une fiche dont le chemin a changé depuis l'ouverture de la fenêtre (v0.10.2).
+#[test]
+fn marks_are_written_only_for_the_checked_path() {
+    use comicrust_core::store::{Store, StoreConfig};
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = StoreConfig::Sqlite(dir.path().join("comicrust.db"));
+    let old = dir.path().join("Séries_Temp/a.cbz").to_string_lossy().into_owned();
+    let rangee = dir.path().join("Séries/a.cbz");
+    std::fs::create_dir_all(rangee.parent().unwrap()).unwrap();
+    std::fs::write(&rangee, b"BD").unwrap();
+    let a = book("a", &old);
+    let mut b = book("b", &dir.path().join("b.cbz").to_string_lossy());
+    b.missing = Some(true);
+    Store::open(&cfg).unwrap().upsert(&[a.clone(), b.clone()]).unwrap();
+    let ctx = eframe::egui::Context::default();
+    let wait = |rx: std::sync::mpsc::Receiver<OpDone>| rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
+
+    // La vérification a vu « a » à son ancien chemin (absent) ; pendant ce temps, un script
+    // range le fichier et met la fiche à jour.
+    let seen: HashMap<String, String> =
+        [("a".to_string(), old.clone()), ("b".to_string(), b.file.clone().unwrap())].into();
+    let mut moved = a.clone();
+    moved.file = Some(rangee.to_string_lossy().into_owned());
+    Store::open_existing(&cfg).unwrap().upsert(&[moved.clone()]).unwrap();
+    let done = wait(persist_marks(cfg.clone(), vec!["a".into()], vec!["b".into()], seen.clone(), None, &ctx));
+    let Ok(OpResult::Store { books, .. }) = done.result else { panic!("{:?}", done.result) };
+    assert_eq!(books.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), ["b"], "seul « b » écrit");
+    let mut st = Store::open_existing(&cfg).unwrap();
+    let ga = st.get(&["a".to_string()]).unwrap().remove(0);
+    assert_eq!((ga.file.as_deref(), ga.missing), (moved.file.as_deref(), None), "fiche déplacée : pas manquante");
+    assert_eq!(st.get(&["b".to_string()]).unwrap()[0].missing, None, "revenu : effacé");
+    // Livre absent des chemins vérifiés : jamais écrit (pas d'écriture sans condition).
+    let done = wait(persist_marks(cfg.clone(), vec!["a".into()], vec![], HashMap::new(), None, &ctx));
+    let Ok(OpResult::Store { books, .. }) = done.result else { panic!() };
+    assert!(books.is_empty());
+    assert_eq!(st.get(&["a".to_string()]).unwrap()[0].missing, None);
+    // Sans déplacement : marqué.
+    let seen: HashMap<String, String> = [("a".to_string(), moved.file.clone().unwrap())].into();
+    let done = wait(persist_marks(cfg.clone(), vec!["a".into()], vec![], seen, None, &ctx));
+    assert!(matches!(done.result, Ok(OpResult::Store { ref books, .. }) if books.len() == 1));
+    assert_eq!(st.get(&["a".to_string()]).unwrap()[0].missing, Some(true));
+
+    // Relocalisation proposée d'après l'ancienne fiche (chemin `old`) : la fiche a changé
+    // depuis, rien n'est écrit.
+    let done = wait(relocate(Target::Store(cfg.clone()), vec![(a, rangee.clone())], None, &ctx));
+    let Ok(OpResult::Store { books, .. }) = done.result else { panic!("{:?}", done.result) };
+    assert!(books.is_empty(), "fiche modifiée entre-temps : pas réécrite");
+}
+
+/// Un résultat « manquant » mémorisé cède quand la fiche change dans la base : ComicRack
+/// qui efface `<Missing>` (fichier revenu), ou ligne réécrite (compteur) ; il reste tant
+/// que la fiche est relue sans changement.
+#[test]
+fn a_newer_database_state_wins_over_a_remembered_mark() {
+    let mut cr = book("c", "/bd/c.cbz");
+    cr.missing = Some(true);
+    let mut s = state(vec![book("a", "/bd/a.cbz"), cr.clone()]);
+    if let Status::Loaded(db) = &mut s.status {
+        Arc::make_mut(db).rows.extend([("a".to_string(), 1), ("c".to_string(), 1)]);
+    }
+    s.set_missing(&["a".into(), "c".into()], true);
+    assert_eq!(s.missing_count(), 2);
+    // Relecture sans changement (même compteur) : marquage gardé.
+    let same = |id: &str, n: i64, b: LibraryBook| Changes {
+        updated: vec![b],
+        rows: vec![(id.into(), n)],
+        ..Default::default()
+    };
+    s.apply_changes(same("a", 1, book("a", "/bd/a.cbz")));
+    assert_eq!(s.database().unwrap().get("a").unwrap().missing, Some(true));
+    // ComicRack efface <Missing> de « c » (fichier revenu) : plus manquant.
+    let mut c2 = cr.clone();
+    c2.missing = None;
+    s.apply_changes(same("c", 2, c2.clone()));
+    assert_eq!(s.database().unwrap().get("c").unwrap().missing, None);
+    // … même sans compteur (ComicDb.xml relu) : `Missing` a changé.
+    let mut s2 = state(vec![cr.clone()]);
+    s2.set_missing(&["c".into()], true);
+    s2.replace(ComicDatabase::from_books(vec![c2]));
+    assert_eq!(s2.missing_count(), 0, "base plus récente");
+    // Fiche « a » réécrite par ComicRack (compteur changé) : la base a raison.
+    s.apply_changes(same("a", 7, book("a", "/bd/a.cbz")));
+    assert_eq!(s.missing_count(), 0);
+    assert!(s.missing.overlay.is_empty(), "résultats périmés oubliés");
+    // Présent d'après la vérification, manquant d'après la base : « présent » tant que la
+    // base ne change pas, puis la base.
+    let mut s3 = state(vec![cr.clone()]);
+    s3.set_missing(&["c".into()], false);
+    assert_eq!(s3.database().unwrap().get("c").unwrap().missing, Some(false));
+    s3.replace(ComicDatabase::from_books(vec![cr.clone()]));
+    assert_eq!(s3.database().unwrap().get("c").unwrap().missing, Some(false), "relu sans changement");
+}
+
+/// Suppr / retrait : seulement les livres sélectionnés **affichés** (un livre sélectionné
+/// puis masqué par la recherche ou le filtre n'est jamais visé).
+#[test]
+fn destructive_actions_target_only_shown_books() {
+    let mut s = state(vec![book("a", "/bd/a.cbz"), book("b", "/bd/b.cbz")]);
+    assert_eq!(shown(&mut s).len(), 2);
+    s.click_book("a", false, false);
+    assert_eq!(s.visible_selection(), ["a"]);
+    s.set_missing(&["b".into()], true);
+    s.missing_only = true;
+    assert_eq!(shown(&mut s), ["b"]);
+    assert_eq!(s.selection(), ["a"], "repli sur le livre courant (fiche, infos)");
+    assert!(s.visible_selection().is_empty(), "« a » est masqué : rien à retirer");
+    s.click_book("b", false, false);
+    assert_eq!(s.visible_selection(), ["b"]);
+}
+
+/// « Retrouver le fichier… » : taille et doublons examinés dans un fil.
+#[test]
+fn chosen_file_is_examined_in_a_thread() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("Tome 01.cbz");
+    std::fs::write(&f, b"12345").unwrap();
+    let mut a = book("a", "/ancien/Tome 01.cbz");
+    a.file_size = Some(5);
+    let s = state(vec![a]);
+    let ctx = eframe::egui::Context::default();
+    let rx = check_chosen(s.database().unwrap(), "a".into(), f.clone(), &ctx);
+    let p = rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap().unwrap();
+    assert_eq!((p.kind, p.checked, p.new), (MatchKind::NameAndSize, true, f));
+    let rx = check_chosen(s.database().unwrap(), "absent".into(), dir.path().join("x.cbz"), &ctx);
+    assert!(rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap().is_none());
 }

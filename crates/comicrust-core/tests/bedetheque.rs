@@ -366,9 +366,21 @@ fn entree(cle: &str) -> ScriptEntry {
     entrees.into_iter().find(|e| e.key.as_deref() == Some(cle)).unwrap_or_else(|| panic!("entrée {cle} absente"))
 }
 
+/// Lance le script avec un dossier `data` neuf (module dans `data\python`, cache des
+/// couvertures dans `data\bedetheque\cache`) : chaque lancement part d'un cache vide.
 fn lancer(py: &Path, cle: &str, ctx: RunContext, hote: Arc<Hote>) -> RunResult {
-    let module = tempfile::tempdir().unwrap();
-    lancer_dans(py, cle, ctx, hote, module.path())
+    let data = tempfile::tempdir().unwrap();
+    lancer_dans(py, cle, ctx, hote, &module_dans(data.path()))
+}
+
+/// Dossier du module `comicrust` dans `racine\data\python` ; le cache des couvertures est
+/// alors `racine\data\bedetheque\cache` (voir [`cache_dans`]).
+fn module_dans(racine: &Path) -> PathBuf {
+    racine.join("data").join("python")
+}
+
+fn cache_dans(racine: &Path) -> PathBuf {
+    racine.join("data").join("bedetheque").join("cache")
 }
 
 /// Comme [`lancer`], avec le dossier du module `comicrust` (`data\python` dans ComicRust).
@@ -639,12 +651,13 @@ fn couvertures_des_fenetres_de_choix() {
     let py = need_python!();
     let srv = serveur();
     let journaux = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
     let hote = Arc::new(
         Hote::avec(vec![livre("t", "Thorgal Monde", "99")])
             .reglages(&srv, journaux.path(), json!({"TailleVignettes": 180}))
             .choix(vec![Choix::Rang(0), Choix::Annuler]),
     );
-    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t"]), hote.clone());
+    let r = lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t"]), hote.clone(), &module_dans(data.path()));
     assert_eq!(r.return_value, json!({"traites": 0, "ignores": 1}), "{}", r.journal_text());
     let listes = hote.listes.lock().unwrap();
     assert_eq!(listes.len(), 2, "série, puis album (numéro 99 absent : toute la série)");
@@ -678,6 +691,27 @@ fn couvertures_des_fenetres_de_choix() {
     assert_eq!(n("/cache/thb_couv/couv_811.jpg"), 1, "og:image (grande) de la série 81 → miniature");
     assert_eq!(n("/media/couvertures/couv_811.jpg"), 0);
     assert!(hote.messages.lock().unwrap().iter().all(|m| !m.contains("404")), "404 sans message");
+    // Deux requêtes au plus par couverture (miniature, puis grande), jamais une troisième.
+    let images: Vec<&String> =
+        chemins.iter().filter(|c| c.starts_with("/media/") || c.starts_with("/cache/")).collect();
+    for c in &images {
+        let nom = c.rsplit('/').next().unwrap();
+        assert!(images.iter().filter(|x| x.ends_with(nom)).count() <= 2, "{nom} : {images:?}");
+    }
+    // Absence (404) gardée sur le disque : au passage suivant, la miniature absente n'est
+    // pas redemandée, la grande vient du cache.
+    let avant = srv.chemins().len();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("t", "Thorgal Monde", "99")])
+            .reglages(&srv, journaux.path(), json!({}))
+            .choix(vec![Choix::Rang(0), Choix::Annuler]),
+    );
+    lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t"]), hote.clone(), &module_dans(data.path()));
+    assert_eq!(hote.avec_image(1), [0, 1], "couvertures des albums, depuis le cache");
+    let apres: Vec<String> = srv.chemins()[avant..].to_vec();
+    assert!(!apres.iter().any(|c| c.contains("couv_802")), "absence gardée : {apres:?}");
+    let index = std::fs::read_to_string(cache_dans(data.path()).join("couvertures.json")).unwrap();
+    assert!(index.contains("absente:") && index.to_lowercase().contains("thb_couv/couv_802.jpg"), "{index}");
 
     // Option décochée : aucune page de série lue avant le choix.
     let srv = serveur();
@@ -705,12 +739,14 @@ fn couvertures_progressives_cache_et_pauses() {
     let py = need_python!();
     let srv = serveur();
     let journaux = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let module = module_dans(data.path());
     let hote = Arc::new(
         Hote::avec(vec![livre("l", "Lanfeust", "9")])
             .reglages(&srv, journaux.path(), json!({}))
             .choix(vec![Choix::Rang(0), Choix::Annuler]),
     );
-    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["l"]), hote.clone());
+    let r = lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["l"]), hote.clone(), &module);
     assert_eq!(r.return_value, json!({"traites": 0, "ignores": 1}), "{}", r.journal_text());
     let listes = hote.listes.lock().unwrap();
     assert_eq!(listes.len(), 2, "série puis album");
@@ -746,9 +782,17 @@ fn couvertures_progressives_cache_et_pauses() {
     let t = srv.instants("/serie-10");
     assert_eq!(t.len(), 2);
     assert!(t[1].duration_since(t[0]) >= Duration::from_millis(950), "{:?}", t[1].duration_since(t[0]));
-    // Cache disque borné, dans le dossier des journaux (data\bedetheque\cache par défaut).
-    let cache = journaux.path().join("cache");
+    // … et au moins 0,4 s entre deux images téléchargées.
+    let t = srv.instants("/cache/thb_couv/");
+    assert_eq!(t.len(), 3);
+    for w in t.windows(2) {
+        assert!(w[1].duration_since(w[0]) >= Duration::from_millis(380), "{:?}", w[1].duration_since(w[0]));
+    }
+    // Cache disque borné, toujours dans data\bedetheque\cache (jamais dans le dossier des
+    // journaux, même réglé ailleurs).
+    let cache = cache_dans(data.path());
     assert!(cache.join("couvertures.json").is_file());
+    assert!(!journaux.path().join("cache").exists());
     let n_img = std::fs::read_dir(&cache)
         .unwrap()
         .filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "img"));
@@ -763,7 +807,7 @@ fn couvertures_progressives_cache_et_pauses() {
             .choix(vec![Choix::Rang(0), Choix::Annuler])
             .survols(vec![vec![], vec![2]]),
     );
-    lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["l"]), hote.clone());
+    lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["l"]), hote.clone(), &module);
     let apres: Vec<String> = srv.chemins()[avant..].to_vec();
     assert_eq!(hote.avec_image(0), [0, 1], "depuis le cache");
     assert!(hote.avec_image(1).contains(&2), "couverture de l'album survolé");
@@ -773,6 +817,39 @@ fn couvertures_progressives_cache_et_pauses() {
     assert_eq!(n("/bd-lanfeust-de-troy-tome-3-castel-or-903.html"), 1);
     let images: Vec<&String> = apres.iter().filter(|c| c.starts_with("/media/") || c.starts_with("/cache/")).collect();
     assert_eq!(images, ["/cache/thb_couv/couv_903.jpg"], "seule l'image nouvelle (miniature)");
+}
+
+/// Cache disque plein (800 images) : la place est faite **avant** d'écrire, la borne n'est
+/// jamais dépassée ; les images les plus anciennes partent, les nouvelles restent.
+#[test]
+fn cache_plein_jamais_depasse() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let cache = cache_dans(data.path());
+    std::fs::create_dir_all(&cache).unwrap();
+    let vieux = std::time::SystemTime::now() - Duration::from_secs(3600);
+    for i in 0..800 {
+        let f = cache.join(format!("{i:040}.img"));
+        std::fs::write(&f, b"x").unwrap();
+        std::fs::File::options().write(true).open(&f).unwrap().set_modified(vieux).unwrap();
+    }
+    let hote = Arc::new(
+        Hote::avec(vec![livre("l", "Lanfeust", "9")])
+            .reglages(&srv, journaux.path(), json!({}))
+            .choix(vec![Choix::Rang(0), Choix::Annuler]),
+    );
+    lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["l"]), hote.clone(), &module_dans(data.path()));
+    assert_eq!(hote.avec_image(0), [0, 1]);
+    let images: Vec<PathBuf> = std::fs::read_dir(&cache)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "img"))
+        .collect();
+    assert_eq!(images.len(), 800, "borne respectée");
+    let neuves = images.iter().filter(|p| std::fs::metadata(p).unwrap().len() > 1).count();
+    assert_eq!(neuves, 3, "les 3 images téléchargées sont gardées");
 }
 
 /// Réglages réels relevés à la recette de la v0.10.1 (fixture `App_EN.Config`, réduite) :

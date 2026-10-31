@@ -20,8 +20,6 @@
 //! on les glisse pour déplacer la ou les séries en bloc (dépôt entre deux groupes ou deux
 //! piles, un seul `move_books`, ordre interne gardé) ; menu du groupe : monter / descendre.
 
-use std::path::PathBuf;
-
 use comicrust_core::library::LibraryBook;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
 
@@ -206,19 +204,16 @@ impl ComicRustApp {
             self.error = Some(format!("« {} » n'a pas de fichier associé dans la base.", book.caption()));
             return;
         };
-        // Livre converti en CBZ par ComicRust et original rangé : le CBZ est ouvert.
-        let path = self.settings.effective_path(&PathBuf::from(&file));
         let start = match start {
             Start::Auto => Start::Resume(book.current_page.map(|p| p as usize)),
             other => other,
         };
-        // Absent mais « .tmp » présent : ComicRack réécrit le fichier, le lecteur patiente.
-        if !path.exists() && !comicrust_core::providers::is_being_rewritten(&path) {
-            // Fenêtre « Fichier introuvable » : retrouver le fichier ou retirer le livre (v0.10.2).
-            self.missing_not_found(id);
-            return;
-        }
-        self.open_book_at(ctx, path, start);
+        // Fichier examiné dans un fil (NAS endormi : jamais d'attente sur le fil de
+        // l'interface) : livre converti en CBZ par ComicRust et original rangé, le CBZ est
+        // ouvert ; absent mais « .tmp » présent, ComicRack réécrit le fichier, le lecteur
+        // patiente ; introuvable, fenêtre « Fichier introuvable » (v0.10.2).
+        let id = book.id.clone();
+        self.open_after_probe(ctx, &id, file, start);
     }
 
     fn library_toolbar(&mut self, ui: &mut Ui) {
@@ -457,16 +452,17 @@ impl ComicRustApp {
         }
         // Suppr dans une liste de lecture : retirer les livres de la liste (jamais les fichiers).
         let books_focus = self.library.nav.focus == KeyFocus::Books;
-        if delete && books_focus && self.library.reading_list_shown() && self.library.selected_book.is_some() {
-            let books = self.library.selection();
+        // Seulement les livres affichés : jamais un livre sélectionné puis masqué (recherche,
+        // filtre « Livres manquants », autre liste).
+        let shown = if delete && books_focus { self.library.visible_selection() } else { Vec::new() };
+        if !shown.is_empty() && self.library.reading_list_shown() {
             if self.book_menu_data(ui.ctx()).reason.is_none() {
-                self.book_list_request(ui.ctx(), BookListAction::Remove, books);
+                self.book_list_request(ui.ctx(), BookListAction::Remove, shown);
             }
-        } else if delete && books_focus && !self.library.reading_list_shown() && self.library.selected_book.is_some() {
+        } else if !shown.is_empty() {
             // Suppr ailleurs (bibliothèque, liste intelligente) : retirer de la bibliothèque,
             // après confirmation (comme ComicRack) ; jamais les fichiers.
-            let books = self.library.selection();
-            self.missing_ui.pending = Some(crate::ui::missing_ui::MissingRequest::Remove(books));
+            self.missing_ui.pending = Some(crate::ui::missing_ui::MissingRequest::Remove(shown));
         }
         let stacked = self.settings.library_stack && !self.settings.library_table && self.library.open_stack.is_none();
         if enter && stacked {

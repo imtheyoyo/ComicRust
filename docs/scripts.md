@@ -104,7 +104,8 @@ La fenêtre s'ouvre **tout de suite** ; les couvertures arrivent ensuite, une à
 de la ligne survolée ou choisie d'abord), pendant que l'on lit la liste :
 
 - **miniatures** du site (`cache/thb_couv/…`, quelques Ko) plutôt que les couvertures en
-  grand (`media/Couvertures/…`, prise seulement si la miniature manque) ;
+  grand (`media/Couvertures/…`, prise seulement si la miniature manque) : deux requêtes
+  au plus par couverture ;
 - couvertures des albums et des éditions : celles que donnent les pages ; adresses
   complètes, relatives ou sans schéma (`//www.bedetheque.com/…`), images chargées au
   défilement (`data-src`) ; dans la page d'une série, couverture, dépôt légal et éditeur
@@ -116,14 +117,16 @@ de la ligne survolée ou choisie d'abord), pendant que l'on lit la liste :
   pour prendre la couverture de leur premier album, celle des autres au survol ; la page
   de la série choisie n'est pas relue ensuite ;
 - pauses : une requête à la fois, **au moins 1 s entre deux pages** lues pour une
-  couverture et 0,15 s entre deux images téléchargées (l'original lit déjà 3 ou 4 pages
+  couverture et 0,4 s entre deux images téléchargées (l'original lit déjà 3 ou 4 pages
   par livre sans pause) ; une erreur est seulement notée au journal de débogage ;
 - images demandées comme un navigateur : `Referer` du site, `Accept` WebP/PNG/JPEG/GIF
   (pas d'AVIF) ; une réponse qui n'est pas une image (page d'erreur) est ignorée ;
-- **cache disque** `data\bedetheque\cache\` (ou `cache\` du dossier des journaux) :
-  images téléchargées et adresse de la couverture de chaque page déjà lue (60 jours ;
-  7 jours si la page n'en avait pas) : une série déjà proposée n'est plus relue ; 800
-  images et 120 Mo au plus (les moins récemment utilisées partent d'abord).
+- **cache disque** `data\bedetheque\cache\` à côté de `ComicRust.exe` (toujours, même si
+  `dossier_journaux` désigne un autre dossier) : images téléchargées et adresse de la
+  couverture de chaque page déjà lue (60 jours ; 7 jours si la page n'en avait pas) : une
+  série déjà proposée n'est plus relue ; image absente du site (404) : plus redemandée
+  pendant 7 jours ; 800 images et 120 Mo au plus, jamais dépassés (avant d'écrire, les
+  moins récemment utilisées partent pour faire la place).
 
 Réglages ajoutés (onglet Préférences, cadre « Fenêtres de choix (ComicRust) ») : hauteur
 des couvertures (`TailleVignettes`, 150 px), couvertures des séries oui/non

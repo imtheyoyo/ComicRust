@@ -5,6 +5,50 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.2] — 2026-11-01
+
+Améliorations demandées à la recette de la v0.10.1.
+
+### Nouveautés
+- **Icônes** : elles ne s'affichent plus en carrés. Les polices de symboles d'egui sont
+  réactivées, et Segoe UI Symbol / Segoe UI / Segoe UI Emoji de Windows servent de secours.
+- **Déplacer une série entière dans une liste de lecture** (liste triée par « ordre de la
+  liste », livres groupés par série) :
+  - un clic sur l'en-tête ou sur la pile sélectionne toute la série ; Ctrl ajoute une série,
+    Maj une plage de séries ;
+  - on la glisse d'un bloc entre deux autres séries ;
+  - le menu de l'en-tête propose Monter / Descendre la série ;
+  - une série dispersée dans la liste est regroupée à l'endroit du dépôt.
+- **Livres dont le fichier a disparu** :
+  - bandeau « ⚠ manquant » sur la couverture, icône dans le tableau ;
+  - liste « Livres manquants (N) » dans le panneau des listes ;
+  - « Retrouver le fichier… » et « Chercher dans un dossier… » (la lecture, la note et les infos
+    sont gardées) ;
+  - « Retirer de la bibliothèque… » : la fiche seulement, jamais le fichier, avec confirmation.
+    Avec ComicRack en écriture, le retrait se fait comme ComicRack le fait ;
+  - à l'ouverture, une fenêtre propose ces choix ; si le disque ou le NAS ne répond pas, elle ne
+    propose que « Réessayer » ;
+  - un NAS injoignable ou une disparition massive ne marque rien.
+- **Bedetheque Scraper 2** :
+  - miniatures des couvertures dans les choix de série, d'album et d'édition. Elles sont
+    chargées après l'ouverture de la fenêtre, avec une pause entre les images et un cache dans
+    `data\bedetheque\cache\` ;
+  - **QuickScrape** : nouvelle fenêtre avec un bouton Coller, des exemples de liens et
+    l'aperçu du lien (couverture et titre).
+- **Tes réglages ComicRack** (`App.Config` de Bedetheque, `losettingsx.dat` de Library
+  Organizer) : import vérifié valeur par valeur. Les chemins de tes 7 profils sont identiques à
+  ceux de l'original.
+
+### Corrections (relecture avant publication)
+- Un livre déplacé pendant une vérification n'est plus marqué manquant.
+- Les vérifications de fichiers ne bloquent plus l'interface (ouverture, Réessayer, Retrouver).
+- Suppr ne vise plus un livre masqué par la recherche.
+- Il faut cocher une case pour retirer un livre dont le fichier existe encore.
+- Plus de seconde fiche pour un fichier vu deux fois pendant une analyse.
+
+### Recette
+[recette/v0.10.2.md](recette/v0.10.2.md).
+
 ## [v0.10.1] — 2026-10-31
 
 Demandes de la recette de la v0.10.0 : modifier les fiches à la main, les flèches du clavier,
