@@ -202,7 +202,7 @@ cargo run --release -p comicrust -- "F:\BD\Thanos Quest 01.cbz"
 ## Recette
 
 Chaque version a sa liste de tests manuels à valider avant l'étape suivante :
-[`recette/`](recette) (actuelle : [v0.10.0](recette/v0.10.0.md)), avec des BD d'essai dans
+[`recette/`](recette) (actuelle : [v0.10.1](recette/v0.10.1.md)), avec des BD d'essai dans
 [`recette/echantillons`](recette/echantillons).
 
 ## Publier une release

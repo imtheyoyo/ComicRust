@@ -5,6 +5,55 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.1] — 2026-10-31
+
+Demandes de la recette de la v0.10.0 : modifier les fiches à la main, les flèches du clavier,
+et les deux scripts de ComicRack les plus utilisés.
+
+### Nouveautés
+- **Fenêtre « Infos du livre »** (Ctrl+I, clic droit → « Modifier les infos… », double-clic sur
+  la couverture des détails) :
+  - onglets Résumé, Détails, Intrigue et notes, Catalogue, Personnalisé ;
+  - suggestions tirées de la bibliothèque, note en étoiles ; chaque erreur s'affiche sous son
+    champ ;
+  - **plusieurs livres à la fois** : un champ qui diffère affiche « (valeurs multiples) » et
+    n'est modifié que si tu le changes ;
+  - Précédent / Suivant ; case « Écrire aussi les infos dans le fichier » ;
+  - en lecture seule : consultation seulement ;
+  - l'analyse des dossiers n'écrase pas une fiche modifiée à la main.
+- **Flèches du clavier** :
+  - couvertures : ← → ↑ ↓, Début/Fin, Page préc./suiv., Maj pour étendre la sélection, Ctrl
+    pour déplacer le curseur, Espace pour (dé)sélectionner, Entrée pour ouvrir ;
+  - tableau : mêmes touches ;
+  - arbre des listes : ↑/↓ pour changer de liste, → pour déplier, ← pour replier ;
+  - Tab passe de la vue à l'arbre.
+- **Bedetheque Scraper 2**, portage en Python 3 du script de ComicRack (v6.08, crédits
+  conservés) :
+  - mêmes réglages et mêmes fenêtres de choix (série, album, édition) avec couvertures, choix
+    automatique après un délai, QuickScrape par lien ;
+  - mêmes pauses entre les requêtes ;
+  - bouton dans la fenêtre « Infos du livre » ;
+  - import de l'`App.Config` de ComicRack ;
+  - option en plus : ne remplir que les champs vides.
+- **Library Organizer**, portage en Python 3 du script de ComicRack (2.1.13, licence Apache
+  2.0) :
+  - profils, syntaxe d'origine des modèles `{préfixe<champ>suffixe}` avec tous les jetons
+    (valeurs calculées sur toute la bibliothèque, comme l'original), règles ;
+  - Déplacer / Simuler, doublons (garder les deux ou ne pas déplacer, jamais d'écrasement) ;
+  - journal, annulation du dernier rangement réellement appliqué, suppression des dossiers
+    devenus vides sur confirmation ;
+  - import de `losettingsx.dat` de ComicRack.
+- **Scripts** : formulaires à onglets, liste de choix avec vignettes, `open_url`, lecture de toute
+  la bibliothèque (`library_books()`), bilan des renommages appliqués.
+
+### Corrections (relecture avant publication)
+- Clavier sans effet sur la bibliothèque quand une fenêtre de script est ouverte.
+- Nettoyage des dossiers vides limité au dossier de base du profil (jamais une racine).
+- Journaux de Bedetheque dans `data\bedetheque\`.
+
+### Recette
+[recette/v0.10.1.md](recette/v0.10.1.md).
+
 ## [v0.10.0] — 2026-10-26
 
 Scripts Python, avec Python embarqué dans le zip.
