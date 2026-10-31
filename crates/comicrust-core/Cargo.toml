@@ -34,6 +34,8 @@ uuid = { version = "1", features = ["v4", "v5"] }
 # Identité physique d'un fichier ou dossier (volume + index sous Windows, dev + inode
 # ailleurs) : reconnaître `Z:\BD` et `\\SERVEURNAS\BD` comme le même dossier.
 same-file = "1"
+# Noms de fichiers en NFC ou NFD (NAS macOS, Samba) : comparés après normalisation.
+unicode-normalization = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Imaging", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }

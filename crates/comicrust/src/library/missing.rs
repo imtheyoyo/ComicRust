@@ -16,8 +16,10 @@
 //! - **Retirer de la bibliothèque** : la **fiche seulement, jamais le fichier**. Base
 //!   ComicRust : `Store::delete` ; ComicRack MySQL en écriture : `db::delete_books`
 //!   (comme `ComicStorageBaseSql.Delete`). Les suppressions sont signalées à la
-//!   surveillance **avant** d'être faites, pour qu'elle ne les prenne pas pour des
-//!   suppressions extérieures.
+//!   surveillance sous un verrou qu'elle prend aussi pour interroger la base
+//!   (`watch::DeletedSink`), pour qu'elle ne les prenne pas pour des suppressions
+//!   extérieures. Une suppression MySQL partielle rend les fiches réellement supprimées
+//!   (retirées de l'affichage) **et** l'erreur.
 //!
 //! Listes de lecture : comme ComicRack (`ComicListLibraryBrowser.RemoveBookHandler` appelle
 //! seulement `library.Remove(book)`), elles ne sont pas réécrites : le livre n'y apparaît
@@ -35,12 +37,12 @@ use std::sync::Arc;
 
 use comicrust_core::db::{BookEdit, DbConfig, WriteReport};
 use comicrust_core::library::LibraryBook;
-use comicrust_core::missing::{CheckItem, CheckReport, MatchKind, Progress, SearchReport, Wanted};
+use comicrust_core::missing::{CheckItem, CheckReport, KnownFiles, MatchKind, Progress, SearchReport, Wanted};
 use comicrust_core::scanner::path_key;
 use comicrust_core::store::{Store, StoreConfig};
 use eframe::egui;
 
-use super::watch::{DeletedSink, WrittenSink};
+use super::watch::{DeletedSink, ListsSource, WrittenSink};
 use super::LibraryState;
 
 /// Le livre est-il manquant ? (Comme `ComicBookIsMissingMatcher` : livre avec fichier.)
@@ -69,18 +71,20 @@ pub struct CheckJob {
 }
 
 impl CheckJob {
-    /// `items` : identifiant, chemin de la fiche, fichier réel à examiner.
-    pub fn start(items: Vec<(String, String, PathBuf)>, manual: bool, ctx: &egui::Context) -> Self {
+    /// `items` : livres à vérifier (voir [`check_items`]) ; `folders` : où lire les dossiers
+    /// surveillés (garde-fou « disparition massive »), lus dans le fil.
+    pub fn start(items: Vec<CheckEntry>, folders: Option<ListsSource>, manual: bool, ctx: &egui::Context) -> Self {
         let progress = Arc::new(Progress::default());
         let cancel = Arc::new(AtomicBool::new(false));
-        let files = items.iter().map(|(id, f, _)| (id.to_ascii_lowercase(), f.clone())).collect();
-        let check: Vec<CheckItem> = items.into_iter().map(|(id, _, path)| CheckItem { id, path }).collect();
+        let files = items.iter().map(|e| (e.item.id.to_ascii_lowercase(), e.file.clone())).collect();
+        let check: Vec<CheckItem> = items.into_iter().map(|e| e.item).collect();
         let (tx, rx) = mpsc::channel();
         let (p, c, ctx) = (progress.clone(), cancel.clone(), ctx.clone());
         std::thread::Builder::new()
             .name("comicrust-manquants".into())
             .spawn(move || {
-                let _ = tx.send(comicrust_core::missing::check_files(&check, &p, &c));
+                let folders = folders.map(|f| f.watch_folders()).unwrap_or_default();
+                let _ = tx.send(comicrust_core::missing::check_files(&check, &folders, &p, &c));
                 ctx.request_repaint();
             })
             .expect("fil de vérification des fichiers");
@@ -92,6 +96,31 @@ impl CheckJob {
     }
 }
 
+/// Livre à vérifier : chemin de la fiche (le résultat ne vaut que pour lui) et élément de
+/// la vérification (fichier réel).
+#[derive(Debug, Clone)]
+pub struct CheckEntry {
+    pub file: String,
+    pub item: CheckItem,
+}
+
+/// Livres à vérifier : ceux qui ont un fichier, avec leur fichier réel (CBZ converti par
+/// ComicRust si l'original a été rangé : `converted`, réglages). Seule façon de calculer le
+/// fichier réel, pour la vérification comme pour la fenêtre « Retirer de la bibliothèque ».
+pub fn check_items<'a>(
+    books: impl IntoIterator<Item = &'a LibraryBook>,
+    converted: &HashMap<PathBuf, PathBuf>,
+) -> Vec<CheckEntry> {
+    books
+        .into_iter()
+        .filter_map(|b| {
+            let f = b.file.clone().filter(|f| !f.is_empty())?;
+            let path = comicrust_core::missing::real_file(&f, converted);
+            Some(CheckEntry { item: CheckItem { id: b.id.clone(), path, was_missing: b.missing == Some(true) }, file: f })
+        })
+        .collect()
+}
+
 /// Recherche des fichiers manquants dans un dossier.
 pub struct SearchJob {
     pub progress: Arc<Progress>,
@@ -101,7 +130,7 @@ pub struct SearchJob {
 }
 
 impl SearchJob {
-    pub fn start(dir: PathBuf, wanted: Vec<Wanted>, exclude: HashSet<String>, ctx: &egui::Context) -> Self {
+    pub fn start(dir: PathBuf, wanted: Vec<Wanted>, known: KnownFiles, ctx: &egui::Context) -> Self {
         let progress = Arc::new(Progress::default());
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
@@ -109,7 +138,7 @@ impl SearchJob {
         std::thread::Builder::new()
             .name("comicrust-recherche".into())
             .spawn(move || {
-                let _ = tx.send(comicrust_core::missing::search_folder(&d, &wanted, &exclude, &p, &c));
+                let _ = tx.send(comicrust_core::missing::search_folder(&d, &wanted, &known, &p, &c));
                 ctx.request_repaint();
             })
             .expect("fil de recherche des fichiers");
@@ -144,8 +173,9 @@ pub enum OpResult {
     Store { books: Vec<LibraryBook>, counter: i64 },
     /// Base ComicRack : bilan d'écriture.
     ComicRack(WriteReport),
-    /// Fiches supprimées ; `absent` : déjà absentes de la base.
-    Removed { ids: Vec<String>, absent: Vec<String> },
+    /// Fiches supprimées ; `absent` : déjà absentes de la base ; `error` : suppression
+    /// partielle (les fiches de `ids` sont bien supprimées, les autres non).
+    Removed { ids: Vec<String>, absent: Vec<String>, error: Option<String> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,23 +323,22 @@ impl LibraryState {
         n
     }
 
-    /// Lance la vérification des fichiers ; `real` : fichier réel d'un chemin de fiche (CBZ
-    /// converti). Sans effet si une vérification tourne déjà.
-    pub fn start_check(&mut self, real: impl Fn(&str) -> PathBuf, manual: bool, ctx: &egui::Context) {
+    /// Lance la vérification des fichiers ; `converted` : CBZ convertis (voir
+    /// [`check_items`]) ; `folders` : où lire les dossiers surveillés. Sans effet si une
+    /// vérification tourne déjà.
+    pub fn start_check(
+        &mut self,
+        converted: &HashMap<PathBuf, PathBuf>,
+        folders: Option<ListsSource>,
+        manual: bool,
+        ctx: &egui::Context,
+    ) {
         if self.missing.check.is_some() {
             return;
         }
         let Some(db) = self.database() else { return };
-        let items: Vec<(String, String, PathBuf)> = db
-            .books
-            .iter()
-            .filter_map(|b| {
-                let f = b.file.clone().filter(|f| !f.is_empty())?;
-                let real = real(&f);
-                Some((b.id.clone(), f, real))
-            })
-            .collect();
-        self.missing.check = Some(CheckJob::start(items, manual, ctx));
+        let items = check_items(&db.books, converted);
+        self.missing.check = Some(CheckJob::start(items, folders, manual, ctx));
     }
 
     /// Vérification terminée : appliquée ; renvoie le bilan (et si elle était demandée).
@@ -333,10 +362,11 @@ impl LibraryState {
             .collect()
     }
 
-    /// Fichiers déjà dans la bibliothèque (clés de chemin) → identifiant du livre.
-    pub fn files_index(&self) -> HashMap<String, String> {
-        let Some(db) = self.database() else { return HashMap::new() };
-        db.books.iter().filter_map(|b| Some((path_key(b.file.as_deref()?), b.id.clone()))).collect()
+    /// Fichiers déjà dans la bibliothèque, jamais proposés par une recherche (même sous un
+    /// autre chemin du même partage).
+    pub fn known_files(&self) -> KnownFiles {
+        let Some(db) = self.database() else { return KnownFiles::new([]) };
+        KnownFiles::new(db.books.iter().filter_map(|b| b.file.as_deref()))
     }
 
     /// Propositions de la fenêtre de confirmation, d'après le résultat d'une recherche.
@@ -355,7 +385,7 @@ impl LibraryState {
                     kind: c.kind,
                     others: c.others,
                     duplicate: None,
-                    checked: c.kind.sure(),
+                    checked: c.sure(),
                 })
             })
             .collect()
@@ -366,11 +396,21 @@ impl LibraryState {
         let db = self.database()?;
         let b = db.get(id)?;
         let old = b.file.clone().unwrap_or_default();
-        let key = path_key(&new.to_string_lossy());
+        let text = new.to_string_lossy();
+        let (key, name) = (path_key(&text), file_name_key(&text));
+        // Même chemin, ou même fichier physique sous un autre chemin (`Z:\` ↔ `\\SERVEUR\…`,
+        // lien symbolique) : seulement pour les fiches de même nom de fichier.
         let duplicate = db
             .books
             .iter()
-            .find(|o| o.id != b.id && o.file.as_deref().is_some_and(|f| path_key(f) == key))
+            .find(|o| {
+                o.id != b.id
+                    && o.file.as_deref().is_some_and(|f| {
+                        path_key(f) == key
+                            || (file_name_key(f) == name
+                                && comicrust_core::missing::same_physical_file(std::path::Path::new(f), &new))
+                    })
+            })
             .map(|o| o.caption());
         let kind = comicrust_core::missing::chosen_kind(&old, b.file_size, &new, size);
         Some(Proposal {
@@ -419,15 +459,53 @@ pub fn relocate(
     })
 }
 
-/// Lance le retrait de fiches de la bibliothèque (jamais les fichiers). `deleted` : signalé
-/// à la surveillance avant la suppression.
+/// Au-delà de ce nombre de livres retirés d'un coup, la case de confirmation est exigée
+/// même si la vérification des fichiers est sûre.
+pub const REMOVE_CONFIRM_ABOVE: usize = 100;
+
+/// Fenêtre « Retirer de la bibliothèque » : la case « je confirme » est-elle exigée ? Oui si
+/// un volume est injoignable, une disparition massive bloquée, des livres non vérifiés, ou
+/// plus de [`REMOVE_CONFIRM_ABOVE`] livres.
+pub fn remove_needs_confirmation(n: usize, check: &CheckReport) -> bool {
+    !check.is_conclusive() || n > REMOVE_CONFIRM_ABOVE
+}
+
+/// Bouton « Retirer » actif ? Jamais avant la fin de la vérification ; ensuite, seulement si
+/// la confirmation exigée est cochée.
+pub fn remove_allowed(check: Option<&CheckReport>, n: usize, confirmed: bool) -> bool {
+    check.is_some_and(|c| confirmed || !remove_needs_confirmation(n, c))
+}
+
+/// Nom de fichier d'un chemin (séparateurs `\` et `/`), en minuscules.
+fn file_name_key(p: &str) -> String {
+    p.rsplit(['/', '\\']).next().unwrap_or(p).to_lowercase()
+}
+
+/// Bilan d'une suppression dans la base MySQL de ComicRack : les fiches réellement
+/// supprimées sont toujours rendues (pour les retirer de l'affichage), avec l'erreur si
+/// d'autres ne l'ont pas été.
+pub fn removed_from_mysql(r: comicrust_core::db::DeleteReport) -> OpResult {
+    let error = r.failed.first().map(|(id, e)| {
+        format!(
+            "{} fiche(s) supprimée(s), {} en erreur (ex. {id} : {e})",
+            r.deleted.len(),
+            r.failed.len()
+        )
+    });
+    OpResult::Removed { ids: r.deleted, absent: r.missing, error }
+}
+
+/// Lance le retrait de fiches de la bibliothèque (jamais les fichiers). `deleted` : la
+/// surveillance, prévenue pendant la suppression (voir [`DeletedSink`]).
 pub fn remove(target: Target, ids: Vec<String>, deleted: Option<DeletedSink>, ctx: &egui::Context) -> Receiver<OpDone> {
-    spawn(ctx, OpKind::Remove, move || {
-        if let Some(s) = &deleted {
-            s.lock().unwrap().extend(ids.iter().map(|i| i.to_ascii_lowercase()));
-            // Laisse la surveillance prendre la note avant sa prochaine interrogation.
-            std::thread::sleep(std::time::Duration::from_millis(400));
-        }
+    spawn(ctx, OpKind::Remove, move || match &deleted {
+        Some(s) => s.deleting(ids.clone(), || remove_now(target, ids)),
+        None => remove_now(target, ids),
+    })
+}
+
+fn remove_now(target: Target, ids: Vec<String>) -> Result<OpResult, String> {
+    {
         match target {
             Target::Store(cfg) => {
                 let mut st = Store::open_existing(&cfg).map_err(|e| e.to_string())?;
@@ -435,21 +513,14 @@ pub fn remove(target: Target, ids: Vec<String>, deleted: Option<DeletedSink>, ct
                     st.get(&ids).map_err(|e| e.to_string())?.into_iter().map(|b| b.id.to_ascii_lowercase()).collect();
                 st.delete(&ids).map_err(|e| e.to_string())?;
                 let (ids, absent) = ids.into_iter().partition(|i| present.contains(&i.to_ascii_lowercase()));
-                Ok(OpResult::Removed { ids, absent })
+                Ok(OpResult::Removed { ids, absent, error: None })
             }
             Target::ComicRack(cfg) => {
                 let r = comicrust_core::db::delete_books(&cfg, &ids).map_err(|e| e.to_string())?;
-                if let Some((id, e)) = r.failed.first() {
-                    return Err(format!(
-                        "{} fiche(s) supprimée(s), {} en erreur (ex. {id} : {e})",
-                        r.deleted.len(),
-                        r.failed.len()
-                    ));
-                }
-                Ok(OpResult::Removed { ids: r.deleted, absent: r.missing })
+                Ok(removed_from_mysql(r))
             }
         }
-    })
+    }
 }
 
 /// Base ComicRust : enregistre `missing` (vrai pour `missing`, effacé pour `back`).

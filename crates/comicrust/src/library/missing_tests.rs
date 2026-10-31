@@ -103,18 +103,29 @@ fn proposals_from_search_and_chosen_file() {
                 others: 0,
             },
             Candidate { id: "b".into(), path: "/rangé/b2.cbz".into(), size: 1, kind: MatchKind::Size, others: 0 },
+            Candidate {
+                id: "c".into(),
+                path: "/rangé/c/x.cbz".into(),
+                size: 1,
+                kind: MatchKind::NameOtherSize,
+                others: 0,
+            },
+            Candidate { id: "b".into(), path: "/autre/b.cbz".into(), size: 1, kind: MatchKind::NameAndSize, others: 2 },
         ],
         ..Default::default()
     };
     let p = s.proposals(&report);
-    assert_eq!(p.len(), 2);
+    assert_eq!(p.len(), 4);
     assert!(p[0].checked && !p[1].checked, "par taille seule : à cocher soi-même");
+    assert!(!p[2].checked, "même nom, taille différente : à cocher soi-même");
+    assert!(!p[3].checked, "plusieurs fichiers de même nom : à cocher soi-même");
     // Fichier choisi déjà dans la bibliothèque (doublon) : décoché, signalé.
     let p = s.chosen_proposal("b", "/rangé/x.cbz".into(), 3).unwrap();
     assert!(!p.checked && p.duplicate.is_some());
     let p = s.chosen_proposal("a", "/ailleurs/29 - marvel team-up #55.CBZ".into(), 100).unwrap();
     assert_eq!((p.kind, p.checked), (MatchKind::NameAndSize, true));
-    assert!(s.files_index().contains_key("/rangé/x.cbz"));
+    let known = s.known_files();
+    assert!(known.contains(std::path::Path::new("/RANGÉ/x.cbz")) && !known.contains(std::path::Path::new("/y.cbz")));
 }
 
 /// Base ComicRust (SQLite) : marquage enregistré, relocalisation (lecture gardée) et retrait
@@ -152,9 +163,9 @@ fn standalone_operations() {
 
     let deleted: crate::library::watch::DeletedSink = Default::default();
     let done = wait(remove(Target::Store(cfg.clone()), vec!["b".into(), "absent".into()], Some(deleted.clone()), &ctx));
-    let Ok(OpResult::Removed { ids, absent }) = done.result else { panic!() };
-    assert_eq!((ids, absent), (vec!["b".to_string()], vec!["absent".to_string()]));
-    assert_eq!(deleted.lock().unwrap().len(), 2, "signalé avant la suppression");
+    let Ok(OpResult::Removed { ids, absent, error }) = done.result else { panic!() };
+    assert_eq!((ids, absent, error), (vec!["b".to_string()], vec!["absent".to_string()], None));
+    assert_eq!(deleted.pending(), ["b", "absent"], "signalé à la surveillance");
     assert!(kept.exists() && new_file.exists(), "aucun fichier supprimé");
     assert_eq!(Store::open_existing(&cfg).unwrap().count().unwrap(), 1);
 }
@@ -195,7 +206,7 @@ fn comicrack_mysql_operations() {
     };
     conn.exec_drop(
         "Insert into comics values (?, 1, ?)",
-        (a, xml(a, r"\\SERVEURNAS\BD\Séries_Temp\29 - Marvel Team-Up #55.cbz")),
+        (a, xml(a, r"\\NAS\Partage\BD\29 - Marvel Team-Up #55.cbz")),
     )
     .unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -222,12 +233,120 @@ fn comicrack_mysql_operations() {
 
     let deleted: crate::library::watch::DeletedSink = Default::default();
     let done = wait(remove(Target::ComicRack(cfg.clone()), vec![b.to_uppercase()], Some(deleted.clone()), &ctx));
-    let Ok(OpResult::Removed { ids, absent }) = done.result else { panic!() };
-    assert_eq!((ids, absent.len()), (vec![b.to_string()], 0));
-    assert_eq!(deleted.lock().unwrap().as_slice(), [b.to_string()]);
+    let Ok(OpResult::Removed { ids, absent, error }) = done.result else { panic!() };
+    assert_eq!((ids, absent.len(), error), (vec![b.to_string()], 0, None));
+    assert_eq!(deleted.pending(), [b.to_string()]);
     let (u, d): (i64, i64) = conn.query_first("SELECT update_counter, delete_counter FROM changes").unwrap().unwrap();
     assert_eq!((u, d), (6, 1));
     let n: i64 = conn.query_first("SELECT COUNT(*) FROM comics").unwrap().unwrap();
     assert_eq!(n, 1);
     assert!(kept.exists() && new_file.exists(), "aucun fichier supprimé");
+}
+
+/// Suppression MySQL partielle : les fiches supprimées sont rendues (et retirées de
+/// l'affichage), avec l'erreur.
+#[test]
+fn partial_mysql_removal_keeps_the_deleted_books() {
+    let r = comicrust_core::db::DeleteReport {
+        deleted: vec!["a".into()],
+        missing: vec!["z".into()],
+        failed: vec![("b".into(), "verrou".into())],
+        delete_counter: Some(3),
+    };
+    let OpResult::Removed { ids, absent, error } = removed_from_mysql(r) else { panic!() };
+    assert_eq!((ids.as_slice(), absent.as_slice()), (["a".to_string()].as_slice(), ["z".to_string()].as_slice()));
+    let e = error.unwrap();
+    assert!(e.contains("1 fiche(s) supprimée(s), 1 en erreur") && e.contains("b : verrou"), "{e}");
+    let mut s = state(vec![book("a", "/bd/a.cbz"), book("b", "/bd/b.cbz"), book("z", "/bd/z.cbz")]);
+    s.remove_books(&[ids, absent].concat());
+    assert_eq!(shown(&mut s), ["b"], "seule la fiche en erreur reste affichée");
+    let ok = comicrust_core::db::DeleteReport { deleted: vec!["a".into()], ..Default::default() };
+    assert!(matches!(removed_from_mysql(ok), OpResult::Removed { error: None, .. }));
+}
+
+/// Fenêtre « Retirer » : bouton inactif pendant la vérification ; confirmation exigée si
+/// un volume ne répond pas, une disparition massive est bloquée, ou beaucoup de livres.
+#[test]
+fn removal_needs_a_finished_and_safe_check() {
+    use comicrust_core::missing::{CheckReport, Skipped};
+    let sure = CheckReport { missing: vec!["a".into()], ..Default::default() };
+    assert!(!remove_allowed(None, 1, true), "vérification en cours");
+    assert!(remove_allowed(Some(&sure), 1, false));
+    assert!(!remove_allowed(Some(&sure), REMOVE_CONFIRM_ABOVE + 1, false), "beaucoup de livres");
+    assert!(remove_allowed(Some(&sure), REMOVE_CONFIRM_ABOVE + 1, true));
+    let nas = CheckReport {
+        unreachable: vec![Skipped { root: r"\\NAS\BD".into(), books: 3, gone: 0 }],
+        unknown: vec!["a".into(), "b".into(), "c".into()],
+        ..Default::default()
+    };
+    assert!(remove_needs_confirmation(3, &nas));
+    assert!(!remove_allowed(Some(&nas), 3, false), "NAS injoignable : confirmation obligatoire");
+    assert!(remove_allowed(Some(&nas), 3, true));
+    let massive = CheckReport {
+        blocked: vec![Skipped { root: "/srv/bd".into(), books: 40, gone: 30 }],
+        unknown: vec!["x".into(); 30],
+        ..Default::default()
+    };
+    assert!(!remove_allowed(Some(&massive), 30, false));
+    let unreadable = CheckReport { unknown: vec!["x".into()], ..Default::default() };
+    assert!(!remove_allowed(Some(&unreadable), 1, false));
+}
+
+/// Un seul calcul du fichier réel (CBZ converti) pour la vérification et le retrait.
+#[test]
+fn check_items_use_the_converted_file() {
+    let mut a = book("a", "/bd/a.cbr");
+    a.missing = Some(true);
+    let books = [a, book("b", "/bd/b.cbz"), book("vide", "")];
+    let converted: HashMap<std::path::PathBuf, std::path::PathBuf> =
+        [("/bd/a.cbr".into(), "/bd/a.cbz".into())].into_iter().collect();
+    let items = check_items(&books, &converted);
+    assert_eq!(items.len(), 2, "sans fichier : pas vérifié");
+    assert_eq!((items[0].file.as_str(), items[0].item.path.to_str()), ("/bd/a.cbr", Some("/bd/a.cbz")));
+    assert!(items[0].item.was_missing && !items[1].item.was_missing);
+    assert_eq!(items[1].item.path.to_str(), Some("/bd/b.cbz"));
+}
+
+/// La surveillance ne peut pas interroger la base pendant une suppression : elle attend la
+/// fin, puis relève les identifiants signalés avant d'interroger.
+#[test]
+fn watcher_never_polls_during_a_removal() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let sink = crate::library::watch::DeletedSink::default();
+    let deleting = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (s2, d2) = (sink.clone(), deleting.clone());
+    let remover = std::thread::spawn(move || {
+        s2.deleting(["A".to_string()], || {
+            d2.store(true, Ordering::SeqCst);
+            started_tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            d2.store(false, Ordering::SeqCst);
+        })
+    });
+    started_rx.recv().unwrap();
+    let (noted, during) = sink.noted_then(|ids| (ids, deleting.load(Ordering::SeqCst)));
+    remover.join().unwrap();
+    assert_eq!(noted, ["a"], "suppression signalée avant l'interrogation");
+    assert!(!during, "interrogation jamais pendant la suppression");
+    assert!(sink.pending().is_empty());
+}
+
+/// Fichier choisi déjà en bibliothèque sous un autre chemin (lien symbolique ≈ `Z:\` ↔
+/// `\\SERVEUR\…`) : signalé comme doublon, décoché.
+#[cfg(unix)]
+#[test]
+fn chosen_file_already_in_library_under_an_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("réel/Série/Tome 01.cbz");
+    std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+    std::fs::write(&real, b"BD").unwrap();
+    std::os::unix::fs::symlink(dir.path().join("réel"), dir.path().join("alias")).unwrap();
+    let alias = dir.path().join("alias/Série/Tome 01.cbz");
+    let s = state(vec![book("a", "/ancien/Tome 01.cbz"), book("b", &alias.to_string_lossy())]);
+    let p = s.chosen_proposal("a", real.clone(), 2).unwrap();
+    assert!(p.duplicate.is_some() && !p.checked, "{p:?}");
+    let other = dir.path().join("réel/Série/Tome 02.cbz");
+    std::fs::write(&other, b"BD").unwrap();
+    assert!(s.chosen_proposal("a", other, 2).unwrap().duplicate.is_none());
 }

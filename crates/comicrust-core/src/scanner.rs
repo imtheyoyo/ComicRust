@@ -84,10 +84,9 @@ pub const SCAN_THREADS: usize = 4;
 /// Sous-dossier où la conversion en CBZ de ComicRust range les originaux (ignoré).
 pub const ORIGINALS_DIR: &str = "_originaux";
 
-/// Sécurité contre un partage partiellement monté : si, sous un dossier choisi, au moins
-/// ce nombre de livres **et** plus de la moitié des livres présents disparaissent d'un
-/// coup, aucun n'est marqué manquant (voir [`scan`]).
-pub const MASS_MISSING_MIN: usize = 20;
+/// Sécurité contre un partage partiellement monté : voir [`crate::mass_guard`] (règle
+/// commune avec la vérification des livres manquants) et [`scan`].
+pub use crate::mass_guard::{MASS_MISSING_ABS, MASS_MISSING_MIN};
 
 /// Nombre de livres ajoutés transmis à la fois au rappel de [`scan_batched`] (le dernier
 /// lot peut être plus petit).
@@ -622,8 +621,11 @@ enum Outcome {
 ///   « manquante ». Donc, par dossier choisi (le plus précis en cas d'imbrication) :
 ///   - aucun fichier trouvé alors que des livres y sont connus → aucun n'est marqué
 ///     manquant ni déplacé, erreur « dossier vide : … » dans `errors` ;
-///   - au moins [`MASS_MISSING_MIN`] livres et plus de la moitié des livres présents
-///     disparaîtraient d'un coup → aucun n'est marqué manquant, erreur dans `errors`.
+///   - disparition massive ([`crate::mass_guard`]) : par dossier choisi **et** par
+///     sous-dossier de premier niveau, au moins [`MASS_MISSING_ABS`] livres, ou au moins
+///     [`MASS_MISSING_MIN`] livres et plus de la moitié des livres présents,
+///     disparaîtraient d'un coup → aucun livre de ce groupe n'est marqué manquant, erreur
+///     dans `errors`.
 ///     Les déplacements reconnus ne comptent pas comme disparitions (une réorganisation
 ///     des dossiers n'est donc pas bloquée). Une vraie suppression massive reste possible
 ///     en retirant les livres de la bibliothèque à la main.
@@ -797,31 +799,43 @@ pub fn scan_batched(
             candidates.push((root_of(&key), b.id.as_str()));
         }
     }
-    // Sécurité n° 2 : disparition massive sous une racine (partage partiellement monté,
-    // branche mergerfs absente…) → rien n'est marqué manquant pour cette racine.
-    let mut gone_per_root = vec![0usize; roots.len()];
-    for (i, _) in &candidates {
-        if let Some(i) = i {
-            gone_per_root[*i] += 1;
+    // Sécurité n° 2 : disparition massive sous une racine ou un de ses sous-dossiers de
+    // premier niveau (partage partiellement monté, branche mergerfs absente…) → rien
+    // n'est marqué manquant pour ce groupe (règle commune : `mass_guard`).
+    let folder_text: Vec<String> = folders.iter().map(|f| f.to_string_lossy().into_owned()).collect();
+    let mut guard = crate::mass_guard::MassGuard::new();
+    for b in known {
+        if let Some(f) = b.file.as_deref().filter(|_| b.missing != Some(true)) {
+            if let Some(i) = root_of(&path_key(f)) {
+                guard.add_known(&folder_text[i], f);
+            }
         }
     }
-    let blocked: Vec<bool> = (0..roots.len())
-        .map(|i| gone_per_root[i] >= MASS_MISSING_MIN && gone_per_root[i] * 2 > present_before[i])
-        .collect();
-    for (i, root) in folders.iter().enumerate().filter(|(i, _)| blocked[*i]) {
+    let file_of: HashMap<&str, &str> =
+        known.iter().filter_map(|b| Some((b.id.as_str(), b.file.as_deref()?))).collect();
+    for (i, id) in &candidates {
+        if let (Some(i), Some(f)) = (i, file_of.get(id)) {
+            guard.add_gone(&folder_text[*i], f);
+        }
+    }
+    for b in guard.blocked() {
         report.errors.push((
-            root.clone(),
+            PathBuf::from(&b.label),
             format!(
                 "{} livres sur {} auraient disparu d'un coup sous {} (partage partiellement monté ?) ; \
                  livres non marqués manquants",
-                gone_per_root[i],
-                present_before[i],
-                root.display()
+                b.gone, b.known, b.label
             ),
         ));
     }
-    report.missing =
-        candidates.into_iter().filter(|(i, _)| !i.is_some_and(|i| blocked[i])).map(|(_, id)| id.to_string()).collect();
+    report.missing = candidates
+        .into_iter()
+        .filter(|(i, id)| match (i, file_of.get(id)) {
+            (Some(i), Some(f)) => !guard.is_blocked(&folder_text[*i], f),
+            _ => true,
+        })
+        .map(|(_, id)| id.to_string())
+        .collect();
 
     // 4. Lecture des fichiers nouveaux ou modifiés, en parallèle limité, par tranches de
     //    `ADD_BATCH` fichiers pour transmettre les ajouts au fil de l'eau.
@@ -1304,6 +1318,29 @@ mod tests {
         let r = run(std::slice::from_ref(&root2), &known2);
         assert_eq!(r.moved.len(), 25, "{}", r.summary());
         assert_eq!(r.missing.len(), 15);
+    }
+
+    /// Règle commune (`mass_guard`) : un sous-dossier de premier niveau vidé d'un coup est
+    /// bloqué même si c'est moins de la moitié du dossier choisi.
+    #[test]
+    fn mass_disappearance_of_a_first_level_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("BD");
+        for i in 0..25 {
+            cbz(&root.join(format!("Marvel/Thanos/{i:02}.cbz")), 1, None);
+        }
+        for i in 0..40 {
+            cbz(&root.join(format!("DC/Batman/{i:02}.cbz")), 1, None);
+        }
+        let folders = [root.clone()];
+        let known = run(&folders, &[]).added;
+        std::fs::remove_dir_all(root.join("Marvel")).unwrap();
+        std::fs::remove_file(root.join("DC/Batman/00.cbz")).unwrap();
+        let r = run(&folders, &known);
+        assert_eq!(r.missing.len(), 1, "seule la suppression hors de « Marvel » : {}", r.summary());
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert!(r.errors[0].1.starts_with("25 livres sur 25"), "{}", r.errors[0].1);
+        assert!(r.errors[0].0.ends_with("Marvel"), "{:?}", r.errors[0].0);
     }
 
     #[test]

@@ -24,6 +24,7 @@ pub mod index;
 pub mod library;
 pub mod lists_edit;
 pub mod locale;
+pub mod mass_guard;
 pub mod matcher_catalog;
 pub mod missing;
 pub mod name_info;

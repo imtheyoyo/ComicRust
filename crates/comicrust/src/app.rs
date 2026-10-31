@@ -335,7 +335,7 @@ impl ComicRustApp {
     /// (Re)lance la surveillance de la bibliothèque et la lecture des listes de ComicRack
     /// (`ComicDb.xml`), une fois la bibliothèque chargée.
     pub(crate) fn restart_watch(&mut self, ctx: &Context) {
-        use crate::library::watch::{self, ListsSource};
+        use crate::library::watch;
         use crate::settings::LibraryMode;
         self.library.watcher = None;
         let Some(db) = self.library.database() else { return };
@@ -345,24 +345,30 @@ impl ComicRustApp {
         } else {
             None
         };
-        let ini = self.settings.comicrack_ini.clone().or_else(|| match &self.settings.db_source {
-            DbSource::ComicRackIni(ini) => Some(ini.clone()),
-            _ => None,
-        });
-        let lists = if standalone {
-            self.library.standalone().cloned().map(ListsSource::Store)
-        } else {
-            match (&self.settings.library_db, ini) {
-                (Some(p), _) => Some(ListsSource::File(p.clone())),
-                (None, Some(ini)) => Some(ListsSource::FromIni(ini)),
-                _ => None,
-            }
-        };
+        let lists = self.lists_source();
         if lists.is_none() {
             self.library.lists.set(None, Err("ComicDb.xml non indiqué (base saisie à la main)".into()));
         }
         self.library.watch_error = None;
         self.library.watcher = Some(watch::spawn(db_watch, lists, ctx));
+    }
+
+    /// Où lire les listes (et les dossiers surveillés) : base de ComicRust, ou `ComicDb.xml`
+    /// de ComicRack (choisi, ou trouvé d'après `ComicRack.ini`).
+    pub(crate) fn lists_source(&self) -> Option<crate::library::watch::ListsSource> {
+        use crate::library::watch::ListsSource;
+        if self.settings.library_mode == crate::settings::LibraryMode::Standalone {
+            return self.library.standalone().cloned().map(ListsSource::Store);
+        }
+        let ini = self.settings.comicrack_ini.clone().or_else(|| match &self.settings.db_source {
+            DbSource::ComicRackIni(ini) => Some(ini.clone()),
+            _ => None,
+        });
+        match (&self.settings.library_db, ini) {
+            (Some(p), _) => Some(ListsSource::File(p.clone())),
+            (None, Some(ini)) => Some(ListsSource::FromIni(ini)),
+            _ => None,
+        }
     }
 
     /// Bibliothèque choisie dans les réglages.

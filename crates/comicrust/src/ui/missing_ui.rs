@@ -8,12 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
 use comicrust_core::library::LibraryBook;
-use comicrust_core::missing::{volume_root, CheckItem, Progress};
+use comicrust_core::missing::{volume_root, CheckReport, Progress};
 use comicrust_core::providers::BOOK_EXTENSIONS;
 use eframe::egui::{self, Color32, Context, FontId, Rect, RichText, Ui};
 
 use crate::app::ComicRustApp;
-use crate::library::missing::{is_missing, OpKind, OpResult, Proposal, SearchJob, Target};
+use crate::library::missing::{
+    check_items, is_missing, remove_allowed, remove_needs_confirmation, OpKind, OpResult, Proposal, SearchJob, Target,
+};
 
 /// Demande venue d'un menu, d'un bouton ou du clavier (traitée après le dessin).
 #[derive(Debug, Clone, PartialEq)]
@@ -52,9 +54,13 @@ pub struct NotFound {
 pub struct RemoveDialog {
     pub ids: Vec<String>,
     pub captions: Vec<String>,
-    /// Fichiers encore présents (`None` : vérification en cours).
-    pub existing: Option<usize>,
-    rx: Option<Receiver<usize>>,
+    /// Bilan complet de la vérification des fichiers (`None` : en cours) : présents,
+    /// volumes injoignables, disparitions massives.
+    pub check: Option<CheckReport>,
+    rx: Option<Receiver<CheckReport>>,
+    /// Case « je confirme que ces fichiers ont bien disparu » (exigée si la vérification
+    /// n'est pas sûre ou pour beaucoup de livres : `remove_needs_confirmation`).
+    pub confirmed: bool,
 }
 
 /// Confirmation d'une relocalisation.
@@ -209,15 +215,8 @@ impl ComicRustApp {
     }
 
     fn start_missing_check(&mut self, ctx: &Context, manual: bool) {
-        let converted = self.settings.converted.clone();
-        self.library.start_check(
-            |f| {
-                let p = PathBuf::from(f);
-                converted.get(&p).cloned().unwrap_or(p)
-            },
-            manual,
-            ctx,
-        );
+        let folders = self.lists_source();
+        self.library.start_check(&self.settings.converted, folders, manual, ctx);
         if manual {
             self.missing_ui.show_check = true;
         }
@@ -258,8 +257,8 @@ impl ComicRustApp {
             }
         }
         if let Some(d) = &mut self.missing_ui.remove {
-            if let Some(n) = d.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-                d.existing = Some(n);
+            if let Some(r) = d.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+                d.check = Some(r);
                 d.rx = None;
             }
         }
@@ -323,15 +322,22 @@ impl ComicRustApp {
                     self.library.apply_written(&report);
                     self.missing_ui.info = Some(report.summary());
                 }
-                OpResult::Removed { ids, absent } => {
+                OpResult::Removed { ids, absent, error } => {
+                    // Suppression partielle comprise : les fiches supprimées quittent
+                    // l'affichage, l'erreur est dite.
                     let all: Vec<String> = ids.iter().chain(&absent).cloned().collect();
                     self.library.remove_books(&all);
-                    self.missing_ui.info = Some(format!(
+                    let mut msg = format!(
                         "{} livre{} retiré{} de la bibliothèque (fichiers non touchés).",
                         ids.len(),
                         plural(ids.len()),
                         plural(ids.len())
-                    ));
+                    );
+                    if let Some(e) = error {
+                        msg.push_str(&format!("\n\n⚠ Retrait incomplet : {e}"));
+                        self.bg_errors.lock().unwrap().push(format!("Livres non retirés de la bibliothèque :\n{e}"));
+                    }
+                    self.missing_ui.info = Some(msg);
                 }
             }
         }
@@ -399,8 +405,8 @@ impl ComicRustApp {
                 let Some(dir) = dlg.pick_folder() else { return };
                 self.settings.last_dir = Some(dir.clone());
                 let wanted = self.library.wanted(&ids);
-                let exclude = self.library.files_index().into_keys().collect();
-                self.library.missing.search = Some(SearchJob::start(dir, wanted, exclude, ctx));
+                let known = self.library.known_files();
+                self.library.missing.search = Some(SearchJob::start(dir, wanted, known, ctx));
             }
             MissingRequest::Remove(ids) => {
                 if ids.is_empty() {
@@ -412,22 +418,35 @@ impl ComicRustApp {
                 }
                 let Some(db) = self.library.database() else { return };
                 let books: Vec<&LibraryBook> = ids.iter().filter_map(|id| db.get(id)).collect();
-                let items: Vec<CheckItem> = books
-                    .iter()
-                    .filter_map(|b| Some(CheckItem { id: b.id.clone(), path: PathBuf::from(b.file.clone()?) }))
+                // Même fichier réel que la vérification (CBZ convertis). Tous comptés comme
+                // présents avant : un retrait massif sous un même dossier doit être confirmé.
+                let items: Vec<_> = check_items(books.iter().copied(), &self.settings.converted)
+                    .into_iter()
+                    .map(|mut e| {
+                        e.item.was_missing = false;
+                        e.item
+                    })
                     .collect();
+                let folders = self.lists_source();
                 let (tx, rx) = mpsc::channel();
                 let ctx2 = ctx.clone();
                 std::thread::spawn(move || {
-                    let r = comicrust_core::missing::check_files(&items, &Progress::default(), &AtomicBool::new(false));
-                    let _ = tx.send(r.present.len());
+                    let folders = folders.map(|f| f.watch_folders()).unwrap_or_default();
+                    let r = comicrust_core::missing::check_files(
+                        &items,
+                        &folders,
+                        &Progress::default(),
+                        &AtomicBool::new(false),
+                    );
+                    let _ = tx.send(r);
                     ctx2.request_repaint();
                 });
                 self.missing_ui.remove = Some(RemoveDialog {
                     ids: books.iter().map(|b| b.id.clone()).collect(),
                     captions: books.iter().take(6).map(|b| b.caption()).collect(),
-                    existing: None,
+                    check: None,
                     rx: Some(rx),
+                    confirmed: false,
                 });
             }
         }
@@ -668,13 +687,13 @@ impl ComicRustApp {
     }
 
     fn remove_window(&mut self, ctx: &Context) {
-        let Some(d) = &self.missing_ui.remove else { return };
         let comicrack = self.comicrack_write_config().is_some();
+        let Some(d) = &mut self.missing_ui.remove else { return };
         let n = d.ids.len();
         let mut go = false;
         let mut cancel = false;
         egui::Modal::new(egui::Id::unique("comicrust-retirer")).show(ctx, |ui| {
-            ui.set_max_width(520.0);
+            ui.set_max_width(560.0);
             ui.heading("Retirer de la bibliothèque");
             ui.add_space(4.0);
             ui.label(format!(
@@ -696,35 +715,100 @@ impl ComicRustApp {
             if n > d.captions.len() {
                 ui.label(RichText::new(format!("… et {} autre{}", n - d.captions.len(), plural(n - d.captions.len()))).small().weak());
             }
+            if comicrack {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "⚠ Fermez ComicRack avant de retirer des livres : s'il est ouvert, il peut recréer une fiche \
+                         supprimée (quand il enregistre un livre encore en mémoire, il ajoute la ligne si elle manque).",
+                    )
+                    .color(crate::ui::theme::warning(ui)),
+                );
+            }
             ui.add_space(4.0);
-            match d.existing {
+            let red = crate::ui::theme::error(ui);
+            match &d.check {
                 None => {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.label(RichText::new("Vérification des fichiers…").weak());
                     });
                 }
-                Some(0) => {}
-                Some(k) => {
-                    let again = if comicrack {
-                        "ComicRack les ajoutera de nouveau s'il analyse leur dossier"
-                    } else {
-                        "ils réapparaîtront à la prochaine analyse s'ils sont dans un dossier surveillé"
-                    };
-                    ui.label(
-                        RichText::new(format!(
-                            "⚠ {k} fichier{} existe{} encore : {again}.",
-                            plural(k),
-                            if k > 1 { "nt" } else { "" }
-                        ))
-                        .color(crate::ui::theme::warning(ui)),
-                    );
+                Some(r) => {
+                    for u in &r.unreachable {
+                        ui.label(
+                            RichText::new(format!(
+                                "⛔ {} ne répond pas (NAS éteint, lecteur réseau déconnecté ?) : {} livre{} non \
+                                 vérifié{}. Leurs fichiers existent peut-être encore.",
+                                u.root,
+                                u.books,
+                                plural(u.books),
+                                plural(u.books)
+                            ))
+                            .color(red),
+                        );
+                    }
+                    for b in &r.blocked {
+                        ui.label(
+                            RichText::new(format!(
+                                "⛔ {} : {} livres sur {} auraient disparu d'un coup (partage partiellement monté, \
+                                 disque du NAS absent ?).",
+                                b.root, b.gone, b.books
+                            ))
+                            .color(red),
+                        );
+                    }
+                    if r.unreachable.is_empty() && r.blocked.is_empty() && !r.unknown.is_empty() {
+                        let k = r.unknown.len();
+                        ui.label(
+                            RichText::new(format!(
+                                "⛔ {k} livre{} non vérifié{} (dossier illisible : droits ?).",
+                                plural(k),
+                                plural(k)
+                            ))
+                            .color(red),
+                        );
+                    }
+                    let k = r.present.len();
+                    if k > 0 {
+                        let again = if comicrack {
+                            "ComicRack les ajoutera de nouveau s'il analyse leur dossier"
+                        } else {
+                            "ils réapparaîtront à la prochaine analyse s'ils sont dans un dossier surveillé"
+                        };
+                        ui.label(
+                            RichText::new(format!(
+                                "⚠ {k} fichier{} existe{} encore : {again}.",
+                                plural(k),
+                                if k > 1 { "nt" } else { "" }
+                            ))
+                            .color(crate::ui::theme::warning(ui)),
+                        );
+                    }
+                    if remove_needs_confirmation(n, r) {
+                        ui.add_space(4.0);
+                        let text = if r.is_conclusive() {
+                            format!("Je confirme vouloir retirer ces {n} livres")
+                        } else {
+                            "Je confirme que ces fichiers ont bien disparu (ou que je veux retirer ces fiches quand \
+                             même)"
+                                .to_string()
+                        };
+                        ui.checkbox(&mut d.confirmed, RichText::new(text).strong());
+                    }
                 }
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let label = format!("Retirer {n} livre{}", plural(n));
-                if ui.button(RichText::new(label).strong()).clicked() {
+                let allowed = remove_allowed(d.check.as_ref(), n, d.confirmed);
+                let r = ui.add_enabled(allowed, egui::Button::new(RichText::new(label).strong()));
+                let why = if d.check.is_none() {
+                    "Vérification des fichiers en cours…"
+                } else {
+                    "Cochez la confirmation ci-dessus"
+                };
+                if r.on_disabled_hover_text(why).clicked() {
                     go = true;
                 }
                 if ui.button("Annuler").clicked() {

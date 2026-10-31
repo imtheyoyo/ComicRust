@@ -50,6 +50,21 @@ impl ListsSource {
             ListsSource::Store(_) => None,
         }
     }
+
+    /// Dossiers surveillés : ceux de la base de ComicRust, ou `<WatchFolders>` du
+    /// `ComicDb.xml` de ComicRack. Vide si illisible (à appeler dans un fil).
+    pub fn watch_folders(&self) -> Vec<PathBuf> {
+        match self {
+            ListsSource::Store(cfg) => {
+                comicrust_core::store::Store::open_existing(cfg).and_then(|mut st| st.folders()).unwrap_or_default()
+            }
+            _ => self
+                .resolve()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|xml| comicrust_core::store::read_watch_folders(&xml))
+                .unwrap_or_default(),
+        }
+    }
 }
 
 /// Livres écrits par ComicRust dans la base MySQL de ComicRack (`id`, nouveau
@@ -57,9 +72,39 @@ impl ListsSource {
 /// pour des modifications faites dans ComicRack (`Watcher::note_written`).
 pub type WrittenSink = Arc<Mutex<Vec<(String, i64)>>>;
 
-/// Livres que ComicRust va supprimer de la bibliothèque (« Retirer de la bibliothèque »),
-/// signalés **avant** la suppression (`Watcher::note_deleted`, `StoreWatcher::note_deleted`).
-pub type DeletedSink = Arc<Mutex<Vec<String>>>;
+/// Livres que ComicRust supprime de la bibliothèque (« Retirer de la bibliothèque »), à
+/// signaler à la surveillance (`Watcher::note_deleted`, `StoreWatcher::note_deleted`).
+///
+/// Pas de course possible : [`DeletedSink::deleting`] garde le verrou **pendant** la
+/// suppression, et la surveillance prend ce même verrou pour relever les suppressions
+/// signalées **puis** interroger la base ([`DeletedSink::noted_then`]). Une interrogation a
+/// donc lieu soit avant la suppression (rien à voir), soit après, une fois la suppression
+/// signalée — jamais pendant, et sans pause arbitraire.
+#[derive(Clone, Default)]
+pub struct DeletedSink(Arc<Mutex<Vec<String>>>);
+
+impl DeletedSink {
+    /// Signale `ids` et exécute `delete` sans que la surveillance interroge la base
+    /// entre-temps.
+    pub fn deleting<R>(&self, ids: impl IntoIterator<Item = String>, delete: impl FnOnce() -> R) -> R {
+        let mut pending = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        pending.extend(ids.into_iter().map(|i| i.to_ascii_lowercase()));
+        delete()
+    }
+
+    /// Côté surveillance : `f` reçoit les suppressions signalées, les note puis interroge la
+    /// base, sous le verrou (aucune suppression ne peut commencer entre les deux).
+    pub fn noted_then<R>(&self, f: impl FnOnce(Vec<String>) -> R) -> R {
+        let mut pending = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        f(std::mem::take(&mut *pending))
+    }
+
+    /// Suppressions signalées et pas encore relevées (tests).
+    #[cfg(test)]
+    pub fn pending(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
 
 /// Arrête le fil quand elle est libérée.
 pub struct WatchHandle {
@@ -117,8 +162,7 @@ impl DbWatch {
     }
 
     /// Suppressions faites par ComicRust (« Retirer de la bibliothèque »).
-    fn note_deleted(&mut self, sink: &DeletedSink) {
-        let deleted: Vec<String> = std::mem::take(&mut *sink.lock().unwrap());
+    fn note_deleted(&mut self, deleted: Vec<String>) {
         if deleted.is_empty() {
             return;
         }
@@ -225,11 +269,16 @@ pub fn spawn(
                 }
                 if let Some(w) = watcher.as_mut() {
                     w.note_written(&sink);
-                    w.note_deleted(&deleted_sink);
                 }
                 if let Some(w) = watcher.as_mut().filter(|_| now >= next_db) {
                     next_db = now + DB_INTERVAL;
-                    let ev = match w.poll() {
+                    // Suppressions de ComicRust relevées puis base interrogée, sous le verrou
+                    // de `deleted_sink` (voir `DeletedSink`).
+                    let polled = deleted_sink.noted_then(|ids| {
+                        w.note_deleted(ids);
+                        w.poll()
+                    });
+                    let ev = match polled {
                         Ok(Some(ev)) => {
                             let back = failing.then_some(WatchEvent::DbError(None));
                             failing = false;
