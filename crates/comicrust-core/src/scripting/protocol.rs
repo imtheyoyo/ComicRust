@@ -33,7 +33,12 @@
 //!      "cancel":…,"values":{…},"width":…}` → `{"button":…,"values":{…}}` ou `null`
 //!      (annulé, arrêté, script sans interface) ; voir [`super::forms::FormSpec`] ;
 //!    - `choose` `{"title":…,"columns":[…],"rows":[[…]],"images":[base64|null…],
-//!      "multi":…,"default":…,"filter":…,"timeout":…}` → rang, liste de rangs ou `null` ;
+//!      "multi":…,"default":…,"filter":…,"timeout":…,"lazy":[rangs],"on_demand":[rangs]}`
+//!      → rang, liste de rangs ou `null`. Avec `lazy`/`on_demand` (vignettes chargées après
+//!      coup), la fenêtre s'ouvre tout de suite ; tant que la réponse n'est pas partie, le
+//!      script envoie `{"t":"choose_image","id":N,"index":i,"image":base64|""}` (N : numéro
+//!      de la demande `choose`) et ComicRust lui signale les lignes attendues (survolées,
+//!      choisies) par `{"t":"choose_want","id":N,"index":i}` ;
 //!    - `open_url` `{"url":…}` → booléen (http/https seulement) ;
 //!    - `clipboard_set` `{"text":…}` → booléen ;
 //! 4. et des **notifications** sans réponse : `{"t":"log","level":…,"text":…}`,
@@ -80,6 +85,14 @@ pub enum FromScript {
         detail: Option<String>,
         #[serde(default)]
         image: Option<Value>,
+    },
+    /// Vignette d'une liste de choix ouverte (demande `choose` numéro `id`), envoyée après
+    /// coup ; `image` vide ou absente : pas d'image pour cette ligne.
+    ChooseImage {
+        id: u64,
+        index: usize,
+        #[serde(default)]
+        image: Value,
     },
     Done {
         #[serde(default)]

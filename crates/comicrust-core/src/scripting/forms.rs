@@ -1265,6 +1265,22 @@ pub struct ChooseSpec {
     pub thumb_size: f32,
     /// Présentation (v0.10.2) : tableau, ou fiches (vignette et lignes de texte).
     pub layout: ChooseLayout,
+    /// Vignettes envoyées par le script **après** l'ouverture de la fenêtre (v0.10.2) : vide
+    /// si aucune, sinon une valeur par ligne. Le script les envoie une à une pendant que la
+    /// fenêtre est ouverte (`{"t":"choose_image",…}`) ; elles s'affichent à leur arrivée.
+    pub lazy: Vec<LazyImage>,
+}
+
+/// Chargement d'une vignette de liste de choix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LazyImage {
+    /// Image donnée avec la liste (ou aucune).
+    Given,
+    /// Envoyée par le script dès que possible, dans l'ordre des lignes (les lignes
+    /// survolées ou choisies d'abord).
+    Auto,
+    /// Envoyée seulement quand l'utilisateur survole ou choisit la ligne.
+    OnDemand,
 }
 
 /// Présentation d'une liste de choix.
@@ -1318,9 +1334,29 @@ impl ChooseSpec {
             for (i, v) in raw_images.iter().enumerate() {
                 images.push(read_image(v, &format!("image de la ligne {i}"), &mut total)?);
             }
-            if images.iter().all(Option::is_none) {
-                images.clear();
+        }
+        // Vignettes chargées après coup : rangs « lazy » (dès que possible) et « on_demand »
+        // (au survol), sans image donnée.
+        let mut lazy = vec![LazyImage::Given; rows.len()];
+        for (key, kind) in [("lazy", LazyImage::Auto), ("on_demand", LazyImage::OnDemand)] {
+            for v in get_array(p, key)? {
+                let i = v.as_u64().map(|u| u as usize).filter(|i| *i < rows.len());
+                let i = i.ok_or_else(|| format!("« {key} » : rang de ligne attendu ({v})"))?;
+                lazy[i] = kind;
             }
+        }
+        if lazy.iter().all(|l| *l == LazyImage::Given) {
+            lazy.clear();
+        } else if images.is_empty() {
+            images = vec![None; rows.len()];
+        }
+        for (i, l) in lazy.iter().enumerate() {
+            if *l != LazyImage::Given && images[i].is_some() {
+                return Err(format!("ligne {i} : image donnée et chargée après coup"));
+            }
+        }
+        if lazy.is_empty() && images.iter().all(Option::is_none) {
+            images.clear();
         }
         let multi = get_bool(p, "multi", false);
         let mut default: Vec<usize> = match p.get("default") {
@@ -1360,7 +1396,22 @@ impl ChooseSpec {
             timeout,
             thumb_size: get_size(p, "thumb_size")?.unwrap_or(64.0).clamp(24.0, MAX_THUMB_SIZE),
             layout,
+            lazy,
         })
+    }
+
+    /// Vignette de la ligne `index` chargée après coup ?
+    pub fn is_lazy(&self, index: usize) -> bool {
+        self.lazy.get(index).is_some_and(|l| *l != LazyImage::Given)
+    }
+
+    /// Lit une vignette envoyée après coup (`choose_image`) : base64, `""`/`null` = pas
+    /// d'image. `total` : octets déjà reçus pour cette fenêtre (12 Mo au plus en tout).
+    pub fn read_lazy_image(&self, index: usize, v: &Value, total: &mut usize) -> Result<Option<Arc<Vec<u8>>>, String> {
+        if !self.is_lazy(index) {
+            return Err(format!("ligne {index} : pas d'image attendue"));
+        }
+        read_image(v, &format!("image de la ligne {index}"), total)
     }
 
     /// Réponse de l'interface remise en forme : rangs valides, sans doublon, triés ; un

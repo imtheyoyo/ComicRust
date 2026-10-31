@@ -46,7 +46,7 @@ __all__ = [
     "progress", "cancelled", "check_cancelled", "log", "message",
     "ask", "ask_choice", "confirm", "settings", "format_name",
     "http_get", "http_get_text", "http_get_json",
-    "form", "choose", "ui", "open_url", "clipboard_set",
+    "form", "choose", "on_demand", "ui", "open_url", "clipboard_set",
 ]
 
 PROTOCOL_VERSION = 3
@@ -98,6 +98,8 @@ class _Channel:
         # Message de fin envoyé : plus rien à interrompre.
         self.finished = False
         self.inbox = queue.Queue()
+        # Lignes d'une liste de choix dont l'utilisateur attend la vignette (choose_want).
+        self.wants = queue.Queue()
 
     def send(self, msg):
         # allow_nan=False : NaN et l'infini ne sont pas du JSON (ComicRust refuserait tout
@@ -107,7 +109,10 @@ class _Channel:
             self._out.write(data)
             self._out.flush()
 
-    def request(self, method, **params):
+    def request(self, method, _work=None, **params):
+        """Demande à ComicRust et attend sa réponse. ``_work`` : fonction ``f(id)`` qui rend
+        un objet dont ``step()`` fait un peu de travail pendant l'attente (vignettes d'une
+        liste de choix chargées après coup) et rend False quand il n'y a rien à faire."""
         with self._wlock:
             self._ids += 1
             rid = self._ids
@@ -116,13 +121,16 @@ class _Channel:
         msg = {"t": "req", "id": rid, "m": method}
         msg.update(params)
         self.send(msg)
+        work = _work(rid) if _work is not None else None
+        busy = False
         while True:
             try:
-                rep = box.get(timeout=0.2)
+                rep = box.get_nowait() if busy else box.get(timeout=0.2)
                 break
             except queue.Empty:
                 if self.closed:
                     raise Cancelled("ComicRust a interrompu le dialogue")
+                busy = work is not None and not self.cancelled.is_set() and work.step()
         if rep.get("ok"):
             return rep.get("value")
         raise ScriptError(rep.get("error") or "demande refusée")
@@ -139,6 +147,8 @@ class _Channel:
                     box = self._waiting.pop(msg.get("id"), None)
                     if box is not None:
                         box.put(msg)
+                elif t == "choose_want":
+                    self.wants.put(msg)
                 elif t == "cancel":
                     if not self.cancelled.is_set():
                         self.cancelled.set()
@@ -856,6 +866,74 @@ def form(title, controls, buttons=("OK", "Annuler"), values=None, width=None, me
     return rep.get("button"), result
 
 
+class on_demand(object):
+    """Vignette de ``choose`` chargée seulement quand l'utilisateur survole ou choisit la
+    ligne : ``images=[comicrust.on_demand(lambda: telecharger(url)), …]``."""
+
+    def __init__(self, load):
+        if not callable(load):
+            raise TypeError("on_demand : fonction attendue")
+        self.load = load
+
+
+class _ChooseLoader(object):
+    """Vignettes d'une liste de choix chargées pendant que la fenêtre est ouverte : une à la
+    fois, entre deux vérifications de la réponse ; les lignes attendues par l'utilisateur
+    (survolées, choisies) d'abord, puis les autres dans l'ordre (``on_demand`` : seulement
+    si attendues)."""
+
+    def __init__(self, rid, loads, demand, order, ch):
+        self.rid = rid
+        self.loads = loads
+        self.demand = demand
+        self.order = order
+        self.ch = ch
+        self.wanted = []
+        self.total = 0
+        self.errors = 0
+
+    def _next(self):
+        while True:
+            try:
+                msg = self.ch.wants.get_nowait()
+            except queue.Empty:
+                break
+            i = msg.get("index")
+            if msg.get("id") == self.rid and i in self.loads and i not in self.wanted:
+                self.wanted.append(i)
+        while self.wanted:
+            i = self.wanted.pop(0)
+            if i in self.loads:
+                return i
+        for i in self.order:
+            if i in self.loads and i not in self.demand:
+                return i
+        return None
+
+    def step(self):
+        i = self._next()
+        if i is None:
+            return False
+        load = self.loads.pop(i)
+        raw = None
+        try:
+            data = load()
+            if data is not None and data != b"":
+                raw = _image_bytes(data, "image de la ligne %d" % i)
+        except (Cancelled, KeyboardInterrupt):
+            raise
+        except Exception as e:  # image illisible, réseau… : la ligne reste sans image
+            self.errors += 1
+            if self.errors <= 3:
+                log("choose : image de la ligne %d non chargée (%s)" % (i, e), level="warning")
+        if raw is not None and self.total + len(raw) > MAX_IMAGES_TOTAL:
+            raw = None
+        self.total += len(raw or b"")
+        self.ch.send({"t": "choose_image", "id": self.rid, "index": i,
+                      "image": base64.b64encode(raw).decode("ascii") if raw else ""})
+        return True
+
+
 def choose(title, columns, rows, images=None, multi=False, default=None, message=None, filter=None,
            timeout=None, thumb_size=None, layout=None):
     """Liste de choix (tableau triable, vignettes facultatives) ; double-clic = choisir.
@@ -863,7 +941,10 @@ def choose(title, columns, rows, images=None, multi=False, default=None, message
     ``columns`` : titres des colonnes ; ``rows`` : une liste de cellules par ligne (ou
     un simple texte) ; ``images`` : une image par ligne (octets JPEG/PNG/WebP/GIF/BMP,
     chemin de fichier ou ``None``), 2 Mo au plus chacune et 12 Mo en tout (``ValueError``
-    sinon) ; ``multi`` : plusieurs lignes ; ``default`` : rang (ou liste de rangs) choisi
+    sinon) ; ou une **fonction** sans argument qui rend l'image : la fenêtre s'ouvre tout
+    de suite et les images arrivent une à une (lignes survolées d'abord) ; une fonction
+    enveloppée dans ``on_demand(…)`` n'est appelée que si la ligne est survolée ou
+    choisie ; ``multi`` : plusieurs lignes ; ``default`` : rang (ou liste de rangs) choisi
     au départ ; ``filter`` : champ de filtre (par défaut au-delà de 8 lignes) ; ``timeout``
     : secondes après lesquelles ``default`` est validé tout seul (toute action arrête le
     compte à rebours) ; ``thumb_size`` : hauteur des vignettes (64 px par défaut, 320 au
@@ -877,12 +958,22 @@ def choose(title, columns, rows, images=None, multi=False, default=None, message
         columns = [columns]
     rows = [list(r) if isinstance(r, (list, tuple)) else [r] for r in rows]
     params = {"title": str(title), "columns": [str(c) for c in columns], "rows": rows, "multi": bool(multi)}
+    loads, demand = {}, set()
     if images is not None:
         images = list(images)
         if len(images) != len(rows):
             raise ValueError("choose : %d images pour %d lignes" % (len(images), len(rows)))
         enc, total = [], 0
         for i, img in enumerate(images):
+            if isinstance(img, on_demand):
+                loads[i] = img.load
+                demand.add(i)
+                enc.append(None)
+                continue
+            if callable(img):
+                loads[i] = img
+                enc.append(None)
+                continue
             if img is None:
                 enc.append(None)
                 continue
@@ -906,7 +997,14 @@ def choose(title, columns, rows, images=None, multi=False, default=None, message
         if layout not in ("cards", "table"):
             raise ValueError("choose : layout « %s » inconnu (cards ou table)" % (layout,))
         params["layout"] = layout
-    return _session().ch.request("choose", **params)
+    if not loads:
+        return _session().ch.request("choose", **params)
+    params["lazy"] = sorted(set(loads) - demand)
+    params["on_demand"] = sorted(demand)
+    first = list(default) if isinstance(default, (list, tuple, set)) else ([] if default is None else [default])
+    order = [i for i in first if i in loads] + [i for i in range(len(rows)) if i not in first]
+    ch = _session().ch
+    return ch.request("choose", _work=lambda rid: _ChooseLoader(rid, loads, demand, order, ch), **params)
 
 
 def open_url(url):

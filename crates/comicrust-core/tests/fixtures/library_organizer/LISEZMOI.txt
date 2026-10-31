@@ -1,0 +1,7 @@
+losettingsx_reel.dat : réglages réels de Library Organizer de l'utilisateur (recette de la
+v0.10.1), anonymisés : dossier de base du NAS remplacé par « \\NAS\Partage\BD », « BDZ »
+remplacé par « NAS » dans les noms de profils. 7 profils (jetons Oui/Non avec texte et
+« (!) », <number0>, <volume0>, espaces doublés, caractères interdits personnalisés,
+mode Copier). Utilisé par tests/library_organizer.rs (reglages_reels_de_l_utilisateur) ;
+chemins attendus obtenus en exécutant le PathMaker de lobookmover.py (original) sur les
+mêmes livres factices.

@@ -5,7 +5,8 @@
 //! - vue tableau : ligne sous le pointeur, position d'insertion entre deux lignes ;
 //! - réordonnancement d'une liste de lecture (`move_books`) ;
 //! - règles d'acceptation d'un dépôt de livres (liste du panneau, vue elle-même) ;
-//! - défilement automatique près des bords.
+//! - défilement automatique près des bords ;
+//! - séries (groupes, piles) déplacées en bloc dans une liste de lecture (v0.10.2).
 //!
 //! Aucun glisser ne touche aux fichiers : seules les listes de lecture sont modifiées.
 
@@ -113,6 +114,8 @@ pub enum Anchor {
     Before(String),
     /// Insérer juste après ce livre (dépôt en fin de vue).
     After(String),
+    /// En fin de liste (série déposée après la dernière série affichée).
+    End,
 }
 
 fn lower_set(ids: &[String]) -> HashSet<String> {
@@ -144,11 +147,56 @@ pub fn reorder_target(list: &[String], moving: &[String], anchor: &Anchor) -> Op
     let to = match anchor {
         Anchor::Before(id) => find(id)?,
         Anchor::After(id) => find(id)? + 1,
+        Anchor::End => rest.len(),
     };
     let mut new = rest.clone();
     new.splice(to..to, moved);
     let unchanged = new.iter().zip(list).all(|(a, b)| a.eq_ignore_ascii_case(b));
     (!unchanged).then_some(to)
+}
+
+/// Séries déplacées en bloc (v0.10.2) : `groups` = livres de chaque groupe affiché (titre de
+/// groupe ou pile), dans l'ordre de la vue ; dépôt à la frontière `ins` (0 = avant le premier
+/// groupe, `groups.len()` = après le dernier). Repère à passer à [`reorder_target`] : devant
+/// le premier livre (non déplacé) du groupe `ins`, sinon en fin de liste.
+///
+/// Les groupes de la vue suivent leur premier livre dans la liste (voir `sorting::sort`) :
+/// insérer les livres déplacés devant le premier livre du groupe `ins` les fait apparaître
+/// juste avant lui, dans leur ordre d'origine (`move_books` garde l'ordre de la liste).
+pub fn group_drop_anchor(groups: &[Vec<String>], moving: &[String], ins: usize) -> Option<Anchor> {
+    let flat: Vec<String> = groups.concat();
+    let rank = groups[..ins.min(groups.len())].iter().map(Vec::len).sum();
+    match reorder_anchor(&flat, moving, rank)? {
+        Anchor::After(_) => Some(Anchor::End),
+        a => Some(a),
+    }
+}
+
+/// « Monter la série » (`up`) / « Descendre la série » : repère pour déplacer le groupe `k`
+/// d'un cran parmi les groupes affichés, `None` s'il est déjà en tête (en fin).
+pub fn group_shift_anchor(groups: &[Vec<String>], k: usize, up: bool) -> Option<Anchor> {
+    let moving = groups.get(k)?;
+    let ins = if up {
+        k.checked_sub(1)?
+    } else if k + 1 < groups.len() {
+        k + 2
+    } else {
+        return None;
+    };
+    group_drop_anchor(groups, moving, ins)
+}
+
+/// Frontière entre groupes la plus proche de l'ordonnée `y` : `bounds` = haut de chaque
+/// groupe, puis bas du dernier (dans l'ordre). Rang de la frontière (0 ..= nombre de groupes).
+pub fn group_boundary(bounds: &[f32], y: f32) -> Option<usize> {
+    (0..bounds.len()).min_by(|&a, &b| (bounds[a] - y).abs().total_cmp(&(bounds[b] - y).abs()))
+}
+
+/// Tableau groupé : rang dans la vue (livres seuls) de la ligne affichée `d`, les lignes de
+/// titre de groupe étant `headers` (rangs des lignes affichées, croissants). Une ligne de
+/// titre donne le premier livre de son groupe ; `d` peut valoir le nombre de lignes (fin).
+pub fn book_rank_of_row(headers: &[usize], d: usize) -> usize {
+    d - headers.iter().filter(|&&h| h < d).count()
 }
 
 /// Livres déposés sur une liste du panneau : acceptés ? Sinon la raison (curseur
@@ -311,6 +359,117 @@ mod tests {
         assert_eq!(reorder_anchor(&s(&["a"]), &s(&["a"]), 0), None);
         // Repère disparu de la liste (modifiée entre-temps).
         assert_eq!(reorder_target(&list, &s(&["a"]), &Anchor::Before("z".into())), None);
+    }
+
+    /// Applique `move_books` comme le cœur (livres déplacés dans l'ordre de la liste).
+    fn apply(list: &[String], moving: &[String], anchor: &Anchor) -> Vec<String> {
+        let Some(to) = reorder_target(list, moving, anchor) else { return list.to_vec() };
+        let set = lower_set(moving);
+        let (moved, mut rest): (Vec<String>, Vec<String>) =
+            list.iter().cloned().partition(|b| set.contains(&b.to_ascii_lowercase()));
+        rest.splice(to..to, moved);
+        rest
+    }
+
+    /// Groupes affichés d'une liste dans l'ordre de leur premier livre (comme `sorting::sort`
+    /// avec « Ordre de la liste » et un regroupement par série : 1re lettre = série).
+    fn groups_of(list: &[String]) -> Vec<Vec<String>> {
+        let mut out: Vec<Vec<String>> = Vec::new();
+        for b in list {
+            let serie = &b[..1];
+            match out.iter_mut().find(|g| g[0].starts_with(serie)) {
+                Some(g) => g.push(b.clone()),
+                None => out.push(vec![b.clone()]),
+            }
+        }
+        out
+    }
+
+    fn names(groups: &[Vec<String>]) -> String {
+        groups.iter().map(|g| g[0][..1].to_ascii_uppercase()).collect()
+    }
+
+    #[test]
+    fn series_moved_as_a_block() {
+        // Liste : séries A (a1 a2), B (b1 b2 b3), C (c1), D (d1 d2).
+        let list = s(&["a1", "a2", "b1", "b2", "b3", "c1", "d1", "d2"]);
+        let g = groups_of(&list);
+        assert_eq!(names(&g), "ABCD");
+        // B glissée avant A (frontière 0) : un seul déplacement, ordre interne gardé.
+        let anchor = group_drop_anchor(&g, &g[1], 0).unwrap();
+        assert_eq!(anchor, Anchor::Before("a1".into()));
+        assert_eq!(apply(&list, &g[1], &anchor), s(&["b1", "b2", "b3", "a1", "a2", "c1", "d1", "d2"]));
+        // A déposée après D (frontière 4 = fin).
+        let anchor = group_drop_anchor(&g, &g[0], 4).unwrap();
+        assert_eq!(anchor, Anchor::End);
+        assert_eq!(names(&groups_of(&apply(&list, &g[0], &anchor))), "BCDA");
+        // A et C (Ctrl) déposées entre B et D… soit avant D (frontière 3).
+        let moving = [g[0].clone(), g[2].clone()].concat();
+        let anchor = group_drop_anchor(&g, &moving, 3).unwrap();
+        let after = apply(&list, &moving, &anchor);
+        assert_eq!(after, s(&["b1", "b2", "b3", "a1", "a2", "c1", "d1", "d2"]));
+        // Déposée à sa propre place (frontières 1 et 2 pour B) : rien ne change.
+        for ins in [1, 2] {
+            let anchor = group_drop_anchor(&g, &g[1], ins).unwrap();
+            assert_eq!(reorder_target(&list, &g[1], &anchor), None, "frontière {ins}");
+        }
+        // Toutes les séries déplacées : aucun repère.
+        assert_eq!(group_drop_anchor(&g, &list, 2), None);
+    }
+
+    #[test]
+    fn series_scattered_in_the_list() {
+        // Série A en deux morceaux : a1 b1 a2 c1 b2 → groupes A (a1 a2), B (b1 b2), C (c1).
+        let list = s(&["a1", "b1", "a2", "c1", "b2"]);
+        let g = groups_of(&list);
+        assert_eq!(names(&g), "ABC");
+        // C avant B : elle passe devant le premier livre de B ; les livres de B restent où ils
+        // sont dans la liste, B s'affiche après C.
+        let after = apply(&list, &g[2], &group_drop_anchor(&g, &g[2], 1).unwrap());
+        assert_eq!(after, s(&["a1", "c1", "b1", "a2", "b2"]));
+        assert_eq!(names(&groups_of(&after)), "ACB");
+        // A en fin : ses deux livres regroupés en fin de liste (lue en dernier).
+        let after = apply(&list, &g[0], &group_drop_anchor(&g, &g[0], 3).unwrap());
+        assert_eq!(after, s(&["b1", "c1", "b2", "a1", "a2"]));
+        assert_eq!(names(&groups_of(&after)), "BCA");
+    }
+
+    #[test]
+    fn series_up_and_down() {
+        let list = s(&["a1", "b1", "a2", "c1", "c2", "d1"]);
+        let g = groups_of(&list);
+        assert_eq!(names(&g), "ABCD");
+        let shift =
+            |k: usize, up: bool| group_shift_anchor(&g, k, up).map(|a| names(&groups_of(&apply(&list, &g[k], &a))));
+        assert_eq!(shift(0, true), None, "déjà en tête");
+        assert_eq!(shift(3, false), None, "déjà en fin");
+        assert_eq!(shift(1, true).as_deref(), Some("BACD"));
+        assert_eq!(shift(2, true).as_deref(), Some("ACBD"));
+        assert_eq!(shift(0, false).as_deref(), Some("BACD"));
+        assert_eq!(shift(1, false).as_deref(), Some("ACBD"));
+        assert_eq!(shift(2, false).as_deref(), Some("ABDC"));
+        // Ordre interne de la série descendue conservé.
+        let a = group_shift_anchor(&g, 2, false).unwrap();
+        assert_eq!(apply(&list, &g[2], &a), s(&["a1", "b1", "a2", "d1", "c1", "c2"]));
+    }
+
+    #[test]
+    fn boundaries_between_groups() {
+        // Titres de groupe à 0, 300 et 500 ; fin du contenu à 900.
+        let bounds = [0.0, 300.0, 500.0, 900.0];
+        assert_eq!(group_boundary(&bounds, 40.0), Some(0));
+        assert_eq!(group_boundary(&bounds, 260.0), Some(1));
+        assert_eq!(group_boundary(&bounds, 420.0), Some(2));
+        assert_eq!(group_boundary(&bounds, 800.0), Some(3));
+        assert_eq!(group_boundary(&[], 10.0), None);
+        // Tableau : titres aux lignes 0 et 3 (groupe 1 : lignes 1-2, groupe 2 : 4-5).
+        let headers = [0, 3];
+        assert_eq!(book_rank_of_row(&headers, 0), 0, "titre : premier livre du groupe");
+        assert_eq!(book_rank_of_row(&headers, 1), 0);
+        assert_eq!(book_rank_of_row(&headers, 2), 1);
+        assert_eq!(book_rank_of_row(&headers, 3), 2);
+        assert_eq!(book_rank_of_row(&headers, 5), 3);
+        assert_eq!(book_rank_of_row(&headers, 6), 4, "fin");
     }
 
     fn l(id: &str, kind: ListKind) -> ComicList {

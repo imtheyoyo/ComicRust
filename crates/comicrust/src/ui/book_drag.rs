@@ -12,6 +12,10 @@ use crate::library::mouse::edge_scroll_speed;
 #[derive(Debug, Clone)]
 pub struct BooksDrag {
     pub books: Vec<String>,
+    /// Séries entières glissées depuis leur titre de groupe ou leur pile (v0.10.2) : nombre
+    /// de séries (0 : livres glissés un par un). Dans une vue groupée, le dépôt se fait alors
+    /// entre deux groupes.
+    pub groups: usize,
 }
 
 /// Ce que ferait un dépôt à l'endroit survolé (calculé à chaque image par la zone survolée).
@@ -33,8 +37,22 @@ pub fn dragged_books(ctx: &Context) -> Option<std::sync::Arc<BooksDrag>> {
 /// Commence le glisser des livres.
 pub fn start_books_drag(ctx: &Context, books: Vec<String>) {
     if !books.is_empty() {
-        egui::DragAndDrop::set_payload(ctx, BooksDrag { books });
+        egui::DragAndDrop::set_payload(ctx, BooksDrag { books, groups: 0 });
     }
+}
+
+/// Commence le glisser de séries entières (`groups` : nombre de séries, `books` : tous leurs
+/// livres dans l'ordre de la vue).
+pub fn start_group_drag(ctx: &Context, books: Vec<String>, groups: usize) {
+    if !books.is_empty() {
+        egui::DragAndDrop::set_payload(ctx, BooksDrag { books, groups: groups.max(1) });
+    }
+}
+
+/// Trait d'insertion horizontal entre deux groupes, sur toute la largeur `[left, right]` à
+/// l'ordonnée `y` (écran).
+pub fn paint_group_insertion(ui: &Ui, clip: Rect, left: f32, right: f32, y: f32) {
+    paint_insertion(ui, clip, pos2(left, y), pos2(right, y));
 }
 
 /// Défilement automatique de la zone `area` quand le pointeur approche de ses bords (ou les
@@ -75,7 +93,11 @@ impl ComicRustApp {
             Some(DropHint::Refused(_)) | None => CursorIcon::NotAllowed,
         });
         let n = drag.books.len();
-        let title = format!("📚 {n} livre{}", if n > 1 { "s" } else { "" });
+        let s = |k: usize| if k > 1 { "s" } else { "" };
+        let title = match drag.groups {
+            0 => format!("📚 {n} livre{}", s(n)),
+            g => format!("📚 {g} série{} · {n} livre{}", s(g), s(n)),
+        };
         let detail = match &hint {
             Some(DropHint::Move) => Some("Déplacer ici".to_string()),
             Some(DropHint::Add(name)) => Some(format!("Ajouter à « {name} »")),

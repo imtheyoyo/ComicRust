@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use comicrust_core::scripting::forms::{
     find_choice, number_value, value_text, ChoiceItem, ColumnKind, Control, ControlKind, TableColumn,
 };
-use comicrust_core::scripting::{ChooseSpec, FormAnswer, FormSpec};
+use comicrust_core::scripting::{ChooseSpec, FormAnswer, FormSpec, LazyImage};
 use eframe::egui::{self, ColorImage, TextureHandle};
 use serde_json::{Map, Value};
 
@@ -195,6 +195,8 @@ pub struct FormState {
     pub textures: HashMap<usize, TextureHandle>,
     /// Onglets à ouvrir pour voir chaque contrôle : clé → [(identifiant des onglets, rang)].
     key_tabs: HashMap<String, Vec<(usize, usize)>>,
+    /// Entrée appuyée dans un champ d'une ligne : le bouton principal est validé.
+    pub enter: bool,
 }
 
 impl FormState {
@@ -239,7 +241,13 @@ impl FormState {
             images,
             textures: HashMap::new(),
             key_tabs,
+            enter: false,
         }
+    }
+
+    /// Bouton validé par Entrée : le premier, sauf s'il annule (alors aucun).
+    pub fn main_button(&self) -> Option<&String> {
+        (self.spec.cancel != Some(0)).then(|| self.spec.buttons.first()).flatten()
     }
 
     /// Valeurs actuelles (clé → valeur JSON).
@@ -342,6 +350,14 @@ pub struct ChooseState {
     pub zoom: f32,
     /// Ligne à amener dans la partie visible (déplacement au clavier).
     pub scroll_to: Option<usize>,
+    /// Vignettes attendues du script (chargées après coup), par ligne.
+    pub loading: Vec<bool>,
+    /// Vignettes « à la demande » pas encore demandées (survol ou choix).
+    pub on_demand: Vec<bool>,
+    /// Lignes déjà signalées au script comme attendues.
+    asked: Vec<bool>,
+    /// Lignes attendues, lues par le fil du script ([`super::host::ChooseWants`]).
+    wants: Option<super::host::ChooseWants>,
 }
 
 impl ChooseState {
@@ -351,8 +367,18 @@ impl ChooseState {
             selected[i] = true;
         }
         let deadline = spec.timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
+        let mut images = images;
+        if images.is_empty() && !spec.lazy.is_empty() {
+            images = (0..spec.rows.len()).map(|_| None).collect();
+        }
         let n = images.len();
+        let loading: Vec<bool> = (0..spec.lazy.len()).map(|i| spec.is_lazy(i)).collect();
+        let on_demand: Vec<bool> = spec.lazy.iter().map(|l| *l == LazyImage::OnDemand).collect();
         ChooseState {
+            asked: vec![false; loading.len()],
+            loading,
+            on_demand,
+            wants: None,
             current: spec.default.first().copied(),
             spec,
             images,
@@ -370,6 +396,51 @@ impl ChooseState {
     fn with_zoom(mut self) -> ChooseState {
         self.zoom = self.spec.thumb_size;
         self
+    }
+
+    /// Lignes attendues partagées avec le fil du script (vignettes chargées après coup).
+    pub fn with_wants(mut self, wants: super::host::ChooseWants) -> ChooseState {
+        if !self.spec.lazy.is_empty() {
+            self.wants = Some(wants);
+        }
+        self
+    }
+
+    /// Liste avec une colonne de vignettes ?
+    pub fn has_images(&self) -> bool {
+        !self.images.is_empty()
+    }
+
+    /// Vignette de la ligne `i` encore attendue du script ?
+    pub fn is_loading(&self, i: usize) -> bool {
+        self.loading.get(i).copied().unwrap_or(false)
+    }
+
+    /// Vignette « à la demande » pas encore demandée (elle le sera au survol) ?
+    pub fn waits_hover(&self, i: usize) -> bool {
+        self.is_loading(i) && self.on_demand.get(i).copied().unwrap_or(false) && !self.asked[i]
+    }
+
+    /// Vignette arrivée après l'ouverture (`None` : pas d'image pour cette ligne).
+    pub fn set_image(&mut self, i: usize, image: Option<ColorImage>) {
+        if i >= self.images.len() || !self.is_loading(i) {
+            return;
+        }
+        self.loading[i] = false;
+        self.images[i] = image;
+        self.textures[i] = None;
+    }
+
+    /// L'utilisateur regarde la ligne `i` (survol, choix) : sa vignette, si elle est encore
+    /// attendue, est demandée au script en priorité (une seule fois).
+    pub fn want(&mut self, i: usize) {
+        if !self.is_loading(i) || self.asked[i] {
+            return;
+        }
+        if let Some(w) = &self.wants {
+            self.asked[i] = true;
+            w.lock().unwrap().push(i);
+        }
     }
 
     /// Flèches du clavier (choix simple) : ligne affichée suivante (`delta` > 0) ou

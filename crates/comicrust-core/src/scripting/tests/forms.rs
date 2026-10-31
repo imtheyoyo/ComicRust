@@ -211,6 +211,34 @@ fn liste_de_choix_description() {
     assert!(e.contains("base64"), "{e}");
 }
 
+/// v0.10.2 : vignettes chargées après l'ouverture (« lazy » d'office, « on_demand » au
+/// survol) : colonne de vignettes et fiches sans image donnée ; images reçues ensuite
+/// vérifiées comme les autres (format, taille, total).
+#[test]
+fn vignettes_chargees_apres_coup() {
+    let c = ChooseSpec::parse(&obj(json!({"rows": ["a", "b", "c"], "lazy": [0, 2], "on_demand": [1]}))).unwrap();
+    assert_eq!(c.lazy, [LazyImage::Auto, LazyImage::OnDemand, LazyImage::Auto]);
+    assert_eq!(c.images.len(), 3, "colonne de vignettes");
+    assert_eq!(c.layout, ChooseLayout::Cards);
+    assert!(c.is_lazy(1) && !c.is_lazy(3));
+    let mut total = 0;
+    assert!(c.read_lazy_image(0, &json!(b64(PNG)), &mut total).unwrap().is_some());
+    assert_eq!(total, PNG.len());
+    assert!(c.read_lazy_image(2, &json!(""), &mut total).unwrap().is_none(), "pas d'image");
+    assert!(c.read_lazy_image(0, &json!("!!!"), &mut total).is_err());
+    let mut plein = MAX_IMAGES_TOTAL;
+    assert!(c.read_lazy_image(1, &json!(b64(PNG)), &mut plein).unwrap_err().contains("au total"));
+    // Ligne sans chargement après coup, rang hors liste, image donnée et attendue.
+    let c = ChooseSpec::parse(&obj(json!({"rows": ["a", "b"], "lazy": [1], "images": [b64(PNG), null]}))).unwrap();
+    assert!(c.read_lazy_image(0, &json!(b64(PNG)), &mut 0).is_err());
+    assert_eq!(c.lazy, [LazyImage::Given, LazyImage::Auto]);
+    assert!(ChooseSpec::parse(&obj(json!({"rows": ["a"], "lazy": [3]}))).unwrap_err().contains("lazy"));
+    let e = ChooseSpec::parse(&obj(json!({"rows": ["a"], "lazy": [0], "images": [b64(PNG)]}))).unwrap_err();
+    assert!(e.contains("après coup"), "{e}");
+    let c = ChooseSpec::parse(&obj(json!({"rows": ["a"]}))).unwrap();
+    assert!(c.lazy.is_empty() && c.images.is_empty());
+}
+
 /// v0.10.2 : présentation en fiches (par défaut avec des vignettes), taille des vignettes
 /// bornée ; champ texte avec « Coller » et indications ; largeur des libellés.
 #[test]
@@ -230,7 +258,8 @@ fn fiches_coller_indications_et_libelles() {
          "hints": [["(?i)/BD-[^/]*-\\d+\\.html$", "album"], ["(?i)serie-\\d+", "série"]]},
         {"type": "secret", "key": "cle", "paste": true, "hints": [[".", "x"]]},
         {"type": "textarea", "key": "notes", "paste": true},
-    ]}))).unwrap();
+    ]})))
+    .unwrap();
     assert_eq!(f.label_width, Some(60.0), "bornée");
     let ControlKind::Text { paste, hints, hint_none, .. } = &f.control("lien").unwrap().kind else { panic!() };
     assert!(*paste);
@@ -246,8 +275,8 @@ fn fiches_coller_indications_et_libelles() {
     let ControlKind::Text { paste, .. } = &f.control("notes").unwrap().kind else { panic!() };
     assert!(!*paste, "plusieurs lignes : pas de bouton");
     assert!(FormSpec::parse(&obj(json!({"controls": []}))).unwrap().label_width.is_none());
-    let e = FormSpec::parse(&obj(json!({"controls": [{"type": "text", "key": "t", "hints": [["(", "x"]]}]})))
-        .unwrap_err();
+    let e =
+        FormSpec::parse(&obj(json!({"controls": [{"type": "text", "key": "t", "hints": [["(", "x"]]}]}))).unwrap_err();
     assert!(e.contains("expression invalide"), "{e}");
     let e = FormSpec::parse(&obj(json!({"controls": [{"type": "text", "key": "t", "hints": ["x"]}]}))).unwrap_err();
     assert!(e.contains("paire"), "{e}");

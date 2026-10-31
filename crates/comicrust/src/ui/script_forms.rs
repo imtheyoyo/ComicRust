@@ -119,21 +119,33 @@ pub(crate) fn form_window(ctx: &Context, script: &str, st: &mut FormState) -> Ac
             ui.label(RichText::new(format!("⚠ À corriger : {}", names.join(", "))).color(crate::ui::theme::error(ui)));
         }
         ui.separator();
+        // Boutons du script à droite, de même taille, dans l'ordre donné (le premier, mis en
+        // valeur, est celui d'Entrée) ; « Arrêter le script » à gauche, à l'écart.
         ui.horizontal(|ui| {
-            for (i, b) in st.spec.buttons.iter().enumerate() {
-                let main = i == 0 && st.spec.cancel != Some(0);
-                let text = if main { RichText::new(b).strong() } else { RichText::new(b) };
-                if ui.button(text).clicked() {
-                    clicked = Some(b.clone());
-                }
+            if ui.small_button("⏹ Arrêter le script").clicked() {
+                stop = true;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("⏹ Arrêter le script").clicked() {
-                    stop = true;
+                let main = st.main_button().cloned();
+                for b in st.spec.buttons.iter().rev() {
+                    let primary = main.as_ref() == Some(b);
+                    let mut button =
+                        egui::Button::new(if primary { RichText::new(b).strong() } else { RichText::new(b) })
+                            .min_size(egui::vec2(96.0, 28.0));
+                    if primary {
+                        button = button.fill(ui.visuals().selection.bg_fill);
+                    }
+                    if ui.add(button).clicked() {
+                        clicked = Some(b.clone());
+                    }
                 }
             });
         });
     });
+    // Entrée dans un champ d'une ligne : bouton principal.
+    if std::mem::take(&mut st.enter) && clicked.is_none() {
+        clicked = st.main_button().cloned();
+    }
     if stop {
         return Action::Stop;
     }
@@ -207,13 +219,15 @@ fn draw_control(
             });
         }
         ControlKind::Group { title, controls } => {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
+            egui::Frame::group(ui.style()).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 if !title.is_empty() {
                     hover(ui.label(RichText::new(title).strong()), help);
+                    ui.add_space(2.0);
                 }
                 draw_controls(ui, controls, st, values, enabled, clicked);
             });
+            ui.add_space(4.0);
         }
         ControlKind::Columns { columns } => {
             ui.columns(columns.len(), |uis| {
@@ -309,6 +323,15 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
     let help = c.help.as_str();
     let key = c.key.clone();
     let lw = st.spec.label_width.unwrap_or(LABEL_W);
+    let mut enter = false;
+    draw_field_inner(ui, c, st, &key, lw, help, &mut enter);
+    if enter {
+        st.enter = true;
+    }
+}
+
+fn draw_field_inner(ui: &mut Ui, c: &Control, st: &mut FormState, key: &str, lw: f32, help: &str, enter: &mut bool) {
+    let key = key.to_string();
     let Some(field) = st.fields.get_mut(&key) else { return };
     match (&c.kind, field) {
         (ControlKind::Text { placeholder, rows, secret, inserts, paste, hints, hint_none, .. }, Field::Text(text)) => {
@@ -332,11 +355,18 @@ fn draw_field(ui: &mut Ui, c: &Control, st: &mut FormState) {
                     label_cell(ui, lw, &c.label, help);
                     let extra = if inserts.is_empty() { 0.0 } else { 90.0 } + if *paste { 100.0 } else { 0.0 };
                     let w = c.width.unwrap_or((ui.available_width() - extra).max(80.0));
-                    let mut edit = egui::TextEdit::singleline(text).id(id).desired_width(w).hint_text(hint);
+                    let mut edit = egui::TextEdit::singleline(text)
+                        .id(id)
+                        .desired_width(w)
+                        .hint_text(hint)
+                        .margin(egui::vec2(6.0, 4.0));
                     if *secret {
                         edit = edit.password(true);
                     }
-                    hover(ui.add(edit), help);
+                    let r = hover(ui.add(edit), help);
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        *enter = true;
+                    }
                     if *paste
                         && ui.button("📋 Coller").on_hover_text("Remplacer par le texte du presse-papiers").clicked()
                     {
@@ -647,12 +677,12 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
     if let Some(expired) = st.expired() {
         return Action::Reply(expired);
     }
-    let images = !st.images.is_empty();
+    let images = st.has_images();
     let cards = st.spec.layout == ChooseLayout::Cards;
     let (width, max_h) = sized(
         ctx,
         if cards {
-            1000.0
+            1120.0
         } else if images {
             900.0
         } else {
@@ -711,6 +741,14 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
                 if r.changed() {
                     st.deadline = None;
                 }
+                // Vignettes chargées après l'ouverture : combien sont encore attendues.
+                let attendues = (0..st.spec.rows.len()).filter(|&i| st.is_loading(i) && !st.waits_hover(i)).count();
+                if attendues > 0 {
+                    ui.separator();
+                    ui.add(egui::Spinner::new().size(14.0));
+                    ui.label(RichText::new(format!("{attendues} image(s) en chargement")).small().weak())
+                        .on_hover_text("Les images arrivent une à une ; survoler une ligne charge la sienne d'abord.");
+                }
             }
         });
         if let Some(s) = st.remaining() {
@@ -721,15 +759,8 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
             ui.ctx().request_repaint_after(Duration::from_millis(250));
         }
         ui.add_space(4.0);
-        let preview_w = if images {
-            if cards {
-                300.0
-            } else {
-                250.0
-            }
-        } else {
-            0.0
-        };
+        // Aperçu agrandi : environ un tiers de la fenêtre (une couverture lisible).
+        let preview_w = if images { (width * if cards { 0.32 } else { 0.28 }).clamp(240.0, 380.0) } else { 0.0 };
         let table_h = (max_h - 120.0).clamp(160.0, if cards { 620.0 } else { 480.0 });
         ui.horizontal_top(|ui| {
             let table_w = (ui.available_width() - preview_w - 12.0).max(200.0);
@@ -746,15 +777,26 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
                 ui.vertical(|ui| {
                     ui.set_width(preview_w);
                     let shown = hovered.or(st.current);
+                    if let Some(i) = shown {
+                        // Vignette attendue : demandée au script en priorité.
+                        st.want(i);
+                    }
                     match shown {
                         Some(i) => {
                             let lines = (st.spec.columns.len().saturating_sub(1) as f32 + 2.0) * 18.0;
                             match st.texture(ui.ctx(), i) {
                                 Some(tex) => {
+                                    // Agrandie jusqu'à la largeur de l'aperçu (proportions gardées).
                                     ui.add(
                                         egui::Image::from_texture(egui::load::SizedTexture::from_handle(&tex))
-                                            .max_size(egui::vec2(preview_w, (table_h - lines).max(120.0))),
+                                            .fit_to_exact_size(egui::vec2(preview_w, (table_h - lines).max(120.0))),
                                     );
+                                }
+                                None if st.is_loading(i) => {
+                                    ui.horizontal(|ui| {
+                                        ui.add(egui::Spinner::new());
+                                        ui.label(RichText::new("Chargement de l'image…").weak().small());
+                                    });
                                 }
                                 None => {
                                     ui.label(RichText::new("(pas d'image)").weak().small());
@@ -772,20 +814,13 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
             }
         });
         ui.separator();
+        // Comme les formulaires : « Arrêter le script » à gauche, Choisir / Annuler à droite.
         ui.horizontal(|ui| {
-            let can = st.can_validate();
-            let label = if st.spec.multi {
-                format!("Choisir ({})", st.selected.iter().filter(|s| **s).count())
-            } else {
-                "Choisir".to_string()
-            };
-            if ui.add_enabled(can, egui::Button::new(RichText::new(label).strong())).clicked() || (enter && can) {
-                validate = true;
-            }
-            if ui.button("Annuler").on_hover_text("Le script reçoit None").clicked() {
-                action = Action::Reply(None);
+            if ui.small_button("⏹ Arrêter le script").clicked() {
+                action = Action::Stop;
             }
             if st.spec.multi {
+                ui.separator();
                 if ui.small_button("Tout").clicked() {
                     for &i in &view {
                         st.selected[i] = true;
@@ -798,8 +833,22 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("⏹ Arrêter le script").clicked() {
-                    action = Action::Stop;
+                let size = egui::vec2(96.0, 28.0);
+                if ui.add(egui::Button::new("Annuler").min_size(size)).on_hover_text("Le script reçoit None").clicked()
+                {
+                    action = Action::Reply(None);
+                }
+                let can = st.can_validate();
+                let label = if st.spec.multi {
+                    format!("Choisir ({})", st.selected.iter().filter(|s| **s).count())
+                } else {
+                    "Choisir".to_string()
+                };
+                let choisir = egui::Button::new(RichText::new(label).strong())
+                    .min_size(size)
+                    .fill(ui.visuals().selection.bg_fill);
+                if ui.add_enabled(can, choisir).clicked() || (enter && can) {
+                    validate = true;
                 }
             });
         });
@@ -858,14 +907,11 @@ fn card_text(ui: &mut Ui, columns: &[String], row: &[String], wrap: bool) {
             continue;
         }
         let mut job = egui::text::LayoutJob::default();
-        let small = egui::TextStyle::Small.resolve(ui.style());
         let body = egui::TextStyle::Body.resolve(ui.style());
+        // Nom de la colonne un peu plus petit et estompé, mais lisible.
+        let small = egui::FontId::new(body.size * 0.88, body.family.clone());
         if !col.is_empty() {
-            job.append(
-                &format!("{col} : "),
-                0.0,
-                egui::TextFormat::simple(small.clone(), ui.visuals().weak_text_color()),
-            );
+            job.append(&format!("{col} : "), 0.0, egui::TextFormat::simple(small, ui.visuals().weak_text_color()));
         }
         job.append(cell, 0.0, egui::TextFormat::simple(body, ui.visuals().text_color()));
         if !wrap {
@@ -886,7 +932,7 @@ fn choose_cards(
     hovered: &mut Option<usize>,
     validate: &mut bool,
 ) {
-    let images = !st.images.is_empty();
+    let images = st.has_images();
     let thumb = if images { st.zoom } else { 0.0 };
     let text_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
     let lines = st.spec.columns.len().max(1) as f32;
@@ -956,13 +1002,20 @@ fn choose_cards(
                     }
                     None => {
                         ui.painter().rect_filled(slot, 2.0, crate::ui::theme::placeholder(ui));
-                        ui.painter().text(
-                            slot.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "—",
-                            egui::TextStyle::Body.resolve(ui.style()),
-                            ui.visuals().weak_text_color(),
-                        );
+                        if st.is_loading(i) && !st.waits_hover(i) {
+                            // Image en route : petit indicateur animé au centre.
+                            let r = egui::Rect::from_center_size(slot.center(), egui::vec2(18.0, 18.0));
+                            egui::Spinner::new().size(18.0).paint_at(ui, r);
+                        } else {
+                            let mark = if st.waits_hover(i) { "👁" } else { "—" };
+                            ui.painter().text(
+                                slot.center(),
+                                egui::Align2::CENTER_CENTER,
+                                mark,
+                                egui::TextStyle::Body.resolve(ui.style()),
+                                ui.visuals().weak_text_color(),
+                            );
+                        }
                     }
                 }
                 x += thumb_w + 10.0;
@@ -1006,7 +1059,7 @@ fn choose_table(
     hovered: &mut Option<usize>,
     validate: &mut bool,
 ) {
-    let images = !st.images.is_empty();
+    let images = st.has_images();
     let thumb = st.zoom;
     let row_h = if images { thumb } else { ui.text_style_height(&egui::TextStyle::Body) + 6.0 };
     let n_cols = st.spec.columns.len();
@@ -1095,6 +1148,9 @@ fn choose_table(
                                     .max_size(egui::vec2(320.0, 420.0)),
                             );
                         });
+                    }
+                    None if st.is_loading(i) && !st.waits_hover(i) => {
+                        ui.add(egui::Spinner::new());
                     }
                     None => {
                         ui.label(RichText::new("—").weak());

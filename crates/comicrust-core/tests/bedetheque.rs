@@ -11,13 +11,13 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use comicrust_core::library::LibraryBook;
 use comicrust_core::scripting::forms::{text_hint, ChooseLayout, Control, ControlKind};
 use comicrust_core::scripting::{
-    book_json, discover_with_warnings, ChooseSpec, FormAnswer, FormSpec, Hook, Question, QuestionKind, RunContext,
-    RunOptions, RunResult, RunState, ScriptEntry, ScriptHost, ScriptRunner, ScriptSettings,
+    book_json, discover_with_warnings, ChooseSpec, FormAnswer, FormSpec, Hook, LazyImage, Question, QuestionKind,
+    RunContext, RunOptions, RunResult, RunState, ScriptEntry, ScriptHost, ScriptRunner, ScriptSettings,
 };
 use serde_json::{json, Map, Value};
 
@@ -73,6 +73,10 @@ fn page(chemin: &str) -> Option<(&'static str, String)> {
         if chemin == "/media/couvertures/couv_802.jpg" {
             return None;
         }
+        // Couverture « .jpg » servie en WebP (comme le fait le site selon l'en-tête Accept).
+        if nom == "couv_950.jpg" {
+            return Some(("image/jpeg", "images/couv_webp.webp".into()));
+        }
         let n: u64 = nom.trim_start_matches("couv_").trim_end_matches(".jpg").parse().unwrap_or(1);
         return Some(("image/png", format!("images/couv_{}.png", n % 6 + 1)));
     }
@@ -97,6 +101,11 @@ fn page(chemin: &str) -> Option<(&'static str, String)> {
         }
         "/serie-80-bd-thorgal__10000.html" => "serie_thorgal.html",
         "/serie-81-bd-monde-de-thorgal-le-kriss-de-valnor__10000.html" => "serie_kriss.html",
+        "/bandes_dessinees_l.html" => "lettre_l.html",
+        "/search/tout?rechtexte=lanfeust&rechwhere=7" => "recherche_lanfeust.html",
+        "/serie-100-bd-lanfeust-de-troy__10000.html" => "serie_lanfeust.html",
+        "/serie-101-bd-lanfeust-des-etoiles__10000.html" => "serie_lanfeust_etoiles.html",
+        "/bd-lanfeust-de-troy-tome-3-castel-or-903.html" => "album_lanfeust_3.html",
         _ => return None,
     };
     Some((html, f.to_string()))
@@ -105,11 +114,20 @@ fn page(chemin: &str) -> Option<(&'static str, String)> {
 struct Serveur {
     base: String,
     releve: Arc<Mutex<Vec<Requete>>>,
+    /// Instant de chaque requête (même ordre que `releve`).
+    instants: Arc<Mutex<Vec<Instant>>>,
 }
 
 impl Serveur {
     fn chemins(&self) -> Vec<String> {
         self.releve.lock().unwrap().iter().map(|(c, _)| c.to_lowercase()).collect()
+    }
+
+    /// Instants des requêtes dont le chemin (en minuscules) commence par `debut`.
+    fn instants(&self, debut: &str) -> Vec<Instant> {
+        let chemins = self.chemins();
+        let t = self.instants.lock().unwrap();
+        chemins.iter().zip(t.iter()).filter(|(c, _)| c.starts_with(debut)).map(|(_, t)| *t).collect()
     }
 }
 
@@ -117,7 +135,8 @@ fn serveur() -> Serveur {
     let ecoute = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", ecoute.local_addr().unwrap());
     let releve = Arc::new(Mutex::new(Vec::new()));
-    let (r2, b2) = (releve.clone(), base.clone());
+    let instants = Arc::new(Mutex::new(Vec::new()));
+    let (r2, b2, i2) = (releve.clone(), base.clone(), instants.clone());
     std::thread::spawn(move || {
         for flux in ecoute.incoming() {
             let Ok(mut flux) = flux else { continue };
@@ -137,8 +156,14 @@ fn serveur() -> Serveur {
                 }
             }
             let cible = ligne.split_whitespace().nth(1).unwrap_or("/").to_string();
+            // Images : refusées sans Referer du site (comme un serveur qui protège ses
+            // images des liens extérieurs).
+            let image = cible.to_lowercase().starts_with("/media/") || cible.to_lowercase().starts_with("/cache/");
+            let referer_ok = entetes.get("referer").is_some_and(|r| r.starts_with(&b2));
             r2.lock().unwrap().push((cible.clone(), entetes));
+            i2.lock().unwrap().push(Instant::now());
             let (statut, type_, corps): (&str, &str, Vec<u8>) = match page(&cible.to_lowercase()) {
+                _ if image && !referer_ok => ("403 Forbidden", "text/html", b"<html>Interdit</html>".to_vec()),
                 Some((t, f)) => {
                     let chemin = fixtures().join(f);
                     let mut octets = std::fs::read(chemin).unwrap();
@@ -162,7 +187,7 @@ fn serveur() -> Serveur {
             let _ = flux.read(&mut reste);
         }
     });
-    Serveur { base, releve }
+    Serveur { base, releve, instants }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -190,6 +215,11 @@ struct Hote {
     messages: Mutex<Vec<String>>,
     choix: Mutex<Vec<Choix>>,
     listes: Mutex<Vec<ChooseSpec>>,
+    /// Vignettes reçues après l'ouverture de chaque liste : (ligne, avec image).
+    images_recues: Mutex<Vec<Vec<(usize, bool)>>>,
+    /// Lignes « survolées » par liste (rendues par `choose_wants`), dans l'ordre des listes.
+    survols: Mutex<Vec<Vec<usize>>>,
+    survol_courant: Mutex<Vec<usize>>,
     reponses_form: Mutex<Vec<ReponseForm>>,
     formulaires: Mutex<Vec<FormSpec>>,
     enregistres: Mutex<Vec<ScriptSettings>>,
@@ -225,6 +255,32 @@ impl ScriptHost for Hote {
     }
     fn choose(&self, choice: &ChooseSpec) -> Option<Vec<usize>> {
         self.listes.lock().unwrap().push(choice.clone());
+        self.images_recues.lock().unwrap().push(Vec::new());
+        // Vignettes chargées après coup : l'« utilisateur » attend celles qui viennent d'office
+        // et celles des lignes qu'il survole, comme s'il regardait la fenêtre.
+        if !choice.lazy.is_empty() {
+            let survol = {
+                let mut s = self.survols.lock().unwrap();
+                if s.is_empty() {
+                    Vec::new()
+                } else {
+                    s.remove(0)
+                }
+            };
+            let mut attendues: Vec<usize> =
+                (0..choice.rows.len()).filter(|&i| choice.lazy[i] == LazyImage::Auto).collect();
+            attendues.extend(survol.iter().copied());
+            *self.survol_courant.lock().unwrap() = survol;
+            let fin = Instant::now() + Duration::from_secs(30);
+            loop {
+                let recues: Vec<usize> =
+                    self.images_recues.lock().unwrap().last().unwrap().iter().map(|r| r.0).collect();
+                if attendues.iter().all(|i| recues.contains(i)) || Instant::now() > fin {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
         let mut c = self.choix.lock().unwrap();
         let rep = if c.is_empty() { Choix::Annuler } else { c.remove(0) };
         match rep {
@@ -232,6 +288,14 @@ impl ScriptHost for Hote {
             Choix::Delai => (!choice.default.is_empty()).then(|| choice.default.clone()),
             Choix::Annuler => None,
         }
+    }
+    fn choose_image(&self, index: usize, image: Option<Arc<Vec<u8>>>) {
+        if let Some(l) = self.images_recues.lock().unwrap().last_mut() {
+            l.push((index, image.is_some()));
+        }
+    }
+    fn choose_wants(&self) -> Vec<usize> {
+        std::mem::take(&mut *self.survol_courant.lock().unwrap())
     }
     fn load_settings(&self, _key: &str) -> ScriptSettings {
         self.reglages.clone()
@@ -243,6 +307,17 @@ impl ScriptHost for Hote {
 }
 
 impl Hote {
+    /// Lignes de la liste `n` dont une image est arrivée après l'ouverture (dans l'ordre
+    /// d'arrivée).
+    fn avec_image(&self, n: usize) -> Vec<usize> {
+        self.images_recues.lock().unwrap()[n].iter().filter(|r| r.1).map(|r| r.0).collect()
+    }
+
+    fn survols(self, s: Vec<Vec<usize>>) -> Hote {
+        *self.survols.lock().unwrap() = s;
+        self
+    }
+
     fn avec(livres: Vec<LibraryBook>) -> Hote {
         Hote { livres: livres.iter().map(|b| (b.id.clone(), book_json(b))).collect(), ..Default::default() }
     }
@@ -434,15 +509,18 @@ fn recherche_choix_et_fiche_complete() {
     assert_eq!(listes.len(), 1);
     assert_eq!(listes[0].title, "Choisissez une série pour Spirou");
     assert_eq!(listes[0].rows.len(), 3);
-    assert_eq!(listes[0].columns, ["Série", "Infos", "Résultat", "Lien"]);
+    assert_eq!(listes[0].columns, ["Série", "Éditeur / pays", "Résultat", "Lien"]);
     assert_eq!(listes[0].rows[0], ["Spirou et Fantasio", "Dupuis", "001", "serie-1-BD-Spirou-et-Fantasio.html"]);
     assert_eq!(listes[0].timeout, Some(30.0));
     assert!(listes[0].default.is_empty());
     assert_eq!(listes[0].layout, ChooseLayout::Cards);
-    assert_eq!(listes[0].thumb_size, 120.0);
-    // Deux couvertures dans les résultats ; la page de la troisième série (pour sa
-    // couverture) n'existe pas : rien, et aucun message d'erreur.
-    assert_eq!(listes[0].images.iter().filter(|i| i.is_some()).count(), 2);
+    assert_eq!(listes[0].thumb_size, 150.0);
+    // Fenêtre ouverte tout de suite, couvertures envoyées ensuite : deux dans les résultats ;
+    // la page de la troisième série (pour sa couverture) n'existe pas : rien, et aucun
+    // message d'erreur.
+    assert_eq!(listes[0].lazy, [LazyImage::Auto; 3]);
+    assert!(listes[0].images.iter().all(Option::is_none));
+    assert_eq!(hote.avec_image(0), [0, 1]);
 
     // Requêtes : mêmes en-têtes que le fetcher de l'original, accueil avant la recherche.
     let chemins = srv.chemins();
@@ -527,7 +605,7 @@ fn choix_ignorer_automatique_et_edition() {
     assert_eq!(listes[0].rows.len(), 2);
     assert_eq!(listes[0].timeout, Some(12.0));
     assert_eq!(listes[0].default, vec![0]);
-    assert_eq!(listes[0].images.iter().filter(|i| i.is_some()).count(), 2);
+    assert_eq!(hote.avec_image(0), [0, 1], "couvertures envoyées après l'ouverture");
     drop(listes);
 
     // Choix de l'édition (« Choix automatique de l'édition » décoché), sans délai.
@@ -544,16 +622,16 @@ fn choix_ignorer_automatique_et_edition() {
     let listes = hote.listes.lock().unwrap();
     assert_eq!(listes[0].title, "Choisissez une édition pour 1");
     assert_eq!(listes[0].timeout, None);
-    assert_eq!(listes[0].columns, ["Titre", "Numéro alternatif", "Dépôt légal", "Éditeur", "ISBN", "Identifiant"]);
-    assert_eq!(listes[0].rows[0], ["Quelque part entre les ombres", "", "11/2000", "Dargaud", "2-205-04969-8", "21"]);
-    assert_eq!(listes[0].rows[1][1], "a2005");
-    assert_eq!(listes[0].images.iter().filter(|i| i.is_some()).count(), 2);
+    assert_eq!(listes[0].columns, ["Titre", "N°", "Dépôt légal", "Éditeur", "ISBN", "Identifiant"]);
+    assert_eq!(listes[0].rows[0], ["Quelque part entre les ombres", "1", "11/2000", "Dargaud", "2-205-04969-8", "21"]);
+    assert_eq!(listes[0].rows[1][1], "1 a2005");
+    assert_eq!(hote.avec_image(0), [0, 1]);
 }
 
 /// Fenêtres de choix avec couvertures (v0.10.2) : résultats de recherche sans image
 /// (drapeaux seulement, comme le site) → page des premières séries lue pour sa couverture
-/// (premier album en « data-src », ou og:image), sans relire ensuite la page de la série
-/// choisie ; couverture en grand d'une vignette, repli sur la vignette ; réglages
+/// pendant que la fenêtre est ouverte (premier album en « data-src », ou og:image), sans
+/// relire ensuite la page de la série choisie ; couverture en grand d'une vignette, repli sur la vignette ; réglages
 /// « VignettesSeries » et « TailleVignettes ».
 #[test]
 fn couvertures_des_fenetres_de_choix() {
@@ -574,14 +652,16 @@ fn couvertures_des_fenetres_de_choix() {
     assert_eq!(series.rows[0], ["Thorgal", "Le Lombard · Belgique", "001", "serie-80-BD-Thorgal.html"]);
     assert_eq!(series.rows[2][1], "France");
     assert_eq!(series.thumb_size, 180.0);
-    let avec: Vec<bool> = series.images.iter().map(Option::is_some).collect();
-    assert_eq!(avec, [true, true, false]);
+    assert_eq!(hote.avec_image(0), [0, 1]);
     let albums = &listes[1];
     assert_eq!(albums.title, "Choisissez un album pour 99");
-    assert_eq!(albums.columns, ["Album", "Rang", "Lien"]);
-    assert_eq!(albums.rows[0][0], "1. La Magicienne trahie");
-    assert_eq!(albums.rows[0][2], "BD-Thorgal-Tome-1-La-Magicienne-trahie-801.html");
-    assert_eq!(albums.images.iter().filter(|i| i.is_some()).count(), 2);
+    assert_eq!(albums.columns, ["Titre", "N°", "Parution", "Éditeur", "Lien"]);
+    assert_eq!(
+        albums.rows[0],
+        ["La Magicienne trahie", "1", "", "", "BD-Thorgal-Tome-1-La-Magicienne-trahie-801.html"]
+    );
+    assert_eq!(albums.lazy, [LazyImage::Auto; 2]);
+    assert_eq!(hote.avec_image(1), [0, 1]);
     drop(listes);
     let chemins = srv.chemins();
     let n = |c: &str| chemins.iter().filter(|x| x.as_str() == c).count();
@@ -606,10 +686,90 @@ fn couvertures_des_fenetres_de_choix() {
     );
     lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t"]), hote.clone());
     let listes = hote.listes.lock().unwrap();
-    assert!(listes[0].images.is_empty(), "aucune couverture");
+    assert!(listes[0].images.is_empty() && listes[0].lazy.is_empty(), "aucune couverture");
     assert_eq!(listes[0].layout, ChooseLayout::Cards);
-    assert_eq!(listes[0].thumb_size, 120.0);
+    assert_eq!(listes[0].thumb_size, 150.0);
     assert!(!srv.chemins().iter().any(|c| c.starts_with("/serie-")), "{:?}", srv.chemins());
+}
+
+/// Fenêtres de choix (v0.10.2) : la fenêtre s'ouvre tout de suite, les couvertures arrivent
+/// ensuite. Adresses sans schéma (« //www… »), relatives, en `data-src` ; « .jpg » servi en
+/// WebP ; Referer exigé par le serveur d'images (403 sinon) ; titre, numéro, dépôt légal et
+/// éditeur des albums lus dans la page de la série ; album sans couverture dans cette page :
+/// page de l'album lue seulement au survol ; au moins 1 s entre deux pages de séries ;
+/// cache disque (`cache\` du dossier des journaux) : rien n'est retéléchargé ensuite.
+#[test]
+fn couvertures_progressives_cache_et_pauses() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("l", "Lanfeust", "9")])
+            .reglages(&srv, journaux.path(), json!({}))
+            .choix(vec![Choix::Rang(0), Choix::Annuler]),
+    );
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["l"]), hote.clone());
+    assert_eq!(r.return_value, json!({"traites": 0, "ignores": 1}), "{}", r.journal_text());
+    let listes = hote.listes.lock().unwrap();
+    assert_eq!(listes.len(), 2, "série puis album");
+    assert_eq!(listes[0].rows[1][0], "Lanfeust des Étoiles");
+    assert_eq!(listes[0].lazy, [LazyImage::Auto; 2]);
+    assert_eq!(hote.avec_image(0), [0, 1], "couverture de chaque série (la 2e en WebP)");
+    let albums = &listes[1];
+    assert_eq!(albums.columns, ["Titre", "N°", "Parution", "Éditeur", "Lien"]);
+    assert_eq!(albums.rows[0][..4], ["L'ivoire du Magohamoth", "1", "05/1994", "Soleil Productions"]);
+    assert_eq!(albums.rows[1][..4], ["Thanos l'incongru", "2", "02/1995", "Soleil Productions"]);
+    assert_eq!(albums.rows[2][..4], ["Castel Or", "3", "", ""]);
+    assert_eq!(albums.lazy, [LazyImage::Auto, LazyImage::Auto, LazyImage::OnDemand]);
+    assert_eq!(hote.avec_image(1), [0, 1]);
+    drop(listes);
+    let chemins = srv.chemins();
+    let n = |c: &str| chemins.iter().filter(|x| x.as_str() == c).count();
+    assert_eq!(n("/serie-100-bd-lanfeust-de-troy__10000.html"), 1, "page gardée pour la suite : {chemins:?}");
+    assert_eq!(n("/serie-101-bd-lanfeust-des-etoiles__10000.html"), 1);
+    assert_eq!(n("/bd-lanfeust-de-troy-tome-3-castel-or-903.html"), 0, "album 3 : pas survolé, pas lu");
+    assert_eq!(n("/media/couvertures/couv_901.jpg"), 1, "une seule fois pour les deux fenêtres");
+    assert_eq!(n("/media/couvertures/couv_902.jpg"), 1, "adresse relative");
+    assert_eq!(n("/media/couvertures/couv_950.jpg"), 1, "adresse sans schéma");
+    // Images demandées comme un navigateur : Referer du site, pas d'AVIF.
+    for (c, h) in srv.releve.lock().unwrap().iter() {
+        if c.starts_with("/media/") || c.starts_with("/cache/") {
+            assert!(h.get("referer").is_some_and(|r| r.starts_with(&srv.base)), "{c} : {h:?}");
+            let accept = h.get("accept").cloned().unwrap_or_default();
+            assert!(accept.contains("image/webp") && !accept.contains("avif"), "{c} : {accept}");
+        }
+    }
+    // Pauses : au moins 1 s entre deux pages de séries lues pour leurs couvertures.
+    let t = srv.instants("/serie-10");
+    assert_eq!(t.len(), 2);
+    assert!(t[1].duration_since(t[0]) >= Duration::from_millis(950), "{:?}", t[1].duration_since(t[0]));
+    // Cache disque borné, dans le dossier des journaux (data\bedetheque\cache par défaut).
+    let cache = journaux.path().join("cache");
+    assert!(cache.join("couvertures.json").is_file());
+    let n_img = std::fs::read_dir(&cache)
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "img"));
+    assert_eq!(n_img.count(), 3, "901 (aussi couverture de la série 100), 902, 950");
+
+    // Second passage (même cache) : aucune page de série relue pour sa couverture, aucune
+    // image retéléchargée ; l'album 3, survolé, est lu (une fois) pour sa couverture.
+    let avant = srv.chemins().len();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("l", "Lanfeust", "9")])
+            .reglages(&srv, journaux.path(), json!({}))
+            .choix(vec![Choix::Rang(0), Choix::Annuler])
+            .survols(vec![vec![], vec![2]]),
+    );
+    lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["l"]), hote.clone());
+    let apres: Vec<String> = srv.chemins()[avant..].to_vec();
+    assert_eq!(hote.avec_image(0), [0, 1], "depuis le cache");
+    assert!(hote.avec_image(1).contains(&2), "couverture de l'album survolé");
+    let n = |c: &str| apres.iter().filter(|x| x.as_str() == c).count();
+    assert_eq!(n("/serie-101-bd-lanfeust-des-etoiles__10000.html"), 0, "{apres:?}");
+    assert_eq!(n("/serie-100-bd-lanfeust-de-troy__10000.html"), 1, "page de la série choisie");
+    assert_eq!(n("/bd-lanfeust-de-troy-tome-3-castel-or-903.html"), 1);
+    let images: Vec<&String> = apres.iter().filter(|c| c.starts_with("/media/") || c.starts_with("/cache/")).collect();
+    assert_eq!(images, ["/media/couvertures/couv_903.jpg"], "seule l'image nouvelle");
 }
 
 /// Réglages réels relevés à la recette de la v0.10.1 (fixture `App_EN.Config`, réduite) :
@@ -657,6 +817,46 @@ fn import_reglages_reels_anglais() {
     assert!(!c.contains_key("Tags"), "étiquettes gardées : {c:?}");
     assert!(c["Summary"].as_str().unwrap().ends_with("Edition info: Premier tirage avec ex-libris."), "{c:?}");
     assert!(hote.messages.lock().unwrap().last().unwrap().contains("Processed: 1"), "{:?}", hote.messages);
+}
+
+/// `App.Config` réel complet de l'utilisateur (fixture `App_reel.Config`, recette de la
+/// v0.10.1 ; aucun chemin personnel) : les 50 réglages de l'original sont tous relus, avec
+/// leur valeur (booléens 0/1, textes gardés tels quels, tailles des journaux à l'octet).
+#[test]
+fn import_reglages_reels_complets() {
+    let py = need_python!();
+    let journaux = tempfile::tempdir().unwrap();
+    let mut hote = Hote::default().formulaires(vec![
+        Some(("importer".into(), json!({}))),
+        Some(("OK".into(), json!({"fichier": fixtures().join("App_reel.Config").to_string_lossy()}))),
+        Some(("OK".into(), json!({}))),
+    ]);
+    hote.reglages.values.insert("dossier_journaux".into(), json!(journaux.path().to_string_lossy()));
+    let hote = Arc::new(hote);
+    let mut ctx = RunContext::new(Hook::ConfigScript, vec![]);
+    ctx.interactive = true;
+    lancer(&py, "Bedetheque2Config", ctx, hote.clone());
+    let s = hote.enregistres.lock().unwrap().last().expect("réglages enregistrés").values.clone();
+    let attendu: Value = serde_json::from_str(
+        r#"{
+           "SHOWRENLOG": false, "SHOWDBGLOG": false, "DBGONOFF": false, "DBGLOGMAX": 20000, "RENLOGMAX": 20000,
+           "LANGENFR": "EN", "TBTags": "", "CBCover": true, "CBStatus": true, "CBGenre": true, "CBNotes": true,
+           "CBWeb": true, "ShortWebLink": false, "CBCount": true, "CBSynopsys": true, "CBImprint": true,
+           "CBLetterer": true, "CBInker": true, "CBPrinted": true, "CBRating": true, "CBISBN": true,
+           "CBLanguage": true, "CBEditor": true, "CBFormat": true, "CBColorist": true, "CBPenciller": true,
+           "CBWriter": true, "CBSeries": true, "CBTitle": true, "CBDefault": false, "CBRescrape": false,
+           "ARTICLES": "Le,La,Les,Die,Der,Das,Het", "SUBPATT": " - - ", "COUNTOF": true, "CBCouverture": true,
+           "COUNTFINIE": true, "TITLEIT": true, "TIMEOUT": "70", "TIMEOUTS": "7", "TIMEPOPUP": "30",
+           "FORMATARTICLES": true, "PopUpEditionForm": false, "PadNumber": "0", "SerieResumeEverywhere": true,
+           "AlwaysChooseSerie": false, "ONESHOTFORMAT": false, "AcceptGenericArtists": false, "CBStop": "2"}"#,
+    )
+    .unwrap();
+    for (cle, v) in attendu.as_object().unwrap() {
+        assert_eq!(s.get(cle), Some(v), "{cle}");
+    }
+    // Réglages propres au portage : valeurs par défaut (absents de l'original).
+    assert_eq!(s["TailleVignettes"], json!(150));
+    assert_eq!(s["VignettesSeries"], json!(true));
 }
 
 /// Hook `Editor` (fenêtre « Infos du livre ») : même traitement, sur le livre affiché.
@@ -727,7 +927,9 @@ fn scrape_rapide_et_rescrape() {
             .reglages(&srv, journaux.path(), json!({}))
             .formulaires(vec![
                 Some(("OK".into(), json!({"lien": lien_album}))),
-                Some(("OK".into(), json!({"lien": "serie-1-BD-Spirou-et-Fantasio.html"}))),
+                // « Chercher sur bedetheque.com » : la fenêtre revient avec le lien saisi.
+                Some(("chercher".into(), json!({"lien": "serie-1-BD-Spirou-et-Fantasio.html", "vides": true}))),
+                Some(("OK".into(), json!({}))),
             ])
             .choix(vec![Choix::Rang(1)]),
     );
@@ -743,7 +945,9 @@ fn scrape_rapide_et_rescrape() {
     assert_eq!(b["Number"], json!("2"));
     assert!(!b.contains_key("Count"), "lien direct : pas de nombre d'albums");
     let formulaires = hote.formulaires.lock().unwrap();
-    assert_eq!(formulaires.len(), 2);
+    assert_eq!(formulaires.len(), 3);
+    assert_eq!(formulaires[2].values["lien"], json!("serie-1-BD-Spirou-et-Fantasio.html"), "lien gardé");
+    assert_eq!(formulaires[2].values["vides"], json!(true), "option gardée");
     assert_eq!(formulaires[0].title, "Scrape directement un lien");
     // Champ du lien : bouton « Coller » et aperçu du lien reconnu (expressions du script
     // évaluées par ComicRust).
@@ -752,18 +956,24 @@ fn scrape_rapide_et_rescrape() {
     };
     assert!(*paste);
     let apercu = |t: &str| text_hint(hints, hint_none, t).map(|(ok, h)| (ok, h.to_string()));
-    assert_eq!(apercu(&lien_album), Some((true, "Lien d'un album".into())));
-    assert_eq!(apercu("www.bedetheque.com/BD--21.html#reed").unwrap().1, "Lien d'un album");
+    assert_eq!(apercu(&lien_album), Some((true, "Lien d'un album : ses infos seront lues".into())));
+    assert!(apercu("www.bedetheque.com/BD--21.html#reed").unwrap().1.starts_with("Lien d'un album"));
     assert!(apercu(" serie-1-BD-Spirou-et-Fantasio.html ").unwrap().1.starts_with("Lien d'une série"));
     assert_eq!(apercu("https://www.bedetheque.com/revue-Spirou.html").unwrap().1, "Lien d'une revue");
     assert!(!apercu("https://example.com/").unwrap().0);
     assert_eq!(apercu("  "), None);
-    let texte = |c: &Control| match &c.kind {
-        ControlKind::Label { text, .. } => text.clone(),
-        _ => String::new(),
+    // Mise en page : livre concerné, lien (avec « Chercher sur bedetheque.com »), options
+    // pour ce passage, aide.
+    let groupe = |c: &Control| match &c.kind {
+        ControlKind::Group { title, controls } => (title.clone(), controls.iter().map(|c| c.key.clone()).collect()),
+        _ => (String::new(), Vec::<String>::new()),
     };
-    let textes: Vec<String> = formulaires[0].controls.iter().map(texte).collect();
-    assert!(textes[0].starts_with("Livre 1 sur 2 : "), "{textes:?}");
+    let groupes: Vec<(String, Vec<String>)> = formulaires[0].controls.iter().map(groupe).collect();
+    assert_eq!(groupes[0].0, "Livre 1 sur 2");
+    assert_eq!(groupes[1].1, ["lien", "chercher"]);
+    assert_eq!(groupes[2].0, "Options pour ce passage");
+    assert_eq!(groupes[2].1, ["vides", "edition"]);
+    assert_eq!(formulaires[0].buttons, ["OK", "Annuler"]);
     let listes = hote.listes.lock().unwrap();
     assert_eq!(listes[0].rows.len(), 3, "toute la série est proposée");
     drop((formulaires, listes));

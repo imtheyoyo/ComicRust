@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -291,6 +291,17 @@ pub trait ScriptHost: Send + Sync {
     /// le contexte est interactif. Par défaut : aucune interface (`None`).
     fn choose(&self, _choice: &ChooseSpec) -> Option<Vec<usize>> {
         None
+    }
+
+    /// Vignette de la ligne `index` de la liste de choix ouverte, arrivée après son ouverture
+    /// (liste avec [`ChooseSpec::lazy`]) ; `None` : pas d'image pour cette ligne. Appelée
+    /// pendant que [`choose`](ScriptHost::choose) attend la réponse (dans un autre fil).
+    fn choose_image(&self, _index: usize, _image: Option<Arc<Vec<u8>>>) {}
+
+    /// Lignes de la liste de choix ouverte dont l'utilisateur attend la vignette (survolées,
+    /// choisies), à charger en priorité ; rendues une seule fois (la liste est vidée).
+    fn choose_wants(&self) -> Vec<usize> {
+        Vec::new()
     }
 
     /// Ouvre une adresse http(s) déjà vérifiée dans le navigateur ; vrai si c'est fait.
@@ -668,6 +679,29 @@ struct Session {
     end: Option<(RunState, Option<ScriptFailure>, Value)>,
     hello: bool,
     protocol_error: Option<String>,
+    /// Liste de choix ouverte dont les vignettes arrivent après coup : la réponse au script
+    /// part quand l'interface a répondu (voir [`Session::poll_choose`]).
+    live_choose: Option<LiveChoose>,
+}
+
+/// Liste de choix ouverte avec des vignettes chargées après coup.
+struct LiveChoose {
+    /// Numéro de la demande `choose`.
+    id: u64,
+    spec: Arc<ChooseSpec>,
+    /// Réponse de l'interface (fil qui attend [`ScriptHost::choose`]).
+    answer: Receiver<Option<Vec<usize>>>,
+    /// Octets des vignettes déjà reçues (12 Mo au plus pour la fenêtre).
+    total: usize,
+}
+
+/// Réponse au script d'une liste de choix.
+fn choose_answer(spec: &ChooseSpec, picked: Option<Vec<usize>>) -> Value {
+    match picked.and_then(|p| spec.sanitize(&p)) {
+        None => Value::Null,
+        Some(picked) if spec.multi => json!(picked),
+        Some(picked) => json!(picked[0]),
+    }
 }
 
 fn run(
@@ -798,6 +832,7 @@ fn run_inner(
         end: None,
         hello: false,
         protocol_error: None,
+        live_choose: None,
     };
     let stop = s.main_loop(&rx, &mut child, &cancel);
     // Fin : stdin fermé (le module s'arrête s'il attendait encore), attente bornée.
@@ -998,7 +1033,61 @@ impl Session {
                 Ok(Ev::Eof) | Err(RecvTimeoutError::Disconnected) => return stop,
                 Err(RecvTimeoutError::Timeout) => {}
             }
+            self.poll_choose();
         }
+    }
+
+    /// Liste de choix aux vignettes chargées après coup : lignes attendues transmises au
+    /// script, réponse envoyée dès que l'interface l'a donnée.
+    fn poll_choose(&mut self) {
+        let Some(lc) = &self.live_choose else { return };
+        let id = lc.id;
+        let wants: Vec<usize> = self.host.choose_wants().into_iter().filter(|&i| lc.spec.is_lazy(i)).collect();
+        let answer = match lc.answer.try_recv() {
+            Ok(a) => Some(a),
+            Err(TryRecvError::Disconnected) => Some(None),
+            Err(TryRecvError::Empty) => None,
+        };
+        for i in wants {
+            self.send(&json!({"t": "choose_want", "id": id, "index": i}));
+        }
+        if let Some(picked) = answer {
+            let lc = self.live_choose.take().expect("liste de choix ouverte");
+            let value = choose_answer(&lc.spec, picked);
+            self.send(&json!({"t": "reply", "id": id, "ok": true, "value": value}));
+        }
+    }
+
+    /// Demande `choose` : réponse tout de suite (`Some`), ou plus tard pour une liste aux
+    /// vignettes chargées après coup (`None` : fenêtre ouverte dans un autre fil, réponse
+    /// envoyée par [`poll_choose`](Session::poll_choose)).
+    fn choose(&mut self, id: u64, p: &Map<String, Value>) -> Result<Option<Value>, String> {
+        let spec = ChooseSpec::parse(p).map_err(|e| format!("liste de choix : {e}"))?;
+        if !self.ctx.interactive {
+            self.log(
+                JournalKind::Info,
+                format!("liste de choix « {} » non affichée : script sans interface (None)", spec.title),
+            );
+            return Ok(Some(Value::Null));
+        }
+        if spec.lazy.is_empty() {
+            let picked = self.host.choose(&spec);
+            return Ok(Some(choose_answer(&spec, picked)));
+        }
+        if self.live_choose.is_some() {
+            return Err("liste de choix : une autre liste est déjà ouverte".into());
+        }
+        let spec = Arc::new(spec);
+        let (tx, rx) = mpsc::channel();
+        let (host, s2) = (self.host.clone(), spec.clone());
+        std::thread::Builder::new()
+            .name("comicrust-script-choix".into())
+            .spawn(move || {
+                let _ = tx.send(host.choose(&s2));
+            })
+            .map_err(|e| format!("liste de choix : {e}"))?;
+        self.live_choose = Some(LiveChoose { id, spec, answer: rx, total: 0 });
+        Ok(None)
     }
 
     /// Traite un message du script. `Err` = protocole rompu.
@@ -1054,7 +1143,17 @@ impl Session {
                 if !self.hello {
                     return Err("demande avant la présentation".into());
                 }
-                let reply = match self.request(&m, &params) {
+                let result = if m == "choose" {
+                    match self.choose(id, &params) {
+                        Ok(Some(v)) => Ok(v),
+                        // Réponse plus tard (vignettes chargées après coup).
+                        Ok(None) => return Ok(()),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    self.request(&m, &params)
+                };
+                let reply = match result {
                     Ok(value) => json!({"t": "reply", "id": id, "ok": true, "value": value}),
                     Err(error) => json!({"t": "reply", "id": id, "ok": false, "error": error}),
                 };
@@ -1077,6 +1176,17 @@ impl Session {
                     Ok(d) if d.is_empty() => {}
                     Ok(d) => self.host.progress_details(&d),
                     Err(e) => self.log(JournalKind::Warning, format!("progression : {e}")),
+                }
+            }
+            FromScript::ChooseImage { id, index, image } => {
+                // Liste déjà fermée (image envoyée juste avant la réponse) : ignorée.
+                let Some(lc) = self.live_choose.as_mut().filter(|lc| lc.id == id) else { return Ok(()) };
+                match lc.spec.read_lazy_image(index, &image, &mut lc.total) {
+                    Ok(img) => self.host.choose_image(index, img),
+                    Err(e) => {
+                        self.log(JournalKind::Warning, format!("liste de choix : {e}"));
+                        self.host.choose_image(index, None);
+                    }
                 }
             }
             FromScript::Done { value } => self.end = Some((RunState::Finished, None, value)),
@@ -1167,21 +1277,6 @@ impl Session {
                     Ok(false) => Ok(Value::Null),
                     Err(e) => Err(format!("formulaire : {e}")),
                 }
-            }
-            "choose" => {
-                let spec = ChooseSpec::parse(p).map_err(|e| format!("liste de choix : {e}"))?;
-                if !self.ctx.interactive {
-                    self.log(
-                        JournalKind::Info,
-                        format!("liste de choix « {} » non affichée : script sans interface (None)", spec.title),
-                    );
-                    return Ok(Value::Null);
-                }
-                Ok(match self.host.choose(&spec).and_then(|picked| spec.sanitize(&picked)) {
-                    None => Value::Null,
-                    Some(picked) if spec.multi => json!(picked),
-                    Some(picked) => json!(picked[0]),
-                })
             }
             "open_url" => {
                 let url = check_url(p.get("url").and_then(Value::as_str).unwrap_or_default())?;

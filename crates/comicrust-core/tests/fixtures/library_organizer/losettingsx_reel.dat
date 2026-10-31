@@ -1,0 +1,648 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Réglages réels de Library Organizer (recette ComicRust v0.10.1), anonymisés : chemins et noms personnels remplacés. -->
+<Profiles LastUsed="4_BDx">
+  <Profile Name="z_Ancien_Déplace vers NAS" Version="2.1">
+    <FolderTemplate>{ &lt;seriesComplete(Séries Terminées)&gt;}{ &lt;seriesComplete(Séries En cours)(!)&gt;}\{&lt;series&gt;}</FolderTemplate>
+    <BaseFolder>\\NAS\Partage\BD</BaseFolder>
+    <FileTemplate>{ &lt;series&gt;}{  #&lt;number0&gt;}{  - &lt;title&gt;}{  Vol.&lt;volume0&gt;}</FileTemplate>
+    <EmptyFolder />
+    <EmptyData />
+    <Postfix>
+      <Item Name="Format" Value=")" />
+      <Item Name="Month" Value=", " />
+      <Item Name="Month Number" Value=", " />
+      <Item Name="Count" Value=")" />
+      <Item Name="Year" Value=")" />
+    </Postfix>
+    <Prefix>
+      <Item Name="Start Year" Value="(" />
+      <Item Name="Volume" Value="Vol." />
+      <Item Name="Month" Value="(" />
+      <Item Name="Number" Value="#" />
+      <Item Name="Month Number" Value="(" />
+      <Item Name="Count" Value="(of " />
+    </Prefix>
+    <Seperator>
+      <Item Name="Scan Information" Value="," />
+      <Item Name="Locations" Value="," />
+      <Item Name="Characters" Value=", " />
+      <Item Name="Colorist" Value="," />
+      <Item Name="Tags" Value=", " />
+      <Item Name="Inker" Value="," />
+      <Item Name="Letterer" Value="," />
+      <Item Name="Genre" Value=", " />
+      <Item Name="Alternate Series Multi" Value="," />
+      <Item Name="Editor" Value="," />
+      <Item Name="Teams" Value=", " />
+      <Item Name="Cover Artist" Value="," />
+      <Item Name="Penciller" Value="," />
+      <Item Name="Writer" Value=", " />
+    </Seperator>
+    <IllegalCharacters>
+      <Item Name="&quot;" Value="'" />
+      <Item Name="/" Value="" />
+      <Item Name="*" Value="" />
+      <Item Name="&lt;" Value="[" />
+      <Item Name="?" Value="" />
+      <Item Name="&gt;" Value="]" />
+      <Item Name="|" Value="!" />
+      <Item Name=":" Value=" - " />
+      <Item Name="\" Value="" />
+    </IllegalCharacters>
+    <Months>
+      <Item Name="1" Value="January" />
+      <Item Name="2" Value="February" />
+      <Item Name="3" Value="March" />
+      <Item Name="4" Value="April" />
+      <Item Name="5" Value="May" />
+      <Item Name="6" Value="June" />
+      <Item Name="7" Value="July" />
+      <Item Name="8" Value="August" />
+      <Item Name="9" Value="September" />
+      <Item Name="10" Value="October" />
+      <Item Name="11" Value="November" />
+      <Item Name="12" Value="December" />
+      <Item Name="13" Value="Spring" />
+      <Item Name="14" Value="Summer" />
+      <Item Name="15" Value="Fall" />
+      <Item Name="16" Value="Winter" />
+    </Months>
+    <TextBox>
+      <Item Name="Read Percentage" Value="Read" />
+      <Item Name="Manga" Value="Manga" />
+      <Item Name="Series Complete" Value="Test En cours" />
+    </TextBox>
+    <UseFolder>true</UseFolder>
+    <UseFileName>true</UseFileName>
+    <ExcludeFolders />
+    <DontAskWhenMultiOne>true</DontAskWhenMultiOne>
+    <ExcludeOperator>Any</ExcludeOperator>
+    <RemoveEmptyFolder>true</RemoveEmptyFolder>
+    <ExcludedEmptyFolder />
+    <MoveFileless>true</MoveFileless>
+    <FilelessFormat>.jpg</FilelessFormat>
+    <ExcludeMode>Only</ExcludeMode>
+    <FailEmptyValues>false</FailEmptyValues>
+    <MoveFailed>false</MoveFailed>
+    <FailedFolder />
+    <FailedFields />
+    <Mode>Move</Mode>
+    <CopyMode>false</CopyMode>
+    <AutoSpaceFields>true</AutoSpaceFields>
+    <ReplaceMultipleSpaces>true</ReplaceMultipleSpaces>
+    <CopyReadPercentage>true</CopyReadPercentage>
+    <ExcludeRules Operator="Any" ExcludeMode="Only" />
+  </Profile>
+  <Profile Name="2_Terminées" Version="2.1">
+    <FolderTemplate>{ &lt;seriesComplete(Séries Terminées)&gt;}\{&lt;series&gt;}</FolderTemplate>
+    <BaseFolder>\\NAS\Partage\BD</BaseFolder>
+    <FileTemplate>{ &lt;series&gt;}{  #&lt;number0&gt;}{  - &lt;title&gt;}{  Vol.&lt;volume0&gt;}</FileTemplate>
+    <EmptyFolder />
+    <EmptyData />
+    <Postfix>
+      <Item Name="Format" Value=")" />
+      <Item Name="Month" Value=", " />
+      <Item Name="Month Number" Value=", " />
+      <Item Name="Count" Value=")" />
+      <Item Name="Year" Value=")" />
+    </Postfix>
+    <Prefix>
+      <Item Name="Start Year" Value="(" />
+      <Item Name="Volume" Value="Vol." />
+      <Item Name="Month" Value="(" />
+      <Item Name="Number" Value="#" />
+      <Item Name="Month Number" Value="(" />
+      <Item Name="Count" Value="(of " />
+    </Prefix>
+    <Seperator>
+      <Item Name="Scan Information" Value="," />
+      <Item Name="Locations" Value="," />
+      <Item Name="Characters" Value=", " />
+      <Item Name="Colorist" Value="," />
+      <Item Name="Tags" Value=", " />
+      <Item Name="Inker" Value="," />
+      <Item Name="Letterer" Value="," />
+      <Item Name="Genre" Value=", " />
+      <Item Name="Alternate Series Multi" Value="," />
+      <Item Name="Editor" Value="," />
+      <Item Name="Teams" Value=", " />
+      <Item Name="Cover Artist" Value="," />
+      <Item Name="Penciller" Value="," />
+      <Item Name="Writer" Value=", " />
+    </Seperator>
+    <IllegalCharacters>
+      <Item Name="&quot;" Value="'" />
+      <Item Name="/" Value="" />
+      <Item Name="*" Value="" />
+      <Item Name="&lt;" Value="[" />
+      <Item Name="?" Value="" />
+      <Item Name="&gt;" Value="]" />
+      <Item Name="|" Value="!" />
+      <Item Name=":" Value=" - " />
+      <Item Name="\" Value="" />
+    </IllegalCharacters>
+    <Months>
+      <Item Name="1" Value="January" />
+      <Item Name="2" Value="February" />
+      <Item Name="3" Value="March" />
+      <Item Name="4" Value="April" />
+      <Item Name="5" Value="May" />
+      <Item Name="6" Value="June" />
+      <Item Name="7" Value="July" />
+      <Item Name="8" Value="August" />
+      <Item Name="9" Value="September" />
+      <Item Name="10" Value="October" />
+      <Item Name="11" Value="November" />
+      <Item Name="12" Value="December" />
+      <Item Name="13" Value="Spring" />
+      <Item Name="14" Value="Summer" />
+      <Item Name="15" Value="Fall" />
+      <Item Name="16" Value="Winter" />
+    </Months>
+    <TextBox>
+      <Item Name="Read Percentage" Value="Read" />
+      <Item Name="Manga" Value="Manga" />
+      <Item Name="Series Complete" Value="Test En cours" />
+    </TextBox>
+    <UseFolder>true</UseFolder>
+    <UseFileName>true</UseFileName>
+    <ExcludeFolders />
+    <DontAskWhenMultiOne>true</DontAskWhenMultiOne>
+    <ExcludeOperator>Any</ExcludeOperator>
+    <RemoveEmptyFolder>true</RemoveEmptyFolder>
+    <ExcludedEmptyFolder />
+    <MoveFileless>true</MoveFileless>
+    <FilelessFormat>.jpg</FilelessFormat>
+    <ExcludeMode>Only</ExcludeMode>
+    <FailEmptyValues>false</FailEmptyValues>
+    <MoveFailed>false</MoveFailed>
+    <FailedFolder />
+    <FailedFields />
+    <Mode>Move</Mode>
+    <CopyMode>false</CopyMode>
+    <AutoSpaceFields>true</AutoSpaceFields>
+    <ReplaceMultipleSpaces>true</ReplaceMultipleSpaces>
+    <CopyReadPercentage>true</CopyReadPercentage>
+    <ExcludeRules Operator="Any" ExcludeMode="Only" />
+  </Profile>
+  <Profile Name="z_Ancien_Copie vers NAS" Version="2.1">
+    <FolderTemplate>{ &lt;seriesComplete(Séries Terminées)&gt;}{ &lt;seriesComplete(Séries En cours)(!)&gt;}\{&lt;series&gt;}</FolderTemplate>
+    <BaseFolder>\\NAS\Partage\BD</BaseFolder>
+    <FileTemplate>{ &lt;series&gt;}{  #&lt;number0&gt;}{  - &lt;title&gt;}{  Vol.&lt;volume0&gt;}</FileTemplate>
+    <EmptyFolder />
+    <EmptyData />
+    <Postfix>
+      <Item Name="Format" Value=")" />
+      <Item Name="Month" Value=", " />
+      <Item Name="Month Number" Value=", " />
+      <Item Name="Count" Value=")" />
+      <Item Name="Year" Value=")" />
+    </Postfix>
+    <Prefix>
+      <Item Name="Start Year" Value="(" />
+      <Item Name="Volume" Value="Vol." />
+      <Item Name="Month" Value="(" />
+      <Item Name="Number" Value="#" />
+      <Item Name="Month Number" Value="(" />
+      <Item Name="Count" Value="(of " />
+    </Prefix>
+    <Seperator>
+      <Item Name="Scan Information" Value="," />
+      <Item Name="Locations" Value="," />
+      <Item Name="Characters" Value=", " />
+      <Item Name="Colorist" Value="," />
+      <Item Name="Tags" Value=", " />
+      <Item Name="Inker" Value="," />
+      <Item Name="Letterer" Value="," />
+      <Item Name="Genre" Value=", " />
+      <Item Name="Alternate Series Multi" Value="," />
+      <Item Name="Editor" Value="," />
+      <Item Name="Teams" Value=", " />
+      <Item Name="Cover Artist" Value="," />
+      <Item Name="Penciller" Value="," />
+      <Item Name="Writer" Value=", " />
+    </Seperator>
+    <IllegalCharacters>
+      <Item Name="&quot;" Value="'" />
+      <Item Name="/" Value="" />
+      <Item Name="*" Value="" />
+      <Item Name="&lt;" Value="[" />
+      <Item Name="?" Value="" />
+      <Item Name="&gt;" Value="]" />
+      <Item Name="|" Value="!" />
+      <Item Name=":" Value=" - " />
+      <Item Name="\" Value="" />
+    </IllegalCharacters>
+    <Months>
+      <Item Name="1" Value="January" />
+      <Item Name="2" Value="February" />
+      <Item Name="3" Value="March" />
+      <Item Name="4" Value="April" />
+      <Item Name="5" Value="May" />
+      <Item Name="6" Value="June" />
+      <Item Name="7" Value="July" />
+      <Item Name="8" Value="August" />
+      <Item Name="9" Value="September" />
+      <Item Name="10" Value="October" />
+      <Item Name="11" Value="November" />
+      <Item Name="12" Value="December" />
+      <Item Name="13" Value="Spring" />
+      <Item Name="14" Value="Summer" />
+      <Item Name="15" Value="Fall" />
+      <Item Name="16" Value="Winter" />
+    </Months>
+    <TextBox>
+      <Item Name="Read Percentage" Value="Read" />
+      <Item Name="Manga" Value="Manga" />
+      <Item Name="Series Complete" Value="Test En cours" />
+    </TextBox>
+    <UseFolder>true</UseFolder>
+    <UseFileName>true</UseFileName>
+    <ExcludeFolders />
+    <DontAskWhenMultiOne>true</DontAskWhenMultiOne>
+    <ExcludeOperator>Any</ExcludeOperator>
+    <RemoveEmptyFolder>true</RemoveEmptyFolder>
+    <ExcludedEmptyFolder />
+    <MoveFileless>true</MoveFileless>
+    <FilelessFormat>.jpg</FilelessFormat>
+    <ExcludeMode>Only</ExcludeMode>
+    <FailEmptyValues>false</FailEmptyValues>
+    <MoveFailed>false</MoveFailed>
+    <FailedFolder />
+    <FailedFields />
+    <Mode>Copy</Mode>
+    <CopyMode>false</CopyMode>
+    <AutoSpaceFields>true</AutoSpaceFields>
+    <ReplaceMultipleSpaces>true</ReplaceMultipleSpaces>
+    <CopyReadPercentage>true</CopyReadPercentage>
+    <ExcludeRules Operator="Any" ExcludeMode="Only" />
+  </Profile>
+  <Profile Name="1_En cours" Version="2.1">
+    <FolderTemplate>{ &lt;seriesComplete(Séries En cours)(!)&gt;}\{&lt;series&gt;}</FolderTemplate>
+    <BaseFolder>\\NAS\Partage\BD</BaseFolder>
+    <FileTemplate>{ &lt;series&gt;}{  #&lt;number0&gt;}{  - &lt;title&gt;}{  Vol.&lt;volume0&gt;}</FileTemplate>
+    <EmptyFolder />
+    <EmptyData />
+    <Postfix>
+      <Item Name="Format" Value=")" />
+      <Item Name="Month" Value=", " />
+      <Item Name="Month Number" Value=", " />
+      <Item Name="Count" Value=")" />
+      <Item Name="Year" Value=")" />
+    </Postfix>
+    <Prefix>
+      <Item Name="Start Year" Value="(" />
+      <Item Name="Volume" Value="Vol." />
+      <Item Name="Month" Value="(" />
+      <Item Name="Number" Value="#" />
+      <Item Name="Month Number" Value="(" />
+      <Item Name="Count" Value="(of " />
+    </Prefix>
+    <Seperator>
+      <Item Name="Scan Information" Value="," />
+      <Item Name="Locations" Value="," />
+      <Item Name="Characters" Value=", " />
+      <Item Name="Colorist" Value="," />
+      <Item Name="Tags" Value=", " />
+      <Item Name="Inker" Value="," />
+      <Item Name="Letterer" Value="," />
+      <Item Name="Genre" Value=", " />
+      <Item Name="Alternate Series Multi" Value="," />
+      <Item Name="Editor" Value="," />
+      <Item Name="Teams" Value=", " />
+      <Item Name="Cover Artist" Value="," />
+      <Item Name="Penciller" Value="," />
+      <Item Name="Writer" Value=", " />
+    </Seperator>
+    <IllegalCharacters>
+      <Item Name="&quot;" Value="'" />
+      <Item Name="/" Value="" />
+      <Item Name="*" Value="" />
+      <Item Name="&lt;" Value="[" />
+      <Item Name="?" Value="" />
+      <Item Name="&gt;" Value="]" />
+      <Item Name="|" Value="!" />
+      <Item Name=":" Value=" - " />
+      <Item Name="\" Value="" />
+    </IllegalCharacters>
+    <Months>
+      <Item Name="1" Value="January" />
+      <Item Name="2" Value="February" />
+      <Item Name="3" Value="March" />
+      <Item Name="4" Value="April" />
+      <Item Name="5" Value="May" />
+      <Item Name="6" Value="June" />
+      <Item Name="7" Value="July" />
+      <Item Name="8" Value="August" />
+      <Item Name="9" Value="September" />
+      <Item Name="10" Value="October" />
+      <Item Name="11" Value="November" />
+      <Item Name="12" Value="December" />
+      <Item Name="13" Value="Spring" />
+      <Item Name="14" Value="Summer" />
+      <Item Name="15" Value="Fall" />
+      <Item Name="16" Value="Winter" />
+    </Months>
+    <TextBox>
+      <Item Name="Read Percentage" Value="Read" />
+      <Item Name="Manga" Value="Manga" />
+      <Item Name="Series Complete" Value="Test En cours" />
+    </TextBox>
+    <UseFolder>true</UseFolder>
+    <UseFileName>true</UseFileName>
+    <ExcludeFolders />
+    <DontAskWhenMultiOne>true</DontAskWhenMultiOne>
+    <ExcludeOperator>Any</ExcludeOperator>
+    <RemoveEmptyFolder>true</RemoveEmptyFolder>
+    <ExcludedEmptyFolder />
+    <MoveFileless>true</MoveFileless>
+    <FilelessFormat>.jpg</FilelessFormat>
+    <ExcludeMode>Only</ExcludeMode>
+    <FailEmptyValues>false</FailEmptyValues>
+    <MoveFailed>false</MoveFailed>
+    <FailedFolder />
+    <FailedFields />
+    <Mode>Move</Mode>
+    <CopyMode>false</CopyMode>
+    <AutoSpaceFields>true</AutoSpaceFields>
+    <ReplaceMultipleSpaces>true</ReplaceMultipleSpaces>
+    <CopyReadPercentage>true</CopyReadPercentage>
+    <ExcludeRules Operator="Any" ExcludeMode="Only" />
+  </Profile>
+  <Profile Name="Déplace Temp" Version="2.1">
+    <FolderTemplate>Séries_Temp\{&lt;series&gt;}</FolderTemplate>
+    <BaseFolder>\\NAS\Partage\BD</BaseFolder>
+    <FileTemplate>{ &lt;series&gt;}{  #&lt;number0&gt;}{  - &lt;title&gt;}{  Vol.&lt;volume0&gt;}</FileTemplate>
+    <EmptyFolder />
+    <EmptyData />
+    <Postfix>
+      <Item Name="Format" Value=")" />
+      <Item Name="Month" Value=", " />
+      <Item Name="Month Number" Value=", " />
+      <Item Name="Count" Value=")" />
+      <Item Name="Year" Value=")" />
+    </Postfix>
+    <Prefix>
+      <Item Name="Start Year" Value="(" />
+      <Item Name="Volume" Value="Vol." />
+      <Item Name="Month" Value="(" />
+      <Item Name="Number" Value="#" />
+      <Item Name="Month Number" Value="(" />
+      <Item Name="Count" Value="(of " />
+    </Prefix>
+    <Seperator>
+      <Item Name="Scan Information" Value="," />
+      <Item Name="Locations" Value="," />
+      <Item Name="Characters" Value=", " />
+      <Item Name="Colorist" Value="," />
+      <Item Name="Tags" Value=", " />
+      <Item Name="Inker" Value="," />
+      <Item Name="Letterer" Value="," />
+      <Item Name="Genre" Value=", " />
+      <Item Name="Alternate Series Multi" Value="," />
+      <Item Name="Editor" Value="," />
+      <Item Name="Teams" Value=", " />
+      <Item Name="Cover Artist" Value="," />
+      <Item Name="Penciller" Value="," />
+      <Item Name="Writer" Value=", " />
+    </Seperator>
+    <IllegalCharacters>
+      <Item Name="&quot;" Value="'" />
+      <Item Name="/" Value="" />
+      <Item Name="*" Value="" />
+      <Item Name="&lt;" Value="[" />
+      <Item Name="?" Value="" />
+      <Item Name="&gt;" Value="]" />
+      <Item Name="|" Value="!" />
+      <Item Name=":" Value=" - " />
+      <Item Name="\" Value="" />
+    </IllegalCharacters>
+    <Months>
+      <Item Name="1" Value="January" />
+      <Item Name="2" Value="February" />
+      <Item Name="3" Value="March" />
+      <Item Name="4" Value="April" />
+      <Item Name="5" Value="May" />
+      <Item Name="6" Value="June" />
+      <Item Name="7" Value="July" />
+      <Item Name="8" Value="August" />
+      <Item Name="9" Value="September" />
+      <Item Name="10" Value="October" />
+      <Item Name="11" Value="November" />
+      <Item Name="12" Value="December" />
+      <Item Name="13" Value="Spring" />
+      <Item Name="14" Value="Summer" />
+      <Item Name="15" Value="Fall" />
+      <Item Name="16" Value="Winter" />
+    </Months>
+    <TextBox>
+      <Item Name="Read Percentage" Value="Read" />
+      <Item Name="Manga" Value="Manga" />
+      <Item Name="Series Complete" Value="Test En cours" />
+    </TextBox>
+    <UseFolder>true</UseFolder>
+    <UseFileName>true</UseFileName>
+    <ExcludeFolders />
+    <DontAskWhenMultiOne>true</DontAskWhenMultiOne>
+    <ExcludeOperator>Any</ExcludeOperator>
+    <RemoveEmptyFolder>true</RemoveEmptyFolder>
+    <ExcludedEmptyFolder />
+    <MoveFileless>true</MoveFileless>
+    <FilelessFormat>.jpg</FilelessFormat>
+    <ExcludeMode>Only</ExcludeMode>
+    <FailEmptyValues>false</FailEmptyValues>
+    <MoveFailed>false</MoveFailed>
+    <FailedFolder />
+    <FailedFields />
+    <Mode>Move</Mode>
+    <CopyMode>false</CopyMode>
+    <AutoSpaceFields>true</AutoSpaceFields>
+    <ReplaceMultipleSpaces>true</ReplaceMultipleSpaces>
+    <CopyReadPercentage>true</CopyReadPercentage>
+    <ExcludeRules Operator="Any" ExcludeMode="Only" />
+  </Profile>
+  <Profile Name="4_BDx" Version="2.1">
+    <FolderTemplate>BD_X\{&lt;series&gt;}</FolderTemplate>
+    <BaseFolder>\\NAS\Partage\BD</BaseFolder>
+    <FileTemplate>{ &lt;series&gt;}{  #&lt;number0&gt;}{  - &lt;title&gt;}{  Vol.&lt;volume0&gt;}</FileTemplate>
+    <EmptyFolder />
+    <EmptyData />
+    <Postfix>
+      <Item Name="Format" Value=")" />
+      <Item Name="Month" Value=", " />
+      <Item Name="Month Number" Value=", " />
+      <Item Name="Count" Value=")" />
+      <Item Name="Year" Value=")" />
+    </Postfix>
+    <Prefix>
+      <Item Name="Start Year" Value="(" />
+      <Item Name="Volume" Value="Vol." />
+      <Item Name="Month" Value="(" />
+      <Item Name="Number" Value="#" />
+      <Item Name="Month Number" Value="(" />
+      <Item Name="Count" Value="(of " />
+    </Prefix>
+    <Seperator>
+      <Item Name="Scan Information" Value="," />
+      <Item Name="Locations" Value="," />
+      <Item Name="Characters" Value=", " />
+      <Item Name="Colorist" Value="," />
+      <Item Name="Tags" Value=", " />
+      <Item Name="Inker" Value="," />
+      <Item Name="Letterer" Value="," />
+      <Item Name="Genre" Value=", " />
+      <Item Name="Alternate Series Multi" Value="," />
+      <Item Name="Editor" Value="," />
+      <Item Name="Teams" Value=", " />
+      <Item Name="Cover Artist" Value="," />
+      <Item Name="Penciller" Value="," />
+      <Item Name="Writer" Value=", " />
+    </Seperator>
+    <IllegalCharacters>
+      <Item Name="&quot;" Value="'" />
+      <Item Name="/" Value="" />
+      <Item Name="*" Value="" />
+      <Item Name="&lt;" Value="[" />
+      <Item Name="?" Value="" />
+      <Item Name="&gt;" Value="]" />
+      <Item Name="|" Value="!" />
+      <Item Name=":" Value=" - " />
+      <Item Name="\" Value="" />
+    </IllegalCharacters>
+    <Months>
+      <Item Name="1" Value="January" />
+      <Item Name="2" Value="February" />
+      <Item Name="3" Value="March" />
+      <Item Name="4" Value="April" />
+      <Item Name="5" Value="May" />
+      <Item Name="6" Value="June" />
+      <Item Name="7" Value="July" />
+      <Item Name="8" Value="August" />
+      <Item Name="9" Value="September" />
+      <Item Name="10" Value="October" />
+      <Item Name="11" Value="November" />
+      <Item Name="12" Value="December" />
+      <Item Name="13" Value="Spring" />
+      <Item Name="14" Value="Summer" />
+      <Item Name="15" Value="Fall" />
+      <Item Name="16" Value="Winter" />
+    </Months>
+    <TextBox>
+      <Item Name="Read Percentage" Value="Read" />
+      <Item Name="Manga" Value="Manga" />
+      <Item Name="Series Complete" Value="Test En cours" />
+    </TextBox>
+    <UseFolder>true</UseFolder>
+    <UseFileName>true</UseFileName>
+    <ExcludeFolders />
+    <DontAskWhenMultiOne>true</DontAskWhenMultiOne>
+    <ExcludeOperator>Any</ExcludeOperator>
+    <RemoveEmptyFolder>true</RemoveEmptyFolder>
+    <ExcludedEmptyFolder />
+    <MoveFileless>true</MoveFileless>
+    <FilelessFormat>.jpg</FilelessFormat>
+    <ExcludeMode>Only</ExcludeMode>
+    <FailEmptyValues>false</FailEmptyValues>
+    <MoveFailed>false</MoveFailed>
+    <FailedFolder />
+    <FailedFields />
+    <Mode>Move</Mode>
+    <CopyMode>false</CopyMode>
+    <AutoSpaceFields>true</AutoSpaceFields>
+    <ReplaceMultipleSpaces>true</ReplaceMultipleSpaces>
+    <CopyReadPercentage>true</CopyReadPercentage>
+    <ExcludeRules Operator="Any" ExcludeMode="Only" />
+  </Profile>
+  <Profile Name="3_Terminées - Manque tomes" Version="2.1">
+    <FolderTemplate>{ &lt;seriesComplete(Séries Terminées - Tomes Manquants)&gt;}\{&lt;series&gt;}</FolderTemplate>
+    <BaseFolder>\\NAS\Partage\BD</BaseFolder>
+    <FileTemplate>{ &lt;series&gt;}{  #&lt;number0&gt;}{  - &lt;title&gt;}{  Vol.&lt;volume0&gt;}</FileTemplate>
+    <EmptyFolder />
+    <EmptyData />
+    <Postfix>
+      <Item Name="Format" Value=")" />
+      <Item Name="Month" Value=", " />
+      <Item Name="Month Number" Value=", " />
+      <Item Name="Count" Value=")" />
+      <Item Name="Year" Value=")" />
+    </Postfix>
+    <Prefix>
+      <Item Name="Start Year" Value="(" />
+      <Item Name="Volume" Value="Vol." />
+      <Item Name="Month" Value="(" />
+      <Item Name="Number" Value="#" />
+      <Item Name="Month Number" Value="(" />
+      <Item Name="Count" Value="(of " />
+    </Prefix>
+    <Seperator>
+      <Item Name="Scan Information" Value="," />
+      <Item Name="Locations" Value="," />
+      <Item Name="Characters" Value=", " />
+      <Item Name="Colorist" Value="," />
+      <Item Name="Tags" Value=", " />
+      <Item Name="Inker" Value="," />
+      <Item Name="Letterer" Value="," />
+      <Item Name="Genre" Value=", " />
+      <Item Name="Alternate Series Multi" Value="," />
+      <Item Name="Editor" Value="," />
+      <Item Name="Teams" Value=", " />
+      <Item Name="Cover Artist" Value="," />
+      <Item Name="Penciller" Value="," />
+      <Item Name="Writer" Value=", " />
+    </Seperator>
+    <IllegalCharacters>
+      <Item Name="&quot;" Value="'" />
+      <Item Name="/" Value="" />
+      <Item Name="*" Value="" />
+      <Item Name="&lt;" Value="[" />
+      <Item Name="?" Value="" />
+      <Item Name="&gt;" Value="]" />
+      <Item Name="|" Value="!" />
+      <Item Name=":" Value=" - " />
+      <Item Name="\" Value="" />
+    </IllegalCharacters>
+    <Months>
+      <Item Name="1" Value="January" />
+      <Item Name="2" Value="February" />
+      <Item Name="3" Value="March" />
+      <Item Name="4" Value="April" />
+      <Item Name="5" Value="May" />
+      <Item Name="6" Value="June" />
+      <Item Name="7" Value="July" />
+      <Item Name="8" Value="August" />
+      <Item Name="9" Value="September" />
+      <Item Name="10" Value="October" />
+      <Item Name="11" Value="November" />
+      <Item Name="12" Value="December" />
+      <Item Name="13" Value="Spring" />
+      <Item Name="14" Value="Summer" />
+      <Item Name="15" Value="Fall" />
+      <Item Name="16" Value="Winter" />
+    </Months>
+    <TextBox>
+      <Item Name="Read Percentage" Value="Read" />
+      <Item Name="Manga" Value="Manga" />
+      <Item Name="Series Complete" Value="Test En cours" />
+    </TextBox>
+    <UseFolder>true</UseFolder>
+    <UseFileName>true</UseFileName>
+    <ExcludeFolders />
+    <DontAskWhenMultiOne>true</DontAskWhenMultiOne>
+    <ExcludeOperator>Any</ExcludeOperator>
+    <RemoveEmptyFolder>true</RemoveEmptyFolder>
+    <ExcludedEmptyFolder />
+    <MoveFileless>true</MoveFileless>
+    <FilelessFormat>.jpg</FilelessFormat>
+    <ExcludeMode>Only</ExcludeMode>
+    <FailEmptyValues>false</FailEmptyValues>
+    <MoveFailed>false</MoveFailed>
+    <FailedFolder />
+    <FailedFields />
+    <Mode>Move</Mode>
+    <CopyMode>false</CopyMode>
+    <AutoSpaceFields>true</AutoSpaceFields>
+    <ReplaceMultipleSpaces>true</ReplaceMultipleSpaces>
+    <CopyReadPercentage>true</CopyReadPercentage>
+    <ExcludeRules Operator="Any" ExcludeMode="Only" />
+  </Profile>
+</Profiles>

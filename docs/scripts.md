@@ -97,23 +97,46 @@ dossier du script dans ComicRack (par ex.
 
 Fenêtres de choix de la série, de l'album et de l'édition (v0.10.2) : **fiches avec
 couverture** (titre en gras ; série : éditeur et pays du résultat, rang, lien ; album :
-rang, lien ; édition : numéro alternatif, dépôt légal, éditeur, ISBN, identifiant), aperçu
-agrandi, curseur « Taille ». Couvertures : celles que donnent les pages (vignette du site
-remplacée par la couverture en grand `media/Couvertures/…` quand elle existe), 24 au plus
-par fenêtre, 0,15 s entre deux images. Les résultats de recherche du site n'ont **pas** de
-couverture (un drapeau) et aucune adresse d'image ne se déduit du numéro de la série :
-la page des 6 premières séries proposées est donc lue (0,6 s entre deux pages, erreurs
-seulement notées au journal de débogage, revues exclues) pour prendre la couverture de leur
-premier album ; la page de la série choisie n'est pas relue ensuite. Réglages ajoutés
-(onglet Préférences, cadre « Fenêtres de choix (ComicRust) ») : hauteur des couvertures
-(`TailleVignettes`, 120 px), couvertures des séries oui/non (`VignettesSeries`) et nombre
-de séries (`NbVignettesSeries`, 12 au plus).
+numéro, parution — dépôt légal —, éditeur, lien ; édition : numéro (et numéro
+alternatif), dépôt légal, éditeur, ISBN, identifiant), aperçu agrandi, curseur « Taille ».
 
-QuickScrape BD2 (v0.10.2) : fenêtre refaite — livre concerné (série, numéro, titre,
-fichier), champ du lien sur toute la largeur avec bouton « 📋 Coller », aperçu du lien
-reconnu (album, série — l'album sera choisi dans la liste —, revue, ou non reconnu : lu
-comme une page d'album, comme l'original), aide. Mêmes boutons que l'original : OK (sans
-lien : arrêt) et Annuler (arrêt).
+La fenêtre s'ouvre **tout de suite** ; les couvertures arrivent ensuite, une à une (celle
+de la ligne survolée ou choisie d'abord), pendant que l'on lit la liste :
+
+- couvertures des albums et des éditions : celles que donnent les pages (vignette du site
+  remplacée par la couverture en grand `media/Couvertures/…` quand elle existe) ; adresses
+  complètes, relatives ou sans schéma (`//www.bedetheque.com/…`), images chargées au
+  défilement (`data-src`) ; dans la page d'une série, couverture, dépôt légal et éditeur
+  de chaque album sont cherchés autour de son lien ; un album sans couverture dans cette
+  page : sa page est lue **seulement si l'on survole sa ligne** ;
+- couvertures des séries : les résultats de recherche du site n'en ont **pas** (un
+  drapeau) et aucune adresse d'image ne se déduit du numéro de la série : la page des
+  6 premières séries proposées (`NbVignettesSeries`, 12 au plus ; revues exclues) est lue
+  pour prendre la couverture de leur premier album, celle des autres au survol ; la page
+  de la série choisie n'est pas relue ensuite ;
+- pauses : une requête à la fois, **au moins 1 s entre deux pages** lues pour une
+  couverture et 0,15 s entre deux images téléchargées (l'original lit déjà 3 ou 4 pages
+  par livre sans pause) ; une erreur est seulement notée au journal de débogage ;
+- images demandées comme un navigateur : `Referer` du site, `Accept` WebP/PNG/JPEG/GIF
+  (pas d'AVIF) ; une réponse qui n'est pas une image (page d'erreur) est ignorée ;
+- **cache disque** `data\bedetheque\cache\` (ou `cache\` du dossier des journaux) :
+  images téléchargées et adresse de la couverture de chaque page déjà lue (60 jours ;
+  7 jours si la page n'en avait pas) : une série déjà proposée n'est plus relue ; 800
+  images et 120 Mo au plus (les moins récemment utilisées partent d'abord).
+
+Réglages ajoutés (onglet Préférences, cadre « Fenêtres de choix (ComicRust) ») : hauteur
+des couvertures (`TailleVignettes`, 150 px), couvertures des séries oui/non
+(`VignettesSeries`) et nombre de séries lues d'office (`NbVignettesSeries`).
+
+QuickScrape BD2 (v0.10.2) : fenêtre en trois cadres — **livre concerné** (n° sur le
+nombre de livres, série, numéro, titre, fichier) ; **lien** : champ sur toute la largeur
+avec bouton « 📋 Coller », type de lien reconnu (album, série — l'album sera choisi dans
+la liste de la série —, revue, ou non reconnu : lu comme une page d'album, comme
+l'original), bouton « 🔎 Chercher « série » sur bedetheque.com » (ouvre la recherche dans
+le navigateur ; la fenêtre revient avec le lien déjà saisi) ; **options pour ce passage**
+(« Ne remplir que les champs vides », « Choisir l'édition dans une liste », valables
+jusqu'à la fin du passage, réglages enregistrés inchangés) ; aide d'une ligne. Mêmes
+boutons que l'original : OK (sans lien : arrêt ; **Entrée** = OK) et Annuler (arrêt).
 
 « Langue du plugin » (`LANGENFR`), comme dans l'original : langue des fenêtres et messages
 du script **et** du libellé ajouté au résumé (« Info édition: » / « Edition info: ») ; les
@@ -353,9 +376,10 @@ bouton_et_valeurs = comicrust.form(titre, controles, buttons=("OK", "Annuler"),
 - Renvoie `(bouton, valeurs)` : `bouton` = libellé du bouton du bas cliqué, ou clé d'un
   `ui.button` ; `valeurs` = dictionnaire clé → valeur de **tous** les contrôles (y compris
   ceux d'onglets non visités ou désactivés). Ou `None`.
-- `buttons` : boutons du bas, le premier est mis en avant ; `cancel` : celui qui annule
-  (rend `None`, sans vérification) — par défaut le **dernier** quand il y en a plusieurs,
-  `cancel=None` : aucun.
+- `buttons` : boutons du bas, alignés à droite dans l'ordre donné, le premier mis en avant
+  (**Entrée** dans un champ d'une ligne le valide, sauf s'il annule) ; `cancel` : celui
+  qui annule (rend `None`, sans vérification) — par défaut le **dernier** quand il y en a
+  plusieurs, `cancel=None` : aucun.
 - `values` : valeurs initiales qui remplacent les `default` (pour rouvrir un formulaire
   avec la saisie précédente) ; `width` : largeur en pixels (560 par défaut) ; `message` :
   texte d'introduction ; `label_width` (v0.10.2) : largeur de la colonne des libellés à
@@ -504,9 +528,17 @@ rang = comicrust.choose(titre, colonnes, lignes, images=None, multi=False, defau
   sélection est validée toute seule (option « choix automatique » de Bedetheque Scraper ;
   toute action de l'utilisateur arrête le compte à rebours ; sans sélection : `None`) ;
   `thumb_size` : hauteur des vignettes au départ (64 px par défaut, 320 au plus).
-- Les images sont toutes envoyées avec la liste (pas d'envoi après coup : le script attend
-  la réponse) : les télécharger avant, avec `comicrust.progress(..., detail=)` pour
-  patienter.
+- **Images chargées après l'ouverture** (v0.10.2) : à la place d'une image, une
+  **fonction** sans argument qui rend l'image (octets, chemin ou `None`). La fenêtre
+  s'ouvre tout de suite (indicateur animé dans la vignette) ; pendant qu'elle est ouverte,
+  le module `comicrust` appelle ces fonctions une à une (dans l'ordre des lignes, la ligne
+  par défaut d'abord, et **la ligne survolée ou choisie en priorité**) et envoie chaque
+  image dès qu'elle est prête. `comicrust.on_demand(fonction)` : appelée **seulement** si
+  l'utilisateur survole ou choisit la ligne (« 👁 » dans la vignette). Les fonctions
+  tournent dans le fil du script, entre deux vérifications de la réponse : dès que
+  l'utilisateur a choisi, plus rien n'est chargé (au plus l'image en cours). Une erreur
+  dans une fonction laisse la ligne sans image (avertissement au journal, trois au plus).
+  Mêmes limites (2 Mo par image, 12 Mo pour la fenêtre).
 
 ```python
 albums = chercher(book.series)               # [(titre, numéro, année, url_couv, url), …]
@@ -517,6 +549,11 @@ i = comicrust.choose("Quel album ?", ["Titre", "N°", "Année"],
 if i is None:
     return                                   # ignoré
 album = albums[i]
+
+# Fenêtre ouverte tout de suite, couvertures téléchargées ensuite (survol d'abord) :
+couvs = [(lambda u=a[3]: comicrust.http_get(u)) if a[3] else None for a in albums]
+i = comicrust.choose("Quel album ?", ["Titre", "N°", "Année"], [a[:3] for a in albums],
+                     images=couvs)
 ```
 
 ### Réglages du script
@@ -663,7 +700,9 @@ def ouvert(book):
   bibliothèque, bilan des renommages appliqués) : un module `comicrust.py` plus ancien ou
   plus récent que ComicRust est refusé avec un message clair (le module est réécrit par
   ComicRust à chaque lancement, il a donc toujours la bonne version). Les images
-  voyagent en base64 (un message fait 20 Mo au plus).
+  voyagent en base64 (un message fait 20 Mo au plus). v0.10.2 (même protocole 3, ajout
+  compatible) : vignettes d'une liste de choix envoyées après son ouverture
+  (`choose_image`) et lignes attendues signalées au script (`choose_want`).
 - Le module `comicrust.py` est intégré à ComicRust et écrit à chaque lancement dans
   `data\python\` à côté de `ComicRust.exe` (ComicRust est portable : rien n'est écrit
   hors de son dossier) ; ne pas le modifier.

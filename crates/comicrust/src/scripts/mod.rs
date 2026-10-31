@@ -226,10 +226,15 @@ impl ScriptRun {
                         self.pending = Some(Pending::Form { state, reply });
                     }
                 }
-                HostEvent::Choose { spec, images, reply } => {
+                HostEvent::Choose { spec, images, wants, reply } => {
                     if !self.stopping {
-                        let state = Box::new(ChooseState::new(*spec, images));
+                        let state = Box::new(ChooseState::new(*spec, images).with_wants(wants));
                         self.pending = Some(Pending::Choose { state, reply });
+                    }
+                }
+                HostEvent::ChooseImage { index, image } => {
+                    if let Some(Pending::Choose { state, .. }) = &mut self.pending {
+                        state.set_image(index, image);
                     }
                 }
                 HostEvent::ProgressDetails { detail, image } => {
@@ -628,6 +633,7 @@ impl ScriptsState {
                     | HostEvent::Message { .. }
                     | HostEvent::Form { .. }
                     | HostEvent::Choose { .. }
+                    | HostEvent::ChooseImage { .. }
                     | HostEvent::OpenUrl(_)
                     | HostEvent::Clipboard(_)
                     | HostEvent::ProgressDetails { .. }

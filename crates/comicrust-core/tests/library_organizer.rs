@@ -799,3 +799,157 @@ fn library_organizer_principal() {
     assert!(r.changes.is_empty());
     assert!(hote.enregistres.lock().unwrap().is_empty());
 }
+
+// ---------------------------------------------------------------------------------------
+// Réglages réels de l'utilisateur (recette de la v0.10.1)
+// ---------------------------------------------------------------------------------------
+
+/// `losettingsx.dat` réel (fixture anonymisée `fixtures/library_organizer/losettingsx_reel.dat` :
+/// dossier de base du NAS remplacé par `\\NAS\Partage\BD`) : 7 profils, jetons Oui/Non avec
+/// texte et `(!)`, `<number0>` / `<volume0>`, espaces doublés, caractères interdits
+/// personnalisés. Import complet, puis chemins calculés comme `lobookmover.py` (chemins
+/// attendus obtenus en exécutant le `PathMaker` de l'original, avec des cales .NET, sur les
+/// mêmes livres).
+#[test]
+fn reglages_reels_de_l_utilisateur() {
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dat = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/library_organizer/losettingsx_reel.dat");
+    let data = tmp.path().join("data");
+    let hote = Arc::new(Hote::avec(&[], json!({"dossier_journal": data.to_string_lossy()})).formulaires(vec![
+        ("Library Organizer", "importer_cr", json!({})),
+        ("Importer les réglages", "Importer", json!({"fichier": dat.to_string_lossy(), "remplacer": true})),
+        ("Library Organizer", "OK", json!({})),
+    ]));
+    lancer(&py, "library-organizer-reglages", Hook::ConfigScript, &[], hote.clone());
+    let s = hote.derniers_reglages();
+    let profils = s["profils"].as_object().unwrap();
+    let mut noms: Vec<&str> = profils.keys().map(String::as_str).collect();
+    noms.sort();
+    assert_eq!(
+        noms,
+        [
+            "1_En cours",
+            "2_Terminées",
+            "3_Terminées - Manque tomes",
+            "4_BDx",
+            "Déplace Temp",
+            "z_Ancien_Copie vers NAS",
+            "z_Ancien_Déplace vers NAS"
+        ]
+    );
+    assert_eq!(s["derniers"], json!(["4_BDx"]));
+    let modele_fichier = "{ <series>}{  #<number0>}{  - <title>}{  Vol.<volume0>}";
+    for (nom, p) in profils {
+        assert_eq!(p["BaseFolder"], json!("\\\\NAS\\Partage\\BD"), "{nom}");
+        assert_eq!(p["FileTemplate"], json!(modele_fichier), "{nom} : espaces doublés gardés");
+        assert_eq!(
+            p["IllegalCharacters"],
+            json!({"\"": "'", "/": "", "*": "", "<": "[", "?": "", ">": "]", "|": "!", ":": " - ", "\\": ""}),
+            "{nom}"
+        );
+        assert_eq!(p["Prefix"]["Number"], json!("#"));
+        assert_eq!(p["Postfix"]["Year"], json!(")"));
+        assert_eq!(p["Seperator"]["Writer"], json!(", "));
+        assert_eq!(p["TextBox"]["Series Complete"], json!("Test En cours"));
+        assert_eq!(p["Months"]["16"], json!("Winter"));
+        for (cle, v) in [
+            ("UseFolder", true),
+            ("UseFileName", true),
+            ("DontAskWhenMultiOne", true),
+            ("RemoveEmptyFolder", true),
+            ("MoveFileless", true),
+            ("FailEmptyValues", false),
+            ("MoveFailed", false),
+            ("CopyMode", false),
+            ("AutoSpaceFields", true),
+            ("ReplaceMultipleSpaces", true),
+            ("CopyReadPercentage", true),
+        ] {
+            assert_eq!(p[cle], json!(v), "{nom} : {cle}");
+        }
+        assert_eq!(p["ExcludeMode"], json!("Only"));
+        assert_eq!(p["ExcludeOperator"], json!("Any"));
+        assert_eq!(p["ExcludeRules"], json!([]));
+        assert_eq!(p["FilelessFormat"], json!(".jpg"));
+        assert_eq!(p["EmptyFolder"], json!(""));
+    }
+    let deplace = &profils["z_Ancien_Déplace vers NAS"];
+    assert_eq!(
+        deplace["FolderTemplate"],
+        json!("{ <seriesComplete(Séries Terminées)>}{ <seriesComplete(Séries En cours)(!)>}\\{<series>}")
+    );
+    assert_eq!(deplace["Mode"], json!("Move"));
+    assert_eq!(profils["z_Ancien_Copie vers NAS"]["Mode"], json!("Copy"));
+    assert_eq!(profils["4_BDx"]["FolderTemplate"], json!("BD_X\\{<series>}"));
+    assert_eq!(profils["Déplace Temp"]["FolderTemplate"], json!("Séries_Temp\\{<series>}"));
+
+    // Chemins : livres factices, dossier de base remplacé par un dossier temporaire.
+    let entree = tmp.path().join("in");
+    let sortie = tmp.path().join("sortie");
+    let mk = |id: &str, f: &str, serie: &str, num: &str, titre: &str, complete: Option<&str>| {
+        let mut b = livre(id, &fichier(&entree.join(f)));
+        b.series = Some(serie.into());
+        b.number = (!num.is_empty()).then(|| num.into());
+        b.title = (!titre.is_empty()).then(|| titre.into());
+        b.series_complete = complete.map(Into::into);
+        b
+    };
+    let mut c = mk("c", "x3.cbz", "Thorgal: Les mondes", "3", "Kriss? <de> Valnor", Some("Yes"));
+    c.volume = Some(2);
+    let livres = [
+        mk("a", "x1.cbz", "Blacksad", "1", "Quelque part entre les ombres", Some("No")),
+        mk("b", "x2.cbr", "Blacksad", "12", "Fin", Some("No")),
+        c,
+        mk("d", "x4.pdf", "Astérix", "HS", "Le \"Livre\" d'or|1", None),
+        mk("e", "x5.cbz", "Spirou", "7.5", "", Some("Yes")),
+        mk("f", "x6.cbz", "Spirou", "10", "Z", Some("Yes")),
+    ];
+    let ids = ["a", "b", "c", "d", "e", "f"];
+    let attendus: [(&str, [&str; 6]); 3] = [
+        (
+            "z_Ancien_Déplace vers NAS",
+            [
+                "Séries En cours/Blacksad/Blacksad #01 - Quelque part entre les ombres.cbz",
+                "Séries En cours/Blacksad/Blacksad #12 - Fin.cbr",
+                "Séries Terminées/Thorgal - Les mondes/Thorgal - Les mondes #3 - Kriss [de] Valnor Vol.2.cbz",
+                // Série complète inconnue : ni l'un ni l'autre, niveau retiré.
+                "Astérix/Astérix #HS - Le 'Livre' d'or!1.pdf",
+                "Séries Terminées/Spirou/Spirou #07.5.cbz",
+                "Séries Terminées/Spirou/Spirou #10 - Z.cbz",
+            ],
+        ),
+        (
+            "1_En cours",
+            [
+                "Séries En cours/Blacksad/Blacksad #01 - Quelque part entre les ombres.cbz",
+                "Séries En cours/Blacksad/Blacksad #12 - Fin.cbr",
+                "Thorgal - Les mondes/Thorgal - Les mondes #3 - Kriss [de] Valnor Vol.2.cbz",
+                "Astérix/Astérix #HS - Le 'Livre' d'or!1.pdf",
+                "Spirou/Spirou #07.5.cbz",
+                "Spirou/Spirou #10 - Z.cbz",
+            ],
+        ),
+        (
+            "3_Terminées - Manque tomes",
+            [
+                "Blacksad/Blacksad #01 - Quelque part entre les ombres.cbz",
+                "Blacksad/Blacksad #12 - Fin.cbr",
+                "Séries Terminées - Tomes Manquants/Thorgal - Les mondes/Thorgal - Les mondes #3 - Kriss [de] Valnor Vol.2.cbz",
+                "Astérix/Astérix #HS - Le 'Livre' d'or!1.pdf",
+                "Séries Terminées - Tomes Manquants/Spirou/Spirou #07.5.cbz",
+                "Séries Terminées - Tomes Manquants/Spirou/Spirou #10 - Z.cbz",
+            ],
+        ),
+    ];
+    for (nom, chemins) in attendus {
+        let mut p = profils[nom].clone();
+        p["BaseFolder"] = json!(sortie.to_string_lossy());
+        let hote = Arc::new(Hote::avec(&livres, reglages(&data, p)));
+        let r = lancer(&py, "library-organizer-quick", Hook::Books, &ids, hote);
+        let ren = renommages(&r);
+        for (id, attendu) in ids.iter().zip(chemins) {
+            assert_eq!(ren[*id], sortie.join(attendu), "{nom} / {id}\n{}", r.journal_text());
+        }
+    }
+}

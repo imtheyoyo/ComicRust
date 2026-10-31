@@ -45,6 +45,8 @@ anglais de l'original, option « Langue du plugin »), ``bd2.png`` et ``bd2q.png
 Les journaux de l'original (``BD2_Rename_Log.txt``, ``BD2_Debug_Log.txt``) sont écrits dans
 ``data\\bedetheque\\`` à côté de ComicRust.exe (ou dans le dossier du réglage
 ``dossier_journaux``) ; leur contenu va aussi dans le journal du script de ComicRust.
+Couvertures des fenêtres de choix : chargées pendant que la fenêtre est ouverte (survol
+d'abord), gardées dans ``cache\\`` de ce dossier (borné, voir ``CacheDisque``).
 
 Réglages avancés (``comicrust.settings()``, sans interface) : ``url_base`` (autre adresse du
 site, pour les essais ; aussi variable d'environnement ``COMICRUST_BEDETHEQUE_URL``),
@@ -52,8 +54,10 @@ site, pour les essais ; aussi variable d'environnement ``COMICRUST_BEDETHEQUE_UR
 """
 
 import datetime
+import hashlib
 import html
 import http.cookiejar
+import json
 import os
 import re
 import ssl
@@ -91,7 +95,7 @@ DEFAUTS = {
     "AcceptGenericArtists": False,
     # Ajouts du portage (absents de l'original) : champs vides seulement ; fenêtres de choix
     # (hauteur des vignettes, couvertures des séries lues sur la page des premières séries).
-    "ChampsVidesSeulement": False, "TailleVignettes": 120, "VignettesSeries": True, "NbVignettesSeries": 6,
+    "ChampsVidesSeulement": False, "TailleVignettes": 150, "VignettesSeries": True, "NbVignettesSeries": 6,
     "url_base": "", "dossier_journaux": "",
 }
 TEXTES = {"LANGENFR", "TBTags", "ARTICLES", "SUBPATT", "TIMEOUT", "TIMEOUTS", "TIMEPOPUP", "PadNumber",
@@ -125,16 +129,28 @@ EN_TETES = [
 ]
 DELAI_RESEAU = 30
 
-# Vignettes des fenêtres de choix (limites de comicrust.choose) : nombre d'images
-# téléchargées au plus par fenêtre, pause entre deux images (serveur d'images du site).
+# Vignettes des fenêtres de choix (limites de comicrust.choose) : images chargées d'office
+# au plus par fenêtre (les autres au survol), pause entre deux images téléchargées
+# (serveur d'images du site ; une image du cache disque n'attend pas).
 MAX_VIGNETTES = 24
 MAX_IMAGE = 2 * 1024 * 1024
-MAX_IMAGES = 12 * 1024 * 1024
 PAUSE_IMAGE = 0.15
-# Couvertures des séries : pages de séries lues au plus (réglage NbVignettesSeries) et
-# pause entre deux pages.
+# Couvertures des séries (et des albums sans couverture dans la page de la série) : lues
+# sur leur page, **pendant** que la fenêtre de choix est ouverte, une page à la fois, avec
+# au moins PAUSE_PAGE_SERIE secondes entre deux pages ; NbVignettesSeries pages d'office
+# (12 au plus), les autres seulement si l'utilisateur survole la ligne.
 MAX_PAGES_SERIES = 12
-PAUSE_PAGE_SERIE = 0.6
+PAUSE_PAGE_SERIE = 1.0
+# Cache disque des vignettes (data\bedetheque\cache\) : nombre de fichiers et taille au
+# plus (les moins récemment utilisés sont supprimés) ; adresses des couvertures des pages
+# gardées COUV_JOURS jours (COUV_ABSENTE_JOURS si la page n'en avait pas).
+MAX_CACHE_FICHIERS = 800
+MAX_CACHE_OCTETS = 120 * 1024 * 1024
+MAX_CACHE_COUVERTURES = 5000
+COUV_JOURS = 60
+COUV_ABSENTE_JOURS = 7
+# Accept des images : WebP, PNG, JPEG, GIF (pas d'AVIF, que ComicRust ne lit pas).
+ACCEPT_IMAGES = "image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8,*/*;q=0.5"
 
 
 class _Etat:
@@ -164,6 +180,9 @@ class _Etat:
         self.nIgnored = 0
         self.images = {}
         self.pages = {}
+        self.cache = None
+        # Dernière requête par sorte (« page », « image ») : pauses des vignettes.
+        self.derniere = {}
         self.couverture = None
         self.fraction = 0.0
         self.detail = ""
@@ -255,6 +274,14 @@ LISTE_INFO = re.compile(r'class="bdt-liste-info"[^>]*>(.*?)</span>', I | D)
 LISTE_DRAPEAU = re.compile(r'/flags/([A-Za-z_-]+)\.(?:png|gif|jpg|svg)', I)
 PAGE_OG_IMAGE = re.compile(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', I)
 PAGE_COUV = re.compile(r'<a[^>]+class="bdt-img bdt-ecov[^"]*"[^>]+href="([^"]+)"', I)
+# Infos des albums d'une page de série (fenêtre de choix de l'album) : liens des albums
+# (numéro en fin d'adresse), liens vers une couverture, dépôt légal et éditeur, dans les
+# deux mises en page connues du site (« <dt>Dépot légal</dt><dd>11/2000 » et
+# « <label>Dépot légal :</label>11/2000 »).
+LIEN_ALBUM_PAGE = re.compile(r'href="[^"]*?-(\d+)\.html', I)
+LIEN_COUV = re.compile(r'href="([^"]+?/(?:media/Couvertures|cache/thb_couv)/[^"]+)"', I)
+INFO_DEPOT = re.compile(r'D.p.t\s+l.gal\s*:?\s*(?:<[^>]+>\s*)*((?:\d{1,2}|-)/\d{4}|\d{4})', I)
+INFO_EDITEUR = re.compile(r'.diteur\s*:?\s*(?:<[^>]+>\s*)*([^<>]+?)\s*<', I)
 
 # Langue de parution (2 premières lettres du libellé) → code ISO. L'original avait « du »
 # pour le néerlandais : ComicRust n'accepte que les codes ISO, d'où « nl ».
@@ -575,8 +602,15 @@ class Web:
             raise NoContentError("aucun contenu")
         return texte
 
-    def octets(self, url):
-        req = urllib.request.Request(url)
+    def octets(self, url, referer=None):
+        """Image : en-têtes d'un navigateur qui affiche une image de la page (Referer du
+        site : le serveur d'images peut refuser les images demandées hors du site)."""
+        entetes = {"Accept": ACCEPT_IMAGES, "Referer": referer or self.base + "/", "Sec-Fetch-Dest": "image"}
+        if self.scraper is not None:
+            r = self.scraper.get(url, headers=entetes, timeout=DELAI_RESEAU)
+            r.raise_for_status()
+            return r.content[:MAX_IMAGE + 1]
+        req = urllib.request.Request(url_fix(url), headers=entetes)
         with self.opener.open(req, timeout=DELAI_RESEAU) as rep:
             return rep.read(MAX_IMAGE + 1)
 
@@ -662,19 +696,170 @@ def _texte_erreur(e):
     return "%s: %s" % (type(e).__name__, e)
 
 
-def image(url):
-    """Octets d'une image (couverture) ; ``None`` en cas d'erreur ou si trop grosse."""
+def _url_image(url):
+    """Adresse complète d'une image trouvée dans une page : entités HTML décodées, adresse
+    sans schéma (« //www.bedetheque.com/… » : celui du site), relative (« /media/… »,
+    « media/… ») ; None pour une image intégrée (« data: ») ou vide."""
+    u = checkWebChar(url).strip()
+    if not u or u.lower().startswith("data:"):
+        return None
+    if u.startswith("//"):
+        hote, _, chemin = u[2:].partition("/")
+        if hote.lower() in ("www.bedetheque.com", "bedetheque.com"):
+            return S.base + "/" + chemin
+        return S.base.split(":", 1)[0] + ":" + u
+    if re.match(r"(?i)^https?://", u):
+        return u
+    return GetFullURL(u)
+
+
+# Signatures des formats d'image lisibles par ComicRust (une page d'erreur HTML servie à
+# la place d'une image n'est ni montrée ni gardée en cache).
+def _est_image(d):
+    return bool(d) and (d[:3] == b"\xff\xd8\xff" or d[:8] == b"\x89PNG\r\n\x1a\n" or d[:4] == b"GIF8"
+                        or (d[:4] == b"RIFF" and d[8:12] == b"WEBP") or d[:2] == b"BM")
+
+
+def _attendre(sorte, pause):
+    """Pause avant une requête de vignette : au moins ``pause`` secondes depuis la
+    précédente de la même sorte (pages, images) ; l'arrêt du script est guetté."""
+    fin = S.derniere.get(sorte, 0.0) + pause
+    while time.monotonic() < fin and not stop():
+        time.sleep(min(0.05, max(0.0, fin - time.monotonic())))
+    S.derniere[sorte] = time.monotonic()
+
+
+class CacheDisque:
+    """Cache des vignettes des fenêtres de choix, dans ``cache\\`` du dossier des journaux
+    (``data\\bedetheque\\cache\\`` à côté de ComicRust.exe) : images téléchargées
+    (``<empreinte SHA-1 de l'adresse>.img``) et adresse de la couverture de chaque page de
+    série ou d'album déjà lue (``couvertures.json``). Une série déjà proposée n'est donc
+    plus relue. Borné : MAX_CACHE_FICHIERS images et MAX_CACHE_OCTETS au plus (les moins
+    récemment utilisées partent d'abord). Toute erreur disque est ignorée (cache vide)."""
+
+    def __init__(self, dossier):
+        self.dossier = dossier
+        self.index_chemin = os.path.join(dossier, "couvertures.json")
+        self.index = None
+        self.modifie = False
+        self.ecrits = 0
+
+    def _chemin(self, url):
+        return os.path.join(self.dossier, hashlib.sha1(url.encode("utf-8")).hexdigest() + ".img")
+
+    def image(self, url):
+        chemin = self._chemin(url)
+        try:
+            with open(chemin, "rb") as f:
+                d = f.read(MAX_IMAGE + 1)
+            os.utime(chemin, None)  # utilisée : gardée plus longtemps
+            return d if _est_image(d) and len(d) <= MAX_IMAGE else None
+        except OSError:
+            return None
+
+    def garder_image(self, url, donnees):
+        try:
+            os.makedirs(self.dossier, exist_ok=True)
+            tmp = self._chemin(url) + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(donnees)
+            os.replace(tmp, self._chemin(url))
+            self.ecrits += 1
+            if self.ecrits % 50 == 1:
+                self.purger()
+        except OSError as e:
+            debuglog("Cache : %s" % e)
+
+    def _index(self):
+        if self.index is None:
+            try:
+                with open(self.index_chemin, encoding="utf-8") as f:
+                    self.index = dict(json.load(f))
+            except (OSError, ValueError, TypeError):
+                self.index = {}
+        return self.index
+
+    def couverture(self, page):
+        """``(connue, adresse ou None)`` de la couverture d'une page déjà lue."""
+        e = self._index().get(page)
+        if not isinstance(e, list) or len(e) != 2:
+            return False, None
+        img, quand = e
+        jours = COUV_JOURS if img else COUV_ABSENTE_JOURS
+        if not isinstance(quand, (int, float)) or time.time() - quand > jours * 86400:
+            return False, None
+        return True, img or None
+
+    def garder_couverture(self, page, img):
+        idx = self._index()
+        idx[page] = [img or "", int(time.time())]
+        if len(idx) > MAX_CACHE_COUVERTURES:
+            for k, _ in sorted(idx.items(), key=lambda kv: kv[1][1] if isinstance(kv[1], list) else 0)[
+                    :len(idx) - MAX_CACHE_COUVERTURES]:
+                del idx[k]
+        self.modifie = True
+
+    def enregistrer(self):
+        if not self.modifie:
+            return
+        try:
+            os.makedirs(self.dossier, exist_ok=True)
+            tmp = self.index_chemin + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.index, f, ensure_ascii=False)
+            os.replace(tmp, self.index_chemin)
+            self.modifie = False
+        except OSError as e:
+            debuglog("Cache : %s" % e)
+
+    def purger(self):
+        """Supprime les images les moins récemment utilisées au-delà des bornes."""
+        try:
+            fichiers = []
+            for n in os.listdir(self.dossier):
+                if n.endswith(".img") or n.endswith(".tmp"):
+                    c = os.path.join(self.dossier, n)
+                    st = os.stat(c)
+                    fichiers.append((st.st_mtime, st.st_size, c))
+        except OSError:
+            return
+        fichiers.sort()
+        total = sum(f[1] for f in fichiers)
+        while fichiers and (len(fichiers) > MAX_CACHE_FICHIERS or total > MAX_CACHE_OCTETS):
+            _, taille, c = fichiers.pop(0)
+            try:
+                os.remove(c)
+                total -= taille
+            except OSError:
+                pass
+
+
+def image(url, referer=None):
+    """Octets d'une image (couverture) : mémoire, cache disque, sinon le site (pause
+    PAUSE_IMAGE entre deux téléchargements) ; ``None`` en cas d'erreur, si trop grosse ou
+    si ce n'est pas une image."""
+    url = _url_image(url) if url else None
     if not url:
         return None
     if url in S.images:
         return S.images[url]
-    donnees = None
-    try:
-        donnees = S.web.octets(GetFullURL(url) if not re.match(r"(?i)^https?://", url) else url)
-        if not donnees or len(donnees) > MAX_IMAGE:
-            donnees = None
-    except Exception as e:
-        debuglog("Image %s : %s" % (url, e))
+    if len(S.images) > 200:  # mémoire bornée sur une longue sélection
+        S.images.clear()
+    donnees = S.cache.image(url) if S.cache else None
+    if donnees is None:
+        _attendre("image", PAUSE_IMAGE)
+        try:
+            donnees = S.web.octets(url, referer)
+            if not donnees or len(donnees) > MAX_IMAGE:
+                debuglog("Image %s : trop grosse ou vide" % url)
+                donnees = None
+            elif not _est_image(donnees):
+                debuglog("Image %s : pas une image lisible (JPEG, PNG, WebP, GIF, BMP)" % url)
+                donnees = None
+            elif S.cache:
+                S.cache.garder_image(url, donnees)
+        except Exception as e:
+            debuglog("Image %s : %s" % (url, _texte_erreur(e)))
     S.images[url] = donnees
     return donnees
 
@@ -688,35 +873,67 @@ def _grande(url):
     return None
 
 
-def vignettes(urls):
-    """Images des lignes d'une fenêtre de choix : MAX_VIGNETTES au plus, 2 Mo chacune et
-    12 Mo en tout ; couverture en grand quand l'adresse est une vignette du site (aperçu
-    agrandi lisible), sinon la vignette. Courte pause entre deux téléchargements ; l'arrêt
-    du script est guetté."""
-    out, total, n = [], 0, 0
-    a_lire = sum(1 for i, u in enumerate(urls) if u and i < MAX_VIGNETTES and (_grande(u) or u) not in S.images)
-    for i, u in enumerate(urls):
-        img = None
-        if u and i < MAX_VIGNETTES and not stop():
-            deja = (_grande(u) or u) in S.images
-            if not deja:
-                n += 1
-                if a_lire > 1:
-                    comicrust.progress(S.fraction, Trans(62), detail=_t("Couvertures %d/%d…", "Covers %d/%d…")
-                                       % (n, a_lire))
-            grande = _grande(u)
-            img = image(grande) if grande else None
-            if img is None:
-                img = image(u)
-            if not deja and n < a_lire:
-                time.sleep(PAUSE_IMAGE)
-        if img is not None and total + len(img) > MAX_IMAGES:
-            img = None
-        total += len(img or b"")
-        out.append(img)
-    if a_lire > 1:
-        comicrust.progress(S.fraction, Trans(62), detail=S.detail)
-    return out if any(out) else None
+def _vignette(url):
+    """Image d'une ligne de fenêtre de choix : la couverture en grand quand l'adresse est
+    une vignette du site (aperçu agrandi lisible), sinon (ou si elle manque) la vignette."""
+    if not url or stop():
+        return None
+    grande = _grande(url)
+    img = image(grande) if grande else None
+    return img if img is not None else image(url)
+
+
+def _couverture_page(url, sorte):
+    """Couverture d'une série (``sorte`` = SERIE) ou d'un album (ALBUM) d'après sa page :
+    cache disque, sinon la page est lue (pause PAUSE_PAGE_SERIE entre deux pages, erreurs
+    seulement notées au journal de débogage ; page gardée pour la suite si elle est
+    choisie)."""
+    if stop():
+        return None
+    connue, img = S.cache.couverture(url) if S.cache else (False, None)
+    if not connue:
+        if len(S.pages) > 3 * MAX_PAGES_SERIES:  # mémoire bornée sur une longue sélection
+            S.pages.clear()
+        _attendre("page", PAUSE_PAGE_SERIE)
+        if stop():
+            return None
+        page = _read_url(url, True, silencieux=True, garder=True)
+        if not page:
+            return None  # erreur (peut-être passagère) : rien en cache
+        img = _couverture_page_serie(page) if sorte == SERIE else _couverture_page_album(page)
+        img = _url_image(img) if img else None
+        if S.cache:
+            S.cache.garder_couverture(url, img)
+            S.cache.enregistrer()
+    return _vignette(img) if img else None
+
+
+def _images_choix(liste, formType):
+    """Images d'une fenêtre de choix pour ``comicrust.choose`` : fonctions appelées pendant
+    que la fenêtre est ouverte (elle s'ouvre tout de suite, les couvertures arrivent une à
+    une, celle de la ligne survolée d'abord). Séries : page des NbVignettesSeries premières
+    séries d'office, des autres au survol (revues : aucune). Albums : couverture trouvée
+    dans la page de la série, sinon page de l'album au survol. Éditions : couverture de la
+    page de l'album. None si aucune image possible."""
+    images, auto_pages, auto_images = [], 0, 0
+    for x in liste:
+        img = x[3] if len(x) > 3 else None
+        f = None
+        if img:
+            f = (lambda u=img: _vignette(u))
+            auto_images += 1
+            if auto_images > MAX_VIGNETTES:
+                f = comicrust.on_demand(f)
+        elif formType == SERIE and C("VignettesSeries") and x[0].lower().startswith("serie-"):
+            url = GetFullURL(x[0]).lower().replace(".html", "__10000.html")
+            f = (lambda u=url: _couverture_page(u, SERIE))
+            auto_pages += 1
+            if auto_pages > C("NbVignettesSeries"):
+                f = comicrust.on_demand(f)
+        elif formType == ALBUM and x[0] and ".html" in x[0].lower():
+            f = comicrust.on_demand(lambda u=GetFullURL(x[0]).split("#")[0]: _couverture_page(u, ALBUM))
+        images.append(f)
+    return images if any(images) else None
 
 
 def stop():
@@ -1019,22 +1236,28 @@ def SeriesForm(serie, liste, formType):
     auto = AllowUserChoice() == "2"
     if formType == SERIE:
         titre = Trans(132) + serie
-        colonnes = [_t("Série", "Series"), _t("Infos", "Info"), _t("Résultat", "Result"), _t("Lien", "Link")]
+        colonnes = [_t("Série", "Series"), _t("Éditeur / pays", "Publisher / country"), _t("Résultat", "Result"),
+                    _t("Lien", "Link")]
         lignes = [[x[1], x[4] if len(x) > 4 else "", x[2], _lien_court(x[0])] for x in liste]
         defaut = None
     elif formType == EDITION:
         titre = Trans(145) + serie
-        colonnes = [_t("Titre", "Title"), _t("Numéro alternatif", "Alternate number"),
-                    _t("Dépôt légal", "Legal deposit"), _t("Éditeur", "Publisher"), "ISBN",
-                    _t("Identifiant", "Id")]
-        lignes = [[x[1].Title, x[1].A] + list(_infos_edition(x[1].Info)) + [x[1].ID] for x in liste]
+        colonnes = [_t("Titre", "Title"), _t("N°", "No."), _t("Dépôt légal", "Legal deposit"),
+                    _t("Éditeur", "Publisher"), "ISBN", _t("Identifiant", "Id")]
+        lignes = [[x[1].Title, " ".join(v for v in (x[1].N, x[1].A) if v)] + list(_infos_edition(x[1].Info)) + [x[1].ID]
+                  for x in liste]
         defaut = 0
     else:
         titre = Trans(146) + serie
-        colonnes = [_t("Album", "Book"), _t("Rang", "Rank"), _t("Lien", "Link")]
-        lignes = [[x[1], x[2], _lien_court(x[0])] for x in liste]
+        colonnes = [_t("Titre", "Title"), _t("N°", "No."), _t("Parution", "Published"), _t("Éditeur", "Publisher"),
+                    _t("Lien", "Link")]
+        lignes = []
+        for x in liste:
+            d = x[4] if len(x) > 4 and isinstance(x[4], dict) else {}
+            lignes.append([d.get("titre") or x[1], d.get("num", ""), d.get("parution", ""), d.get("editeur", ""),
+                           _lien_court(x[0])])
         defaut = 0
-    images = vignettes([x[3] if len(x) > 3 else None for x in liste])
+    images = _images_choix(liste, formType)
     try:
         delai = int(C("TIMEPOPUP")) if auto else None
     except ValueError:
@@ -1137,7 +1360,6 @@ def SetSerieId(f, serie, num, nBooksIn):
                     journal_choix(ListSeries[nItem][1], ListSeries[nItem][0])
                     S.RenameSeries = ListSeries[nItem][1]
                     return ListSeries[nItem][0]
-                _couvertures_series(ListSeries)
                 rang = SeriesForm(serie, ListSeries, SERIE)
                 if rang is None:
                     debuglog(Trans(24) + checkWebChar(serie) + "]")
@@ -1184,42 +1406,83 @@ def _infos_resultat(fragment):
     return " · ".join(x for x in morceaux if x)
 
 
+def _couverture_page_album(page):
+    """Couverture d'un album d'après sa page : celle de la première édition, sinon l'image
+    de partage (og:image)."""
+    m = PAGE_COUV.search(page or "")
+    if m:
+        return checkWebChar(m.group(1))
+    m = PAGE_OG_IMAGE.search(page or "")
+    return checkWebChar(m.group(1)) if m and not IMG_PAS_COUV.search(m.group(1)) else None
+
+
+def _infos_albums(page, urls):
+    """Couverture, dépôt légal et éditeur des albums ``urls`` d'une page de série, pour la
+    fenêtre de choix de l'album : autour de chaque lien vers un album (numéro en fin
+    d'adresse), jusqu'aux liens des albums voisins, l'image ou le lien de couverture
+    nommé d'après l'album (« Couv_901.jpg »), sinon le plus proche, puis « Dépot légal »
+    et « Editeur ». Rend {numéro: {"img", "parution",
+    "editeur"}} (champs trouvés seulement)."""
+    page = page or ""
+    voulus = {}
+    for u in urls:
+        m = re.search(r"-(\d+)\.html", u or "")
+        if m:
+            voulus[m.group(1)] = True
+    liens = [(m.start(), m.group(1)) for m in LIEN_ALBUM_PAGE.finditer(page) if m.group(1) in voulus]
+    out = {}
+    for k, (pos, n) in enumerate(liens):
+        avant = [p for p, x in liens[:k] if x != n]
+        apres = [p for p, x in liens[k + 1:] if x != n]
+        debut = max(avant[-1] if avant else 0, pos - 4000)
+        fin = min(apres[0] if apres else len(page), pos + 4000)
+        bloc = page[debut:fin]
+        d = out.setdefault(n, {})
+        if "img" not in d:
+            candidats = []
+            for b in IMG_TAG.finditer(bloc):
+                u = _img(b.group(0))
+                if u:
+                    candidats.append((abs(debut + b.start() - pos), u))
+            for m in LIEN_COUV.finditer(bloc):
+                candidats.append((abs(debut + m.start() - pos), checkWebChar(m.group(1))))
+            # D'abord l'image nommée d'après l'album (« Couv_901.jpg »), puis les couvertures
+            # (adresse « couv »), puis la plus proche du lien.
+            candidats.sort(key=lambda c: (not re.search(r"(?i)\D%s\D" % n, c[1]),
+                                          not re.search(r"(?i)couv", c[1]), c[0]))
+            if candidats:
+                d["img"] = candidats[0][1]
+        suite = page[pos:fin]
+        if "parution" not in d:
+            m = INFO_DEPOT.search(suite)
+            if m:
+                d["parution"] = m.group(1)
+        if "editeur" not in d:
+            m = INFO_EDITEUR.search(suite)
+            if m and checkWebChar(m.group(1)).strip():
+                d["editeur"] = checkWebChar(m.group(1)).strip()
+    return out
+
+
 def _couverture_page_serie(page):
-    """Couverture d'une série d'après sa page : celle du premier album de la liste, sinon
-    celle de l'album affiché, sinon l'image de partage (og:image)."""
+    """Couverture d'une série d'après sa page : celle du premier album de la liste (image
+    dans la liste, sinon trouvée autour du lien du premier album), sinon celle de l'album
+    affiché, sinon l'image de partage (og:image), sinon la première couverture de la page."""
     r = SERIE_ALBUMS.search(page or "")
     img = _img(r.group(0)) if r else None
+    if not img and r:
+        m = re.search(r"-(\d+)\.html", r.group("url"))
+        img = _infos_albums(page, [r.group("url")]).get(m.group(1), {}).get("img") if m else None
     if not img:
         m = PAGE_COUV.search(page or "")
         img = checkWebChar(m.group(1)) if m else None
     if not img:
         m = PAGE_OG_IMAGE.search(page or "")
         img = checkWebChar(m.group(1)) if m and not IMG_PAS_COUV.search(m.group(1)) else None
+    if not img:
+        m = LIEN_COUV.search(page or "")
+        img = checkWebChar(m.group(1)) if m else None
     return img
-
-
-def _couvertures_series(liste):
-    """Couvertures des séries d'une fenêtre de choix sans image : les pages de recherche
-    n'en donnent pas (un drapeau seulement). Lit la page des ``NbVignettesSeries``
-    premières séries (pas les revues), avec une pause, sans message en cas d'erreur ; ces
-    pages sont gardées, la série choisie n'est pas relue. Désactivé par le réglage
-    « VignettesSeries »."""
-    if not C("VignettesSeries") or C("NbVignettesSeries") <= 0:
-        return
-    if len(S.pages) > 3 * MAX_PAGES_SERIES:  # mémoire bornée sur une longue sélection
-        S.pages.clear()
-    a_lire = [x for x in liste[:C("NbVignettesSeries")] if not x[3] and x[0].lower().startswith("serie-")]
-    for k, x in enumerate(a_lire):
-        if stop():
-            break
-        comicrust.progress(S.fraction, Trans(62), detail=_t("Couvertures des séries %d/%d…",
-                                                            "Series covers %d/%d…") % (k + 1, len(a_lire)))
-        url = GetFullURL(x[0]).lower().replace(".html", "__10000.html")
-        x[3] = _couverture_page_serie(_read_url(url, False, silencieux=True, garder=True))
-        if k + 1 < len(a_lire):
-            time.sleep(PAUSE_PAGE_SERIE)
-    if a_lire:
-        comicrust.progress(S.fraction, Trans(62), detail=S.detail)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1360,10 +1623,15 @@ def parseSerieInfo(f, serieUrl, lDirect):
             debuglog(Trans(59) + if_else(numero == "one shot", "1", cCountText))
 
     ListAlbum, ListAlbumAll = [], []
-    for i, r in enumerate(SERIE_ALBUMS.finditer(request)):
+    albums = list(SERIE_ALBUMS.finditer(request))
+    infos = _infos_albums(request, [r.group("url") for r in albums])
+    for i, r in enumerate(albums):
         n, a, url, title = r.group("tome"), r.group("alt"), r.group("url"), r.group("title")
         num = if_else(n, n, if_else(a, a, ""))
-        item = [url, num + ". " + checkWebChar(title), str(i).zfill(3), _img(r.group(0))]
+        m = re.search(r"-(\d+)\.html", url)
+        d = dict(infos.get(m.group(1), {}) if m else {})
+        d.update(titre=checkWebChar(title), num=(n or "") + (a or ""))
+        item = [url, num + ". " + checkWebChar(title), str(i).zfill(3), _img(r.group(0)) or d.get("img"), d]
         ListAlbumAll.append(item)
         if S.dlgNumber != "" and num == S.dlgNumber and not lDirect:
             ListAlbum.append(item)
@@ -1869,6 +2137,8 @@ def _initialiser():
     if not LoadSetting():
         return False
     S.web = Web(S.base, C("use_cloudscraper"))
+    S.cache = CacheDisque(os.path.join(S.journaux.dossier, "cache"))
+    S.cache.purger()
     return True
 
 
@@ -2065,47 +2335,71 @@ LIEN_REVUE = r"(?i)(^|/)revue-[^/]+\.html(#.*)?$"
 LIEN_ALBUM = r"(?i)(^|/)BD-[^/]*-\d+\.html(#.*)?$"
 
 
+def _lien_recherche(f):
+    """Recherche de la série du livre sur le site (bouton « Chercher » de QuickScrape)."""
+    nom = S.dlgNameClean or S.dlgName or (f.Series if f is not None else "") or ""
+    return S.base + "/search/tout?RechTexte=" + urllib.parse.quote(remove_accents(nom.strip().lower())) + \
+        "&RechWhere=0"
+
+
 def DirectScrape(f=None, i=0, n=1):
     """Fenêtre « Scrape directement un lien » (DirectScrape de l'original : un champ, OK,
     Annuler) : lien collé, '' (OK sans lien) ou None (Annuler). Le portage ajoute le livre
-    concerné, un bouton « Coller », l'aperçu du lien reconnu et une aide."""
+    concerné, le bouton « Coller », le type de lien reconnu, un bouton qui ouvre la
+    recherche de la série sur le site, deux options pour ce livre et une aide courte.
+    Entrée = OK."""
     livre = S.dlgName or "?"
     if S.dlgNumber:
-        livre += " – " + S.dlgNumber
+        livre += _t(" – n° ", " – #") + S.dlgNumber
     if S.dlgAltNumber:
         livre += " (" + S.dlgAltNumber + ")"
     if f is not None and f.Title:
         livre += " – " + titlize(f.Title)
     fichier = os.path.basename(str(f.FilePath).replace("\\", "/")) if f is not None and f.FilePath else ""
-    entete = [ui.label(_t("Livre %d sur %d : ", "Book %d of %d: ") % (i + 1, n) + livre, style="bold")]
+    livre_ctl = [ui.label(livre, style="bold")]
     if fichier:
-        entete.append(ui.label(fichier, style="weak"))
-    aide = _t("Liens acceptés, complets ou sans « https://www.bedetheque.com/ » :\n"
-              "• album : …/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html (infos de l'album) ;\n"
-              "• série : …/serie-59-BD-Blacksad.html (choix de l'album dans la série) ;\n"
-              "• revue : …/revue-Spirou.html.\n"
-              "OK sans lien ou Annuler : arrêter ici (les livres déjà traités restent dans l'aperçu).",
-              "Accepted links, full or without “https://www.bedetheque.com/”:\n"
-              "• book: …/BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html (book info);\n"
-              "• series: …/serie-59-BD-Blacksad.html (pick the book in the series);\n"
-              "• magazine: …/revue-Spirou.html.\n"
-              "OK without a link or Cancel: stop here (books already done stay in the preview).")
-    r = comicrust.form(Trans(103), entete + [
-        ui.separator(),
-        ui.label(Trans(102)),
-        ui.text("lien", "", "", placeholder=URL_SITE + "/BD-…-12345.html", paste=True,
-                hints=[(LIEN_ALBUM, _t("Lien d'un album", "Book link")),
-                       (LIEN_SERIE, _t("Lien d'une série : l'album sera choisi dans la liste de la série",
-                                       "Series link: the book will be picked from the series list")),
-                       (LIEN_REVUE, _t("Lien d'une revue", "Magazine link"))],
-                hint_none=_t("Lien non reconnu (ni album, ni série, ni revue) : il sera lu comme une page "
-                             "d'album.", "Unrecognised link (not a book, series or magazine): it will be read "
-                                         "as a book page.")),
-        ui.label(aide, style="small"),
-    ], buttons=(Trans(92), Trans(93)), width=780)
-    if r is None:
-        return None
-    return (r[1].get("lien") or "").strip()
+        livre_ctl.append(ui.label(fichier, style="weak"))
+    controles = [
+        ui.group(_t("Livre %d sur %d", "Book %d of %d") % (i + 1, n), livre_ctl),
+        ui.group(Trans(102), [
+            ui.text("lien", "", "", placeholder=URL_SITE + "/BD-…-12345.html", paste=True,
+                    hints=[(LIEN_ALBUM, _t("Lien d'un album : ses infos seront lues", "Book link: its info will be read")),
+                           (LIEN_SERIE, _t("Lien d'une série : l'album sera choisi dans la liste de la série",
+                                           "Series link: the book will be picked from the series list")),
+                           (LIEN_REVUE, _t("Lien d'une revue", "Magazine link"))],
+                    hint_none=_t("Lien non reconnu (ni album, ni série, ni revue) : il sera lu comme une page "
+                                 "d'album.", "Unrecognised link (not a book, series or magazine): it will be read "
+                                             "as a book page.")),
+            ui.button("chercher", _t("🔎 Chercher « %s » sur bedetheque.com", "🔎 Search “%s” on bedetheque.com")
+                      % ((S.dlgNameClean or S.dlgName or "?").strip()),
+                      help=_t("Ouvre la recherche dans le navigateur : copiez-y le lien de l'album, puis « Coller ».",
+                              "Opens the search in the browser: copy the book link there, then “Paste”.")),
+        ]),
+        ui.group(_t("Options pour ce passage", "Options for this run"), [
+            ui.checkbox("vides", _t("Ne remplir que les champs vides", "Only fill empty fields")),
+            ui.checkbox("edition", _t("Choisir l'édition dans une liste quand l'album en a plusieurs",
+                                      "Pick the edition from a list when the book has several")),
+        ]),
+        ui.label(_t("Liens complets ou sans « https://www.bedetheque.com/ » : album (…/BD-…-21.html), "
+                    "série (…/serie-59-BD-Blacksad.html) ou revue (…/revue-Spirou.html). OK sans lien ou "
+                    "Annuler : arrêter (les livres déjà traités restent dans l'aperçu).",
+                    "Full links or without “https://www.bedetheque.com/”: book (…/BD-…-21.html), series "
+                    "(…/serie-59-BD-Blacksad.html) or magazine (…/revue-Spirou.html). OK without a link or "
+                    "Cancel: stop (books already done stay in the preview)."), style="weak"),
+    ]
+    valeurs = {"lien": "", "vides": bool(C("ChampsVidesSeulement")), "edition": bool(C("PopUpEditionForm"))}
+    while True:
+        r = comicrust.form(Trans(103), controles, buttons=(Trans(92), Trans(93)), values=valeurs, width=820)
+        if r is None:
+            return None
+        bouton, valeurs = r[0], dict(r[1])
+        # Options : pour la suite de ce passage seulement (réglages enregistrés inchangés).
+        S.C["ChampsVidesSeulement"] = bool(valeurs.get("vides"))
+        S.C["PopUpEditionForm"] = bool(valeurs.get("edition"))
+        if bouton == "chercher":
+            comicrust.open_url(_lien_recherche(f))
+            continue
+        return (valeurs.get("lien") or "").strip()
 
 
 #@Name QuickScrape BD2
@@ -2266,18 +2560,21 @@ def BDConfigForm(valeurs):
                                 "Copy the “cloudscraper” module (and its dependencies) into scripts\\lib.")),
         ]),
         ui.group(_t("Fenêtres de choix (ComicRust)", "Choice windows (ComicRust)"), [
-            ui.number("TailleVignettes", _t("Hauteur des couvertures (pixels)", "Cover height (pixels)"), 120,
+            ui.number("TailleVignettes", _t("Hauteur des couvertures (pixels)", "Cover height (pixels)"), 150,
                       min=48, max=320, step=4,
                       help=_t("Aussi réglable dans la fenêtre de choix (curseur « Taille »).",
                               "Can also be changed in the choice window (“Size” slider).")),
             ui.checkbox("VignettesSeries", _t("Couvertures des séries : lire la page des premières séries proposées",
                                               "Series covers: read the page of the first proposed series"),
-                        help=_t("Les résultats de recherche du site n'ont pas de couverture : la page des "
-                                "premières séries est lue (une requête par série, avec une pause) ; la page de la "
-                                "série choisie n'est pas relue ensuite.",
-                                "The site's search results have no cover: the page of the first series is read "
-                                "(one request per series, with a pause); the chosen series page is not read "
-                                "again afterwards.")),
+                        help=_t("Les résultats de recherche du site n'ont pas de couverture : la fenêtre s'ouvre "
+                                "tout de suite et la page des premières séries est lue pendant ce temps (une page à "
+                                "la fois, une seconde au moins entre deux pages ; les autres séries au survol). "
+                                "Couvertures gardées dans data\\bedetheque\\cache : une série déjà vue n'est pas "
+                                "relue.",
+                                "The site's search results have no cover: the window opens at once and the page of "
+                                "the first series is read meanwhile (one page at a time, at least one second "
+                                "between pages; other series on hover). Covers are kept in data\\bedetheque\\cache: "
+                                "a series already seen is not read again.")),
             ui.number("NbVignettesSeries", _t("Nombre de séries", "Number of series"), 6, min=1,
                       max=MAX_PAGES_SERIES, enabled_if="VignettesSeries"),
         ]),

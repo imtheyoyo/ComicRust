@@ -14,6 +14,11 @@
 //! (Maj : étendre la sélection ; Ctrl : déplacer le curseur seul, Espace : (dé)sélectionner),
 //! Entrée ouvre, Ctrl+I modifie les infos. Les flèches vont au panneau qui a le focus (clic
 //! dans la vue ou dans l'arbre des listes, Tab pour passer de l'un à l'autre).
+//!
+//! Séries (v0.10.2) : un clic sur un titre de groupe ou sur une pile sélectionne tous ses
+//! livres (Ctrl : ajoutés / retirés). Dans une liste de lecture triée dans l'ordre de la liste,
+//! on les glisse pour déplacer la ou les séries en bloc (dépôt entre deux groupes ou deux
+//! piles, un seul `move_books`, ordre interne gardé) ; menu du groupe : monter / descendre.
 
 use std::path::PathBuf;
 
@@ -23,9 +28,14 @@ use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, RichText, Se
 use crate::app::{ComicRustApp, Start};
 use crate::library::covers::{Cover, CoverCache};
 use crate::library::keynav::{grid_move, KeyFocus, NavKey, SelectMode, Span};
-use crate::library::mouse::{grid_insertion, marquee_hits, reorder_allowed, reorder_anchor, CoverRow, GridGeom};
+use crate::library::mouse::{
+    grid_insertion, group_boundary, group_drop_anchor, marquee_hits, reorder_allowed, reorder_anchor, Anchor, CoverRow,
+    GridGeom,
+};
 use crate::library::{Gesture, GroupKey, Row, SortKey, Status};
-use crate::ui::book_drag::{dragged_books, edge_scroll, paint_insertion, start_books_drag, DropHint};
+use crate::ui::book_drag::{
+    dragged_books, edge_scroll, paint_group_insertion, paint_insertion, start_books_drag, start_group_drag, DropHint,
+};
 use crate::ui::lists_ui::{book_lists_menu, BookListAction};
 
 const HEADER_H: f32 = 34.0;
@@ -556,6 +566,15 @@ impl ComicRustApp {
                     if let Some(t) = grid_move(&spans, cur, k, page) {
                         self.library.selected_stack = Some(stack_names[t].clone());
                         self.library.nav.scroll_to_cursor = true;
+                        // Pile choisie au clavier : ses livres sont la sélection (v0.10.2).
+                        let ids = self
+                            .library
+                            .stacks(&opts)
+                            .get(t)
+                            .map(|st| st.books.iter().map(|&i| db.books[i].id.clone()).collect::<Vec<_>>());
+                        if let Some(ids) = ids {
+                            self.library.select_group(&ids, false);
+                        }
                     }
                 } else if let Some(t) = grid_move(&spans, self.library.cursor_index(), k, page) {
                     self.library.key_select(t, SelectMode::of(m));
@@ -616,16 +635,51 @@ impl ComicRustApp {
         // cours, réordonnancement possible ou non.
         let geom = GridGeom { cell, gap: GAP };
         let mut cover_rows: Vec<CoverRow> = Vec::new();
+        // Séries déplaçables en bloc (v0.10.2) : groupes affichés (titre de groupe, ou pile en
+        // vue empilée) avec leurs livres, frontières entre groupes (haut de chaque titre, puis
+        // fin du contenu), rangées de piles, et premier groupe de chaque ligne de la vue.
+        let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+        let mut bounds: Vec<f32> = Vec::new();
+        let mut stack_rows: Vec<CoverRow> = Vec::new();
+        let mut row_group: Vec<usize> = Vec::with_capacity(rows.len());
         {
-            let (mut y, mut first) = (0.0, 0);
+            let (mut y, mut first, mut sfirst) = (0.0, 0, 0);
             for (row, h) in rows.iter().zip(&heights) {
-                if let Row::Covers(items) = row {
-                    cover_rows.push(CoverRow { top: y, first, len: items.len() });
-                    first += items.len();
+                match row {
+                    Row::Covers(items) => {
+                        cover_rows.push(CoverRow { top: y, first, len: items.len() });
+                        first += items.len();
+                        if let Some(g) = groups.last_mut() {
+                            g.1.extend(items.iter().map(|&i| db.books[i].id.clone()));
+                        }
+                    }
+                    Row::Header { title, .. } if !stacked => {
+                        groups.push((title.clone(), Vec::new()));
+                        bounds.push(y);
+                    }
+                    Row::Header { .. } => {}
+                    Row::Stacks(st) => {
+                        stack_rows.push(CoverRow { top: y, first: sfirst, len: st.len() });
+                        sfirst += st.len();
+                        row_group.push(groups.len());
+                        for x in st {
+                            groups.push((x.series.clone(), x.books.iter().map(|&i| db.books[i].id.clone()).collect()));
+                        }
+                        y += h;
+                        continue;
+                    }
                 }
+                row_group.push(groups.len().saturating_sub(1));
                 y += h;
             }
+            if !bounds.is_empty() {
+                bounds.push(y);
+            }
         }
+        let series_word = if stacked || opts.group == GroupKey::Series { "la série" } else { "le groupe" };
+        let mut group_click: Option<usize> = None;
+        let mut group_drag_start: Option<usize> = None;
+        let mut group_shift: Option<(usize, bool)> = None;
         let ctx = ui.ctx().clone();
         let drag = dragged_books(&ctx);
         let sorted = opts.sort == SortKey::Position && !opts.descending;
@@ -637,7 +691,7 @@ impl ComicRustApp {
         let mut new_gesture: Option<Gesture> = None;
         let mut marquee_sel: Option<(Vec<usize>, std::collections::HashSet<String>)> = None;
         let mut drag_start: Option<(String, bool)> = None;
-        let mut reorder_drop: Option<usize> = None;
+        let mut reorder_drop: Option<Anchor> = None;
         let mut hint: Option<DropHint> = None;
 
         egui::ScrollArea::vertical().auto_shrink(false).id_salt("bibliotheque").show_viewport(ui, |ui, viewport| {
@@ -671,7 +725,7 @@ impl ComicRustApp {
                 }
             }
             let mut y = 0.0;
-            for (row, h) in rows.iter().zip(&heights) {
+            for (ri, (row, h)) in rows.iter().zip(&heights).enumerate() {
                 let top = y;
                 y += h;
                 if y < viewport.min.y || top > viewport.max.y {
@@ -680,6 +734,42 @@ impl ComicRustApp {
                 match row {
                     Row::Header { title, count } => {
                         let r = Rect::from_min_size(origin + vec2(0.0, top), vec2(width, HEADER_H));
+                        // Titre de groupe (hors vue empilée) : clic = tous ses livres, glisser =
+                        // déplacer la série, menu = monter / descendre (v0.10.2).
+                        if !stacked {
+                            let gi = row_group[ri];
+                            let ids = &groups[gi].1;
+                            let resp = ui.interact(r, ui.scope_id().with(("groupe", ri)), Sense::click_and_drag());
+                            if self.library.group_selected(ids) {
+                                ui.painter().rect_filled(r.expand(2.0), 4.0, ui.visuals().selection.bg_fill);
+                            } else if resp.hovered() {
+                                ui.painter().rect_filled(r.expand(2.0), 4.0, ui.visuals().widgets.hovered.bg_fill);
+                            }
+                            let resp = resp.on_hover_text(if in_list {
+                                format!("Clic : sélectionner {series_word} (Ctrl : ajouter) ; glisser pour la déplacer")
+                            } else {
+                                format!("Clic : sélectionner {series_word} (Ctrl : ajouter)")
+                            });
+                            if resp.clicked() {
+                                group_click = Some(gi);
+                            }
+                            if resp.drag_started_by(egui::PointerButton::Primary) {
+                                group_drag_start = Some(gi);
+                            }
+                            resp.context_menu(|ui| {
+                                group_menu(
+                                    ui,
+                                    series_word,
+                                    ids.len(),
+                                    in_list,
+                                    &reorder,
+                                    gi,
+                                    groups.len(),
+                                    &mut group_click,
+                                    &mut group_shift,
+                                );
+                            });
+                        }
                         let p = ui.painter();
                         p.text(
                             pos2(r.min.x, r.center().y),
@@ -808,10 +898,16 @@ impl ComicRustApp {
                     Row::Stacks(stacks) => {
                         for (k, stack) in stacks.iter().enumerate() {
                             let first = &db.books[stack.books[0]];
+                            let gi = row_group[ri] + k;
                             let min = origin + vec2(k as f32 * (cell.x + GAP), top);
                             let rect = Rect::from_min_size(min, cell);
-                            let resp = ui.interact(rect, ui.scope_id().with(("pile", &stack.series)), Sense::click());
-                            let selected = self.library.selected_stack.as_deref() == Some(stack.series.as_str());
+                            let resp =
+                                ui.interact(rect, ui.scope_id().with(("pile", &stack.series)), Sense::click_and_drag());
+                            // Pile sélectionnée : tous ses livres (clic, Ctrl+clic), ou pile du
+                            // clavier quand aucun livre n'est sélectionné.
+                            let selected = self.library.group_selected(&groups[gi].1)
+                                || (self.library.selected_stack.as_deref() == Some(stack.series.as_str())
+                                    && selection.is_empty());
                             if selected {
                                 ui.painter().rect_filled(rect.expand(5.0), 6.0, ui.visuals().selection.bg_fill);
                             } else if resp.hovered() {
@@ -873,27 +969,74 @@ impl ComicRustApp {
                                 ui.label(RichText::new(&stack.series).strong());
                                 ui.label(format!("{} livres, {} lus", stack.books.len(), read));
                                 ui.label(RichText::new("Double-clic (ou Entrée) : ouvrir la pile").weak());
+                                if in_list {
+                                    ui.label(RichText::new("Glisser : déplacer la série dans la liste").weak());
+                                }
                             });
                             if resp.double_clicked() {
                                 open_stack = Some(stack.series.clone());
                             } else if resp.clicked() {
                                 select_stack = Some(stack.series.clone());
+                                group_click = Some(gi);
                             }
+                            if resp.drag_started_by(egui::PointerButton::Primary) {
+                                group_drag_start = Some(gi);
+                            }
+                            let n_groups = groups.len();
+                            let n_books = groups[gi].1.len();
+                            resp.context_menu(|ui| {
+                                group_menu(
+                                    ui,
+                                    series_word,
+                                    n_books,
+                                    in_list,
+                                    &reorder,
+                                    gi,
+                                    n_groups,
+                                    &mut group_click,
+                                    &mut group_shift,
+                                );
+                            });
                         }
                     }
                 }
             }
             // Livres glissés au-dessus de la vue : trait d'insertion (réordonnancement) ou refus.
-            if let (Some(_), Some(p)) = (&drag, pointer) {
+            if let (Some(d), Some(p)) = (&drag, pointer) {
                 if clip.contains(p) {
+                    let ids: Vec<Vec<String>> = groups.iter().map(|g| g.1.clone()).collect();
+                    let at = (p - origin).to_pos2();
                     match &reorder {
-                        Ok(()) => {
-                            if let Some((ins, line)) = grid_insertion(&cover_rows, &geom, (p - origin).to_pos2()) {
+                        // Vue empilée : entre deux piles.
+                        Ok(()) if stacked => {
+                            if let Some((ins, line)) = grid_insertion(&stack_rows, &geom, at) {
                                 paint_insertion(ui, clip, line[0] + origin.to_vec2(), line[1] + origin.to_vec2());
                                 hint = Some(DropHint::Move);
                                 edge_scroll(ui, clip, p);
                                 if released {
-                                    reorder_drop = Some(ins);
+                                    reorder_drop = group_drop_anchor(&ids, &d.books, ins);
+                                }
+                            }
+                        }
+                        // Séries glissées dans une vue groupée : entre deux groupes.
+                        Ok(()) if d.groups > 0 && !bounds.is_empty() => {
+                            if let Some(ins) = group_boundary(&bounds, at.y) {
+                                let ly = origin.y + bounds[ins] + if ins + 1 < bounds.len() { 1.0 } else { -GAP * 0.5 };
+                                paint_group_insertion(ui, clip, origin.x - GAP * 0.5, origin.x + width, ly);
+                                hint = Some(DropHint::Move);
+                                edge_scroll(ui, clip, p);
+                                if released {
+                                    reorder_drop = group_drop_anchor(&ids, &d.books, ins);
+                                }
+                            }
+                        }
+                        Ok(()) => {
+                            if let Some((ins, line)) = grid_insertion(&cover_rows, &geom, at) {
+                                paint_insertion(ui, clip, line[0] + origin.to_vec2(), line[1] + origin.to_vec2());
+                                hint = Some(DropHint::Move);
+                                edge_scroll(ui, clip, p);
+                                if released {
+                                    reorder_drop = reorder_anchor(&self.library.view_ids(), &d.books, ins);
                                 }
                             }
                         }
@@ -931,10 +1074,34 @@ impl ComicRustApp {
             let books = if selected || mods.command { self.library.selection() } else { vec![id] };
             start_books_drag(&ctx, books);
         }
-        if let (Some(ins), Some(d)) = (reorder_drop, &drag) {
+        if released && drag.is_some() && hint == Some(DropHint::Move) {
             egui::DragAndDrop::clear_payload(&ctx);
-            if let Some(anchor) = reorder_anchor(&self.library.view_ids(), &d.books, ins) {
-                list_request = Some((BookListAction::Reorder(anchor), d.books.clone()));
+        }
+        if let (Some(anchor), Some(d)) = (reorder_drop, &drag) {
+            list_request = Some((BookListAction::Reorder(anchor), d.books.clone()));
+        }
+        // Séries : clic (sélection), glisser, monter / descendre (v0.10.2).
+        if let Some(gi) = group_click {
+            if let Some((_, ids)) = groups.get(gi) {
+                self.library.select_group(ids, mods.command);
+            }
+        }
+        if let Some(gi) = group_drag_start {
+            if let Some((_, ids)) = groups.get(gi) {
+                // Série non sélectionnée : elle devient la sélection (ajoutée avec Ctrl).
+                if !self.library.group_selected(ids) {
+                    self.library.select_group(ids, mods.command);
+                }
+                let books = self.library.selection();
+                let set: std::collections::HashSet<&String> = books.iter().collect();
+                let n = groups.iter().filter(|g| !g.1.is_empty() && g.1.iter().all(|b| set.contains(b))).count();
+                start_group_drag(&ctx, books, n);
+            }
+        }
+        if let Some((gi, up)) = group_shift {
+            let ids: Vec<Vec<String>> = groups.iter().map(|g| g.1.clone()).collect();
+            if let Some(anchor) = crate::library::mouse::group_shift_anchor(&ids, gi, up) {
+                list_request = Some((BookListAction::Reorder(anchor), ids[gi].clone()));
             }
         }
         if hint.is_some() {
@@ -976,6 +1143,49 @@ impl ComicRustApp {
         }
         if missing_request.is_some() {
             self.missing_ui.pending = missing_request;
+        }
+    }
+}
+
+/// Menu contextuel d'une série (titre de groupe, pile) : sélectionner ses livres ; dans une
+/// liste de lecture, la monter ou la descendre d'un cran parmi les groupes affichés.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn group_menu(
+    ui: &mut Ui,
+    word: &str,
+    books: usize,
+    in_list: bool,
+    reorder: &Result<(), String>,
+    gi: usize,
+    n_groups: usize,
+    click: &mut Option<usize>,
+    shift: &mut Option<(usize, bool)>,
+) {
+    let s = if books > 1 { "s" } else { "" };
+    if ui.button(format!("Sélectionner {word} ({books} livre{s})")).clicked() {
+        *click = Some(gi);
+        ui.close();
+    }
+    if !in_list {
+        return;
+    }
+    ui.separator();
+    let cap = |w: &str| {
+        let mut c = w.chars();
+        c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+    };
+    for (up, label, ok) in
+        [(true, format!("⬆ Monter {word}"), gi > 0), (false, format!("⬇ Descendre {word}"), gi + 1 < n_groups)]
+    {
+        let r = ui.add_enabled(reorder.is_ok() && ok, egui::Button::new(label));
+        if r.clicked() {
+            *shift = Some((gi, up));
+            ui.close();
+        }
+        if let Err(why) = reorder {
+            r.on_disabled_hover_text(why);
+        } else if !ok {
+            r.on_disabled_hover_text(format!("{} est déjà {}", cap(word), if up { "en tête" } else { "en fin" }));
         }
     }
 }

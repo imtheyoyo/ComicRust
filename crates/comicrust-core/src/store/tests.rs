@@ -520,6 +520,69 @@ fn manual_edits_survive_the_next_folder_scan() {
     assert_eq!(get(&mut s, &a).series.as_deref(), Some("Écrite dans le fichier"));
 }
 
+/// v0.10.2 (livre « manquant » de la recette v0.10.1) : une analyse des dossiers lancée
+/// avant qu'un script déplace des fichiers (Library Organizer, Bedetheque qui récrit le
+/// fichier puis le rangement) ne doit pas, en s'enregistrant à la fin, remettre l'ancien
+/// chemin dans la fiche ni marquer manquant un livre seulement déplacé.
+#[test]
+fn a_scan_does_not_undo_a_move_made_meanwhile() {
+    use crate::edit::{rename_or_move, EditTarget};
+    let (dir, cfg) = temp_cfg();
+    let root = dir.path().join("BD");
+    let temp = root.join("Séries_Temp");
+    let (pa, pb) = (temp.join("29 - Marvel Team-Up #55.cbz"), temp.join("B.cbz"));
+    cbz_with_info(&pa, "Marvel Team-Up", 0);
+    cbz_with_info(&pb, "B", 0);
+    let mut s = Store::open(&cfg).unwrap();
+    let folders = [root.clone()];
+    let p = ScanProgress::default();
+    let no = AtomicBool::new(false);
+    s.scan_into(&folders, &[], &p, &no, new_book_id).unwrap();
+    let id_of = |s: &mut Store, path: &Path| {
+        s.load(None).unwrap().books.into_iter().find(|b| b.file.as_deref() == path.to_str()).unwrap()
+    };
+    let (a, b) = (id_of(&mut s, &pa), id_of(&mut s, &pb));
+
+    // Le fichier A est récrit (infos écrites dans le fichier) : l'analyse le relira.
+    cbz_with_info(&pa, "Marvel Team-Up", 3000);
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+    std::fs::File::options().write(true).open(&pa).unwrap().set_modified(later).unwrap();
+
+    // L'analyse commence : copie de la bibliothèque, puis examen des dossiers…
+    let known = s.load(None).unwrap().books;
+    // … pendant qu'un script range B hors des dossiers analysés (autre partage).
+    let ailleurs = dir.path().join("Autre partage").join("B.cbz");
+    let b_now = s.get(std::slice::from_ref(&b.id)).unwrap().remove(0);
+    rename_or_move(EditTarget::Store(&mut s), &b_now, &ailleurs).unwrap();
+    let report = scanner::scan(&folders, &known, &p, &no, new_book_id);
+    assert!(report.updated.iter().any(|u| u.id == a.id && u.file.as_deref() == pa.to_str()), "{}", report.summary());
+    assert!(report.missing.contains(&b.id), "B absent de son ancien dossier : {}", report.summary());
+    // … et A est rangé juste avant l'enregistrement final de l'analyse.
+    let rangee = root.join("Séries").join("Marvel Team-Up").join("29 - Marvel Team-Up #55.cbz");
+    let a_now = s.get(std::slice::from_ref(&a.id)).unwrap().remove(0);
+    rename_or_move(EditTarget::Store(&mut s), &a_now, &rangee).unwrap();
+
+    let seen: HashMap<String, String> =
+        known.iter().filter_map(|b| Some((b.id.to_ascii_lowercase(), b.file.clone()?))).collect();
+    let w = s.apply_scan_seen(&report, Some(&seen)).unwrap();
+    assert!(w.books.is_empty(), "rien d'écrit pour des livres déplacés entre-temps : {w:?}");
+    let get = |s: &mut Store, id: &str| s.get(&[id.to_string()]).unwrap().remove(0);
+    let ga = get(&mut s, &a.id);
+    assert_eq!(ga.file.as_deref(), rangee.to_str(), "chemin du rangement gardé");
+    assert_eq!(ga.missing, None);
+    let gb = get(&mut s, &b.id);
+    assert_eq!(gb.file.as_deref(), ailleurs.to_str());
+    assert_eq!(gb.missing, None, "livre déplacé, pas manquant");
+    assert!(rangee.is_file() && ailleurs.is_file());
+
+    // Sans cette protection (ancien comportement, `apply_scan`), la fiche de A repartait
+    // vers Séries_Temp, où le fichier n'est plus : « Fichier introuvable ».
+    s.apply_scan(&report).unwrap();
+    assert_eq!(get(&mut s, &a.id).file.as_deref(), pa.to_str());
+    assert_eq!(get(&mut s, &b.id).missing, Some(true));
+    assert!(!pa.exists());
+}
+
 #[test]
 fn scan_into_saves_added_books_in_batches() {
     let (dir, cfg) = temp_cfg();

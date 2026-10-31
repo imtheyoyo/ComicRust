@@ -212,6 +212,10 @@ fn key_cmp(key: SortKey, a: &LibraryBook, b: &LibraryBook, desc: bool) -> Orderi
 
 /// Trie `v` (indices dans `books`) : par groupe, puis par la clé choisie, puis par série.
 /// `position` donne le rang dans la liste ComicRack affichée (clé « Ordre de la liste »).
+///
+/// Dans l'ordre de la liste, les groupes se suivent dans l'ordre de leur **premier livre
+/// dans la liste** (et non par ordre alphabétique) : déplacer une série dans la liste de
+/// lecture la déplace donc aussi à l'écran (v0.10.2).
 pub fn sort(
     v: &mut [usize],
     books: &[LibraryBook],
@@ -228,10 +232,27 @@ pub fn sort(
         }
         g
     };
+    // Ordre de la liste : rang du premier livre de chaque groupe.
+    let mut first: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    if opts.sort == SortKey::Position && !groups.is_empty() {
+        for &i in v.iter() {
+            if let Some(p) = position(i) {
+                let e = first.entry(groups[i].as_str()).or_insert(p);
+                *e = (*e).min(p);
+            }
+        }
+    }
     v.sort_by(|&x, &y| {
         let (a, b) = (&books[x], &books[y]);
         let desc = opts.descending;
-        let mut o = if groups.is_empty() { Ordering::Equal } else { rev(groups[x].cmp(&groups[y]), desc) };
+        let mut o = if groups.is_empty() {
+            Ordering::Equal
+        } else if first.is_empty() {
+            rev(groups[x].cmp(&groups[y]), desc)
+        } else {
+            let rank = |i: usize| first.get(groups[i].as_str()).copied();
+            opt_cmp(rank(x), rank(y), desc).then_with(|| rev(groups[x].cmp(&groups[y]), desc))
+        };
         if o == Ordering::Equal {
             o = if opts.sort == SortKey::Position {
                 opt_cmp(position(x), position(y), desc)
@@ -255,6 +276,33 @@ mod tests {
         assert_eq!(GroupKey::ReadState.label(&b), "En cours");
         b.last_page_read = Some(19);
         assert_eq!(GroupKey::ReadState.label(&b), "Lu");
+    }
+
+    /// Ordre de la liste, livres groupés : les groupes suivent leur premier livre dans la
+    /// liste ; à l'intérieur d'un groupe, l'ordre de la liste.
+    #[test]
+    fn groups_follow_the_list_order() {
+        let mk = |id: &str, series: &str| LibraryBook {
+            id: id.into(),
+            series: Some(series.into()),
+            number: Some(id[1..].into()),
+            ..Default::default()
+        };
+        // Liste : Z1, A1, Z2, M1, A2 (Z avant A et M, malgré l'alphabet).
+        let books = vec![mk("a1", "A"), mk("a2", "A"), mk("m1", "M"), mk("z1", "Z"), mk("z2", "Z")];
+        let pos = [1usize, 4, 3, 0, 2];
+        let mut v = vec![0, 1, 2, 3, 4];
+        let o = crate::library::ViewOptions { sort: SortKey::Position, descending: false, group: GroupKey::Series };
+        sort(&mut v, &books, &o, |i| Some(pos[i]));
+        assert_eq!(v, [3, 4, 0, 1, 2], "Z (z1, z2), A (a1, a2), M");
+        // Décroissant : groupes et livres à l'envers.
+        let o = crate::library::ViewOptions { descending: true, ..o };
+        sort(&mut v, &books, &o, |i| Some(pos[i]));
+        assert_eq!(v, [2, 1, 0, 4, 3]);
+        // Autre tri : groupes par ordre alphabétique, comme avant.
+        let o = crate::library::ViewOptions { sort: SortKey::Series, descending: false, group: GroupKey::Series };
+        sort(&mut v, &books, &o, |i| Some(pos[i]));
+        assert_eq!(v, [0, 1, 2, 3, 4]);
     }
 
     #[test]

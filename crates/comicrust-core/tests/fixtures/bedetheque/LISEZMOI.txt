@@ -24,3 +24,16 @@ remplissage, ou og:image) ; la page de la troisième série n'existe pas (404 sa
 images/couv_*.png : couvertures factices servies pour toute adresse d'image
 (/media/Couvertures/Couv_N.jpg et /cache/thb_couv/Couv_N.jpg ; Couv_802 n'existe qu'en
 vignette).
+
+App_reel.Config : App.Config complet de l'utilisateur relevé à la recette de la v0.10.1
+(50 réglages ; aucun chemin ni nom personnel), relu en entier par l'import.
+
+Recherche « lanfeust » (lettre_l.html, recherche_lanfeust.html, serie_lanfeust.html,
+serie_lanfeust_etoiles.html, album_lanfeust_3.html) : couvertures chargées après
+l'ouverture de la fenêtre (v0.10.2). serie_lanfeust.html a une liste principale des
+albums dans l'ancienne mise en page du site (couverture dans « album-side », adresses sans
+schéma « //www.bedetheque.com/… » ou relatives, « data-src », « Dépot légal : » et
+« Editeur : » en <label>) et la liste latérale sans image lue par l'original ; l'album 3
+n'a pas de couverture dans la page (lue au survol, sur sa page). images/couv_webp.webp :
+servie pour « Couv_950.jpg » (image WebP derrière une adresse « .jpg »). Le serveur de test
+refuse (403) toute image demandée sans Referer du site.

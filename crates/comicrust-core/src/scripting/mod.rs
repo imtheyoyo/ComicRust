@@ -47,7 +47,7 @@ mod tests;
 
 pub use applied::{AppliedRename, AppliedRenames};
 pub use discover::{discover, discover_with_warnings, entries_for_hook, parse_script, DiscoveryWarning, ScriptEntry};
-pub use forms::{ChooseSpec, FormAnswer, FormSpec, ProgressDetails};
+pub use forms::{ChooseSpec, FormAnswer, FormSpec, LazyImage, ProgressDetails};
 pub use runner::{
     book_json, default_module_dir, BookChanges, JournalKind, JournalLine, Question, QuestionKind, RejectedChange,
     RunContext, RunHandle, RunOptions, RunResult, RunState, ScriptChange, ScriptFailure, ScriptHost, ScriptRunner,

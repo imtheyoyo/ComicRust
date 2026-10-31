@@ -290,6 +290,25 @@ impl Store {
     /// Rend les fiches écrites, **relues** après écriture (à mettre dans la bibliothèque
     /// en mémoire, et à signaler au [`StoreWatcher`] avec `counter`).
     pub fn apply_scan(&mut self, report: &ScanReport) -> Result<StoreWrite, Error> {
+        self.apply_scan_seen(report, None)
+    }
+
+    /// [`apply_scan`](Self::apply_scan), en n'écrivant une fiche de `updated`, `missing` ou
+    /// `back` que si son chemin **en base** est encore celui que l'analyse a examiné
+    /// (`seen` : identifiant en minuscules → colonne `file` de la copie analysée).
+    ///
+    /// Une analyse dure longtemps sur un NAS et travaille sur une copie de la bibliothèque
+    /// prise à son début : si un script a déplacé un fichier entre-temps
+    /// (`edit::rename_or_move`, fiche mise à jour aussitôt), l'enregistrement final de
+    /// l'analyse aurait sinon réécrit l'**ancien** chemin dans la fiche (colonne `file` des
+    /// fichiers relus), ou marqué manquant un livre simplement déplacé : la fiche aurait
+    /// pointé vers un fichier qui n'existe plus (v0.10.2). Ces livres sont laissés tels
+    /// quels ; l'analyse suivante les verra à leur nouvelle place.
+    pub fn apply_scan_seen(
+        &mut self,
+        report: &ScanReport,
+        seen: Option<&HashMap<String, String>>,
+    ) -> Result<StoreWrite, Error> {
         if let Some(b) = report.added.iter().chain(&report.updated).find(|b| b.id.trim().is_empty()) {
             return Err(Error::Database(format!("livre sans identifiant : {}", b.caption())));
         }
@@ -297,18 +316,38 @@ impl Store {
         self.conn.write_tx(|conn| {
             let counter = schema::bump(conn, "update_counter")?;
             let c = Val::Int(counter);
+            // Chemin vu par l'analyse : condition ajoutée à chaque écriture (voir plus haut).
+            let guard = |id: &str| -> (String, Vec<Val>) {
+                match seen.and_then(|m| m.get(&id.to_ascii_lowercase())) {
+                    Some(f) => (" AND `file` = ?".to_string(), vec![Val::Text(f.clone())]),
+                    None => (String::new(), Vec::new()),
+                }
+            };
             for u in &report.updated {
+                let (cond, params) = guard(&u.id);
                 if moved.contains(&u.id.to_ascii_lowercase()) {
-                    update_columns(conn, u, MOVE_COLUMNS, false, counter, "")?;
+                    update_columns_if(conn, u, MOVE_COLUMNS, false, counter, &cond, &params)?;
                 } else {
-                    update_columns(conn, u, FILE_COLUMNS, false, counter, "")?;
-                    update_columns(conn, u, scanner::COMIC_INFO_FIELDS, true, counter, NOT_DIRTY)?;
+                    // Les colonnes du fichier d'abord ; la condition reste vraie pour les
+                    // champs ComicInfo (même chemin réécrit).
+                    update_columns_if(conn, u, FILE_COLUMNS, false, counter, &cond, &params)?;
+                    let cond = format!("{NOT_DIRTY}{cond}");
+                    update_columns_if(conn, u, scanner::COMIC_INFO_FIELDS, true, counter, &cond, &params)?;
                 }
             }
             for (ids, sql) in [
                 (&report.missing, "`missing` = 1, `update_counter` = ? WHERE COALESCE(`missing`, 0) = 0 AND"),
                 (&report.back, "`missing` = NULL, `update_counter` = ? WHERE `missing` IS NOT NULL AND"),
             ] {
+                if seen.is_some() {
+                    for id in ids.iter() {
+                        let (cond, extra) = guard(id);
+                        let mut params = vec![c.clone(), Val::Text(id.clone())];
+                        params.extend(extra);
+                        conn.exec(&format!("UPDATE {BOOKS} SET {sql} `id` = ?{cond}"), &params)?;
+                    }
+                    continue;
+                }
                 for chunk in ids.chunks(200) {
                     let marks = vec!["?"; chunk.len()].join(",");
                     let mut params = vec![c.clone()];
@@ -353,6 +392,10 @@ impl Store {
         let mut writes = Vec::new();
         let mut flushed: HashSet<String> = HashSet::new();
         let mut failed = false;
+        // Chemins de la copie analysée : l'enregistrement final ne touche pas une fiche
+        // dont le fichier a été déplacé entre-temps (voir `apply_scan_seen`).
+        let seen: HashMap<String, String> =
+            known.iter().filter_map(|b| Some((b.id.to_ascii_lowercase(), b.file.clone()?))).collect();
         let mut report = scanner::scan_batched(folders, known, progress, cancel, new_id, |batch| {
             if failed {
                 return;
@@ -369,7 +412,7 @@ impl Store {
         });
         let all = std::mem::take(&mut report.added);
         report.added = all.iter().filter(|b| !flushed.contains(&b.id)).cloned().collect();
-        let last = self.apply_scan(&report);
+        let last = self.apply_scan_seen(&report, Some(&seen));
         report.added = all;
         writes.push(last?);
         Ok((report, writes))
@@ -588,6 +631,19 @@ fn update_columns(
     counter: i64,
     cond: &str,
 ) -> Result<u64, Error> {
+    update_columns_if(conn, b, cols, with_pages, counter, cond, &[])
+}
+
+/// [`update_columns`] avec des paramètres pour la condition `cond` (placés après `id`).
+fn update_columns_if(
+    conn: &mut Conn,
+    b: &LibraryBook,
+    cols: &[&str],
+    with_pages: bool,
+    counter: i64,
+    cond: &str,
+    cond_params: &[Val],
+) -> Result<u64, Error> {
     let mut set = Vec::new();
     let mut params = Vec::new();
     for (name, v) in schema::field_values(b) {
@@ -602,6 +658,7 @@ fn update_columns(
     }
     params.push(Val::Int(counter));
     params.push(Val::Text(b.id.clone()));
+    params.extend(cond_params.iter().cloned());
     let sql =
         format!("UPDATE {BOOKS} SET {}, `missing` = NULL, `update_counter` = ? WHERE `id` = ? {cond}", set.join(", "));
     conn.exec(&sql, &params)

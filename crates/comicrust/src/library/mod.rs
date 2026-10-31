@@ -517,6 +517,36 @@ impl LibraryState {
         self.selected_books = set;
     }
 
+    /// Clic sur une série (titre de groupe, pile) : tous ses livres sélectionnés ; avec Ctrl,
+    /// ajoutés à la sélection, ou retirés s'ils y étaient déjà tous (v0.10.2).
+    pub fn select_group(&mut self, ids: &[String], ctrl: bool) {
+        if ids.is_empty() {
+            return;
+        }
+        let mut set: HashSet<String> = if ctrl { self.selection_set() } else { HashSet::new() };
+        if ctrl && ids.iter().all(|id| set.contains(id)) {
+            for id in ids {
+                set.remove(id);
+            }
+            if set.is_empty() {
+                self.clear_selection();
+                return;
+            }
+        } else {
+            set.extend(ids.iter().cloned());
+        }
+        self.cursor = None;
+        if !self.selected_book.as_ref().is_some_and(|b| set.contains(b)) {
+            self.selected_book = ids.iter().find(|b| set.contains(*b)).or_else(|| set.iter().next()).cloned();
+        }
+        self.selected_books = set;
+    }
+
+    /// Tous les livres `ids` sont-ils sélectionnés ?
+    pub fn group_selected(&self, ids: &[String]) -> bool {
+        !ids.is_empty() && ids.iter().all(|id| self.is_selected(id))
+    }
+
     /// Ctrl+A : tous les livres affichés.
     pub fn select_all(&mut self) {
         let all = 0..self.view.len();
@@ -986,6 +1016,30 @@ mod tests {
         assert_eq!(s.selected_book.as_deref(), Some("d"), "Ctrl+A garde le livre courant");
         s.clear_selection();
         assert!(s.selection().is_empty() && s.selected_books.is_empty());
+    }
+
+    /// Clic sur une série : tous ses livres ; Ctrl : ajoutés, puis retirés au 2e clic.
+    #[test]
+    fn group_selection() {
+        let mut s = state();
+        assert_eq!(ids(&mut s, &series()), ["c", "e", "b", "a", "d"]);
+        let g1 = vec!["e".to_string(), "b".into()];
+        let g2 = vec!["d".to_string()];
+        s.select_group(&g1, false);
+        assert_eq!(s.selection(), ["e", "b"]);
+        assert!(s.group_selected(&g1) && !s.group_selected(&g2));
+        s.select_group(&g2, true);
+        assert_eq!(s.selection(), ["e", "b", "d"]);
+        s.select_group(&g1, true);
+        assert_eq!(s.selection(), ["d"]);
+        assert_eq!(s.selected_book.as_deref(), Some("d"));
+        s.select_group(&g2, true);
+        assert!(s.selection().is_empty());
+        // Sans Ctrl : remplace la sélection.
+        s.select_group(&g2, false);
+        s.select_group(&g1, false);
+        assert_eq!(s.selection(), ["e", "b"]);
+        assert!(!s.group_selected(&[]));
     }
 
     #[test]

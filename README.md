@@ -264,3 +264,9 @@ lire les RAR, pas pour créer un compresseur RAR) et **Python embarqué** (distr
 « embeddable » de la Python Software Foundation, licence PSF, `licences/Python-LICENSE.txt`,
 copiée de la distribution par la CI ; elle couvre aussi les bibliothèques livrées avec Python :
 OpenSSL, SQLite, libffi, zlib… et le runtime Visual C++ `vcruntime140.dll`).
+Polices intégrées à l'exécutable (fournies par egui) pour que toutes les icônes de l'interface
+s'affichent, même sans police de symboles sur la machine : Ubuntu Light (Ubuntu Font Licence,
+`licences/Police-Ubuntu-UFL.txt`), Hack (`licences/Police-Hack.txt`), **Noto Emoji** monochrome
+(SIL Open Font License 1.1, `licences/Police-NotoEmoji-OFL.txt`) et emoji-icon-font (MIT,
+`licences/Police-emoji-icon-font-MIT.txt`). Sous Windows, Segoe UI Symbol (police du système,
+non distribuée) sert en plus de repli.

@@ -83,11 +83,18 @@ pub enum HostEvent {
         images: HashMap<usize, ColorImage>,
         reply: Sender<Option<FormAnswer>>,
     },
-    /// Liste de choix (vignettes déjà décodées) ; `None` = annulé.
+    /// Liste de choix (vignettes déjà décodées) ; `None` = annulé. `wants` : lignes dont
+    /// l'utilisateur attend la vignette (vignettes chargées après coup), lues par le script.
     Choose {
         spec: Box<ChooseSpec>,
         images: Vec<Option<ColorImage>>,
+        wants: ChooseWants,
         reply: Sender<Option<Vec<usize>>>,
+    },
+    /// Vignette arrivée après l'ouverture de la liste de choix (`None` : pas d'image).
+    ChooseImage {
+        index: usize,
+        image: Option<ColorImage>,
     },
     /// Sous-texte et image de la progression (`None` : inchangés ; image `Some(None)` :
     /// retirée).
@@ -104,6 +111,10 @@ pub enum HostEvent {
     /// Modifications refusées : bibliothèque en lecture seule (automatisme).
     LiveRefused(String),
 }
+
+/// Lignes d'une liste de choix dont l'utilisateur attend la vignette (survol, choix),
+/// partagées entre l'interface et le fil du script.
+pub type ChooseWants = Arc<Mutex<Vec<usize>>>;
 
 /// Application au fil de l'eau (automatismes).
 pub struct Live {
@@ -128,6 +139,8 @@ pub struct UiHost {
     /// Dossier des bilans de renommages appliqués (`data\renommages\`), relus par
     /// `comicrust.applied_renames()` ; `None` : aucun bilan.
     renames_dir: Option<PathBuf>,
+    /// Lignes attendues de la liste de choix ouverte.
+    choose_wants: ChooseWants,
 }
 
 impl UiHost {
@@ -140,7 +153,18 @@ impl UiHost {
         settings_dirty: Arc<AtomicBool>,
         live: Option<Live>,
     ) -> UiHost {
-        UiHost { db, fresh: Mutex::new(HashMap::new()), tx, ctx, stop, stored, settings_dirty, live, renames_dir: None }
+        UiHost {
+            db,
+            fresh: Mutex::new(HashMap::new()),
+            tx,
+            ctx,
+            stop,
+            stored,
+            settings_dirty,
+            live,
+            renames_dir: None,
+            choose_wants: ChooseWants::default(),
+        }
     }
 
     /// Dossier où relire les bilans de renommages appliqués ([`AppliedRenames`]).
@@ -239,9 +263,21 @@ impl ScriptHost for UiHost {
             .iter()
             .map(|b| b.as_ref().and_then(|b| super::forms::decode_image(b, super::forms::CHOOSE_IMAGE_SIDE)))
             .collect();
+        self.choose_wants.lock().unwrap().clear();
         let (reply, rx) = mpsc::channel();
-        self.send(HostEvent::Choose { spec: Box::new(spec.clone()), images, reply });
+        let wants = self.choose_wants.clone();
+        self.send(HostEvent::Choose { spec: Box::new(spec.clone()), images, wants, reply });
         self.wait(rx).flatten()
+    }
+
+    fn choose_image(&self, index: usize, image: Option<Arc<Vec<u8>>>) {
+        // Décodage ici, sur le fil du script : l'interface ne se fige pas.
+        let image = image.and_then(|b| super::forms::decode_image(&b, super::forms::CHOOSE_IMAGE_SIDE));
+        self.send(HostEvent::ChooseImage { index, image });
+    }
+
+    fn choose_wants(&self) -> Vec<usize> {
+        std::mem::take(&mut *self.choose_wants.lock().unwrap())
     }
 
     fn open_url(&self, url: &str) -> bool {
@@ -418,7 +454,7 @@ mod tests {
         let mut st = super::super::forms::FormState::new(*spec, images);
         st.fields.insert("nom".into(), super::super::forms::Field::Text("Yoyo".into()));
         reply.send(st.submit("OK")).unwrap();
-        let HostEvent::Choose { spec, images, reply } = next() else { panic!("liste de choix attendue") };
+        let HostEvent::Choose { spec, images, reply, .. } = next() else { panic!("liste de choix attendue") };
         assert_eq!(spec.rows.len(), 2);
         assert_eq!(images[0].as_ref().unwrap().size, [320, 480], "vignette réduite");
         assert!(images[1].is_none());
@@ -434,6 +470,82 @@ mod tests {
         assert!(text.contains("formulaire ('OK', {'nom': 'Yoyo'})"), "{text}");
         assert!(text.contains("choix 1"), "{text}");
         assert!(text.contains("second None"), "{text}");
+    }
+
+    /// Liste de choix aux vignettes chargées après coup (v0.10.2) : la fenêtre arrive tout de
+    /// suite, les images ensuite (décodées sur le fil du script) ; une image « à la demande »
+    /// n'est chargée qu'une fois la ligne survolée (`want`).
+    #[test]
+    fn choix_avec_vignettes_chargees_apres_coup() {
+        if scripting_python().is_none() {
+            eprintln!("python3 absent : test ignoré");
+            return;
+        }
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(60, 90, image::Rgba([200, 90, 0, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("couv.png"), &png).unwrap();
+        let code = "import comicrust, time\n\n#@Name F\n#@Hook Library\ndef f(books):\n    \
+                    vus = []\n    \
+                    def charge(i, r):\n        \
+                    def g():\n            vus.append(i)\n            time.sleep(0.05)\n            return r\n        \
+                    return g\n    \
+                    c = comicrust.choose('Séries', ['Titre'], ['A', 'B', 'C'], images=[charge(0, 'couv.png'), \
+                    comicrust.on_demand(charge(1, 'couv.png')), charge(2, None)])\n    \
+                    print('choix', c, 'chargés', vus)\n";
+        let file = dir.path().join("f.py");
+        std::fs::write(&file, code).unwrap();
+        let entry = parse_script(code, &file, "f.py").0.remove(0);
+        let (tx, rx) = mpsc::channel();
+        let host = UiHost::new(
+            Arc::new(ComicDatabase::default()),
+            tx,
+            egui::Context::default(),
+            Arc::new(AtomicBool::new(false)),
+            Default::default(),
+            Default::default(),
+            None,
+        );
+        let opts = RunOptions { module_dir: Some(dir.path().join("module")), ..Default::default() };
+        let handle = ScriptRunner::new(opts).start(&entry, RunContext::new(Hook::Library, vec![]), Arc::new(host));
+        let ev = loop {
+            match rx.recv_timeout(Duration::from_secs(20)).expect("liste attendue") {
+                ev @ HostEvent::Choose { .. } => break ev,
+                _ => continue,
+            }
+        };
+        let HostEvent::Choose { spec, images, wants, reply } = ev else { unreachable!() };
+        use comicrust_core::scripting::LazyImage;
+        assert_eq!(spec.lazy, [LazyImage::Auto, LazyImage::OnDemand, LazyImage::Auto]);
+        let mut st = super::super::forms::ChooseState::new(*spec, images).with_wants(wants);
+        assert!(st.has_images() && st.is_loading(0) && st.waits_hover(1));
+        // Les deux images « d'office » arrivent (la seconde : aucune image).
+        let mut recues = Vec::new();
+        let attendre = |st: &mut super::super::forms::ChooseState, n: usize, recues: &mut Vec<(usize, bool)>| {
+            while recues.len() < n {
+                if let HostEvent::ChooseImage { index, image } =
+                    rx.recv_timeout(Duration::from_secs(20)).expect("image attendue")
+                {
+                    recues.push((index, image.is_some()));
+                    st.set_image(index, image);
+                }
+            }
+        };
+        attendre(&mut st, 2, &mut recues);
+        assert_eq!(recues, [(0, true), (2, false)]);
+        assert!(!st.is_loading(0) && !st.is_loading(2) && st.is_loading(1));
+        assert_eq!(st.images[0].as_ref().unwrap().size, [60, 90]);
+        // Survol de la ligne B : son image est demandée, puis arrive.
+        st.want(1);
+        st.want(1);
+        attendre(&mut st, 3, &mut recues);
+        assert_eq!(recues[2], (1, true));
+        reply.send(Some(vec![1])).unwrap();
+        let r = handle.wait();
+        assert_eq!(r.state, RunState::Finished, "{}", r.journal_text());
+        assert!(r.journal_text().contains("choix 1 chargés [0, 2, 1]"), "{}", r.journal_text());
     }
 
     /// Bilan des renommages appliqués : écrit seulement si un fichier a été renommé, relu
