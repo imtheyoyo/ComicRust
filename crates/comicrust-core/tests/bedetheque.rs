@@ -87,12 +87,14 @@ fn page(chemin: &str) -> Option<(&'static str, String)> {
         "/bandes_dessinees_i.html" => "lettre_i.html",
         "/search/tout?rechtexte=spirou&rechwhere=7" => "recherche_spirou.html",
         "/search/tout?rechtexte=inconnue&rechwhere=7" => "recherche_vide.html",
-        "/serie-59-bd-blacksad__10000.html" => "serie_blacksad.html",
+        "/serie-59-bd-blacksad__10000.html" | "/serie-500-bd-blacksad__10000.html" => "serie_blacksad.html",
         "/serie-1-bd-spirou-et-fantasio__10000.html" => "serie_spirou.html",
-        "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html" | "/bd--21.html" => "album_blacksad_1.html",
+        "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html"
+        | "/bd--21.html"
+        | "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-15161.html" => "album_blacksad_1.html",
         "/bd-blacksad-hs-l-integrale-555.html" => "album_blacksad_hs.html",
         "/bd-spirou-et-fantasio-tome-2-il-y-a-un-sorcier-a-champignac-1002.html" => "album_spirou_2.html",
-        "/ajax/resume/album/21" => "resume_21.html",
+        "/ajax/resume/album/21" | "/ajax/resume/album/15161" => "resume_21.html",
         "/ajax/resume/album/555" => "resume_555.html",
         "/ajax/resume/album/1002" => "resume_1002.html",
         "/bandes_dessinees_t.html" => "lettre_t.html",
@@ -1464,9 +1466,9 @@ fn test_du_site_ok() {
     assert_eq!(
         chemins,
         [
-            "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html",
-            "/ajax/resume/album/21",
-            "/serie-59-bd-blacksad__10000.html"
+            "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-15161.html",
+            "/ajax/resume/album/15161",
+            "/serie-500-bd-blacksad__10000.html"
         ]
     );
     let t = srv.instants.lock().unwrap();

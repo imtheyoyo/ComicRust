@@ -5,6 +5,18 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.5] — 2026-11-01
+
+### Corrections
+- **Bedetheque Scraper 2 – tester le site** :
+  - l'album de référence est bien Blacksad tome 1 (adresses données par Yoyo ; les anciennes
+    pointaient vers Achille Talon #19 et Astérix) ;
+  - le coloriste et le résumé de l'album sont facultatifs : s'ils manquent, ils sont marqués ⚠
+    sans conclure que le site a changé.
+
+### Recette
+[recette/v0.10.5.md](recette/v0.10.5.md).
+
 ## [v0.10.4] — 2026-11-01
 
 Bedetheque Scraper 2 face aux changements du site.

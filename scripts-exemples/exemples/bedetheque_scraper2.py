@@ -323,8 +323,8 @@ MOTIFS_INTEGRES = {nom: (v[0], v[1], len(v) > 2 and bool(v[2])) for nom, v in MO
 # tome 1, album célèbre dont la fiche est complète et stable. Adresses relatives au site
 # (``url_base`` respecté), modifiables dans motifs.json (« reference »).
 REFERENCE_INTEGREE = {
-    "album": "BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html",
-    "serie": "serie-59-BD-Blacksad.html",
+    "album": "BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-15161.html",
+    "serie": "serie-500-BD-Blacksad.html",
 }
 
 # Options des gabarits (compilés à chaque recherche) et motifs en service.
@@ -3142,7 +3142,10 @@ def tester_site():
     except ValueError:
         pause = 7
     ref = S.motifs["reference"]
-    ok, ko = "✔", "✖"
+    ok, ko, absent = "✔", "✖", "⚠"
+    # Champs souvent absents des pages (album sans coloriste ni résumé) : leur absence est
+    # signalée sans conclure que le site a changé.
+    facultatifs = {_t("Coloriste", "Colorist"), _t("Résumé de l'album", "Album summary")}
     lignes = [
         _t("Test du site Bedetheque — ", "Bedetheque site test — ") + _maintenant(),
         _t("Site : ", "Site: ") + S.base,
@@ -3164,6 +3167,9 @@ def tester_site():
         for libelle, valeur in champs:
             if valeur:
                 lignes.append("  %s %s : %s" % (ok, libelle, _court(valeur)))
+            elif libelle in facultatifs:
+                lignes.append("  %s %s : %s" % (absent, libelle, _t("absent de la page (facultatif)",
+                                                                    "not on the page (optional)")))
             else:
                 lignes.append("  %s %s : %s" % (ko, libelle, _t("non trouvé", "not found")))
                 manquants.append(libelle)
