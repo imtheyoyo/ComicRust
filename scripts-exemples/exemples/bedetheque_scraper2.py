@@ -88,7 +88,7 @@ DEFAUTS = {
     "CBLetterer": True, "CBInker": True, "CBPrinted": True, "CBRating": True, "CBISBN": True,
     "CBLanguage": True, "CBEditor": True, "CBFormat": True, "CBColorist": True,
     "CBPenciller": True, "CBWriter": True, "CBSeries": True, "CBTitle": True,
-    "CBDefault": False, "CBRescrape": False, "use_cloudscraper": False, "CBStop": "2",
+    "CBDefault": False, "CBRescrape": False, "use_cloudscraper": False, "CBStop": "1",
     "ARTICLES": "Le,La,Les,L',The", "SUBPATT": " - - ", "COUNTOF": True, "CBCouverture": True,
     "COUNTFINIE": True, "TITLEIT": True, "TIMEOUT": "1000", "TIMEOUTS": "7", "TIMEPOPUP": "30",
     "FORMATARTICLES": True, "PopUpEditionForm": False, "SerieResumeEverywhere": True,
@@ -412,10 +412,10 @@ def SaveSetting():
 
 
 def AllowUserChoice():
-    """« CBStop » de l'original : False (ignorer), True (demander) ou "2" (demander, avec
-    fermeture automatique de la fenêtre après TIMEPOPUP secondes)."""
-    v = C("CBStop")
-    return "2" if v == "2" else v == "1"
+    """« CBStop » de l'original : False (ignorer) ou True (demander). La fermeture
+    automatique de la fenêtre de choix (« 2 » dans l'original) est retirée de ComicRust
+    (v0.10.3, demande de l'utilisateur) : « 2 » vaut « demander »."""
+    return C("CBStop") in ("1", "2")
 
 
 def lire_app_config(chemin):
@@ -1309,7 +1309,7 @@ def SeriesForm(serie, liste, formType):
     Fiches avec couverture (comicrust.choose, présentation « cards ») : titre en gras puis
     les infos utiles au choix ; l'original n'avait qu'une liste de textes
     « (001) - titre (lien) »."""
-    auto = AllowUserChoice() == "2"
+    auto = False  # pas de choix automatique (v0.10.3)
     if formType == SERIE:
         titre = Trans(132) + serie
         colonnes = [_t("Série", "Series"), _t("Éditeur / pays", "Publisher / country"), _t("Résultat", "Result"),
@@ -2603,7 +2603,6 @@ def _valeurs_formulaire(cfg):
     v = {k: cfg[k] for k in DEFAUTS if k not in ("url_base", "dossier_journaux")}
     v["Donnees"] = [cle for cle, reglage, _ in DONNEES if cfg[reglage]]
     v["ChoixUtilisateur"] = "0" if cfg["CBStop"] == "0" else "1"
-    v["FermetureAuto"] = cfg["CBStop"] == "2"
     v["ChoixAutoEdition"] = not cfg["PopUpEditionForm"]
     v["ResumePremierTome"] = not cfg["SerieResumeEverywhere"]
     for k in ("TIMEOUT", "TIMEOUTS", "TIMEPOPUP", "PadNumber"):
@@ -2629,7 +2628,9 @@ def _depuis_formulaire(v, cfg):
         out[reglage] = cle in coches
     out["CBFormat"] = "Format" in coches and not out["ONESHOTFORMAT"]
     if v.get("ChoixUtilisateur") == "1":
-        out["CBStop"] = "2" if v.get("FermetureAuto") else "1"
+        # « 2 » (ancienne fermeture automatique) est gardé tel quel pour ComicRack, mais
+        # n'a plus d'effet dans ComicRust : la fenêtre de choix attend toujours.
+        out["CBStop"] = "2" if cfg.get("CBStop") == "2" else "1"
     else:
         out["CBStop"] = "0"
     out["PopUpEditionForm"] = not v.get("ChoixAutoEdition")
@@ -2689,10 +2690,6 @@ def BDConfigForm(valeurs):
         ]),
         ui.group(Trans(141), [
             ui.radio("ChoixUtilisateur", "", [("0", Trans(45)), ("1", Trans(46))]),
-            ui.group("", [
-                ui.checkbox("FermetureAuto", Trans(44)),
-                ui.number("TIMEPOPUP", _t("Délai (s)", "Delay (s)"), 30, min=1, max=999, enabled_if="FermetureAuto"),
-            ], enabled_if="ChoixUtilisateur=1"),
             ui.checkbox("AlwaysChooseSerie", Trans(151)),
             ui.checkbox("ChoixAutoEdition", Trans(147)),
         ]),

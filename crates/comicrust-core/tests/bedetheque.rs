@@ -523,7 +523,7 @@ fn recherche_choix_et_fiche_complete() {
     assert_eq!(listes[0].rows.len(), 3);
     assert_eq!(listes[0].columns, ["Série", "Éditeur / pays", "Résultat", "Lien"]);
     assert_eq!(listes[0].rows[0], ["Spirou et Fantasio", "Dupuis", "001", "serie-1-BD-Spirou-et-Fantasio.html"]);
-    assert_eq!(listes[0].timeout, Some(30.0));
+    assert_eq!(listes[0].timeout, None, "pas de choix automatique (v0.10.3)");
     assert!(listes[0].default.is_empty());
     assert_eq!(listes[0].layout, ChooseLayout::Cards);
     assert_eq!(listes[0].thumb_size, 150.0);
@@ -615,7 +615,7 @@ fn choix_ignorer_automatique_et_edition() {
     assert_eq!(listes.len(), 1);
     assert_eq!(listes[0].title, "Choisissez un album pour HS");
     assert_eq!(listes[0].rows.len(), 2);
-    assert_eq!(listes[0].timeout, Some(12.0));
+    assert_eq!(listes[0].timeout, None, "pas de choix automatique (v0.10.3)");
     assert_eq!(listes[0].default, vec![0]);
     assert_eq!(hote.avec_image(0), [0, 1], "couvertures envoyées après l'ouverture");
     drop(listes);
@@ -1121,7 +1121,7 @@ fn reglages_et_import_comicrack() {
     let v0 = &formulaires[0].values;
     assert_eq!(v0["LANGENFR"], json!("FR"));
     assert_eq!(v0["ChoixUtilisateur"], json!("1"));
-    assert_eq!(v0["FermetureAuto"], json!(true));
+    assert!(v0.get("FermetureAuto").is_none(), "option retirée (v0.10.3)");
     assert_eq!(v0["Donnees"].as_array().unwrap().len(), 22, "tout coché par défaut");
     // Rouvert après l'import : valeurs de l'App.Config, textes en anglais.
     let v2 = &formulaires[2].values;
@@ -1130,7 +1130,6 @@ fn reglages_et_import_comicrack() {
     assert_eq!(v2["TIMEOUTS"], json!(3));
     assert_eq!(v2["TIMEPOPUP"], json!(12));
     assert_eq!(v2["ChoixUtilisateur"], json!("1"));
-    assert_eq!(v2["FermetureAuto"], json!(false));
     assert_eq!(v2["ChoixAutoEdition"], json!(false));
     assert_eq!(v2["ResumePremierTome"], json!(true));
     assert_eq!(v2["DBGLOGMAX"], json!(2.0));
