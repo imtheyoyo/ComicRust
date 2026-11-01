@@ -1,0 +1,5 @@
+Rapport de recette ComicRust v0.10.5 — 01/11/2026 15:50
+Résultat : 3 OK, 0 échec(s), 0 non testé(s) sur 3.
+Décision proposée : GO possible (bloquants tous OK).
+
+T-01 : test du site sur Blacksad tome 1 (15161) et série 500 : 20/20 champs trouvés, conclusion « Tout est trouvé : les motifs sont à jour ».

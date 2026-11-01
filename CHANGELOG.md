@@ -15,7 +15,7 @@ ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa
     sans conclure que le site a changé.
 
 ### Recette
-[recette/v0.10.5.md](recette/v0.10.5.md).
+[recette/v0.10.5.md](recette/v0.10.5.md) — GO (3/3 OK).
 
 ## [v0.10.4] — 2026-11-01
 
