@@ -1,0 +1,5 @@
+Rapport de recette ComicRust v0.10.4 — 01/11/2026 15:31
+Résultat : 5 OK, 0 échec(s), 0 non testé(s) sur 5.
+Décision proposée : GO possible (bloquants tous OK).
+
+T-01 : test du site : l'adresse de référence BD-Blacksad-Tome-1-…-21.html donne en réalité Achille Talon #19 (identifiant 21), et serie-59 donne Astérix ; 18/20 champs trouvés, Coloriste et Résumé de l'album non trouvés (probablement absents de cette page).

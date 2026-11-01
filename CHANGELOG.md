@@ -24,7 +24,7 @@ Bedetheque Scraper 2 face aux changements du site.
   - bouton « Copier le rapport ».
 
 ### Recette
-[recette/v0.10.4.md](recette/v0.10.4.md).
+[recette/v0.10.4.md](recette/v0.10.4.md) — GO (5/5 OK).
 
 ## [v0.10.3] — 2026-11-01
 
