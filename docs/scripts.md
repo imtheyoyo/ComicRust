@@ -53,7 +53,7 @@ avant de le modifier (pensez à changer son `#@Key`).
 | `ranger_fichiers.py` | **Ranger les fichiers** (`Books`) | Renomme/déplace selon un modèle de nom (syntaxe de la fenêtre « Renommer » : `{series}[ v{volume}][ #{number:000}][ ({year})]`, `/` = sous-dossier), dans un dossier racine, avec sous-dossiers par série ou par éditeur/série. Deux livres de même nom ou un fichier déjà présent : suffixe « (2) », jamais d'écrasement ; chemin de plus de 259 caractères ignoré. | modèle, dossier racine (vide = dossier actuel ; un fichier déjà dans le bon sous-dossier n'y est pas remis une seconde fois), sous-dossiers |
 | `comic_vine.py` | **Infos depuis Comic Vine** (`Books`) | Cherche la série (nom + année) puis le numéro sur Comic Vine, demande de choisir si c'est ambigu, puis complète titre, résumé, scénaristes, dessinateurs, encreurs, coloristes, lettreurs, couverture, éditeurs, personnages, équipes, lieux, arcs, année/mois (date de couverture), éditeur, nombre de numéros, Web (page Comic Vine). Seuls les champs vides par défaut. | **clé d'API** (secrète), remplacer les champs remplis, écrire ComicInfo.xml |
 | `automatisme_nouveaux.py` | automatique (`NewBooks`) | Étiquette « à lire » et série/numéro/année depuis le nom du fichier sur les nouveaux livres. **Désactivé par défaut** (`#@Enabled false`) : le cocher dans « Gérer les scripts » (et cocher « Exécuter les automatismes »). | étiquette, complément depuis le nom |
-| `bedetheque_scraper2.py` | **Bedetheque Scraper 2** (`Books`, `Editor`), **QuickScrape BD2** (`Books`), **Configurer BD2** (`ConfigScript`, `Library`) | Portage Python 3 de *Bedetheque Scraper 2* (Franck, Mizio66, kiwi13 & maforget, v6.08) : cherche la série (liste par lettre, puis recherche du site) et l'album sur www.bedetheque.com, fenêtres de choix de la série / de l'album / de l'édition avec couvertures (sans fermeture automatique depuis la v0.10.3), puis série, numéro, titre, auteurs, éditeur, collection, format, ISBN, dépôt légal, évaluation, résumé, genre, langue, parution, nombre d'albums, lien Web, notes. QuickScrape : lien collé ; option « rescrape » depuis le lien Web. | réglages de l'original en 3 onglets (Préférences, Données, Logging), **import de l'`App.Config` de ComicRack**, « ne remplacer que les champs vides » (ajout) |
+| `bedetheque_scraper2.py` | **Bedetheque Scraper 2** (`Books`, `Editor`), **QuickScrape BD2** (`Books`), **Configurer BD2** (`ConfigScript`, `Library`), **Bedetheque Scraper 2 – tester le site** (`Library`) | Portage Python 3 de *Bedetheque Scraper 2* (Franck, Mizio66, kiwi13 & maforget, v6.08) : cherche la série (liste par lettre, puis recherche du site) et l'album sur www.bedetheque.com, fenêtres de choix de la série / de l'album / de l'édition avec couvertures (sans fermeture automatique depuis la v0.10.3), puis série, numéro, titre, auteurs, éditeur, collection, format, ISBN, dépôt légal, évaluation, résumé, genre, langue, parution, nombre d'albums, lien Web, notes. QuickScrape : lien collé ; option « rescrape » depuis le lien Web. | réglages de l'original en 3 onglets (Préférences, Données, Logging), **import de l'`App.Config` de ComicRack**, « ne remplacer que les champs vides » (ajout) |
 | `library_organizer.py` | **Library Organizer**, **Library Organizer (Quick)** (`Books`), **Library Organizer (Quick) – toute la bibliothèque**, **Configurer Library Organizer**, **… annuler le dernier rangement**, **… supprimer les dossiers vides** (`Library`), réglages (`ConfigScript`) | Portage Python 3 de *Library Organizer* 2.1.13 (Stonepaw, Apache 2.0) : profils multiples, modèles de dossier/nom à la syntaxe de l'original, règles (champ/opérateur/valeur, groupes imbriqués, dossiers exclus), modes Déplacer / Copier (simulé) / Simuler, doublons, journal, annulation. Moteur dans `library_organizer_moteur.py` (module, pas un script). | fenêtre de configuration de l'original (Vue d'ensemble, Fichiers, Dossiers, Règles, Options, Jetons), import/export `.lop`, **import du `losettingsx.dat` de ComicRack** |
 
 ### Comic Vine
@@ -84,7 +84,7 @@ Portage du script de ComicRack (mentions (c) de l'original conservées en tête 
 Fichiers de l'original dans `scripts\exemples\bd2\` : `BDTranslations.Config` (textes
 français/anglais, option « Langue du plugin »), `bd2.png`, `bd2q.png`. Mêmes réglages (mêmes
 noms que l'`App.Config` de l'original : `CBSeries`, `CBStop`, `TIMEPOPUP`, `TIMEOUTS`…),
-mêmes expressions régulières (v6.08), mêmes en-têtes HTTP que son `BedethequeFetcher`
+mêmes expressions régulières (v6.08, dans `bd2\motifs.json` : voir « Quand le site change »), mêmes en-têtes HTTP que son `BedethequeFetcher`
 (navigateur Chrome, cookies gardés et renouvelés après un 403 ; le Python de ComicRust fait
 les requêtes lui-même, sans « daemon »). Option « cloudscraper » : copier le module
 `cloudscraper` et ses dépendances dans `scripts\lib`. Journaux de l'original
@@ -162,6 +162,57 @@ seule) ; le double-clic d'une fenêtre de choix choisit au lieu d'ouvrir la page
 navigateur ; série et numéro « proposés » (fichier sans série/numéro) déduits du nom du
 fichier par le script. Pour les essais : réglage `url_base` ou variable
 `COMICRUST_BEDETHEQUE_URL`.
+
+#### Quand le site change
+
+Les pages de bedetheque.com sont lues par des expressions régulières : si le site change sa
+mise en page, des champs ne sont plus trouvés. Trois aides :
+
+- **Détection** : une page d'album lue sans aucun des éléments essentiels (titre, auteurs,
+  éditeur), une page de série sans liste d'albums, ou une recherche sans résultat alors que
+  la page n'indique pas « 0 série trouvée » affiche **une fois par exécution** « La page de
+  Bedetheque semble avoir changé de structure (… non trouvés) : la recherche peut être
+  incomplète. Signale-le avec l'album essayé. » (avec l'album essayé et l'adresse) ; le
+  détail de chaque page (adresse, éléments manquants, version des motifs) va dans
+  `BD2_Debug_Log.txt` (lignes `STRUCTURE : …`). Seuls les champs trouvés sont appliqués.
+- **Motifs dans un fichier** : toutes les expressions d'analyse des pages sont dans
+  `scripts\exemples\bd2\motifs.json` (`"version"` `MAJEUR.MINEUR`, `"date"`,
+  `"commentaire"`, `"reference"`, `"motifs"` : nom → `{"motif", "options", "gabarit"}`),
+  identiques à celles intégrées au script (valeur de secours si le fichier est absent,
+  illisible ou d'un autre `MAJEUR` : avertissement dans le journal). Un motif invalide
+  (expression qui ne compile pas, groupes `(…)` / `(?P<nom>…)` ou `%s` manquants) garde sa
+  valeur de secours, les autres sont pris. Ce fichier est remplacé par chaque mise à jour.
+- **« Bedetheque Scraper 2 – tester le site »** (menu Scripts, hook `Library`) : lit
+  l'album de référence (Blacksad tome 1, `"reference"` de motifs.json), son résumé, puis sa
+  série (après la pause `TIMEOUTS` entre deux albums) et affiche un rapport ✔/✖ par champ
+  (titre, série, numéro, scénariste, dessinateur, coloriste, éditeur, dépôt légal, format,
+  ISBN, évaluation, résumé, couverture ; nom, genre, parution, langue, résumé, liste et
+  nombre d'albums de la série), la version des motifs utilisée et une conclusion (« Tout
+  est trouvé » / « N champ(s) ne sont plus trouvés : le site a changé ») ; bouton « Copier
+  le rapport ». Ne modifie aucun livre.
+
+**Corriger un motif soi-même** : copier `scripts\exemples\bd2\motifs.json` dans
+`data\bedetheque\motifs.json` (à côté de `ComicRust.exe`) ; ce fichier est **prioritaire**
+et jamais touché par une mise à jour. Y garder seulement `"version"` (même `MAJEUR`, `1.x`)
+et les motifs à corriger, par exemple :
+
+```json
+{
+  "version": "1.1",
+  "date": "2026-12-01",
+  "commentaire": "Libellé « Éditeur » renommé par le site",
+  "motifs": {
+    "ALBUM_EDITEUR": {"motif": "<dt>Maison d'édition</dt>\\s+<dd>(.*?)</dd>", "options": "IMD"}
+  }
+}
+```
+
+Dans le JSON, chaque `\` de l'expression s'écrit `\\` ; options `I` (casse ignorée), `M`
+(multiligne), `D` (`.` reconnaît aussi les retours à la ligne) ; garder les groupes du motif
+d'origine (le script les lit) et, pour un gabarit, le même nombre de `%s`. Relancer « tester
+le site » : la ligne « Motifs corrigés par les fichiers » liste les motifs pris dans les
+fichiers, les avertissements (motif invalide, inconnu…) s'affichent en tête du rapport. Une
+fois le fichier livré corrigé par une mise à jour, supprimer sa propre copie.
 
 ### Library Organizer
 

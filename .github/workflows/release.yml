@@ -93,6 +93,7 @@ jobs:
           New-Item -ItemType Directory -Force "$name/scripts" | Out-Null
           Copy-Item -Recurse scripts-exemples/* "$name/scripts/"
           if (-not (Test-Path "$name/scripts/exemples/nettoyage.py")) { throw "scripts\exemples\ absent du paquet" }
+          if (-not (Test-Path "$name/scripts/exemples/bd2/motifs.json")) { throw "bd2\motifs.json absent du paquet" }
           Get-ChildItem "$name/scripts" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "name=$name" >> $env:GITHUB_OUTPUT

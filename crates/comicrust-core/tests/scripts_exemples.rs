@@ -179,6 +179,7 @@ fn decouverte_sans_avertissement() {
         ("Bedetheque2Config".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::ConfigScript]),
         ("ConfigureBD2".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::Library]),
         ("QuickScrapeBD2".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::Books]),
+        ("TesterBD2".into(), "exemples/bedetheque_scraper2.py".into(), vec![Hook::Library]),
         ("comic-vine".into(), "exemples/comic_vine.py".into(), vec![Hook::Books]),
         ("comic-vine-reglages".into(), "exemples/comic_vine.py".into(), vec![Hook::ConfigScript]),
         // Library Organizer : détail vérifié dans tests/library_organizer.rs.

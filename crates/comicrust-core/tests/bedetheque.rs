@@ -106,6 +106,8 @@ fn page(chemin: &str) -> Option<(&'static str, String)> {
         "/serie-100-bd-lanfeust-de-troy__10000.html" => "serie_lanfeust.html",
         "/serie-101-bd-lanfeust-des-etoiles__10000.html" => "serie_lanfeust_etoiles.html",
         "/bd-lanfeust-de-troy-tome-3-castel-or-903.html" => "album_lanfeust_3.html",
+        // Page d'album dont la structure a changé (détection d'un changement du site).
+        "/bd-blacksad-tome-1-nouvelle-maquette-777.html" => "album_nouvelle_maquette.html",
         _ => return None,
     };
     Some((html, f.to_string()))
@@ -223,6 +225,8 @@ struct Hote {
     reponses_form: Mutex<Vec<ReponseForm>>,
     formulaires: Mutex<Vec<FormSpec>>,
     enregistres: Mutex<Vec<ScriptSettings>>,
+    /// Textes copiés dans le presse-papiers.
+    presse_papiers: Mutex<Vec<String>>,
 }
 
 impl ScriptHost for Hote {
@@ -303,6 +307,10 @@ impl ScriptHost for Hote {
     fn save_settings(&self, _key: &str, s: &ScriptSettings) -> Result<(), String> {
         self.enregistres.lock().unwrap().push(s.clone());
         Ok(())
+    }
+    fn clipboard_set(&self, text: &str) -> bool {
+        self.presse_papiers.lock().unwrap().push(text.into());
+        true
     }
 }
 
@@ -434,6 +442,7 @@ fn decouverte_des_points_d_entree() {
             ("Bedetheque2Config".into(), vec![Hook::ConfigScript], Some("bd2.png".into())),
             ("ConfigureBD2".into(), vec![Hook::Library], Some("bd2.png".into())),
             ("QuickScrapeBD2".into(), vec![Hook::Books], Some("bd2q.png".into())),
+            ("TesterBD2".into(), vec![Hook::Library], Some("bd2.png".into())),
         ]
     );
     for e in entrees.iter().filter(|e| e.rel_path == "exemples/bedetheque_scraper2.py") {
@@ -442,6 +451,9 @@ fn decouverte_des_points_d_entree() {
     }
     // Fichiers de l'original livrés à côté du script.
     assert!(dossier_exemples().join("exemples/bd2/BDTranslations.Config").is_file());
+    assert!(dossier_exemples().join("exemples/bd2/motifs.json").is_file());
+    let nom = entrees.iter().find(|e| e.key.as_deref() == Some("TesterBD2")).map(|e| e.name.clone());
+    assert_eq!(nom.as_deref(), Some("Bedetheque Scraper 2 – tester le site"));
 }
 
 /// Recherche par la liste de la lettre (Blacksad), puis par la recherche du site avec choix
@@ -544,6 +556,7 @@ fn recherche_choix_et_fiche_complete() {
     }
     // Bilan final et journaux de l'original.
     assert!(hote.messages.lock().unwrap().last().unwrap().contains("Traités: 2"));
+    assert!(!hote.messages.lock().unwrap().iter().any(|m| m.contains("changé de structure")), "pages normales");
     let rapport = std::fs::read_to_string(journaux.path().join("BD2_Rename_Log.txt")).unwrap();
     assert!(rapport.contains("** Traité **"), "{rapport}");
     assert!(journaux.path().join("BD2_Debug_Log.txt").is_file());
@@ -991,6 +1004,8 @@ fn page_introuvable() {
     let messages = hote.messages.lock().unwrap();
     assert!(messages[0].contains("Erreur HTTP") && messages[0].contains("404"), "{messages:?}");
     assert!(messages.last().unwrap().contains("Ignorés: 2"), "{messages:?}");
+    // Recherche sans résultat (« 0 série trouvée ») : pas un changement du site.
+    assert!(!messages.iter().any(|m| m.contains("changé de structure")), "{messages:?}");
     assert!(srv.chemins().iter().any(|c| c == "/search/tout?rechtexte=inconnue&rechwhere=7"));
 }
 
@@ -1266,4 +1281,229 @@ fn import_app_config_reel_hors_depot() {
     }
     assert!(ecarts.is_empty(), "réglages mal repris :\n{}", ecarts.join("\n"));
     eprintln!("{} réglages de l'App.Config repris à l'identique", attendu.len());
+}
+
+// ---------------------------------------------------------------------------------------
+// Changements du site : détection, motifs dans bd2/motifs.json, test du site
+// ---------------------------------------------------------------------------------------
+
+/// Page d'album « cassée » (structure changée) : message une seule fois par exécution,
+/// détail (adresse, éléments manquants) dans le journal de débogage, rien d'appliqué.
+#[test]
+fn detection_page_album_cassee() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let lien = format!("{}/BD-Blacksad-Tome-1-Nouvelle-maquette-777.html", srv.base);
+    let (mut a, mut b) = (livre("a", "Blacksad", "1"), livre("b", "Blacksad", "1"));
+    a.web = Some(lien.clone());
+    b.web = Some(lien.clone());
+    let hote = Arc::new(
+        Hote::avec(vec![a, b]).reglages(&srv, journaux.path(), json!({"CBRescrape": true})).confirmations(vec![true]),
+    );
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["a", "b"]), hote.clone());
+    assert_eq!(r.return_value, json!({"traites": 0, "ignores": 2}), "{}", r.journal_text());
+    assert!(champs(&r, "a").is_empty() && champs(&r, "b").is_empty(), "{:?}", r.changes);
+    let messages = hote.messages.lock().unwrap();
+    let alertes: Vec<&String> = messages.iter().filter(|m| m.contains("changé de structure")).collect();
+    assert_eq!(alertes.len(), 1, "une fois par exécution : {messages:?}");
+    assert!(
+        alertes[0].starts_with(
+            "La page de Bedetheque semble avoir changé de structure (album : titre, auteurs, éditeur non trouvés) : \
+             la recherche peut être incomplète. Signale-le avec l'album essayé."
+        ),
+        "{}",
+        alertes[0]
+    );
+    assert!(alertes[0].contains("Album essayé : [Blacksad] 1") && alertes[0].contains(&lien), "{}", alertes[0]);
+    let debug = std::fs::read_to_string(journaux.path().join("BD2_Debug_Log.txt")).unwrap();
+    let lignes: Vec<&str> = debug.lines().filter(|l| l.starts_with("STRUCTURE : ")).collect();
+    assert_eq!(lignes.len(), 2, "chaque page notée : {debug}");
+    assert!(lignes[0].contains(&lien) && lignes[0].contains("non trouvés : titre, auteurs, éditeur"), "{}", lignes[0]);
+    assert!(lignes[0].contains("motifs 1.0 du 2026-11-01"), "{}", lignes[0]);
+    assert!(r.journal_text().contains("page album inattendue"), "{}", r.journal_text());
+}
+
+/// `bd2/motifs.json` livré = motifs intégrés au script ; fichiers illisibles ou d'une autre
+/// version ignorés (motifs intégrés gardés).
+#[test]
+fn motifs_livres_identiques_aux_integres() {
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let module = module_dans(tmp.path());
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::write(module.join("comicrust.py"), comicrust_core::scripting::PYTHON_MODULE).unwrap();
+    let utilisateur = tmp.path().join("data").join("bedetheque");
+    std::fs::create_dir_all(&utilisateur).unwrap();
+    let code = r#"
+import json, os, sys
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+import bedetheque_scraper2 as b
+data, err = b.lire_fichier_motifs(b.FICHIER_MOTIFS)
+assert err is None, err
+fichier = {k: (v["motif"], v["options"], bool(v.get("gabarit"))) for k, v in data["motifs"].items()}
+assert fichier == b.MOTIFS_INTEGRES, sorted(set(fichier.items()) ^ set(b.MOTIFS_INTEGRES.items()))
+assert data["version"] == b.VERSION_MOTIFS_INTEGRES and data["reference"] == b.REFERENCE_INTEGREE
+info = b.charger_motifs()
+assert info["avertissements"] == [] and info["corriges"] == [], info
+assert info["sources"][1:] == ["bd2/motifs.json"], info["sources"]
+assert b.fichier_motifs_utilisateur() == os.path.join(sys.argv[3], "motifs.json")
+# Fichier de l'utilisateur d'une autre version, puis illisible : ignoré.
+for contenu, raison in (('{"version": "2.0", "motifs": {"ALBUM_ISBN": {"motif": "x"}}}', "incompatible"),
+                        ("{pas du json", "illisible")):
+    open(os.path.join(sys.argv[3], "motifs.json"), "w", encoding="utf-8").write(contenu)
+    info = b.charger_motifs()
+    assert len(info["avertissements"]) == 1 and raison in info["avertissements"][0], info
+    assert b.ALBUM_ISBN.pattern == b.MOTIFS_INTEGRES["ALBUM_ISBN"][0]
+print("ok")
+"#;
+    let sortie = std::process::Command::new(&py)
+        .args(["-I", "-c", code])
+        .arg(&module)
+        .arg(dossier_exemples().join("exemples"))
+        .arg(&utilisateur)
+        .output()
+        .unwrap();
+    let texte = String::from_utf8_lossy(&sortie.stdout).into_owned() + &String::from_utf8_lossy(&sortie.stderr);
+    assert!(sortie.status.success() && texte.trim() == "ok", "{texte}");
+}
+
+/// Dossier `data` avec un fichier de motifs de l'utilisateur (`data\bedetheque\motifs.json`).
+fn data_avec_motifs(motifs: Value) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    let dossier = tmp.path().join("data").join("bedetheque");
+    std::fs::create_dir_all(&dossier).unwrap();
+    std::fs::write(dossier.join("motifs.json"), serde_json::to_string_pretty(&motifs).unwrap()).unwrap();
+    tmp
+}
+
+/// Motifs de l'utilisateur prioritaires (éditeur cherché sous un autre libellé : plus
+/// trouvé), motif invalide → valeur de secours pour ce motif seulement (ISBN trouvé).
+#[test]
+fn surcharge_utilisateur_et_motif_invalide() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let tmp = data_avec_motifs(json!({
+        "version": "1.3",
+        "date": "2026-12-01",
+        "motifs": {
+            "ALBUM_EDITEUR": {"motif": r"<dt>Maison d'édition</dt>\s+<dd>(.*?)</dd>", "options": "IMD"},
+            "ALBUM_ISBN": {"motif": "(<dt>EAN", "options": "ID"},
+            "ALBUM_INCONNU": {"motif": "x"}
+        }
+    }));
+    let hote = Arc::new(Hote::avec(vec![livre("b1", "Blacksad", "1")]).reglages(&srv, journaux.path(), json!({})));
+    let module = module_dans(tmp.path());
+    let r = lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b1"]), hote, &module);
+    let b = champs(&r, "b1");
+    assert!(!b.contains_key("Publisher"), "motif de l'utilisateur prioritaire : {b:?}");
+    assert_eq!(b["ISBN"], json!("2-205-04969-8"), "motif invalide : secours");
+    assert_eq!(b["Writer"], json!("Juan Díaz Canales"));
+    let journal = r.journal_text();
+    assert!(journal.contains("motif « ALBUM_ISBN » invalide"), "{journal}");
+    assert!(journal.contains("motif inconnu « ALBUM_INCONNU »"), "{journal}");
+    let debug = std::fs::read_to_string(journaux.path().join("BD2_Debug_Log.txt")).unwrap();
+    assert!(debug.contains("Motifs : version 1.3 du 2026-12-01"), "{debug}");
+}
+
+fn lancer_test_site(py: &Path, hote: Arc<Hote>, module: &Path) -> RunResult {
+    let mut ctx = RunContext::new(Hook::Library, vec![]);
+    ctx.interactive = true;
+    lancer_dans(py, "TesterBD2", ctx, hote, module)
+}
+
+/// Test du site : tout est trouvé sur l'album de référence et sa série ; rapport copié ;
+/// pause du script (TIMEOUTS) avant la page de la série.
+#[test]
+fn test_du_site_ok() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let hote = Arc::new(
+        Hote::default()
+            .reglages(&srv, journaux.path(), json!({"TIMEOUTS": "1"}))
+            .formulaires(vec![Some(("Copier le rapport".into(), json!({}))), Some(("Fermer".into(), json!({})))]),
+    );
+    let r = lancer_test_site(&py, hote.clone(), &module_dans(data.path()));
+    assert_eq!(
+        r.return_value,
+        json!({"trouves": true, "manquants": [], "pages_non_lues": 0, "motifs": "1.0"}),
+        "{}",
+        r.journal_text()
+    );
+    let formulaires = hote.formulaires.lock().unwrap();
+    assert_eq!(formulaires.len(), 2, "rouvert après la copie");
+    assert_eq!(formulaires[0].title, "Tester Bedetheque");
+    assert_eq!(formulaires[0].buttons, ["Copier le rapport", "Fermer"]);
+    assert_eq!(formulaires[1].message, "Rapport copié dans le presse-papiers.");
+    let rapport = formulaires[0].initial_values()["rapport"].as_str().unwrap().to_string();
+    for ligne in [
+        "Motifs : version 1.0 du 2026-11-01 (motifs intégrés au script + bd2/motifs.json)",
+        "✔ Titre : Quelque part entre les ombres",
+        "✔ Série : Blacksad",
+        "✔ Numéro : 1",
+        "✔ Scénariste : Juan Díaz Canales",
+        "✔ Dessinateur : Juanjo Guarnido",
+        "✔ Éditeur : Dargaud",
+        "✔ Dépôt légal : 11/2000",
+        "✔ ISBN : 2-205-04969-8",
+        "✔ Résumé de l'album : John Blacksad",
+        "✔ Couverture : ",
+        "✔ Liste des albums : 5 albums (1er : Quelque part entre les ombres)",
+        "✔ Résumé de la série : Dans une Amérique",
+        "Conclusion : Tout est trouvé : les motifs sont à jour.",
+    ] {
+        assert!(rapport.contains(ligne), "« {ligne} » absent :\n{rapport}");
+    }
+    assert!(!rapport.contains('✖'), "{rapport}");
+    assert_eq!(*hote.presse_papiers.lock().unwrap(), [rapport]);
+    // Pages lues : album, résumé, puis la série après la pause entre deux albums.
+    let chemins = srv.chemins();
+    assert_eq!(
+        chemins,
+        [
+            "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html",
+            "/ajax/resume/album/21",
+            "/serie-59-bd-blacksad__10000.html"
+        ]
+    );
+    let t = srv.instants.lock().unwrap();
+    assert!(t[2] - t[1] >= Duration::from_millis(950), "pause TIMEOUTS : {:?}", t[2] - t[1]);
+}
+
+/// Test du site : album de référence dont la structure a changé (adresse prise dans le
+/// fichier de l'utilisateur) et éditeur cherché sous un autre libellé : champs ✖ et
+/// conclusion « le site a changé ».
+#[test]
+fn test_du_site_ko() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let tmp = data_avec_motifs(json!({
+        "version": "1.1",
+        "motifs": {"SERIE_GENRE": {"motif": "class=\"bdt-genre-v2\">([^<]+)<", "options": "I"}},
+        "reference": {"album": "BD-Blacksad-Tome-1-Nouvelle-maquette-777.html"}
+    }));
+    let hote = Arc::new(Hote::default().reglages(&srv, journaux.path(), json!({})).formulaires(vec![]));
+    let r = lancer_test_site(&py, hote.clone(), &module_dans(tmp.path()));
+    let v = &r.return_value;
+    assert_eq!(v["trouves"], json!(false), "{}", r.journal_text());
+    assert_eq!(v["motifs"], json!("1.1"));
+    let manquants: Vec<&str> = v["manquants"].as_array().unwrap().iter().map(|m| m.as_str().unwrap()).collect();
+    for champ in ["Titre", "Scénariste", "Dessinateur", "Éditeur", "ISBN", "Couverture", "Genre"] {
+        assert!(manquants.contains(&champ), "{champ} : {manquants:?}");
+    }
+    assert!(!manquants.contains(&"Liste des albums") && !manquants.contains(&"Série"), "{manquants:?}");
+    let formulaires = hote.formulaires.lock().unwrap();
+    let rapport = formulaires[0].initial_values()["rapport"].as_str().unwrap().to_string();
+    assert!(rapport.contains("✖ Titre : non trouvé") && rapport.contains("✔ Nom de la série : Blacksad"), "{rapport}");
+    assert!(rapport.contains("Motifs corrigés par les fichiers : SERIE_GENRE"), "{rapport}");
+    assert!(
+        rapport
+            .contains(&format!("Conclusion : {} champ(s) ne sont plus trouvés : le site a changé.", manquants.len())),
+        "{rapport}"
+    );
+    assert!(srv.chemins().contains(&"/bd-blacksad-tome-1-nouvelle-maquette-777.html".to_string()));
 }

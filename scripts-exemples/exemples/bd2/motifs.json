@@ -1,0 +1,305 @@
+{
+  "version": "1.0",
+  "date": "2026-11-01",
+  "commentaire": "Motifs de Bedetheque Scraper 2 v6.08 (portage ComicRust) : identiques à ceux du script.",
+  "aide": [
+    "Expressions régulières (Python, module re) qui lisent les pages de www.bedetheque.com.",
+    "Ne modifiez pas ce fichier (remplacé à chaque mise à jour de ComicRust) : copiez-le dans",
+    "data\\bedetheque\\motifs.json à côté de ComicRust.exe, gardez seulement les motifs à corriger",
+    "(et « version »), puis lancez « Bedetheque Scraper 2 – tester le site ».",
+    "options : I = sans distinction de casse, M = multiligne, D = « . » reconnaît aussi les retours à la ligne.",
+    "gabarit : motif complété par le script à la place de chaque %s ; garder le même nombre de %s.",
+    "Garder les groupes (…) et (?P<nom>…) de chaque motif : le script les lit.",
+    "version : MAJEUR.MINEUR ; augmenter le MINEUR à chaque correction, le MAJEUR change seulement",
+    "si la structure de ce fichier change (un fichier d'un autre MAJEUR est ignoré).",
+    "reference : album (et sa série) lus par la commande de test, adresses relatives au site."
+  ],
+  "reference": {
+    "album": "BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html",
+    "serie": "serie-59-BD-Blacksad.html"
+  },
+  "motifs": {
+    "LAST_FIRST_NAMES": {
+      "motif": "(?P<name>[^,]*?), (?P<firstname>[^,]*?)$",
+      "options": ""
+    },
+    "SERIE_LIST_PATTERN": {
+      "motif": "<a\\shref=\"%s/serie-([^<>\"]*?)\">.+?class=\"bdt-liste-libelle\">.*?<b>(.+?)</b>.+?</a>",
+      "options": "ID",
+      "gabarit": true
+    },
+    "SERIE_LIST_CHECK": {
+      "motif": "séries\\strouvées.{40,80}?La\\srecherche\\srenvoie\\splus\\sde",
+      "options": "ID"
+    },
+    "RECHERCHE_AUCUN": {
+      "motif": "<h2>\\s*0\\s+s.ries?\\s+trouv|aucun\\w*\\s+r.sultat",
+      "options": "I"
+    },
+    "SERIE_URL_PATTERN": {
+      "motif": "<a href=\"([^\"]+?)\">(?:(?!</a>).)+?<span class=\"bdt-liste-libelle\"><b>%s</b></span>",
+      "options": "ID",
+      "gabarit": true
+    },
+    "INFOS_ALBUMS": {
+      "motif": "<dl class=\"bdt-sheet\">.+?</div>",
+      "options": "ID"
+    },
+    "SERIE_LANGUE": {
+      "motif": "<li[^<>]+?(?<=\"Langue de parution\").+?class=\"bdt-sh-flag\"[^<>]+?>([^<>]+?)<",
+      "options": "I"
+    },
+    "SERIE_GENRE": {
+      "motif": "class=\"bdt-tag bdt-sh-genre\"[^<>]+?>([^<>]+?)<",
+      "options": "IMD"
+    },
+    "SERIE_RESUME": {
+      "motif": "class=\"bdt-sh-resume\">([^<>]*?)<",
+      "options": "IMD"
+    },
+    "SERIE_STATUS": {
+      "motif": "class=\"bdt-sh-parution\">([^<>]+?)<",
+      "options": "IMD"
+    },
+    "SERIE_NOTE": {
+      "motif": "<p\\sclass=\"static\">Note:\\s<strong>\\s(?P<note>[^<]*?)</strong>",
+      "options": "IMD"
+    },
+    "SERIE_COUNT": {
+      "motif": "title=\"Nombre de tomes de la série\">(\\d+)",
+      "options": "IMD"
+    },
+    "SERIE_COUNT_REAL": {
+      "motif": "class=\"bdt-box-albums-liste\">(.+?)</ul>",
+      "options": "IMD"
+    },
+    "SERIE_COUNTOF": {
+      "motif": "class=\"bdt-box-albums-num\"[^<>]+?>([^<>]+?)<span",
+      "options": "IMD"
+    },
+    "SERIE_HEADER2": {
+      "motif": "<h3(.+?)</p",
+      "options": "IMD"
+    },
+    "SERIE_QSERIE": {
+      "motif": "<h1>.+?<a href=\"[^<>]+/serie-[^\\.]+\\.html\">([^\"<>]+)</a>.*?</h1>",
+      "options": "IMD"
+    },
+    "SERIE_ALBUMS": {
+      "motif": "<li[^>]*>\\s+?<a href=\"(?P<url>[^\"]+?)\" title=\"(?P<title>[^\"]+?)\">.+?class=\"bdt-box-albums-num\"[^<>]+?>(?P<tome>[^<>]*?)<span class=\"bdt-numa\">(?P<alt>[^<>]*?)<",
+      "options": "ID"
+    },
+    "SERIE_PREMIER": {
+      "motif": "class=\"bdt-edition-head\">\\s*<h3>\\s*<a[^<>]+?href=\"([^\"]+?)\"",
+      "options": "ID"
+    },
+    "SERIE_RESUME_INTRO": {
+      "motif": "Tout sur la série.*?:\\s?",
+      "options": ""
+    },
+    "ALBUM_EVAL": {
+      "motif": "ratingValue\">(.*?)<",
+      "options": "IMD"
+    },
+    "ALBUM_MULTI_AUTHOR_NAMES": {
+      "motif": "\">([^<>]*?)</",
+      "options": "IMD"
+    },
+    "ALBUM_SCENAR_MULTI_AUTHOR": {
+      "motif": "<dt>Sc.nario</dt>\\s*<dd>(.+?)<dt>[^<>]+?</dt>",
+      "options": "IMD"
+    },
+    "ALBUM_STORYBOARD_MULTI_AUTHOR": {
+      "motif": "<dt>storyboard</dt>\\s*<dd>(.+?)<dt>[^<>]+?</dt>",
+      "options": "IMD"
+    },
+    "ALBUM_DESSIN_MULTI_AUTHOR": {
+      "motif": "<dt>dessin</dt>\\s*<dd>(.+?)<dt>[^<>]+?</dt>",
+      "options": "IMD"
+    },
+    "ALBUM_COLOR_MULTI_AUTHOR": {
+      "motif": "<dt>Couleurs</dt>\\s*<dd>(.+?)<dt>[^<>]+?</dt>",
+      "options": "IMD"
+    },
+    "ALBUM_COUVERT_MULTI_AUTHOR": {
+      "motif": "<dt>Couverture</dt>\\s*<dd>(.+?)<dt>[^<>]+?</dt>",
+      "options": "IMD"
+    },
+    "ALBUM_LETTRAGE_MULTI_AUTHOR": {
+      "motif": "<dt>Lettrage</dt>\\s*<dd>(.+?)<dt>[^<>]+?</dt>",
+      "options": "IMD"
+    },
+    "ALBUM_INKER_MULTI_AUTHOR": {
+      "motif": "<dt>Encrage</dt>\\s*<dd>(.+?)<dt>[^<>]+?</dt>",
+      "options": "IMD"
+    },
+    "ALBUM_DEPOT": {
+      "motif": "<dt>D.p.t L.gal</dt>\\s+<dd>(?P<month>[\\d|-]{0,2})/?(?P<year>[\\d]{2,4})?",
+      "options": "IMD"
+    },
+    "ALBUM_ACHEVE": {
+      "motif": "<dt>Achev.*?\\s:\\s</dt>\\s+<dd>(?P<month>[\\d|-]{0,2})/?(?P<year>[\\d]{2,4})?<",
+      "options": "IMD"
+    },
+    "ALBUM_EDITEUR": {
+      "motif": "<dt>.diteur</dt>\\s+<dd>(.*?)</dd>",
+      "options": "IMD"
+    },
+    "ALBUM_COLLECTION": {
+      "motif": "<dt>Collection</dt><dd>(?:<a href.+?>)*([^><]+?)<",
+      "options": "IMD"
+    },
+    "ALBUM_TAILLE": {
+      "motif": "<dt>Format</dt>\\s*<dd>(.*?)</dd>",
+      "options": "IMD"
+    },
+    "ALBUM_ISBN": {
+      "motif": "<dt>EAN/ISBN</dt>\\s*<dd>(.*?)</dd>",
+      "options": "ID"
+    },
+    "ALBUM_PLANCHES": {
+      "motif": "<dt>Planches</dt>\\s*<dd>(.*?)</dd>",
+      "options": "IMD"
+    },
+    "ALBUM_INFOEDITION": {
+      "motif": "<b>Info\\s.*?dition</b>\\s?(.*?)<",
+      "options": "IMD"
+    },
+    "ALBUM_TOME": {
+      "motif": "<h2 class=\"bdt-ah-sub\">\\s*([^<>]+?)<span class=\"bdt-numa\">(.*?)</span>",
+      "options": "ID"
+    },
+    "ALBUM_EDITIONS": {
+      "motif": "<article class=\"bdt-edition bdt-edition--detail\" id=\"ed-(?P<id>[^\"]+)\">.+?<h3>.+?<span class=\"bdt-numa\">(?P<alt>[^\\s<]+)*.+?</h3>.+?<a class=\"bdt-img bdt-ecov[^\"]+\"\\shref=\"(?P<couv>[^\"]+)\".+?<dt>Titre</dt><dd><b>(?P<titre>[^<]+).+?<dt>Identifiant</dt>(?P<infos>.+?)</article>",
+      "options": "IMD"
+    },
+    "ALBUM_SERIE_ENTETE": {
+      "motif": "bdt-ah-top.+?<h1>.+?>([^\"]+?)[<>]",
+      "options": "IMD"
+    },
+    "ALBUM_SERIE_ENCART": {
+      "motif": "<dt>S.rie</dt><dd><a[^>]+?>([^<]+?)</a>",
+      "options": "IMD"
+    },
+    "REVUE_LIST_PATTERN": {
+      "motif": "<a\\shref=\"%s/revue-([^<>\"]*?)\">.+?class=\"bdt-liste-libelle\">.*?<b>(.+?)</b>.+?</a>",
+      "options": "ID",
+      "gabarit": true
+    },
+    "REVUE_LIST_EXISTS": {
+      "motif": "<h2>\\d{1,3} revue\\w?? trouvée\\w??</h2>",
+      "options": "ID"
+    },
+    "REVUE_LIST_CHECK": {
+      "motif": "revues\\strouvées.{40,80}?La\\srecherche\\srenvoie\\splus\\sde",
+      "options": "ID"
+    },
+    "REVUE_HEADER_PATTERN": {
+      "motif": "class=\"couv\"(.{1,100}?couvertures\"\\shref=\"(https?.{1,150}?)\">.{1,600}?class=\"titre\".{1,100}?#(%s)\\..+?class=\"autres\".+?)</li>",
+      "options": "IMD",
+      "gabarit": true
+    },
+    "REVUE_HEADER_PATTERN_ALT": {
+      "motif": "<a name=\"%s\">.+?class=\"couv\"(.{1,100}?couvertures\"\\shref=\"(https?.{1,150}?)\">.+?class=\"titre\".{1,100}?#(.+?)\\..+?class=\"autres\".+?)</li>",
+      "options": "IMD",
+      "gabarit": true
+    },
+    "REVUE_RESUME": {
+      "motif": "<em>Sommaire.*?</em>(.*?)</p",
+      "options": "IMD"
+    },
+    "REVUE_PLANCHES": {
+      "motif": ">Nb\\sPages\\s:\\s??</label>(.*?)<",
+      "options": "IMD"
+    },
+    "REVUE_DEPOT": {
+      "motif": "<label>Parution\\s:s??</label>(.*?)</",
+      "options": "IMD"
+    },
+    "REVUE_PERIOD": {
+      "motif": "<label>P.riodicit.\\s:\\s??</label>(.*?)</",
+      "options": "IMD"
+    },
+    "REVUE_EDITEUR": {
+      "motif": "<label>Editeur\\s:\\s?</label>(.*?)</",
+      "options": "IMD"
+    },
+    "REVUE_OPTIONS": {
+      "motif": "<option\\svalue=\"(%s/revue-[^>]+?)\">(.+?)</option>",
+      "options": "IMD",
+      "gabarit": true
+    },
+    "REVUE_ANCRES": {
+      "motif": "<a name=\"(.+?)\">.+?class=\"titre\".{1,100}?#(.+?)\\..+?",
+      "options": "IMD"
+    },
+    "REVUE_TITRE": {
+      "motif": "<h3 class=\"titre\".+?</span>(.+?)</h3>",
+      "options": "IMD"
+    },
+    "IMG_SRC": {
+      "motif": "<img[^>]+?src=\"([^\"]+?)\"",
+      "options": "I"
+    },
+    "IMG_TAG": {
+      "motif": "<img\\b[^>]*>",
+      "options": "I"
+    },
+    "IMG_ATTR": {
+      "motif": "\\b(data-src|data-original|data-lazy-src|src)\\s*=\\s*\"([^\"]+)\"",
+      "options": "I"
+    },
+    "IMG_PAS_COUV": {
+      "motif": "(?i)/flags/|^data:|\\.svg(?:\\?|$)|blank\\.gif|spacer|pixel\\.gif|/static\\d*/",
+      "options": "I"
+    },
+    "IMG_CLASSE": {
+      "motif": "\\bclass\\s*=\\s*\"([^\"]*)\"",
+      "options": "I"
+    },
+    "IMG_CLASSE_PAS_COUV": {
+      "motif": "(?i)\\b(?:flag|ico|icon|avatar|logo)\\b",
+      "options": "I"
+    },
+    "LISTE_INFO": {
+      "motif": "class=\"bdt-liste-info\"[^>]*>(.*?)</span>",
+      "options": "ID"
+    },
+    "LISTE_DRAPEAU": {
+      "motif": "/flags/([A-Za-z_-]+)\\.(?:png|gif|jpg|svg)",
+      "options": "I"
+    },
+    "PAGE_OG_IMAGE": {
+      "motif": "<meta[^>]+property=\"og:image\"[^>]+content=\"([^\"]+)\"",
+      "options": "I"
+    },
+    "PAGE_COUV": {
+      "motif": "<a[^>]+class=\"bdt-img bdt-ecov[^\"]*\"[^>]+href=\"([^\"]+)\"",
+      "options": "I"
+    },
+    "PAGE_TITRE": {
+      "motif": "<title>(.*?)</title>",
+      "options": "ID"
+    },
+    "PAGE_TITRE_FIN": {
+      "motif": "\\s+-\\s+BD, informations, cotes.*$",
+      "options": ""
+    },
+    "LIEN_ALBUM_PAGE": {
+      "motif": "href=\"[^\"]*?-(\\d+)\\.html",
+      "options": "I"
+    },
+    "LIEN_COUV": {
+      "motif": "href=\"([^\"]+?/(?:media/Couvertures|cache/thb_couv)/[^\"]+)\"",
+      "options": "I"
+    },
+    "INFO_DEPOT": {
+      "motif": "D.p.t\\s+l.gal\\s*:?\\s*(?:<[^>]+>\\s*)*((?:\\d{1,2}|-)/\\d{4}|\\d{4})",
+      "options": "I"
+    },
+    "INFO_EDITEUR": {
+      "motif": ".diteur\\s*:?\\s*(?:<[^>]+>\\s*)*([^<>]+?)\\s*<",
+      "options": "I"
+    }
+  }
+}

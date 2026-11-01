@@ -35,13 +35,18 @@ Points d'entrée (comme l'original) :
   revue) pour chaque livre ;
 - « Configurer BD2 » (``ConfigScript`` et ``Library``) : réglages à trois onglets
   (Préférences, Données, Logging), avec un bouton d'import du fichier ``App.Config`` de
-  l'original (réglages de ComicRack).
+  l'original (réglages de ComicRack) ;
+- « Bedetheque Scraper 2 – tester le site » (``Library``) : lit un album de référence et
+  sa série, rapport ✔/✖ par champ (``TesterBD2``).
 
 Rien n'est écrit directement : les champs sont demandés à ComicRust, qui les montre en
 aperçu (menu) ou remplit la fenêtre « Infos du livre » (hook ``Editor``).
 
 Fichiers à côté du script, dans ``bd2/`` : ``BDTranslations.Config`` (textes français et
-anglais de l'original, option « Langue du plugin »), ``bd2.png`` et ``bd2q.png`` (icônes).
+anglais de l'original, option « Langue du plugin »), ``bd2.png`` et ``bd2q.png`` (icônes),
+``motifs.json`` (expressions d'analyse des pages, surchargeables par
+``data\\bedetheque\\motifs.json`` : voir ``charger_motifs``). Une page lue sans ses éléments
+essentiels est signalée une fois par exécution (``signaler_structure``).
 Les journaux de l'original (``BD2_Rename_Log.txt``, ``BD2_Debug_Log.txt``) sont écrits dans
 ``data\\bedetheque\\`` à côté de ComicRust.exe (ou dans le dossier du réglage
 ``dossier_journaux``) ; leur contenu va aussi dans le journal du script de ComicRust.
@@ -191,6 +196,10 @@ class _Etat:
         self.couverture = None
         self.fraction = 0.0
         self.detail = ""
+        # Motifs en service (charger_motifs) et message « structure changée » déjà montré
+        # pendant cette exécution.
+        self.motifs = None
+        self.alerte_structure = False
 
 
 S = _Etat()
@@ -201,92 +210,262 @@ def C(nom):
 
 
 # ---------------------------------------------------------------------------------------
-# Expressions régulières (celles de l'original, version 6.08)
+# Expressions régulières d'analyse des pages (celles de l'original, version 6.08)
 # ---------------------------------------------------------------------------------------
+#
+# Toutes les expressions qui lisent les pages du site sont réunies ici (MOTIFS_INTEGRES :
+# nom → (motif, options, gabarit)) et dans le fichier livré ``bd2/motifs.json`` (mêmes
+# motifs, vérifié par les tests). Au lancement (``charger_motifs``) : motifs intégrés, puis
+# ceux de ``bd2/motifs.json``, puis ceux du fichier de l'utilisateur
+# ``data\bedetheque\motifs.json`` (prioritaire, jamais touché par une mise à jour) ; un
+# fichier absent, illisible ou d'une version incompatible est ignoré, un motif invalide
+# garde la valeur précédente (avertissement dans le journal). Chaque motif devient une
+# variable du module du même nom (``SERIE_GENRE``…) : expression compilée, ou texte pour un
+# gabarit (motif avec « %s », complété au moment de la recherche, voir ``gabarit``).
+#
+# Options : I = IGNORECASE, M = MULTILINE, D = DOTALL.
 
 I, M, D = re.IGNORECASE, re.MULTILINE, re.DOTALL
+_OPTIONS = {"I": I, "M": M, "D": D}
 
-LAST_FIRST_NAMES = re.compile(r'(?P<name>[^,]*?), (?P<firstname>[^,]*?)$')
+# Version du fichier motifs.json comprise par ce script : « MAJEUR.MINEUR » ; un autre
+# MAJEUR (autre structure du fichier) est refusé, le MINEUR est augmenté à chaque
+# correction des motifs.
+FORMAT_MOTIFS = 1
+VERSION_MOTIFS_INTEGRES = "1.0"
+FICHIER_MOTIFS = os.path.join(FICHIERS, "motifs.json")
 
-SERIE_LIST_PATTERN = r'<a\shref="%s/serie-([^<>"]*?)">.+?class="bdt-liste-libelle">.*?<b>(.+?)</b>.+?</a>'
-SERIE_LIST_CHECK = re.compile(r'séries\strouvées.{40,80}?La\srecherche\srenvoie\splus\sde', I | D)
-SERIE_URL_PATTERN = r'<a href="([^"]+?)">(?:(?!</a>).)+?<span class="bdt-liste-libelle"><b>%s</b></span>'
+MOTIFS_INTEGRES = {
+    "LAST_FIRST_NAMES": (r'(?P<name>[^,]*?), (?P<firstname>[^,]*?)$', ""),
+    "SERIE_LIST_PATTERN": (r'<a\shref="%s/serie-([^<>"]*?)">.+?'
+                           r'class="bdt-liste-libelle">.*?<b>(.+?)</b>.+?</a>', "ID", True),
+    "SERIE_LIST_CHECK": (r'séries\strouvées.{40,80}?La\srecherche\srenvoie\splus\sde', "ID"),
+    "RECHERCHE_AUCUN": (r'<h2>\s*0\s+s.ries?\s+trouv|aucun\w*\s+r.sultat', "I"),
+    "SERIE_URL_PATTERN": (r'<a href="([^"]+?)">(?:(?!</a>).)+?'
+                          r'<span class="bdt-liste-libelle"><b>%s</b></span>', "ID", True),
+    "INFOS_ALBUMS": (r'<dl class="bdt-sheet">.+?</div>', "ID"),
+    "SERIE_LANGUE": (r'<li[^<>]+?(?<="Langue de parution").+?class="bdt-sh-flag"[^<>]+?>([^<>]+?)<', "I"),
+    "SERIE_GENRE": (r'class="bdt-tag bdt-sh-genre"[^<>]+?>([^<>]+?)<', "IMD"),
+    "SERIE_RESUME": (r'class="bdt-sh-resume">([^<>]*?)<', "IMD"),
+    "SERIE_STATUS": (r'class="bdt-sh-parution">([^<>]+?)<', "IMD"),
+    "SERIE_NOTE": (r'<p\sclass="static">Note:\s<strong>\s(?P<note>[^<]*?)</strong>', "IMD"),
+    "SERIE_COUNT": (r'title="Nombre de tomes de la série">(\d+)', "IMD"),
+    "SERIE_COUNT_REAL": (r'class="bdt-box-albums-liste">(.+?)</ul>', "IMD"),
+    "SERIE_COUNTOF": (r'class="bdt-box-albums-num"[^<>]+?>([^<>]+?)<span', "IMD"),
+    "SERIE_HEADER2": (r'<h3(.+?)</p', "IMD"),
+    "SERIE_QSERIE": (r'<h1>.+?<a href="[^<>]+/serie-[^\.]+\.html">([^"<>]+)</a>.*?</h1>', "IMD"),
+    "SERIE_ALBUMS": (r'<li[^>]*>\s+?<a href="(?P<url>[^"]+?)" title="(?P<title>[^"]+?)">.+?'
+                     r'class="bdt-box-albums-num"[^<>]+?>(?P<tome>[^<>]*?)<span class="bdt-numa">(?P<alt>'
+                     r'[^<>]*?)<', "ID"),
+    "SERIE_PREMIER": (r'class="bdt-edition-head">\s*<h3>\s*<a[^<>]+?href="([^"]+?)"', "ID"),
+    "SERIE_RESUME_INTRO": (r'Tout sur la série.*?:\s?', ""),
+    "ALBUM_EVAL": (r'ratingValue">(.*?)<', "IMD"),
+    "ALBUM_MULTI_AUTHOR_NAMES": (r'">([^<>]*?)</', "IMD"),
+    "ALBUM_SCENAR_MULTI_AUTHOR": (r'<dt>Sc.nario</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>', "IMD"),
+    "ALBUM_STORYBOARD_MULTI_AUTHOR": (r'<dt>storyboard</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>', "IMD"),
+    "ALBUM_DESSIN_MULTI_AUTHOR": (r'<dt>dessin</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>', "IMD"),
+    "ALBUM_COLOR_MULTI_AUTHOR": (r'<dt>Couleurs</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>', "IMD"),
+    "ALBUM_COUVERT_MULTI_AUTHOR": (r'<dt>Couverture</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>', "IMD"),
+    "ALBUM_LETTRAGE_MULTI_AUTHOR": (r'<dt>Lettrage</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>', "IMD"),
+    "ALBUM_INKER_MULTI_AUTHOR": (r'<dt>Encrage</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>', "IMD"),
+    "ALBUM_DEPOT": (r'<dt>D.p.t L.gal</dt>\s+<dd>(?P<month>[\d|-]{0,2})/?(?P<year>[\d]{2,4})?', "IMD"),
+    "ALBUM_ACHEVE": (r'<dt>Achev.*?\s:\s</dt>\s+<dd>(?P<month>[\d|-]{0,2})/?(?P<year>[\d]{2,4})?<', "IMD"),
+    "ALBUM_EDITEUR": (r'<dt>.diteur</dt>\s+<dd>(.*?)</dd>', "IMD"),
+    "ALBUM_COLLECTION": (r'<dt>Collection</dt><dd>(?:<a href.+?>)*([^><]+?)<', "IMD"),
+    "ALBUM_TAILLE": (r'<dt>Format</dt>\s*<dd>(.*?)</dd>', "IMD"),
+    "ALBUM_ISBN": (r'<dt>EAN/ISBN</dt>\s*<dd>(.*?)</dd>', "ID"),
+    "ALBUM_PLANCHES": (r'<dt>Planches</dt>\s*<dd>(.*?)</dd>', "IMD"),
+    "ALBUM_INFOEDITION": (r'<b>Info\s.*?dition</b>\s?(.*?)<', "IMD"),
+    "ALBUM_TOME": (r'<h2 class="bdt-ah-sub">\s*([^<>]+?)<span class="bdt-numa">(.*?)</span>', "ID"),
+    "ALBUM_EDITIONS": (r'<article class="bdt-edition bdt-edition--detail" id="ed-(?P<id>[^"]+)">.+?<h3>.+?'
+                       r'<span class="bdt-numa">(?P<alt>[^\s<]+)*.+?</h3>.+?'
+                       r'<a class="bdt-img bdt-ecov[^"]+"\shref="(?P<couv>[^"]+)".+?<dt>Titre</dt><dd><b>'
+                       r'(?P<titre>[^<]+).+?<dt>Identifiant</dt>(?P<infos>.+?)</article>', "IMD"),
+    "ALBUM_SERIE_ENTETE": (r'bdt-ah-top.+?<h1>.+?>([^"]+?)[<>]', "IMD"),
+    "ALBUM_SERIE_ENCART": (r'<dt>S.rie</dt><dd><a[^>]+?>([^<]+?)</a>', "IMD"),
+    "REVUE_LIST_PATTERN": (r'<a\shref="%s/revue-([^<>"]*?)">.+?'
+                           r'class="bdt-liste-libelle">.*?<b>(.+?)</b>.+?</a>', "ID", True),
+    "REVUE_LIST_EXISTS": (r'<h2>\d{1,3} revue\w?? trouvée\w??</h2>', "ID"),
+    "REVUE_LIST_CHECK": (r'revues\strouvées.{40,80}?La\srecherche\srenvoie\splus\sde', "ID"),
+    "REVUE_HEADER_PATTERN": (r'class="couv"(.{1,100}?couvertures"\shref="(https?.{1,150}?)">.{1,600}?'
+                             r'class="titre".{1,100}?#(%s)\..+?class="autres".+?)</li>', "IMD", True),
+    "REVUE_HEADER_PATTERN_ALT": (r'<a name="%s">.+?class="couv"(.{1,100}?couvertures"\shref="(https?.{1,150}?)">.+?'
+                                 r'class="titre".{1,100}?#(.+?)\..+?class="autres".+?)</li>', "IMD", True),
+    "REVUE_RESUME": (r'<em>Sommaire.*?</em>(.*?)</p', "IMD"),
+    "REVUE_PLANCHES": (r'>Nb\sPages\s:\s??</label>(.*?)<', "IMD"),
+    "REVUE_DEPOT": (r'<label>Parution\s:s??</label>(.*?)</', "IMD"),
+    "REVUE_PERIOD": (r'<label>P.riodicit.\s:\s??</label>(.*?)</', "IMD"),
+    "REVUE_EDITEUR": (r'<label>Editeur\s:\s?</label>(.*?)</', "IMD"),
+    "REVUE_OPTIONS": (r'<option\svalue="(%s/revue-[^>]+?)">(.+?)</option>', "IMD", True),
+    "REVUE_ANCRES": (r'<a name="(.+?)">.+?class="titre".{1,100}?#(.+?)\..+?', "IMD"),
+    "REVUE_TITRE": (r'<h3 class="titre".+?</span>(.+?)</h3>', "IMD"),
+    "IMG_SRC": (r'<img[^>]+?src="([^"]+?)"', "I"),
+    "IMG_TAG": (r'<img\b[^>]*>', "I"),
+    "IMG_ATTR": (r'\b(data-src|data-original|data-lazy-src|src)\s*=\s*"([^"]+)"', "I"),
+    "IMG_PAS_COUV": (r'(?i)/flags/|^data:|\.svg(?:\?|$)|blank\.gif|spacer|pixel\.gif|/static\d*/', "I"),
+    "IMG_CLASSE": (r'\bclass\s*=\s*"([^"]*)"', "I"),
+    "IMG_CLASSE_PAS_COUV": (r'(?i)\b(?:flag|ico|icon|avatar|logo)\b', "I"),
+    "LISTE_INFO": (r'class="bdt-liste-info"[^>]*>(.*?)</span>', "ID"),
+    "LISTE_DRAPEAU": (r'/flags/([A-Za-z_-]+)\.(?:png|gif|jpg|svg)', "I"),
+    "PAGE_OG_IMAGE": (r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', "I"),
+    "PAGE_COUV": (r'<a[^>]+class="bdt-img bdt-ecov[^"]*"[^>]+href="([^"]+)"', "I"),
+    "PAGE_TITRE": (r'<title>(.*?)</title>', "ID"),
+    "PAGE_TITRE_FIN": (r'\s+-\s+BD, informations, cotes.*$', ""),
+    "LIEN_ALBUM_PAGE": (r'href="[^"]*?-(\d+)\.html', "I"),
+    "LIEN_COUV": (r'href="([^"]+?/(?:media/Couvertures|cache/thb_couv)/[^"]+)"', "I"),
+    "INFO_DEPOT": (r'D.p.t\s+l.gal\s*:?\s*(?:<[^>]+>\s*)*((?:\d{1,2}|-)/\d{4}|\d{4})', "I"),
+    "INFO_EDITEUR": (r'.diteur\s*:?\s*(?:<[^>]+>\s*)*([^<>]+?)\s*<', "I"),
+}
+# (motif, options) ou (motif, options, True) pour un gabarit → toujours trois valeurs.
+MOTIFS_INTEGRES = {nom: (v[0], v[1], len(v) > 2 and bool(v[2])) for nom, v in MOTIFS_INTEGRES.items()}
 
-INFOS_ALBUMS = re.compile(r'<dl class="bdt-sheet">.+?</div>', I | D)
-SERIE_LANGUE = re.compile(r'<li[^<>]+?(?<="Langue de parution").+?class="bdt-sh-flag"[^<>]+?>([^<>]+?)<', I)
-SERIE_GENRE = re.compile(r'class="bdt-tag bdt-sh-genre"[^<>]+?>([^<>]+?)<', I | M | D)
-SERIE_RESUME = re.compile(r'class="bdt-sh-resume">([^<>]*?)<', I | M | D)
-SERIE_STATUS = re.compile(r'class="bdt-sh-parution">([^<>]+?)<', I | M | D)
-SERIE_NOTE = re.compile(r'<p\sclass="static">Note:\s<strong>\s(?P<note>[^<]*?)</strong>', I | M | D)
-SERIE_COUNT = re.compile(r'title="Nombre de tomes de la série">(\d+)', I | M | D)
-SERIE_COUNT_REAL = re.compile(r'class="bdt-box-albums-liste">(.+?)</ul>', I | M | D)
-SERIE_COUNTOF = re.compile(r'class="bdt-box-albums-num"[^<>]+?>([^<>]+?)<span', I | M | D)
-SERIE_HEADER2 = re.compile(r'<h3(.+?)</p', I | M | D)
-SERIE_QSERIE = re.compile(r'<h1>.+?<a href="[^<>]+/serie-[^\.]+\.html">([^"<>]+)</a>.*?</h1>', I | M | D)
-SERIE_ALBUMS = re.compile(r'<li[^>]*>\s+?<a href="(?P<url>[^"]+?)" title="(?P<title>[^"]+?)">.+?'
-                          r'class="bdt-box-albums-num"[^<>]+?>(?P<tome>[^<>]*?)<span class="bdt-numa">'
-                          r'(?P<alt>[^<>]*?)<', I | D)
-SERIE_PREMIER = re.compile(r'class="bdt-edition-head">\s*<h3>\s*<a[^<>]+?href="([^"]+?)"', I | D)
+# Album de référence de « Bedetheque Scraper 2 – tester le site » (et sa série) : Blacksad
+# tome 1, album célèbre dont la fiche est complète et stable. Adresses relatives au site
+# (``url_base`` respecté), modifiables dans motifs.json (« reference »).
+REFERENCE_INTEGREE = {
+    "album": "BD-Blacksad-Tome-1-Quelque-part-entre-les-ombres-21.html",
+    "serie": "serie-59-BD-Blacksad.html",
+}
 
-ALBUM_EVAL = re.compile(r'ratingValue">(.*?)<', I | M | D)
-ALBUM_MULTI_AUTHOR_NAMES = re.compile(r'">([^<>]*?)</', I | M | D)
-ALBUM_SCENAR_MULTI_AUTHOR = re.compile(r"<dt>Sc.nario</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>", I | M | D)
-ALBUM_STORYBOARD_MULTI_AUTHOR = re.compile(r"<dt>storyboard</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>", I | M | D)
-ALBUM_DESSIN_MULTI_AUTHOR = re.compile(r"<dt>dessin</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>", I | M | D)
-ALBUM_COLOR_MULTI_AUTHOR = re.compile(r"<dt>Couleurs</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>", I | M | D)
-ALBUM_COUVERT_MULTI_AUTHOR = re.compile(r"<dt>Couverture</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>", I | M | D)
-ALBUM_LETTRAGE_MULTI_AUTHOR = re.compile(r"<dt>Lettrage</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>", I | M | D)
-ALBUM_INKER_MULTI_AUTHOR = re.compile(r"<dt>Encrage</dt>\s*<dd>(.+?)<dt>[^<>]+?</dt>", I | M | D)
-ALBUM_DEPOT = re.compile(r"<dt>D.p.t L.gal</dt>\s+<dd>(?P<month>[\d|-]{0,2})/?(?P<year>[\d]{2,4})?", I | M | D)
-ALBUM_ACHEVE = re.compile(r'<dt>Achev.*?\s:\s</dt>\s+<dd>(?P<month>[\d|-]{0,2})/?(?P<year>[\d]{2,4})?<', I | M | D)
-ALBUM_EDITEUR = re.compile(r'<dt>.diteur</dt>\s+<dd>(.*?)</dd>', I | M | D)
-ALBUM_COLLECTION = re.compile(r"<dt>Collection</dt><dd>(?:<a href.+?>)*([^><]+?)<", I | M | D)
-ALBUM_TAILLE = re.compile(r"<dt>Format</dt>\s*<dd>(.*?)</dd>", I | M | D)
-ALBUM_ISBN = re.compile(r"<dt>EAN/ISBN</dt>\s*<dd>(.*?)</dd>", I | D)
-ALBUM_PLANCHES = re.compile(r"<dt>Planches</dt>\s*<dd>(.*?)</dd>", I | M | D)
-ALBUM_INFOEDITION = re.compile(r"<b>Info\s.*?dition</b>\s?(.*?)<", I | M | D)
-ALBUM_TOME = re.compile(r'<h2 class="bdt-ah-sub">\s*([^<>]+?)<span class="bdt-numa">(.*?)</span>', I | D)
-ALBUM_EDITIONS = re.compile(
-    r'<article class="bdt-edition bdt-edition--detail" id="ed-(?P<id>[^"]+)">.+?<h3>.+?'
-    r'<span class="bdt-numa">(?P<alt>[^\s<]+)*.+?</h3>.+?<a class="bdt-img bdt-ecov[^"]+"\shref="(?P<couv>[^"]+)"'
-    r'.+?<dt>Titre</dt><dd><b>(?P<titre>[^<]+).+?<dt>Identifiant</dt>(?P<infos>.+?)</article>', I | D | M)
-ALBUM_SERIE_ENTETE = re.compile(r'bdt-ah-top.+?<h1>.+?>([^"]+?)[<>]', I | D | M)
-ALBUM_SERIE_ENCART = re.compile(r"<dt>S.rie</dt><dd><a[^>]+?>([^<]+?)</a>", I | D | M)
+# Options des gabarits (compilés à chaque recherche) et motifs en service.
+_OPTIONS_GABARITS = {}
+_MOTIFS_ACTIFS = {}
 
-REVUE_LIST_PATTERN = r'<a\shref="%s/revue-([^<>"]*?)">.+?class="bdt-liste-libelle">.*?<b>(.+?)</b>.+?</a>'
-REVUE_LIST_EXISTS = re.compile(r'<h2>\d{1,3} revue\w?? trouvée\w??</h2>', I | D)
-REVUE_LIST_CHECK = re.compile(r'revues\strouvées.{40,80}?La\srecherche\srenvoie\splus\sde', I | D)
-REVUE_HEADER_PATTERN = (r'class="couv"(.{1,100}?couvertures"\shref="(https?.{1,150}?)">.{1,600}?class="titre"'
-                        r'.{1,100}?#(%s)\..+?class="autres".+?)</li>')
-REVUE_HEADER_PATTERN_ALT = (r'<a name="%s">.+?class="couv"(.{1,100}?couvertures"\shref="(https?.{1,150}?)">.+?'
-                            r'class="titre".{1,100}?#(.+?)\..+?class="autres".+?)</li>')
-REVUE_RESUME = re.compile(r'<em>Sommaire.*?</em>(.*?)</p', I | M | D)
-REVUE_PLANCHES = re.compile(r'>Nb\sPages\s:\s??</label>(.*?)<', I | M | D)
-REVUE_DEPOT = re.compile(r'<label>Parution\s:s??</label>(.*?)</', I | M | D)
-REVUE_PERIOD = re.compile(r'<label>P.riodicit.\s:\s??</label>(.*?)</', I | M | D)
-REVUE_EDITEUR = re.compile(r'<label>Editeur\s:\s?</label>(.*?)</', I | M | D)
 
-IMG_SRC = re.compile(r'<img[^>]+?src="([^"]+?)"', I)
-# Ajouts du portage (vignettes des fenêtres de choix) : balises <img> (adresse dans src ou,
-# images chargées au défilement, data-src / data-original / data-lazy-src), drapeaux et
-# icônes écartés ; infos d'un résultat de recherche ; couverture d'une page de série.
-IMG_TAG = re.compile(r'<img\b[^>]*>', I)
-IMG_ATTR = re.compile(r'\b(data-src|data-original|data-lazy-src|src)\s*=\s*"([^"]+)"', I)
-IMG_PAS_COUV = re.compile(r'(?i)/flags/|^data:|\.svg(?:\?|$)|blank\.gif|spacer|pixel\.gif|/static\d*/')
-IMG_CLASSE = re.compile(r'\bclass\s*=\s*"([^"]*)"', I)
-IMG_CLASSE_PAS_COUV = re.compile(r'(?i)\b(?:flag|ico|icon|avatar|logo)\b')
-LISTE_INFO = re.compile(r'class="bdt-liste-info"[^>]*>(.*?)</span>', I | D)
-LISTE_DRAPEAU = re.compile(r'/flags/([A-Za-z_-]+)\.(?:png|gif|jpg|svg)', I)
-PAGE_OG_IMAGE = re.compile(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', I)
-PAGE_COUV = re.compile(r'<a[^>]+class="bdt-img bdt-ecov[^"]*"[^>]+href="([^"]+)"', I)
-# Infos des albums d'une page de série (fenêtre de choix de l'album) : liens des albums
-# (numéro en fin d'adresse), liens vers une couverture, dépôt légal et éditeur, dans les
-# deux mises en page connues du site (« <dt>Dépot légal</dt><dd>11/2000 » et
-# « <label>Dépot légal :</label>11/2000 »).
-LIEN_ALBUM_PAGE = re.compile(r'href="[^"]*?-(\d+)\.html', I)
-LIEN_COUV = re.compile(r'href="([^"]+?/(?:media/Couvertures|cache/thb_couv)/[^"]+)"', I)
-INFO_DEPOT = re.compile(r'D.p.t\s+l.gal\s*:?\s*(?:<[^>]+>\s*)*((?:\d{1,2}|-)/\d{4}|\d{4})', I)
-INFO_EDITEUR = re.compile(r'.diteur\s*:?\s*(?:<[^>]+>\s*)*([^<>]+?)\s*<', I)
+def _options(texte):
+    fl = 0
+    for c in str(texte or "").upper():
+        if c not in _OPTIONS:
+            raise ValueError("option inconnue « %s » (I, M ou D)" % c)
+        fl |= _OPTIONS[c]
+    return fl
+
+
+def _compiler(nom, motif, options, gabarit_=False):
+    """Expression compilée (gabarit : complété par des « x » pour la vérification) ; lève
+    ``re.error`` / ``ValueError`` / ``TypeError`` si le motif est invalide ou ne convient pas
+    à son usage (groupes attendus par le script, nombre de « %s » d'un gabarit)."""
+    ref_motif, _, ref_gab = MOTIFS_INTEGRES[nom]
+    if bool(gabarit_) != bool(ref_gab):
+        raise ValueError("« gabarit » doit valoir %s" % ("true" if ref_gab else "false"))
+    if not isinstance(motif, str) or not motif:
+        raise ValueError("motif vide")
+    fl = _options(options)
+    if ref_gab:
+        n = ref_motif.count("%s")
+        if motif.count("%s") != n:
+            raise ValueError("le gabarit doit contenir %d « %%s »" % n)
+        rx = re.compile(motif % (("x",) * n), fl)
+        ref = re.compile(ref_motif % (("x",) * n), _options(MOTIFS_INTEGRES[nom][1]))
+    else:
+        rx = re.compile(motif, fl)
+        ref = re.compile(ref_motif, _options(MOTIFS_INTEGRES[nom][1]))
+    if rx.groups < ref.groups or not set(ref.groupindex) <= set(rx.groupindex):
+        raise ValueError("groupes attendus : %d%s" % (ref.groups, "".join(" (?P<%s>…)" % g for g in ref.groupindex)))
+    return rx
+
+
+def _appliquer_motifs(motifs):
+    """Variables du module (SERIE_GENRE…) d'après ``motifs`` (nom → (motif, options,
+    gabarit)), déjà vérifiés."""
+    for nom, (motif, options, gab) in motifs.items():
+        if gab:
+            globals()[nom] = motif
+            _OPTIONS_GABARITS[nom] = _options(options)
+        else:
+            globals()[nom] = re.compile(motif, _options(options))
+    _MOTIFS_ACTIFS.clear()
+    _MOTIFS_ACTIFS.update(motifs)
+
+
+def gabarit(nom, *valeurs):
+    """Gabarit ``nom`` complété par ``valeurs`` (déjà échappées), compilé avec ses options."""
+    return re.compile(globals()[nom] % valeurs, _OPTIONS_GABARITS[nom])
+
+
+_appliquer_motifs(MOTIFS_INTEGRES)
+
+
+def lire_fichier_motifs(chemin):
+    """Contenu d'un fichier motifs.json : ``(données, None)`` ou ``(None, raison)`` (absent,
+    illisible, pas un objet JSON, version incompatible)."""
+    try:
+        with open(chemin, encoding="utf-8-sig") as fic:
+            data = json.load(fic)
+    except FileNotFoundError:
+        return None, "absent"
+    except (OSError, ValueError) as e:
+        return None, "illisible (%s)" % e
+    if not isinstance(data, dict) or not isinstance(data.get("motifs", {}), dict):
+        return None, "structure inattendue (objet avec « version » et « motifs » attendu)"
+    version = str(data.get("version", ""))
+    majeur = version.split(".")[0].strip()
+    if not majeur.isdigit() or int(majeur) != FORMAT_MOTIFS:
+        return None, "version « %s » incompatible (%d.x attendue)" % (version, FORMAT_MOTIFS)
+    return data, None
+
+
+def fichier_motifs_utilisateur():
+    """``data\\bedetheque\\motifs.json`` à côté de ComicRust.exe (surcharge de l'utilisateur)."""
+    return os.path.join(dossier_donnees(), "motifs.json")
+
+
+def charger_motifs(avertir=None):
+    """Motifs en service : intégrés, puis bd2/motifs.json, puis le fichier de l'utilisateur
+    (prioritaire). Renvoie les informations montrées par le test du site : version, date,
+    commentaire, sources, album de référence, avertissements. ``avertir(texte)`` reçoit
+    chaque avertissement (journal)."""
+    actifs = dict(MOTIFS_INTEGRES)
+    info = {"version": VERSION_MOTIFS_INTEGRES, "date": "", "commentaire": "",
+            "sources": [_t("motifs intégrés au script", "patterns built into the script")],
+            "reference": dict(REFERENCE_INTEGREE), "avertissements": [], "corriges": []}
+
+    def avertissement(texte):
+        info["avertissements"].append(texte)
+        if avertir:
+            avertir(texte)
+
+    fichiers = [(FICHIER_MOTIFS, "bd2/motifs.json")]
+    try:
+        utilisateur = fichier_motifs_utilisateur()
+    except Exception:  # module comicrust sans __file__ (essais) : pas de surcharge
+        utilisateur = None
+    if utilisateur:
+        fichiers.append((utilisateur, utilisateur))
+    for i, (chemin, libelle) in enumerate(fichiers):
+        data, raison = lire_fichier_motifs(chemin)
+        if data is None:
+            # Fichier de l'utilisateur absent : cas normal, rien à signaler.
+            if not (i > 0 and raison == "absent"):
+                avertissement("Motifs : %s %s, ignoré (motifs %s gardés)."
+                              % (libelle, raison, "intégrés" if i == 0 else "précédents"))
+            continue
+        for nom, valeur in (data.get("motifs") or {}).items():
+            if nom not in MOTIFS_INTEGRES:
+                avertissement("Motifs : %s, motif inconnu « %s » ignoré." % (libelle, nom))
+                continue
+            try:
+                if not isinstance(valeur, dict):
+                    raise ValueError("objet {\"motif\": …, \"options\": …} attendu")
+                motif, options, gab = valeur.get("motif"), valeur.get("options", ""), bool(valeur.get("gabarit"))
+                _compiler(nom, motif, options, gab)
+            except (re.error, ValueError, TypeError) as e:
+                avertissement("Motifs : %s, motif « %s » invalide (%s) : valeur de secours gardée." % (libelle, nom, e))
+                continue
+            if (motif, options, gab) != actifs[nom]:
+                info["corriges"].append(nom)
+            actifs[nom] = (motif, options, gab)
+        ref = data.get("reference")
+        if isinstance(ref, dict):
+            for cle in ("album", "serie"):
+                if isinstance(ref.get(cle), str) and ref[cle].strip():
+                    info["reference"][cle] = ref[cle].strip()
+        info["version"] = str(data.get("version", ""))
+        info["date"] = str(data.get("date", ""))
+        info["commentaire"] = str(data.get("commentaire", ""))
+        info["sources"].append(libelle)
+    _appliquer_motifs(actifs)
+    return info
 
 # Langue de parution (2 premières lettres du libellé) → code ISO. L'original avait « du »
 # pour le néerlandais : ComicRust n'accepte que les codes ISO, d'où « nl ».
@@ -525,6 +704,38 @@ def debuglogOnError():
     S.journaux.ecrire(S.journaux.debug, "\n\n" + _maintenant() + "\n" + traceback.format_exc())
     comicrust.log("Erreur : " + cError, level="warning")
     return cError
+
+
+def _version_motifs():
+    m = S.motifs or {}
+    return "%s%s" % (m.get("version", VERSION_MOTIFS_INTEGRES), " du " + m["date"] if m.get("date") else "")
+
+
+def signaler_structure(sorte, url, manquants):
+    """Page lue mais aucun des éléments essentiels trouvé (``sorte`` : « album », « série »,
+    « recherche ») : le site a sans doute changé. Détail (adresse, éléments manquants,
+    version des motifs) au journal de débogage à chaque fois ; message à l'utilisateur une
+    seule fois par exécution. Rien d'autre n'est fait : seuls les champs trouvés sont
+    appliqués, comme avant."""
+    liste = ", ".join(manquants)
+    essai = ("[" + S.dlgName + "] " + S.dlgNumber).strip() if S.dlgName else ""
+    debuglog("STRUCTURE : page %s sans éléments essentiels — %s — non trouvés : %s — motifs %s%s"
+             % (sorte, url, liste, _version_motifs(), " — album essayé : " + essai if essai else ""))
+    comicrust.log("Bedetheque : page %s inattendue (%s non trouvés) : %s" % (sorte, liste, url), level="warning")
+    if S.alerte_structure:
+        return
+    S.alerte_structure = True
+    texte = _t("La page de Bedetheque semble avoir changé de structure (%s : %s non trouvés) : la recherche peut "
+               "être incomplète. Signale-le avec l'album essayé.",
+               "The Bedetheque page seems to have changed its structure (%s: %s not found): the search may be "
+               "incomplete. Please report it with the album you tried.") % (sorte, liste)
+    if essai:
+        texte += "\n" + _t("Album essayé : ", "Album tried: ") + essai
+    texte += "\n" + _t("Adresse : ", "Address: ") + url
+    texte += "\n" + _t("Détails dans le journal de débogage (BD2_Debug_Log.txt) ; « Bedetheque Scraper 2 – tester le "
+                       "site » vérifie chaque champ.", "Details in the debug log (BD2_Debug_Log.txt); « Bedetheque "
+                       "Scraper 2 – tester le site » checks every field.")
+    comicrust.message(texte)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1366,7 +1577,7 @@ def SetSerieId(f, serie, num, nBooksIn):
             if stop():
                 return ""
             if request:
-                nameRegex = re.compile(SERIE_URL_PATTERN % checkRegExp(serie.strip()), I | D).search(request)
+                nameRegex = gabarit("SERIE_URL_PATTERN", checkRegExp(serie.strip())).search(request)
                 if nameRegex:
                     serieUrl = nameRegex.group(1)
                     if ".html" not in serieUrl:
@@ -1395,16 +1606,18 @@ def SetSerieId(f, serie, num, nBooksIn):
             return ""
 
         i = 1
-        for m in re.finditer(SERIE_LIST_PATTERN % re.escape(S.base), request, I | D):
+        for m in gabarit("SERIE_LIST_PATTERN", re.escape(S.base)).finditer(request):
             ListSeries.append(["serie-" + m.group(1), checkWebChar(strip_tags(m.group(2))), str(i).zfill(3),
                                _img(m.group(0)), _infos_resultat(m.group(0))])
             i += 1
         if REVUE_LIST_EXISTS.search(request):
-            for m in re.finditer(REVUE_LIST_PATTERN % re.escape(S.base), request, I | D):
+            for m in gabarit("REVUE_LIST_PATTERN", re.escape(S.base)).finditer(request):
                 ListSeries.append(["revue-" + m.group(1), checkWebChar(strip_tags(m.group(2))), str(i).zfill(3),
                                    _img(m.group(0)), _infos_resultat(m.group(0)) or "Revue"])
                 i += 1
         ListSeries.sort(key=lambda x: x[2])
+        if request and not ListSeries and not RECHERCHE_AUCUN.search(request):
+            signaler_structure(_t("recherche", "search"), GetFullURL(urlN), [_t("résultats", "results")])
 
         def journal_choix(nom, lien):
             debuglog(Trans(24) + checkWebChar(serie) + "]")
@@ -1598,6 +1811,9 @@ def parseSerieInfo(f, serieUrl, lDirect):
 
     if not request:
         return ""
+    albums = list(SERIE_ALBUMS.finditer(request))
+    if not albums and not SERIE_PREMIER.search(request) and not ALBUM_EDITIONS.search(request):
+        signaler_structure(_t("série", "series"), GetFullURL(serieUrl), [_t("liste des albums", "album list")])
     Entete = request
     if S.RenameSeries and C("CBSeries"):
         f.Series = titlize(S.RenameSeries)
@@ -1625,7 +1841,7 @@ def parseSerieInfo(f, serieUrl, lDirect):
     if C("CBSynopsys"):
         nameRegex = SERIE_RESUME.search(checkWebChar(Entete.replace("\r\n", "")), 0)
         resume = strip_tags(nameRegex.group(1)).strip() if nameRegex else ""
-        resume = re.sub(r"Tout sur la série.*?:\s?", "", resume, count=2)
+        resume = SERIE_RESUME_INTRO.sub("", resume, count=2)
         S.Serie_Resume = checkWebChar(resume).strip()
         debuglog(if_else(resume, Trans(52), Trans(53)))
 
@@ -1699,7 +1915,6 @@ def parseSerieInfo(f, serieUrl, lDirect):
             debuglog(Trans(59) + if_else(numero == "one shot", "1", cCountText))
 
     ListAlbum, ListAlbumAll = [], []
-    albums = list(SERIE_ALBUMS.finditer(request))
     infos = _infos_albums(request, [r.group("url") for r in albums])
     for i, r in enumerate(albums):
         n, a, url, title = r.group("tome"), r.group("alt"), r.group("url"), r.group("title")
@@ -1754,10 +1969,9 @@ def AlbumChooser(ListAlbum):
 
 def _revue(f, serieUrl, lDirect, request):
     ListAlbum = []
-    options = re.findall(r'<option\svalue="(%s/revue-[^>]+?)">(.+?)</option>' % re.escape(S.base), request, I | D | M)
+    options = gabarit("REVUE_OPTIONS", re.escape(S.base)).findall(request)
     if not options:
-        for i, revueNum in enumerate(re.findall(r'<a name="(.+?)">.+?class="titre".{1,100}?#(.+?)\..+?', request,
-                                                I | D | M), 1):
+        for i, revueNum in enumerate(REVUE_ANCRES.findall(request), 1):
             full_url = (serieUrl if _sur_le_site(serieUrl) else S.base + "/" + serieUrl) + "#" + revueNum[0]
             ListAlbum.append([full_url, "Num: " + revueNum[1].strip(), str(i).zfill(5)])
     else:
@@ -1776,10 +1990,10 @@ def _revue(f, serieUrl, lDirect, request):
     request = _read_url(albumURL, False)
     ID = albumURL.split("#")[1] if "#" in albumURL else ""
     if ID:
-        motif = REVUE_HEADER_PATTERN_ALT % re.escape(ID)
+        motif = gabarit("REVUE_HEADER_PATTERN_ALT", re.escape(ID))
     else:
-        motif = REVUE_HEADER_PATTERN % re.escape(str(S.dlgNumber))
-    SerieInfoRegex = re.compile(motif, I | M | D).search(request)
+        motif = gabarit("REVUE_HEADER_PATTERN", re.escape(str(S.dlgNumber)))
+    SerieInfoRegex = motif.search(request)
     if SerieInfoRegex:
         return parseRevueInfo(f, SerieInfoRegex, albumURL)
     return ""
@@ -1798,7 +2012,7 @@ def parseRevueInfo(f, SerieInfoRegex, serieUrl):
             f.Number = Numero
             debuglog(Trans(115), f.Number)
         if C("CBTitle"):
-            nameRegex = re.search(r'<h3 class="titre".+?</span>(.+?)</h3>', Entete, I | D | M)
+            nameRegex = REVUE_TITRE.search(Entete)
             if nameRegex:
                 f.Title = titlize(checkWebChar(nameRegex.group(1).strip()))
             debuglog(Trans(29), f.Title)
@@ -1978,6 +2192,18 @@ def parseAlbumInfo(f, pageUrl, num, lDirect=False):
                 pickedVar = ListAlbum[0][1]
                 debuglog("---> Choix du 1er item")
 
+        # Éléments essentiels de la page (titre, auteurs, éditeur) : aucun trouvé → le site a
+        # sans doute changé (sauf page d'une série lue faute de liste d'albums).
+        if "/serie-" not in pageUrl.lower():
+            infos_ed = " ".join(e[1].Info for e in ListAlbum)
+            essentiels = [
+                (_t("titre", "title"), any(e[1].Title for e in ListAlbum)),
+                (_t("auteurs", "authors"), any(rx.search(infos_ed) for rx in (
+                    ALBUM_SCENAR_MULTI_AUTHOR, ALBUM_STORYBOARD_MULTI_AUTHOR, ALBUM_DESSIN_MULTI_AUTHOR))),
+                (_t("éditeur", "publisher"), bool(ALBUM_EDITEUR.search(infos_ed))),
+            ]
+            if not any(ok for _, ok in essentiels):
+                signaler_structure("album", GetFullURL(pageUrl), [nom for nom, _ in essentiels])
         if pickedVar is None:
             log_BD("   " + pageUrl + " " + Trans(43), "", 1)
             debuglog("Aucune édition reconnue dans la page")
@@ -2212,6 +2438,8 @@ def _initialiser():
     S.__init__()
     if not LoadSetting():
         return False
+    S.motifs = charger_motifs(lambda t: (debuglog(t), comicrust.log(t, level="warning")))
+    debuglog("Motifs : version %s (%s)" % (_version_motifs(), " + ".join(S.motifs["sources"])))
     S.web = Web(S.base, C("use_cloudscraper"))
     # Toujours à côté de ComicRust.exe, même si les journaux sont ailleurs (réglage
     # ``dossier_journaux``, par exemple sur un partage).
@@ -2441,9 +2669,9 @@ def _apercu_lien(lien):
     if not page:
         return None, None, _t("Page introuvable ou illisible (détails dans le journal de débogage).",
                               "Page not found or unreadable (details in the debug log).")
-    m = re.search(r"<title>(.*?)</title>", page, I | D)
+    m = PAGE_TITRE.search(page)
     titre = checkWebChar(strip_tags(m.group(1))).strip() if m else ""
-    titre = re.sub(r"\s+-\s+BD, informations, cotes.*$", "", titre).strip()
+    titre = PAGE_TITRE_FIN.sub("", titre).strip()
     couv = None
     if sorte != "revue":
         img = _couverture_page_serie(page) if sorte == "serie" else _couverture_page_album(page)
@@ -2826,3 +3054,198 @@ def ConfigureBD2Quick():
 #@Description ComicRack) ; ne modifie aucun livre.
 def ConfigureBD2(books):
     return _configurer()
+
+
+# ---------------------------------------------------------------------------------------
+# Test du site (« Bedetheque Scraper 2 – tester le site »)
+# ---------------------------------------------------------------------------------------
+
+def _court(v, n=70):
+    v = " ".join(str(v).split())
+    return v if len(v) <= n else v[:n - 1] + "…"
+
+
+def _champs_album(page, url):
+    """Champs de la page d'album de référence : liste de (libellé, valeur ou '')."""
+    editions = list(ALBUM_EDITIONS.finditer(page))
+    e = editions[0] if editions else None
+    info = e.group("infos") if e else ""
+    tome = ALBUM_TOME.search(page)
+    numero = ((tome.group(1) or "").strip() or checkWebChar((tome.group(2) or "").strip())) if tome else ""
+    entete = ALBUM_SERIE_ENTETE.search(page)
+    editeur = ALBUM_EDITEUR.search(info)
+    depot = _mois_annee(ALBUM_DEPOT.search(info))
+    taille = ALBUM_TAILLE.search(info)
+    isbn = ALBUM_ISBN.search(info)
+    note = ALBUM_EVAL.search(page)
+    return [
+        (_t("Titre", "Title"), checkWebChar(e.group("titre").strip()) if e else ""),
+        (_t("Série", "Series"), checkWebChar(entete.group(1).strip()) if entete else ""),
+        (_t("Numéro", "Number"), numero),
+        (_t("Scénariste", "Writer"),
+         getGenericBookArtists([ALBUM_SCENAR_MULTI_AUTHOR, ALBUM_STORYBOARD_MULTI_AUTHOR], info, "Test")),
+        (_t("Dessinateur", "Penciller"), getGenericBookArtists([ALBUM_DESSIN_MULTI_AUTHOR], info, "Test")),
+        (_t("Coloriste", "Colorist"), getGenericBookArtists([ALBUM_COLOR_MULTI_AUTHOR], info, "Test")),
+        (_t("Éditeur", "Publisher"), parseName(strip_tags(editeur.group(1))) if editeur else ""),
+        (_t("Dépôt légal", "Legal deposit"),
+         ("%02d/%d" % depot if depot[0] > 0 else str(depot[1])) if depot[1] > 0 else ""),
+        (_t("Format", "Format"), checkWebChar(strip_tags(taille.group(1))).strip() if taille else ""),
+        ("ISBN", checkWebChar(strip_tags(isbn.group(1))).strip() if isbn else ""),
+        (_t("Évaluation", "Rating"), note.group(1).strip() if note else ""),
+        (_t("Couverture", "Cover"), e.group("couv").strip() if e else ""),
+    ]
+
+
+def _champs_serie(page):
+    """Champs de la page de la série de référence."""
+    nom = SERIE_QSERIE.search(page)
+    genre = SERIE_GENRE.search(page)
+    parution = SERIE_STATUS.search(page)
+    langue = SERIE_LANGUE.search(page)
+    resume = SERIE_RESUME.search(checkWebChar(page.replace("\r\n", "")))
+    albums = list(SERIE_ALBUMS.finditer(page))
+    nombre = 0
+    liste = SERIE_COUNT_REAL.search(page)
+    for numof in SERIE_COUNTOF.finditer(liste.group(1) if liste else ""):
+        v = numof.group(1).strip()
+        if isnumeric(v):
+            nombre = max(nombre, int(float(v)))
+    return [
+        (_t("Nom de la série", "Series name"), checkWebChar(nom.group(1).strip()) if nom else ""),
+        (_t("Genre", "Genre"), checkWebChar(genre.group(1).strip()) if genre else ""),
+        (_t("Parution", "Status"), checkWebChar(parution.group(1).strip()) if parution else ""),
+        (_t("Langue", "Language"), langue.group(1).strip() if langue else ""),
+        (_t("Résumé de la série", "Series summary"), strip_tags(resume.group(1)).strip() if resume else ""),
+        (_t("Liste des albums", "Album list"),
+         _t("%d albums (1er : %s)", "%d albums (1st: %s)") % (len(albums), checkWebChar(albums[0].group("title")))
+         if albums else ""),
+        (_t("Nombre d'albums", "Album count"), str(nombre) if nombre else ""),
+    ]
+
+
+def _pause_test(pause):
+    """Pause entre deux pages du test : celle du script entre deux albums (TIMEOUTS)."""
+    if pause <= 0:
+        return
+    comicrust.progress(None, Trans(140).replace("%%", str(pause)))
+    for _ in range(20 * pause):
+        time.sleep(0.05)
+        if stop():
+            break
+
+
+def tester_site():
+    """Lit l'album de référence (motifs.json, « reference »), son résumé et sa série ;
+    renvoie ``(rapport, conclusion, manquants, illisibles)``."""
+    try:
+        pause = max(0, int(float(C("TIMEOUTS"))))
+    except ValueError:
+        pause = 7
+    ref = S.motifs["reference"]
+    ok, ko = "✔", "✖"
+    lignes = [
+        _t("Test du site Bedetheque — ", "Bedetheque site test — ") + _maintenant(),
+        _t("Site : ", "Site: ") + S.base,
+        _t("Motifs : version ", "Patterns: version ") + _version_motifs() + " (" + " + ".join(S.motifs["sources"]) + ")",
+    ]
+    if S.motifs.get("corriges"):
+        lignes.append(_t("Motifs corrigés par les fichiers : ", "Patterns changed by the files: ")
+                      + ", ".join(S.motifs["corriges"]))
+    for a in S.motifs.get("avertissements") or []:
+        lignes.append("! " + a)
+    manquants, illisibles = [], []
+
+    def section(titre, url, champs, erreur):
+        lignes.append("")
+        lignes.append(titre + " : " + url)
+        if erreur:
+            lignes.append("  " + ko + " " + _t("page non lue : ", "page not read: ") + erreur)
+            illisibles.append(url)
+        for libelle, valeur in champs:
+            if valeur:
+                lignes.append("  %s %s : %s" % (ok, libelle, _court(valeur)))
+            else:
+                lignes.append("  %s %s : %s" % (ko, libelle, _t("non trouvé", "not found")))
+                manquants.append(libelle)
+
+    def lire(url):
+        page = _read_url(url, True, silencieux=True)
+        return page, (None if page else _t("introuvable ou illisible (détails dans le journal de débogage)",
+                                           "not found or unreadable (details in the debug log)"))
+
+    # Album, puis son résumé (comme pendant la recherche, sans pause entre les deux).
+    url_album = GetFullURL(ref["album"])
+    comicrust.progress(0.1, _t("Lecture de l'album de référence…", "Reading the reference album…"), detail=url_album)
+    page, erreur = lire(url_album)
+    champs = _champs_album(page, url_album) if page else [(n, "") for n, _ in _champs_album("", url_album)]
+    resume = ""
+    m = re.search(r"-(\d+)\.html", url_album)
+    if page and m and not stop():
+        resume = strip_tags(checkWebChar(_read_url("ajax/resume/album/" + m.group(1), False, silencieux=True))).strip()
+    champs.insert(-1, (_t("Résumé de l'album", "Album summary"), resume))
+    section(_t("Album de référence", "Reference album"), url_album, champs, erreur)
+
+    # Série : après la pause du script entre deux albums.
+    url_serie = GetFullURL(ref["serie"])
+    if "__10000.html" not in url_serie:
+        url_serie = url_serie.lower().replace(".html", "__10000.html")
+    if not stop():
+        _pause_test(pause)
+    if not stop():
+        comicrust.progress(0.6, _t("Lecture de la série…", "Reading the series…"), detail=url_serie)
+        page, erreur = lire(url_serie)
+    else:
+        page, erreur = "", _t("arrêté", "stopped")
+    section(_t("Série", "Series"), url_serie, _champs_serie(page) if page else
+            [(n, "") for n, _ in _champs_serie("")], erreur)
+
+    lignes.append("")
+    if illisibles:
+        conclusion = _t("Le site n'a pas pu être lu (%d page(s)) : vérifie la connexion et l'adresse du site, puis "
+                        "relance le test.", "The site could not be read (%d page(s)): check the connection and the "
+                        "site address, then run the test again.") % len(illisibles)
+    elif not manquants:
+        conclusion = _t("Tout est trouvé : les motifs sont à jour.", "Everything was found: the patterns are up to date.")
+    else:
+        conclusion = _t("%d champ(s) ne sont plus trouvés : le site a changé. Signale-le avec ce rapport (ou corrige "
+                        "data\\bedetheque\\motifs.json, voir scripts.md).",
+                        "%d field(s) are no longer found: the site has changed. Report it with this report (or fix "
+                        "data\\bedetheque\\motifs.json, see scripts.md).") % len(manquants)
+    lignes.append(_t("Conclusion : ", "Conclusion: ") + conclusion)
+    debuglog("Test du site :\n" + "\n".join(lignes))
+    return "\n".join(lignes), conclusion, manquants, illisibles
+
+
+#@Name Bedetheque Scraper 2 – tester le site
+#@Hook Library
+#@Key TesterBD2
+#@Image bd2/bd2.png
+#@Description Lit un album de référence (Blacksad tome 1, modifiable dans motifs.json) et sa série sur
+#@Description www.bedetheque.com et vérifie que chaque champ est encore trouvé : rapport ✔/✖ à copier
+#@Description pour signaler un changement du site. Ne modifie aucun livre.
+def TesterBD2(books):
+    if not _initialiser():
+        return None
+    try:
+        rapport, conclusion, manquants, illisibles = tester_site()
+    finally:
+        comicrust.progress(1.0, Trans(16))
+        flush_debuglog()
+    if stop():
+        return None
+    copier = _t("Copier le rapport", "Copy the report")
+    fermer = _t("Fermer", "Close")
+    message = None
+    while True:
+        r = comicrust.form(_t("Tester Bedetheque", "Test Bedetheque"), [
+            ui.label(conclusion),
+            ui.textarea("rapport", "", rapport, rows=24),
+        ], buttons=(copier, fermer), cancel=fermer, message=message, width=780)
+        if r is None or r[0] != copier:
+            break
+        if comicrust.clipboard_set(rapport):
+            message = _t("Rapport copié dans le presse-papiers.", "Report copied to the clipboard.")
+        else:
+            message = _t("Copie impossible : sélectionnez le texte du rapport.", "Copy failed: select the report text.")
+    return {"trouves": not manquants and not illisibles, "manquants": manquants, "pages_non_lues": len(illisibles),
+            "motifs": S.motifs["version"]}
