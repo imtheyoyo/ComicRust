@@ -47,7 +47,7 @@ Améliorations demandées à la recette de la v0.10.1.
 - Plus de seconde fiche pour un fichier vu deux fois pendant une analyse.
 
 ### Recette
-[recette/v0.10.2.md](recette/v0.10.2.md).
+[recette/v0.10.2.md](recette/v0.10.2.md) — GO (19/19 OK).
 
 ## [v0.10.1] — 2026-10-31
 

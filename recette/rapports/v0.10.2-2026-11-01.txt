@@ -1,0 +1,8 @@
+Rapport de recette ComicRust v0.10.2 — 01/11/2026 08:22
+Résultat : 19 OK, 0 échec(s), 0 non testé(s) sur 19.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+Demandes : Bedetheque Scraper 2 et QuickScrape BD2 : enlever le choix automatique dans la fenêtre qui s'ouvre au lancement du script. Un thème modernisé (egui). v0.11.0 (OPDS) sur une autre branche, après GO.
