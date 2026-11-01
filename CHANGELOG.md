@@ -5,6 +5,27 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.4] — 2026-11-01
+
+Bedetheque Scraper 2 face aux changements du site.
+
+### Nouveautés
+- **Alerte quand le site change.** Une page d'album, de série ou de recherche lue sans ses
+  éléments essentiels déclenche un message unique (« La page de Bedetheque semble avoir changé
+  de structure… »). Le détail va dans le journal de débogage. Seuls les champs trouvés sont
+  proposés.
+- **Motifs dans un fichier à part.** Les 69 expressions qui lisent les pages sont dans
+  `scripts\exemples\bd2\motifs.json`. Pour une correction, `data\bedetheque\motifs.json`
+  remplace seulement les motifs voulus et n'est jamais écrasé par une mise à jour. Un motif
+  invalide reprend la valeur intégrée au script.
+- **📜 Scripts → « Bedetheque Scraper 2 – tester le site »** :
+  - lit un album de référence (Blacksad tome 1, modifiable dans `motifs.json`) et sa série ;
+  - affiche ✔/✖ pour 20 champs, avec une conclusion ;
+  - bouton « Copier le rapport ».
+
+### Recette
+[recette/v0.10.4.md](recette/v0.10.4.md).
+
 ## [v0.10.3] — 2026-11-01
 
 Demandes de la recette de la v0.10.2.
@@ -27,7 +48,7 @@ Demandes de la recette de la v0.10.2.
   un `App.Config` importé garde sa valeur pour ComicRack.
 
 ### Recette
-[recette/v0.10.3.md](recette/v0.10.3.md).
+[recette/v0.10.3.md](recette/v0.10.3.md) — GO (11/11 OK).
 
 ## [v0.10.2] — 2026-11-01
 

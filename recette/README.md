@@ -24,7 +24,8 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.10.0 | [v0.10.0.md](v0.10.0.md) — [page à cocher](https://claude.ai/artifact/7oo6BZvTNycrqMRAUn8pqn) — [rapport](rapports/v0.10.0-2026-10-26.txt) | **GO** (26/10/2026) : 18/18 OK ; demandes (fiches, flèches, Bedetheque, Library Organizer) → v0.10.1 |
 | v0.10.1 | [v0.10.1.md](v0.10.1.md) — [page à cocher](https://claude.ai/artifact/CX98twhVA1kFTk4H7Eurps) — [rapport](rapports/v0.10.1-2026-10-31.txt) | **GO** (31/10/2026) : 23/23 OK ; demandes → v0.10.2 |
 | v0.10.2 | [v0.10.2.md](v0.10.2.md) — [page à cocher](https://claude.ai/artifact/SgrPgxRRXBEJs57LSGNGQi) — [rapport](rapports/v0.10.2-2026-11-01.txt) | **GO** (01/11/2026) : 19/19 OK |
-| v0.10.3 | [v0.10.3.md](v0.10.3.md) — [page à cocher](https://claude.ai/artifact/KRJvFA8kWwzzF8FVbPvF31) | en recette |
+| v0.10.3 | [v0.10.3.md](v0.10.3.md) — [page à cocher](https://claude.ai/artifact/KRJvFA8kWwzzF8FVbPvF31) — [rapport](rapports/v0.10.3-2026-11-01.txt) | **GO** (01/11/2026) : 11/11 OK |
+| v0.10.4 | [v0.10.4.md](v0.10.4.md) | en recette |
 
 ## Déroulé
 
