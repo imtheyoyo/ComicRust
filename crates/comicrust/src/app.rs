@@ -257,7 +257,9 @@ impl ComicRustApp {
         self.script_book_event(comicrust_core::scripting::Hook::BookOpened, &path);
         self.mode = Mode::Reader;
         let max_side = ctx.input(|i| i.max_texture_side).min(16384) as u32;
-        let loader = BookLoader::open(path.clone(), ctx.clone(), max_side);
+        // Ordre de lecture : pages de la fiche de la bibliothèque, sinon du fichier.
+        let order = crate::book::loader::Order::Reading(self.library_pages(&path));
+        let loader = BookLoader::open(path.clone(), ctx.clone(), max_side, order);
         self.settings.push_recent(path.clone());
         if let Some(list) = &mut self.list {
             list.current = list.position_of(&path);
@@ -474,15 +476,34 @@ impl ComicRustApp {
         }
     }
 
+    /// Liste des pages de la fiche du fichier `path` dans la bibliothèque (ordre, types,
+    /// rotation), s'il y en a une.
+    pub(crate) fn library_pages(&self, path: &Path) -> Option<Vec<comicrust_core::library::PageInfo>> {
+        let db = self.library.database()?;
+        let p = path.to_string_lossy();
+        let book = db.books.iter().find(|x| {
+            x.file.as_deref().is_some_and(|f| {
+                f.eq_ignore_ascii_case(&p) || self.settings.effective_path(Path::new(f)).as_path() == path
+            })
+        })?;
+        Some(book.pages.page.clone())
+    }
+
+    /// Page courante et page la plus loin atteinte (en double page, la seconde compte), en
+    /// numéros de page du livre (ComicRack : pages supprimées comprises).
+    pub(crate) fn reading_numbers(&self, b: &Book) -> (usize, usize) {
+        let shown = self.spread(b, b.current).into_iter().max().unwrap_or(b.current);
+        (b.number(b.current), b.number(shown))
+    }
+
     pub(crate) fn remember_position(&mut self) {
         if let Some(b) = &self.book {
             if b.opened {
-                self.settings.last_pages.insert(b.path.clone(), b.current);
-                // Page la plus loin atteinte (en double page, la seconde page compte).
-                let shown = self.spread(b, b.current).into_iter().max().unwrap_or(b.current);
+                let (current, shown) = self.reading_numbers(b);
+                self.settings.last_pages.insert(b.path.clone(), current);
                 let p = self.settings.read_progress.entry(b.path.clone()).or_default();
                 p.max_page = p.max_page.max(shown);
-                p.pages = b.page_count();
+                p.pages = b.total.max(b.page_count());
             }
         }
     }
@@ -505,8 +526,8 @@ impl ComicRustApp {
                 f.eq_ignore_ascii_case(&p) || self.settings.effective_path(Path::new(f)).as_path() == b.path.as_path()
             })
         })?;
-        let shown = self.spread(b, b.current).into_iter().max().unwrap_or(b.current) as u32;
-        let current = b.current as u32;
+        let (current, shown) = self.reading_numbers(b);
+        let (current, shown) = (current as u32, shown as u32);
         let last = book.last_page_read.unwrap_or(0).max(shown);
         let id = book.id.clone();
         if let Some(b) = &mut self.book {

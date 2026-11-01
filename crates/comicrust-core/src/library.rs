@@ -185,13 +185,13 @@ pub struct LibraryBook {
 }
 
 /// `<Pages><Page Image="0" Type="FrontCover" …/></Pages>` : informations par page.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct PageList {
     #[serde(rename = "Page", default)]
     pub page: Vec<PageInfo>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PageInfo {
     /// Rang de l'image dans le fichier (ordre naturel des noms).
     #[serde(rename = "@Image", default)]

@@ -28,6 +28,7 @@ pub mod mass_guard;
 pub mod matcher_catalog;
 pub mod missing;
 pub mod name_info;
+pub mod pages;
 pub mod providers;
 pub mod scanner;
 pub mod scripting;

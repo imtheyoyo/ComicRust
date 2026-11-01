@@ -86,10 +86,31 @@ français/anglais, option « Langue du plugin »), `bd2.png`, `bd2q.png`. Mêmes
 noms que l'`App.Config` de l'original : `CBSeries`, `CBStop`, `TIMEPOPUP`, `TIMEOUTS`…),
 mêmes expressions régulières (v6.08, dans `bd2\motifs.json` : voir « Quand le site change »), mêmes en-têtes HTTP que son `BedethequeFetcher`
 (navigateur Chrome, cookies gardés et renouvelés après un 403 ; le Python de ComicRust fait
-les requêtes lui-même, sans « daemon »). Option « cloudscraper » : copier le module
-`cloudscraper` et ses dépendances dans `scripts\lib`. Journaux de l'original
+les requêtes lui-même, sans « daemon »). Option « cloudscraper » : module `cloudscraper` et
+ses dépendances dans `scripts\lib` (voir ci-dessous). Journaux de l'original
 `BD2_Rename_Log.txt` et `BD2_Debug_Log.txt` dans `data\bedetheque\` à côté de
 `ComicRust.exe` (réglage avancé `dossier_journaux` pour un autre dossier).
+
+**Site qui bloque le script.** Une page de protection anti-robot à la place de la page
+demandée (« Just a moment… », « Attention Required! | Cloudflare », `cf-chl`, captcha…) ou
+trois refus HTTP 403 de suite pour une page, malgré de nouveaux cookies à chaque essai,
+arrêtent les requêtes de pages pour le reste de l'exécution ; une explication est donnée
+**une seule fois** par exécution (journal du script, et fenêtre si le script a une
+interface) :
+
+- sans cloudscraper, la fenêtre « Site bloqué — cloudscraper » propose de l'installer :
+  1. installer Python 3.13 pour Windows ([python.org](https://www.python.org/downloads/),
+     bouton « Télécharger Python… ») ;
+  2. dans une invite de commandes, exécuter (bouton « Copier la commande ») :
+     `py -3.13 -m pip install cloudscraper --target "<dossier de ComicRust>\scripts\lib"` ;
+  3. cocher l'option « cloudscraper » dans « Configurer BD2 », puis relancer ;
+- module déjà dans `scripts\lib` mais option non cochée : la fenêtre dit de la cocher ;
+- avec cloudscraper, si le site refuse toujours : message « le site refuse… réessayez plus
+  tard » (le site limite les accès automatiques).
+
+L'option cochée sans module installé est signalée une fois dans le journal
+(« cloudscraper indisponible… », avec la commande d'installation) ; le script continue avec
+des requêtes ordinaires.
 
 « Configurer BD2 » ▸ « Importer les réglages de ComicRack… » : choisir l'`App.Config` du
 dossier du script dans ComicRack (par ex.

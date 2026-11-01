@@ -12,6 +12,8 @@
 //!   le fil de l'interface ; la bibliothèque affichée et la surveillance sont mises à jour.
 //! - Lecture seule (ComicRack sans écriture, `ComicDb.xml`) : consultation seulement, avec
 //!   la marche à suivre.
+//! - Onglet « Pages » (un seul livre, fichier présent) : ordre et type des pages, comme
+//!   ComicRack (`ui/info_pages.rs`) ; enregistré avec le reste par OK / Appliquer.
 //! - Scripts `#@Hook Editor` : bouton « 📜 Scripts » ; les modifications du script
 //!   remplissent les champs de la fenêtre, rien n'est écrit avant OK / Appliquer.
 //!
@@ -34,6 +36,7 @@ use crate::app::ComicRustApp;
 use crate::library::files::FileAction;
 use crate::library::info_form::{self, InfoForm, TABS};
 use crate::scripts::apply::{apply_plan, ApplyOutcome, ApplyPlan, ApplyTarget};
+use crate::ui::info_pages::PagesTab;
 use crate::ui::library_view::paint_cover;
 use crate::ui::theme::accent;
 
@@ -67,7 +70,12 @@ pub struct InfoEditor {
     new_custom: String,
     /// Script `Editor` en cours (identifiant du point d'entrée).
     script: Option<String>,
+    /// Onglet « Pages » (ouvert à la première visite, un seul livre).
+    pages: Option<PagesTab>,
 }
+
+/// Rang de l'onglet « Pages » (après « Personnalisé », `TABS.len()`).
+const PAGES_TAB: usize = TABS.len() + 1;
 
 impl InfoEditor {
     fn new(books: &[&LibraryBook], order: Vec<String>, target: ApplyTarget) -> InfoEditor {
@@ -81,11 +89,23 @@ impl InfoEditor {
             suggestions: HashMap::new(),
             new_custom: String::new(),
             script: None,
+            pages: None,
         }
     }
 
     pub fn dirty(&self) -> bool {
-        self.form.dirty()
+        self.form.dirty() || self.pages_dirty()
+    }
+
+    fn pages_dirty(&self) -> bool {
+        self.pages.as_ref().is_some_and(|p| p.dirty())
+    }
+
+    /// Modifications à écrire : champs du formulaire, puis liste des pages.
+    fn edits(&self) -> Vec<edit::FieldEdit> {
+        let mut e = self.form.edits();
+        e.extend(self.pages.as_ref().and_then(|p| p.edit()));
+        e
     }
 
     fn read_only(&self) -> Option<&str> {
@@ -295,7 +315,7 @@ impl ComicRustApp {
 
     /// Lance l'enregistrement (fil d'arrière-plan).
     fn start_info_save(&mut self, ed: &mut InfoEditor, then: After, ctx: &Context) {
-        let edits = ed.form.edits();
+        let edits = ed.edits();
         let write_info: Vec<String> = if self.settings.info_write_file && !edits.is_empty() {
             let db = self.library.database();
             ed.form
@@ -349,10 +369,17 @@ impl ComicRustApp {
                     return false;
                 }
                 ed.form = InfoForm::new(&books);
+                if let (Some(p), Some(b)) = (&mut ed.pages, books.first()) {
+                    p.saved(b);
+                }
             }
             After::Go(id) => {
                 let Some(b) = db.get(&id) else { return false };
                 ed.form = InfoForm::new(&[b]);
+                ed.pages = None;
+                if ed.tab == PAGES_TAB && b.file.is_none() {
+                    ed.tab = 0;
+                }
                 ed.message = None;
                 // La sélection de la vue suit, comme dans ComicRack.
                 self.library.click_book(&id, false, false);
@@ -524,22 +551,41 @@ impl ComicRustApp {
                     let n = ed.form.custom_fields().count();
                     let custom = if n > 0 { format!("Personnalisé ({n})") } else { "Personnalisé".into() };
                     ui.selectable_value(&mut ed.tab, TABS.len(), custom);
+                    // Pages : un seul livre avec un fichier (comme ComicRack : onglet absent
+                    // pour plusieurs livres, `EnableTabPage(tabPages, comic.IsLinked)`).
+                    if !multiple && books[0].file.is_some() {
+                        let label = if ed.pages_dirty() { "● Pages" } else { "Pages" };
+                        ui.selectable_value(&mut ed.tab, PAGES_TAB, label);
+                    }
                 });
                 ui.separator();
                 let footer = 92.0 + if ed.message.is_some() { 40.0 } else { 0.0 };
-                egui::ScrollArea::vertical()
-                    .id_salt(("infos-onglet", ed.tab, &ed.form.ids[0]))
-                    .auto_shrink([false, false])
-                    .max_height((ui.available_height() - footer).max(120.0))
-                    .show(ui, |ui| {
-                        ui.add_enabled_ui(editable, |ui| {
-                            if ed.tab < TABS.len() {
-                                info_fields(ui, ed, &db, TABS[ed.tab].1);
-                            } else {
-                                custom_values(ui, ed);
-                            }
+                if ed.tab == PAGES_TAB && !multiple {
+                    if let Some(f) = books[0].file.as_deref() {
+                        if ed.pages.as_ref().is_none_or(|p| p.book_id != books[0].id) {
+                            let path = self.settings.effective_path(Path::new(f));
+                            ed.pages = Some(PagesTab::new(ui.ctx(), &books[0], path));
+                        }
+                    }
+                    let h = (ui.available_height() - footer).max(160.0);
+                    if let Some(p) = &mut ed.pages {
+                        p.show(ui, editable, h);
+                    }
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("infos-onglet", ed.tab, &ed.form.ids[0]))
+                        .auto_shrink([false, false])
+                        .max_height((ui.available_height() - footer).max(120.0))
+                        .show(ui, |ui| {
+                            ui.add_enabled_ui(editable, |ui| {
+                                if ed.tab < TABS.len() {
+                                    info_fields(ui, ed, &db, TABS[ed.tab].1);
+                                } else {
+                                    custom_values(ui, ed);
+                                }
+                            });
                         });
-                    });
+                }
                 ui.separator();
                 if let Some((m, err)) = &ed.message {
                     let color = if *err { crate::ui::theme::error(ui) } else { crate::ui::theme::ok(ui) };
@@ -732,7 +778,12 @@ impl ComicRustApp {
                 ui.label("Script en cours…");
             } else if dirty {
                 let n = ed.form.fields.iter().filter(|f| f.touched).count();
-                ui.label(RichText::new(format!("● {n} champ(s) modifié(s)")).color(accent(ui)));
+                let text = match (n, ed.pages_dirty()) {
+                    (0, _) => "● pages modifiées".to_string(),
+                    (n, true) => format!("● {n} champ(s) et les pages modifiés"),
+                    (n, false) => format!("● {n} champ(s) modifié(s)"),
+                };
+                ui.label(RichText::new(text).color(accent(ui)));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let can_save = editable && dirty && errors.is_empty();

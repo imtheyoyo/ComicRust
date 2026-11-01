@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 
+use comicrust_core::library::PageInfo;
+use comicrust_core::pages::{self, ReadingPage};
 use comicrust_core::{open_book_patiently, BookFormat, ComicInfo, PageImage};
 use eframe::egui::{self, ColorImage};
 
@@ -18,12 +20,38 @@ pub const THUMB_HEIGHT: u32 = 180;
 pub enum Request {
     Page(usize),
     Thumb(usize),
+    /// Vignette à refaire (« Rafraîchir »).
+    RefreshThumb(usize),
+}
+
+/// Ordre des pages servies par le chargeur.
+#[derive(Debug, Clone)]
+pub enum Order {
+    /// Images du fichier, dans l'ordre naturel des noms, sans rotation.
+    Raw,
+    /// Ordre de lecture : liste de pages de la bibliothèque, ou `None` pour celle du
+    /// ComicInfo.xml du fichier.
+    Reading(Option<Vec<PageInfo>>),
 }
 
 pub enum Event {
-    Opened { format: BookFormat, pages: Vec<String>, info: Option<Box<ComicInfo>> },
-    Page { index: usize, result: Result<(ColorImage, [u32; 2]), String> },
-    Thumb { index: usize, image: Option<ColorImage> },
+    /// `pages` : noms des images dans l'ordre servi ; `numbers` : numéro de page du livre
+    /// (ComicRack) de chacune ; `total` : nombre d'images du fichier.
+    Opened {
+        format: BookFormat,
+        pages: Vec<String>,
+        numbers: Vec<usize>,
+        total: usize,
+        info: Option<Box<ComicInfo>>,
+    },
+    Page {
+        index: usize,
+        result: Result<(ColorImage, [u32; 2]), String>,
+    },
+    Thumb {
+        index: usize,
+        image: Option<ColorImage>,
+    },
     Failed(String),
 }
 
@@ -50,6 +78,25 @@ fn fit_within(img: PageImage, max_side: u32) -> PageImage {
     )
 }
 
+/// Applique la rotation de la page (degrés).
+fn rotated(img: PageImage, degrees: u16) -> PageImage {
+    match degrees {
+        90 => image::imageops::rotate90(&img),
+        180 => image::imageops::rotate180(&img),
+        270 => image::imageops::rotate270(&img),
+        _ => img,
+    }
+}
+
+/// Pages servies, dans l'ordre (voir [`Order`]).
+pub fn plan(order: &Order, count: usize, info: Option<&ComicInfo>) -> Vec<ReadingPage> {
+    match order {
+        Order::Raw => (0..count).map(|i| ReadingPage { image: i, page: i, rotation: 0 }).collect(),
+        Order::Reading(Some(list)) => pages::reading_order(list, count),
+        Order::Reading(None) => pages::reading_order(&info.map(pages::from_comic_info).unwrap_or_default(), count),
+    }
+}
+
 fn thumbnail(img: &PageImage) -> ColorImage {
     let (w, h) = img.dimensions();
     let th = THUMB_HEIGHT.min(h.max(1));
@@ -58,7 +105,7 @@ fn thumbnail(img: &PageImage) -> ColorImage {
 }
 
 impl BookLoader {
-    pub fn open(path: PathBuf, ctx: egui::Context, max_texture_side: u32) -> Self {
+    pub fn open(path: PathBuf, ctx: egui::Context, max_texture_side: u32, order: Order) -> Self {
         let (req_tx, req_rx) = mpsc::channel::<Request>();
         let (ev_tx, ev_rx) = mpsc::channel::<Event>();
         thread::Builder::new()
@@ -74,7 +121,13 @@ impl BookLoader {
                     Err(e) => return send(Event::Failed(e.to_string())),
                 };
                 let info = book.comic_info().ok().flatten().map(Box::new);
-                send(Event::Opened { format: book.format(), pages: book.pages().to_vec(), info });
+                let total = book.pages().len();
+                let plan = plan(&order, total, info.as_deref());
+                let names = plan.iter().map(|p| book.pages().get(p.image).cloned().unwrap_or_default()).collect();
+                let numbers = plan.iter().map(|p| p.page).collect();
+                send(Event::Opened { format: book.format(), pages: names, numbers, total, info });
+                // Rang servi → (image du fichier, rotation).
+                let source = |i: usize| plan.get(i).map(|p| (p.image, p.rotation)).unwrap_or((i, 0));
 
                 let mut pages: VecDeque<usize> = VecDeque::new();
                 let mut thumbs: VecDeque<usize> = VecDeque::new();
@@ -84,13 +137,13 @@ impl BookLoader {
                     // Attente bloquante seulement quand il n'y a plus rien à faire.
                     if pages.is_empty() && thumbs.is_empty() {
                         match req_rx.recv() {
-                            Ok(r) => push(r, &mut pages, &mut thumbs),
+                            Ok(r) => push(r, &mut pages, &mut thumbs, &mut thumbs_done),
                             Err(_) => return,
                         }
                     }
                     loop {
                         match req_rx.try_recv() {
-                            Ok(r) => push(r, &mut pages, &mut thumbs),
+                            Ok(r) => push(r, &mut pages, &mut thumbs, &mut thumbs_done),
                             Err(TryRecvError::Empty) => break,
                             Err(TryRecvError::Disconnected) => return,
                         }
@@ -99,7 +152,8 @@ impl BookLoader {
                         eprintln!("[loader] file pages={pages:?} vignettes={thumbs:?}");
                     }
                     if let Some(index) = pages.pop_front() {
-                        match book.render_page(index) {
+                        let (image, degrees) = source(index);
+                        match book.render_page(image).map(|img| rotated(img, degrees)) {
                             Ok(img) => {
                                 let size = [img.width(), img.height()];
                                 if thumbs_done.insert(index) {
@@ -112,7 +166,8 @@ impl BookLoader {
                         }
                     } else if let Some(index) = thumbs.pop_front() {
                         if thumbs_done.insert(index) {
-                            let image = book.render_page(index).ok().map(|img| thumbnail(&img));
+                            let (image, degrees) = source(index);
+                            let image = book.render_page(image).ok().map(|img| thumbnail(&rotated(img, degrees)));
                             send(Event::Thumb { index, image });
                         }
                     }
@@ -131,8 +186,13 @@ impl BookLoader {
     }
 }
 
-fn push(r: Request, pages: &mut VecDeque<usize>, thumbs: &mut VecDeque<usize>) {
+fn push(r: Request, pages: &mut VecDeque<usize>, thumbs: &mut VecDeque<usize>, done: &mut HashSet<usize>) {
     match r {
+        Request::RefreshThumb(i) => {
+            done.remove(&i);
+            thumbs.retain(|&t| t != i);
+            thumbs.push_front(i);
+        }
         Request::Page(i) => {
             // La dernière demande est la plus urgente (page affichée).
             pages.retain(|&p| p != i);
@@ -143,5 +203,35 @@ fn push(r: Request, pages: &mut VecDeque<usize>, thumbs: &mut VecDeque<usize>) {
                 thumbs.push_back(i);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Lecteur : ordre de la fiche (bibliothèque), sinon du ComicInfo.xml ; pages
+    /// supprimées masquées, rotation transmise ; onglet « Pages » : ordre brut.
+    #[test]
+    fn plan_follows_the_page_list() {
+        let mut list = pages::full_list(&[], 4);
+        pages::move_to_start(&mut list, &[3]);
+        pages::set_type(&mut list, &[1], "Deleted");
+        pages::set_rotation(&mut list, &[2], "Rotate180");
+        let p = plan(&Order::Reading(Some(list)), 4, None);
+        assert_eq!(
+            p.iter().map(|r| (r.image, r.page, r.rotation)).collect::<Vec<_>>(),
+            [(3, 0, 0), (0, 1, 0), (2, 3, 180)]
+        );
+        let raw = plan(&Order::Raw, 3, None);
+        assert_eq!(raw.iter().map(|r| r.image).collect::<Vec<_>>(), [0, 1, 2]);
+        let ci = ComicInfo::from_xml(
+            r#"<ComicInfo><Pages><Page Image="1" Type="FrontCover"/><Page Image="0" Type="Deleted"/></Pages></ComicInfo>"#,
+        )
+        .unwrap();
+        let file = plan(&Order::Reading(None), 3, Some(&ci));
+        assert_eq!(file.iter().map(|r| r.image).collect::<Vec<_>>(), [1, 2], "ComicInfo.xml du fichier");
+        let img = image::RgbaImage::new(4, 2);
+        assert_eq!(rotated(img, 90).dimensions(), (2, 4));
     }
 }

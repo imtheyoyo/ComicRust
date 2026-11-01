@@ -22,6 +22,10 @@
 //!   ComicRack CE) n'est pas touché : ComicRust n'écrit pas ces infos dans les fichiers.
 //! - Valeurs personnalisées : champ `CustomValue:<clé>` ([`FieldEdit::custom_value`]),
 //!   appliqué sur la valeur **en base** au moment de l'écriture.
+//! - Pages (ordre, types, rotation, position, favoris) : modification dédiée
+//!   [`FieldEdit::pages`] (liste `<Pages>` complète, vérifiée par
+//!   [`crate::pages::validate`]) ; met `ComicInfoIsDirty` à vrai comme ComicRack. Le champ
+//!   `Pages` reste refusé sous forme de texte (scripts).
 
 pub mod catalog;
 pub mod files;
@@ -40,6 +44,9 @@ use crate::db::{BookEdit, DbConfig, Value, WriteReport};
 use crate::library::LibraryBook;
 use crate::store::Store;
 use crate::Error;
+
+/// Nom du champ de la liste des pages ([`FieldEdit::pages`]).
+pub const PAGES_FIELD: &str = "Pages";
 
 /// Préfixe du nom de champ d'une valeur personnalisée : `CustomValue:<clé>`.
 pub const CUSTOM_VALUE_PREFIX: &str = "CustomValue:";
@@ -62,6 +69,12 @@ impl FieldEdit {
 
     pub fn clear(book_id: &str, field: &str) -> Self {
         Self { book_id: book_id.to_string(), field: field.to_string(), value: None }
+    }
+
+    /// Nouvelle liste des pages (`ComicInfo.SetPages` : ordre de lecture, types, rotation,
+    /// position, favoris), remplacée en entier.
+    pub fn pages(book_id: &str, pages: Vec<crate::library::PageInfo>) -> Self {
+        Self { book_id: book_id.to_string(), field: PAGES_FIELD.to_string(), value: Some(EditValue::Pages(pages)) }
     }
 
     /// Valeur personnalisée (`ComicBook.SetCustomValue`) ; `None` ou vide la supprime.
@@ -98,6 +111,8 @@ impl std::fmt::Display for EditError {
 pub(crate) enum Target {
     Field(&'static FieldDef),
     Custom(String),
+    /// Liste des pages, vérifiée et normalisée.
+    Pages(Vec<crate::library::PageInfo>),
 }
 
 /// Modification validée.
@@ -133,6 +148,7 @@ fn check(edit: &FieldEdit) -> Result<Valid, EditError> {
             Some(EditValue::Real(f)) => Some(f.to_string()),
             Some(EditValue::Bool(b)) => Some(b.to_string()),
             Some(EditValue::List(l)) => Some(l.join(", ")),
+            Some(EditValue::Pages(_)) => return Err(err(name, "liste de pages inattendue".into())),
         };
         for s in std::iter::once(key).chain(value.as_deref()) {
             if let Some(c) = s.chars().find(|&c| !crate::lists_edit::xml::is_xml_char(c)) {
@@ -140,6 +156,14 @@ fn check(edit: &FieldEdit) -> Result<Valid, EditError> {
             }
         }
         return Ok(Valid { target: Target::Custom(key.to_string()), value: value.map(Norm::Text) });
+    }
+    if name.eq_ignore_ascii_case(PAGES_FIELD) {
+        if let Some(EditValue::Pages(p)) = &edit.value {
+            return match crate::pages::validate(p) {
+                Ok(p) => Ok(Valid { target: Target::Pages(p), value: None }),
+                Err(m) => Err(err(PAGES_FIELD, format!("pages : {m}"))),
+            };
+        }
     }
     let Some(def) = catalog::field(name) else {
         let why = READ_ONLY_FIELDS
@@ -176,6 +200,12 @@ pub(crate) fn apply_valid(b: &mut LibraryBook, v: &Valid) -> bool {
                 false
             })
         }
+        // Comme `ComicInfo.SetPages` : rien si la liste est la même, sinon remplacée et
+        // ComicInfo « à écrire » (`FirePageChanged`).
+        Target::Pages(p) => (b.pages.page != *p).then(|| {
+            b.pages.page = p.clone();
+            true
+        }),
     };
     match changed_ci {
         None => false,
@@ -321,6 +351,7 @@ fn comicrack_value(def: &FieldDef, b: &LibraryBook) -> Result<Option<Value>, Str
         Some(EditValue::Real(f)) => Some(Value::Float(f as f32)),
         Some(EditValue::Bool(v)) => Some(Value::Bool(v)),
         Some(EditValue::List(l)) => Some(Value::Text(l.join(", "))),
+        Some(EditValue::Pages(p)) => Some(Value::Pages(p)),
     })
 }
 
@@ -368,6 +399,15 @@ pub fn apply_edits_comicrack(cfg: &DbConfig, edits: &[FieldEdit]) -> Result<Edit
                 Err(m) => failed = Some((def.name, m)),
             }
             dirty |= def.in_comic_info;
+        }
+        if before.pages != after.pages {
+            // Élément `<Pages>` réécrit en entier (format de ComicRack, `db::write`).
+            be = if after.pages.page.is_empty() {
+                be.remove(PAGES_FIELD)
+            } else {
+                be.set(PAGES_FIELD, Value::Pages(after.pages.page.clone()))
+            };
+            dirty = true;
         }
         if let Some((field, message)) = failed {
             report.errors.push(EditError { book_id: g.id.clone(), field: field.into(), message });

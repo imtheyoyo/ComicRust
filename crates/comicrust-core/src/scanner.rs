@@ -361,6 +361,9 @@ fn apply_comic_info(b: &mut LibraryBook, ci: Option<&ComicInfo>) {
                         image: p.image as i32,
                         // Comme dans ComicDB.xml, « Story » (valeur par défaut) n'est pas écrit.
                         kind: (p.page_type != crate::comic_info::PageType::Story).then(|| format!("{:?}", p.page_type)),
+                        bookmark: p.bookmark.clone(),
+                        rotation: p.rotation.clone(),
+                        page_position: p.page_position.clone(),
                         ..Default::default()
                     })
                     .collect()

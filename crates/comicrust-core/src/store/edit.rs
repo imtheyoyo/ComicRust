@@ -54,12 +54,17 @@ impl Store {
                     edit::apply_valid(&mut after, v);
                 }
                 let old = schema::field_values(before);
-                let diff: Vec<(&'static str, Val)> = schema::field_values(&after)
+                let mut diff: Vec<(&'static str, Val)> = schema::field_values(&after)
                     .into_iter()
                     .zip(old)
                     .filter(|(n, o)| n.1 != o.1)
                     .map(|(n, _)| n)
                     .collect();
+                // Liste des pages (colonne `pages`, JSON de tous les attributs).
+                let pages = schema::pages_value(&after);
+                if pages != schema::pages_value(before) {
+                    diff.push(("pages", pages));
+                }
                 if diff.is_empty() {
                     report.unchanged.push(g.id.clone());
                 } else {

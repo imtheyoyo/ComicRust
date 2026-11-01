@@ -454,11 +454,11 @@ impl ComicRustApp {
                 f.eq_ignore_ascii_case(&p) || self.settings.effective_path(Path::new(f)).as_path() == b.path.as_path()
             })
         })?;
-        let shown = self.spread(b, b.current).into_iter().max().unwrap_or(b.current);
+        let (current, shown) = self.reading_numbers(b);
         let reading = Reading {
-            current: b.current as u32,
+            current: current as u32,
             shown_max: shown as u32,
-            pages: b.page_count() as u32,
+            pages: b.total.max(b.page_count()) as u32,
             opened_at: b.opened_at,
         };
         let edit = reading_edit(book, &reading);

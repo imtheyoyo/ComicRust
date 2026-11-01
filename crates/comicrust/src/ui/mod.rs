@@ -4,6 +4,7 @@ pub mod book_drag;
 mod files_window;
 pub mod fonts;
 pub mod info_editor;
+mod info_pages;
 mod library_panels;
 mod library_table;
 mod library_view;

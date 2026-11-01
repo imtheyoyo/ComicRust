@@ -76,6 +76,8 @@ pub enum EditValue {
     Bool(bool),
     /// Liste de valeurs (champs [`FieldKind::List`]).
     List(Vec<String>),
+    /// Liste complète des pages (élément `Pages`, seulement par [`super::FieldEdit::pages`]).
+    Pages(Vec<crate::library::PageInfo>),
 }
 
 impl From<&str> for EditValue {
@@ -260,7 +262,7 @@ pub static READ_ONLY_FIELDS: &[(&str, &str)] = &[
     ("FileModifiedTime", "décrit le fichier"),
     ("FileCreationTime", "décrit le fichier"),
     ("PageCount", "nombre réel de pages du fichier"),
-    ("Pages", "liste des pages du fichier"),
+    ("Pages", "liste des pages : modification dédiée edit::FieldEdit::pages (onglet « Pages »)"),
     ("Added", "date d'ajout à la bibliothèque"),
     ("Opened", "lecture : Store::set_progress / BookEdit::opened"),
     ("OpenCount", "compteur de lectures"),
@@ -322,6 +324,7 @@ impl FieldDef {
             Some(EditValue::Real(f)) => (f as f32).to_string(),
             Some(EditValue::Bool(b)) => b.to_string(),
             Some(EditValue::List(l)) => l.join(", "),
+            Some(EditValue::Pages(p)) => format!("{} page(s)", p.len()),
         }
     }
 
@@ -425,6 +428,7 @@ fn as_text(v: &EditValue) -> String {
         EditValue::Real(f) => f.to_string(),
         EditValue::Bool(b) => b.to_string(),
         EditValue::List(l) => l.join(", "),
+        EditValue::Pages(p) => format!("{} page(s)", p.len()),
     }
 }
 
@@ -457,7 +461,7 @@ fn parse_int(v: &EditValue) -> Result<Option<i64>, String> {
             }
             t.parse().map(Some).map_err(|_| format!("« {t} » n'est pas un entier"))
         }
-        EditValue::Bool(_) | EditValue::List(_) => Err("un entier est attendu".into()),
+        EditValue::Bool(_) | EditValue::List(_) | EditValue::Pages(_) => Err("un entier est attendu".into()),
     }
 }
 
@@ -472,7 +476,7 @@ fn parse_real(v: &EditValue) -> Result<Option<f64>, String> {
             }
             t.replace(',', ".").parse().map_err(|_| format!("« {t} » n'est pas un nombre"))?
         }
-        EditValue::Bool(_) | EditValue::List(_) => return Err("un nombre est attendu".into()),
+        EditValue::Bool(_) | EditValue::List(_) | EditValue::Pages(_) => return Err("un nombre est attendu".into()),
     };
     if !f.is_finite() {
         return Err(format!("{f} n'est pas un nombre valide"));

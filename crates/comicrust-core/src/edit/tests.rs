@@ -656,3 +656,98 @@ fn renommage_normalise_dans_la_fiche() {
     let e = rename_or_move(EditTarget::Store(&mut s), &r.book, Path::new("../c.cbz")).unwrap_err().to_string();
     assert!(e.contains(".."), "{e}");
 }
+
+// ---------------------------------------------------------------------------------------
+// Pages (onglet « Pages » de la fenêtre « Infos du livre »)
+// ---------------------------------------------------------------------------------------
+
+/// Liste de pages modifiée comme dans l'onglet : 3 pages, la 3e au début, la 1re
+/// supprimée, la 2e tournée, favori sur la 3e.
+fn edited_pages() -> Vec<crate::library::PageInfo> {
+    let mut l = crate::pages::full_list(&[], 3);
+    l[0].image_width = Some("1200".into());
+    crate::pages::move_to_start(&mut l, &[2]);
+    crate::pages::set_type(&mut l, &[0], "Deleted");
+    crate::pages::set_rotation(&mut l, &[1], "Rotate90");
+    crate::pages::set_position(&mut l, &[1], "Near");
+    crate::pages::set_bookmark(&mut l, 2, Some("Début"));
+    l
+}
+
+#[test]
+fn pages_edit_is_dedicated_and_checked() {
+    // Le champ texte générique reste refusé (scripts).
+    let e = validate(&FieldEdit::set(A, "Pages", "<Page Image=\"0\"/>")).unwrap_err();
+    assert!(e.message.contains("non modifiable"), "{e}");
+    let mut dup = edited_pages();
+    dup[1].image = dup[0].image;
+    let e = validate(&FieldEdit::pages(A, dup)).unwrap_err();
+    assert!(e.message.contains("deux fois"), "{e}");
+    // Aperçu : liste remplacée, ComicInfoIsDirty.
+    let mut b = book();
+    assert!(apply_to_book(&mut b, &FieldEdit::pages(A, edited_pages())).unwrap());
+    assert_eq!(b.pages.page.iter().map(|p| p.image).collect::<Vec<_>>(), [2, 0, 1]);
+    assert_eq!(b.comic_info_is_dirty, Some(true));
+    assert!(!apply_to_book(&mut b, &FieldEdit::pages(A, edited_pages())).unwrap(), "même liste : rien");
+}
+
+#[test]
+fn sqlite_pages_edit() {
+    let (_dir, cfg) = temp_store();
+    let mut s = Store::open(&cfg).unwrap();
+    s.upsert(&[book()]).unwrap();
+    let r = s.apply_edits(&[FieldEdit::pages(A, edited_pages())]).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let a = &r.changed[0];
+    assert_eq!(a.pages.page, crate::pages::validate(&edited_pages()).unwrap());
+    assert_eq!(a.comic_info_is_dirty, Some(true));
+    let db = s.load(None).unwrap();
+    let p = &db.get(A).unwrap().pages.page;
+    assert_eq!((p[0].image, p[0].bookmark.as_deref(), p[0].kind.as_deref()), (2, Some("Début"), None));
+    assert_eq!((p[1].kind.as_deref(), p[1].image_width.as_deref()), (Some("Deleted"), Some("1200")));
+    assert_eq!((p[2].rotation.as_deref(), p[2].page_position.as_deref()), (Some("Rotate90"), Some("Near")));
+    let r = s.apply_edits(&[FieldEdit::pages(A, edited_pages())]).unwrap();
+    assert_eq!((r.unchanged.len(), r.changed.len()), (1, 0));
+}
+
+#[test]
+fn mysql_comicrack_pages_edit() {
+    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
+        eprintln!("COMICRUST_TEST_MYSQL absent : test d'écriture ComicRack ignoré");
+        return;
+    };
+    use mysql::prelude::Queryable;
+    let _lock = crate::db::tests::mysql_lock();
+    let cfg = DbConfig::from_connection_string(&url).unwrap();
+    let mut conn = crate::db::connect(&cfg).unwrap();
+    conn.query_drop("DROP TABLE IF EXISTS comics").unwrap();
+    conn.query_drop("DROP TABLE IF EXISTS changes").unwrap();
+    conn.query_drop("Create table changes (id varchar(40) not null primary key, update_counter bigint default 0, delete_counter bigint default 0)").unwrap();
+    conn.query_drop(
+        "Create table comics (id varchar(40) not null primary key, update_counter bigint default 0, data mediumtext)",
+    )
+    .unwrap();
+    conn.exec_drop("Insert into changes values (?, 10, 0)", (crate::db::write::STORAGE_GUID,)).unwrap();
+    conn.exec_drop("Insert into comics values (?, 5, ?)", (A, CR_A)).unwrap();
+    let r = apply_edits(EditTarget::ComicRack(&cfg), &[FieldEdit::pages(A, edited_pages())]).unwrap();
+    assert!(r.is_complete() && r.changed.len() == 1, "{}", r.summary());
+    let (x,): (String,) = conn.exec_first("SELECT data FROM comics WHERE id = ?", (A,)).unwrap().unwrap();
+    // Format exact de ComicRack : ordre des attributs de ComicPageInfo, défauts omis.
+    let expected = concat!(
+        "<Pages>",
+        r#"<Page Image="2" Bookmark="Début" />"#,
+        r#"<Page Image="0" ImageWidth="1200" Type="Deleted" />"#,
+        r#"<Page Image="1" Rotation="Rotate90" PagePosition="Near" />"#,
+        "</Pages>"
+    );
+    assert!(x.contains(expected), "{x}");
+    assert!(x.contains("<ComicInfoIsDirty>true</ComicInfoIsDirty>"), "{x}");
+    assert!(
+        x.contains("<MyExtra>inconnu</MyExtra>") && x.contains("<CurrentPage>4</CurrentPage>"),
+        "reste gardé : {x}"
+    );
+    let r = apply_edits(EditTarget::ComicRack(&cfg), &[FieldEdit::pages(A, edited_pages())]).unwrap();
+    assert_eq!((r.unchanged.len(), r.changed.len()), (1, 0));
+    let r = apply_edits(EditTarget::ReadOnly, &[FieldEdit::pages(A, edited_pages())]).unwrap();
+    assert!(r.errors.iter().any(|e| e.message == READ_ONLY_MESSAGE));
+}

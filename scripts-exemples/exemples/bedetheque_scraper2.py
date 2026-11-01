@@ -746,17 +746,163 @@ class NoContentError(Exception):
     pass
 
 
+class SiteBloque(Exception):
+    """Le site refuse les requêtes du script (protection anti-robot, 403 répétés)."""
+
+
+# Essais d'une page refusée (403), avec de nouveaux cookies à chaque fois, avant de
+# conclure que le site bloque le script.
+REFUS_MAX = 3
+
+# Python à installer sous Windows pour la commande pip proposée (cloudscraper et ses
+# dépendances sont en Python pur : le module installé sert au Python de ComicRust).
+PYTHON_CLOUDSCRAPER = "3.13"
+URL_PYTHON = "https://www.python.org/downloads/"
+
+# Messages déjà montrés pendant cette exécution (une seule fois chacun).
+_SIGNALES = set()
+
+
+def _une_fois(cle):
+    """Vrai la première fois que ``cle`` est demandée pendant cette exécution."""
+    if cle in _SIGNALES:
+        return False
+    _SIGNALES.add(cle)
+    return True
+
+
+# Marques d'une page de protection anti-robot (Cloudflare, captcha…) à la place de la page
+# demandée.
+_MARQUES_ANTI_ROBOT = ("cf-chl", "cf_chl_opt", "challenge-platform", "/cdn-cgi/challenge", "cf-browser-verification")
+_TITRES_ANTI_ROBOT = ("just a moment", "attention required", "un instant", "captcha", "access denied",
+                      "vérification", "verification")
+
+
+def page_anti_robot(texte):
+    """Vrai si ``texte`` est une page de protection anti-robot (« Just a moment… »,
+    « Attention Required! | Cloudflare », captcha…) et non une page du site."""
+    if not texte:
+        return False
+    bas = texte[:200000].lower()
+    if any(m in bas for m in _MARQUES_ANTI_ROBOT):
+        return True
+    t = re.search(r"<title[^>]*>(.*?)</title>", bas, re.S)
+    titre = html.unescape(t.group(1)).strip() if t else ""
+    if any(m in titre for m in _TITRES_ANTI_ROBOT):
+        return True
+    # Captcha seul : seulement sur une page courte (une vraie page du site est longue et
+    # peut contenir un formulaire de contact avec captcha).
+    return len(bas) < 20000 and any(m in bas for m in ("g-recaptcha", "h-captcha", "hcaptcha", "turnstile"))
+
+
+def _corps_erreur(e):
+    """Texte de la réponse d'une erreur HTTP (page anti-robot servie en 403/503)."""
+    try:
+        if isinstance(e, urllib.error.HTTPError):
+            return e.read(200000).decode("utf-8", "replace")
+        rep = getattr(e, "response", None)
+        return getattr(rep, "text", "") or ""
+    except Exception:
+        return ""
+
+
+def dossier_lib():
+    """``scripts\\lib`` de ComicRust (ajouté à ``sys.path`` des scripts) : le module
+    comicrust est dans ``<ComicRust>\\data\\python``."""
+    data = os.path.dirname(os.path.dirname(os.path.abspath(comicrust.__file__)))
+    return os.path.join(os.path.dirname(data), "scripts", "lib")
+
+
+def commande_cloudscraper():
+    """Commande d'installation de cloudscraper (et de ses dépendances) dans scripts\\lib."""
+    return 'py -%s -m pip install cloudscraper --target "%s"' % (PYTHON_CLOUDSCRAPER, dossier_lib())
+
+
+def _cloudscraper_installe():
+    try:
+        import importlib.util
+        return importlib.util.find_spec("cloudscraper") is not None
+    except Exception:
+        return False
+
+
+def signaler_blocage(avec_cloudscraper, detail):
+    """Le site bloque le script : explication **une fois** par exécution (journal, et
+    fenêtre si le script a une interface). Sans cloudscraper : proposition de l'installer
+    (bouton pour copier la commande, bouton pour la page de téléchargement de Python)."""
+    if not _une_fois("blocage"):
+        return
+    debuglog("Site bloqué : " + detail)
+    if avec_cloudscraper:
+        texte = _t("Le site Bédéthèque refuse les requêtes du script (%s), même avec cloudscraper. "
+                   "Le site limite ou bloque les accès automatiques : réessayez plus tard (dans quelques "
+                   "minutes ou quelques heures), avec moins de livres à la fois." % detail,
+                   "The Bédéthèque site refuses the script's requests (%s), even with cloudscraper. "
+                   "The site limits or blocks automated access: try again later (in a few minutes or "
+                   "hours), with fewer books at a time." % detail)
+        comicrust.log(texte, level="warning")
+        comicrust.message(texte)
+        return
+    commande = commande_cloudscraper()
+    if _cloudscraper_installe():
+        etapes = _t("Le module cloudscraper est installé : cochez l'option « cloudscraper » dans "
+                    "« Configurer BD2 », puis relancez.",
+                    "The cloudscraper module is installed: tick the “cloudscraper” option in "
+                    "“Configure BD2”, then run again.")
+    else:
+        etapes = _t("1. Installez Python %s pour Windows (python.org, « Windows installer (64-bit) »).\n"
+                    "2. Dans une invite de commandes, exécutez :\n    %s\n"
+                    "3. Cochez l'option « cloudscraper » dans « Configurer BD2 », puis relancez."
+                    % (PYTHON_CLOUDSCRAPER, commande),
+                    "1. Install Python %s for Windows (python.org, “Windows installer (64-bit)”).\n"
+                    "2. In a command prompt, run:\n    %s\n"
+                    "3. Tick the “cloudscraper” option in “Configure BD2”, then run again."
+                    % (PYTHON_CLOUDSCRAPER, commande))
+    texte = _t("Le site Bédéthèque bloque les requêtes du script (%s : protection anti-robot ou refus "
+               "répétés). Le module « cloudscraper » permet souvent de passer cette protection."
+               % detail,
+               "The Bédéthèque site blocks the script's requests (%s: anti-bot protection or repeated "
+               "refusals). The “cloudscraper” module can often get past this protection." % detail)
+    comicrust.log(texte + "\n" + etapes, level="warning")
+    copier = _t("Copier la commande", "Copy the command")
+    ouvrir = _t("Télécharger Python…", "Download Python…")
+    fermer = _t("Fermer", "Close")
+    note = None
+    for _ in range(20):  # garde-fou : chaque bouton ferme puis rouvre la fenêtre
+        controles = [ui.label(texte), ui.separator(), ui.label(etapes)]
+        if note:
+            controles.append(ui.label(note, style="weak"))
+        rep = comicrust.form(_t("Site bloqué — cloudscraper", "Site blocked — cloudscraper"), controles,
+                             buttons=(copier, ouvrir, fermer), cancel=fermer, width=620)
+        if rep is None or rep[0] == fermer:
+            return
+        if rep[0] == copier:
+            ok = comicrust.clipboard_set(commande)
+            note = _t("Commande copiée dans le presse-papiers.", "Command copied to the clipboard.") if ok \
+                else _t("Copie impossible : sélectionnez la commande ci-dessus.", "Copy failed: select the command above.")
+        elif rep[0] == ouvrir:
+            ok = comicrust.open_url(URL_PYTHON)
+            note = None if ok else _t("Ouvrez %s dans votre navigateur." % URL_PYTHON,
+                                      "Open %s in your browser." % URL_PYTHON)
+
+
 class Web:
     """Requêtes vers bedetheque.com : un seul « opener » avec ses cookies (le jeton
     csrf_cookie_bel est renouvelé si le site répond 403), mêmes en-têtes que
     BedethequeFetcher.py. Option « cloudscraper » : module ``cloudscraper`` à installer
     dans ``scripts\\lib`` (avec ses dépendances), comme le mode « --cloudscraper » du
-    fetcher de l'original."""
+    fetcher de l'original.
+
+    Blocage : une page anti-robot (« Just a moment… », captcha…) ou ``REFUS_MAX`` refus
+    (403) de suite pour une page malgré le renouvellement des cookies → :class:`SiteBloque`, expliqué une
+    fois par exécution (:func:`signaler_blocage`) ; les pages suivantes ne sont plus
+    demandées pendant cette exécution."""
 
     def __init__(self, base, cloudscraper):
         self.base = base
         self.accueil = False
         self.scraper = None
+        self.bloque = None
         if cloudscraper:
             try:
                 import cloudscraper as cs  # noqa: facultatif
@@ -764,10 +910,26 @@ class Web:
                                                           "desktop": True})
                 self.scraper.headers.update({"Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8"})
             except Exception as e:  # module absent : requêtes ordinaires
-                comicrust.log("cloudscraper indisponible (%s) : requêtes ordinaires. Pour l'utiliser, copiez le "
-                              "module cloudscraper et ses dépendances dans scripts\\lib (voir scripts.md)." % e,
-                              level="warning")
+                if _une_fois("cloudscraper indisponible"):
+                    comicrust.log("cloudscraper indisponible (%s) : requêtes ordinaires. Pour l'installer : %s "
+                                  "(voir scripts.md)." % (e, commande_cloudscraper()), level="warning")
         self._nouvel_opener()
+
+    def _bloquer(self, detail):
+        """Le site bloque : plus de requêtes de pages pendant cette exécution."""
+        self.bloque = detail
+        signaler_blocage(self.scraper is not None, detail)
+        raise SiteBloque(detail)
+
+    def _refus(self, code, corps, essai):
+        """Réponse refusée (403, 429, 503) au ``essai``-ième essai : blocage si c'est une
+        page anti-robot ou le dernier essai d'un refus 403 ; sinon on réessaie (403) ou
+        l'erreur suit son cours."""
+        if page_anti_robot(corps):
+            self._bloquer(_t("page anti-robot, HTTP %s" % code, "anti-bot page, HTTP %s" % code))
+        if code == 403 and essai >= REFUS_MAX:
+            self._bloquer(_t("%d refus HTTP 403 de suite malgré de nouveaux cookies" % essai,
+                             "%d HTTP 403 refusals in a row despite new cookies" % essai))
 
     def _nouvel_opener(self):
         self.jar = http.cookiejar.CookieJar()
@@ -785,16 +947,31 @@ class Web:
             return rep.read().decode(charset, "replace")
 
     def page(self, url):
-        """Texte HTML de ``url`` (exception en cas d'erreur)."""
+        """Texte HTML de ``url`` (exception en cas d'erreur ; :class:`SiteBloque` si le
+        site bloque le script)."""
+        if self.bloque:
+            raise SiteBloque(self.bloque)
+        texte = self._page(url)
+        if page_anti_robot(texte):
+            self._bloquer(_t("page anti-robot", "anti-bot page"))
+        if not texte:
+            raise NoContentError("aucun contenu")
+        return texte
+
+    def _page(self, url):
         recherche = "/search/tout" in url.lower()
         if self.scraper is not None:
             if recherche:
-                self.scraper.get(self.base + "/", timeout=DELAI_RESEAU).raise_for_status()
-            r = self.scraper.get(url, headers={"Referer": self.base + "/"} if recherche else None,
-                                 timeout=DELAI_RESEAU)
+                self.scraper.get(self.base + "/", timeout=DELAI_RESEAU)
+            for essai in range(1, REFUS_MAX + 1):
+                r = self.scraper.get(url, headers={"Referer": self.base + "/"} if recherche else None,
+                                     timeout=DELAI_RESEAU)
+                if r.status_code not in (403, 429, 503):
+                    break
+                self._refus(r.status_code, r.text, essai)
+                if r.status_code != 403:
+                    break
             r.raise_for_status()
-            if not r.text:
-                raise NoContentError("aucun contenu")
             return r.text
         referer = None
         if recherche and not self.accueil:
@@ -805,18 +982,19 @@ class Web:
             except Exception as e:
                 debuglog("Page d'accueil : " + str(e))
             referer = self.base + "/"
-        try:
-            texte = self._lire(url, referer)
-        except urllib.error.HTTPError as e:
-            if e.code != 403:
-                raise
+        for essai in range(1, REFUS_MAX + 1):
+            try:
+                return self._lire(url, referer)
+            except urllib.error.HTTPError as e:
+                if e.code not in (403, 429, 503):
+                    raise
+                self._refus(e.code, _corps_erreur(e), essai)
+                if e.code != 403:
+                    raise
             # Jeton refusé : nouveaux cookies et un nouvel essai.
-            debuglog("403 sur %s : renouvellement des cookies" % url)
+            debuglog("403 sur %s : renouvellement des cookies (essai %d)" % (url, essai))
             self._nouvel_opener()
-            texte = self._lire(url, referer)
-        if not texte:
-            raise NoContentError("aucun contenu")
-        return texte
+        raise SiteBloque("403")  # inatteignable : _refus bloque au dernier essai
 
     def octets(self, url, referer=None):
         """Image : en-têtes d'un navigateur qui affiche une image de la page (Referer du
@@ -894,6 +1072,11 @@ def _read_url(url, bSingle, silencieux=False, garder=False):
             S.pages[target_url] = page
     except NoContentError as nce:
         debuglog("No content returned for URL: " + target_url + ": " + str(nce))
+    except SiteBloque as e:
+        # Déjà expliqué une fois (signaler_blocage) : seulement noté pour ce livre.
+        debuglog("%s : site bloqué (%s)" % (target_url, e))
+        log_BD("   [" + str(S.dlgName) + "] " + str(S.dlgNumber) + " -> ",
+               _t("site bloqué (%s)" % e, "site blocked (%s)" % e), 1)
     except Exception as e:
         if silencieux:
             debuglog("%s : %s" % (target_url, _texte_erreur(e)))

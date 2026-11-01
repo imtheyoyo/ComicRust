@@ -5,6 +5,25 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.6] — 2026-11-01
+
+### Nouveautés
+- **Onglet « Pages » de la fenêtre « Infos du livre »**, comme dans ComicRack :
+  - vignettes numérotées, sélection multiple, glisser-déposer pour changer l'ordre ;
+  - menu contextuel : Type de page (Alt+Maj+A à K), Rotation, Position, favoris, Mettre au
+    début / à la fin, Remettre dans l'ordre d'origine, Copier la page, Tout sélectionner,
+    Inverser la sélection, Marquer comme Supprimée (Suppr) ;
+  - « Pages ▾ » (vignettes ou détails, taille) et « Réinitialiser ▾ » ;
+  - enregistrement dans la base ComicRust, ou dans la base MySQL de ComicRack (écriture
+    activée), au format exact de ComicRack ; au choix aussi dans le ComicInfo.xml du CBZ.
+- **Lecteur** : il suit l'ordre des pages de la fiche, masque les pages « Supprimée » et
+  applique la rotation.
+- **Bedetheque Scraper 2** : quand le site bloque les requêtes (403 répétés, page anti-robot),
+  une fenêtre propose d'installer cloudscraper, avec Python 3.13 et la commande à copier.
+
+### Recette
+[recette/v0.10.6.md](recette/v0.10.6.md).
+
 ## [v0.10.5] — 2026-11-01
 
 ### Corrections

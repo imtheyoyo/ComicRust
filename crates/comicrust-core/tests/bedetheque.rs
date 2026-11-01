@@ -135,7 +135,23 @@ impl Serveur {
     }
 }
 
+/// Comportement du serveur pour les pages HTML (blocage du script par le site).
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Normal,
+    /// Toujours « 403 Forbidden », même avec de nouveaux cookies.
+    Refus403,
+    /// Page de protection Cloudflare (« Just a moment… ») en 403.
+    AntiRobot,
+    /// Captcha servi en 200 à la place de la page.
+    Captcha,
+}
+
 fn serveur() -> Serveur {
+    serveur_mode(Mode::Normal)
+}
+
+fn serveur_mode(mode: Mode) -> Serveur {
     let ecoute = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", ecoute.local_addr().unwrap());
     let releve = Arc::new(Mutex::new(Vec::new()));
@@ -167,6 +183,23 @@ fn serveur() -> Serveur {
             r2.lock().unwrap().push((cible.clone(), entetes));
             i2.lock().unwrap().push(Instant::now());
             let (statut, type_, corps): (&str, &str, Vec<u8>) = match page(&cible.to_lowercase()) {
+                _ if !image && mode == Mode::Refus403 => {
+                    ("403 Forbidden", "text/html", b"<html><body>Forbidden</body></html>".to_vec())
+                }
+                _ if !image && mode == Mode::AntiRobot => (
+                    "403 Forbidden",
+                    "text/html",
+                    b"<html><head><title>Just a moment...</title></head><body><div id=\"cf-chl-widget\"></div>\
+                      <script src=\"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1\"></script></body></html>"
+                        .to_vec(),
+                ),
+                _ if !image && mode == Mode::Captcha => (
+                    "200 OK",
+                    "text/html; charset=utf-8",
+                    b"<html><head><title>Attention Required! | Cloudflare</title></head><body>\
+                      <div class=\"g-recaptcha\"></div></body></html>"
+                        .to_vec(),
+                ),
                 _ if image && !referer_ok => ("403 Forbidden", "text/html", b"<html>Interdit</html>".to_vec()),
                 Some((t, f)) => {
                     let chemin = fixtures().join(f);
@@ -229,6 +262,8 @@ struct Hote {
     enregistres: Mutex<Vec<ScriptSettings>>,
     /// Textes copiés dans le presse-papiers.
     presse_papiers: Mutex<Vec<String>>,
+    /// Adresses ouvertes dans le navigateur.
+    urls: Mutex<Vec<String>>,
 }
 
 impl ScriptHost for Hote {
@@ -312,6 +347,10 @@ impl ScriptHost for Hote {
     }
     fn clipboard_set(&self, text: &str) -> bool {
         self.presse_papiers.lock().unwrap().push(text.into());
+        true
+    }
+    fn open_url(&self, url: &str) -> bool {
+        self.urls.lock().unwrap().push(url.into());
         true
     }
 }
@@ -1508,4 +1547,154 @@ fn test_du_site_ko() {
         "{rapport}"
     );
     assert!(srv.chemins().contains(&"/bd-blacksad-tome-1-nouvelle-maquette-777.html".to_string()));
+}
+
+// ---------------------------------------------------------------------------------------
+// Site qui bloque le script : proposition d'installer cloudscraper
+// ---------------------------------------------------------------------------------------
+
+/// Formulaires « Site bloqué » reçus.
+fn formulaires_blocage(hote: &Hote) -> Vec<FormSpec> {
+    hote.formulaires.lock().unwrap().iter().filter(|f| f.title.contains("Site bloqué")).cloned().collect()
+}
+
+/// 403 répétés malgré le renouvellement des cookies : une seule proposition (deux livres),
+/// boutons « Copier la commande » et « Télécharger Python… », plus aucune page demandée
+/// après le blocage ; l'option cochée sans module : message « indisponible » une fois.
+#[test]
+fn site_bloque_403_propose_cloudscraper() {
+    let py = need_python!();
+    let srv = serveur_mode(Mode::Refus403);
+    let journaux = tempfile::tempdir().unwrap();
+    let rep = |b: &str| Some((b.to_string(), json!({})));
+    let hote = Arc::new(
+        Hote::avec(vec![livre("x", "Blacksad", "1"), livre("y", "Spirou et Fantasio", "2")])
+            .reglages(&srv, journaux.path(), json!({"use_cloudscraper": true}))
+            .formulaires(vec![rep("Copier la commande"), rep("Télécharger Python…"), rep("Fermer")]),
+    );
+    let data = tempfile::tempdir().unwrap();
+    let r =
+        lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["x", "y"]), hote.clone(), &module_dans(data.path()));
+    assert!(r.changes.is_empty(), "{:?}", r.changes);
+    let journal = r.journal_text();
+    assert_eq!(journal.matches("cloudscraper indisponible").count(), 1, "{journal}");
+    let f = formulaires_blocage(&hote);
+    assert_eq!(f.len(), 3, "une proposition, rouverte après chaque bouton : {journal}");
+    assert!(f.iter().all(|x| x.buttons == ["Copier la commande", "Télécharger Python…", "Fermer"]));
+    let lib = data.path().join("scripts").join("lib");
+    let attendu = format!("py -3.13 -m pip install cloudscraper --target \"{}\"", lib.display());
+    assert_eq!(*hote.presse_papiers.lock().unwrap(), [attendu]);
+    assert_eq!(*hote.urls.lock().unwrap(), ["https://www.python.org/downloads/"]);
+    let texte = format!("{:?}", f[0].controls);
+    assert!(texte.contains("cloudscraper") && texte.contains("Configurer BD2") && texte.contains("3.13"), "{texte}");
+    // Pas de message d'erreur par page : le blocage est expliqué une fois.
+    assert!(!hote.messages.lock().unwrap().iter().any(|m| m.contains("403")), "{:?}", hote.messages.lock().unwrap());
+    // Après le blocage, plus aucune page demandée (3 refus, chacun avec un second essai).
+    let pages: Vec<String> =
+        srv.chemins().into_iter().filter(|c| !c.starts_with("/media/") && !c.starts_with("/cache/")).collect();
+    assert!(pages.len() <= 8, "{pages:?}");
+}
+
+/// Page anti-robot (« Just a moment… », en 403) ou captcha servi en 200 : blocage reconnu
+/// dès la première page, proposition une fois ; sans interface (formulaire refusé) le
+/// journal garde l'explication.
+#[test]
+fn page_anti_robot_reconnue() {
+    let py = need_python!();
+    for mode in [Mode::AntiRobot, Mode::Captcha] {
+        let srv = serveur_mode(mode);
+        let journaux = tempfile::tempdir().unwrap();
+        let hote = Arc::new(Hote::avec(vec![livre("x", "Blacksad", "1"), livre("y", "Blacksad", "2")]).reglages(
+            &srv,
+            journaux.path(),
+            json!({}),
+        ));
+        let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["x", "y"]), hote.clone());
+        assert!(r.changes.is_empty());
+        assert_eq!(formulaires_blocage(&hote).len(), 1, "{}", r.journal_text());
+        let journal = r.journal_text();
+        assert!(journal.contains("protection anti-robot") && journal.contains("pip install cloudscraper"), "{journal}");
+        assert!(!journal.contains("cloudscraper indisponible"), "option non cochée : {journal}");
+        let pages = srv.chemins().into_iter().filter(|c| c.starts_with("/search") || c.starts_with("/bandes")).count();
+        assert!(pages <= 1, "{:?}", srv.chemins());
+    }
+}
+
+/// cloudscraper disponible (module factice dans `scripts\lib`) mais le site refuse
+/// toujours : message « réessayer plus tard », pas de proposition d'installation.
+#[test]
+fn site_bloque_meme_avec_cloudscraper() {
+    let py = need_python!();
+    let srv = serveur_mode(Mode::Refus403);
+    let journaux = tempfile::tempdir().unwrap();
+    // Copie des exemples avec un faux module cloudscraper (requêtes par urllib).
+    let exemples = tempfile::tempdir().unwrap();
+    let dest = exemples.path().join("exemples");
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::create_dir_all(exemples.path().join("lib")).unwrap();
+    fn copier(de: &Path, vers: &Path) {
+        std::fs::create_dir_all(vers).unwrap();
+        for e in std::fs::read_dir(de).unwrap() {
+            let e = e.unwrap();
+            if e.file_name() == "__pycache__" {
+                continue;
+            }
+            if e.path().is_dir() {
+                copier(&e.path(), &vers.join(e.file_name()));
+            } else {
+                std::fs::copy(e.path(), vers.join(e.file_name())).unwrap();
+            }
+        }
+    }
+    copier(&dossier_exemples().join("exemples"), &dest);
+    std::fs::write(
+        exemples.path().join("lib").join("cloudscraper.py"),
+        r#"import urllib.request, urllib.error
+class _Rep:
+    def __init__(self, code, octets):
+        self.status_code, self.content = code, octets
+        self.text = octets.decode("utf-8", "replace")
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            e = Exception("HTTP %d" % self.status_code)
+            e.response = self
+            raise e
+class _Scraper:
+    def __init__(self):
+        self.headers = {}
+    def get(self, url, headers=None, timeout=None):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout) as r:
+                return _Rep(r.status, r.read())
+        except urllib.error.HTTPError as e:
+            return _Rep(e.code, e.read())
+def create_scraper(**kw):
+    return _Scraper()
+"#,
+    )
+    .unwrap();
+    let hote = Arc::new(Hote::avec(vec![livre("x", "Blacksad", "1"), livre("y", "Blacksad", "2")]).reglages(
+        &srv,
+        journaux.path(),
+        json!({"use_cloudscraper": true}),
+    ));
+    let (entrees, _) = discover_with_warnings(exemples.path());
+    let entree = entrees.into_iter().find(|e| e.key.as_deref() == Some("Bedetheque2")).unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let options = RunOptions {
+        python: Some(py.clone()),
+        module_dir: Some(module_dans(data.path())),
+        scripts_dir: Some(exemples.path().to_path_buf()),
+        timeout: Some(Duration::from_secs(120)),
+        ..Default::default()
+    };
+    let r = ScriptRunner::new(options).start(&entree, livres_ctx(Hook::Books, &["x", "y"]), hote.clone()).wait();
+    assert_eq!(r.state, RunState::Finished, "{:?}\n{}", r.failure, r.journal_text());
+    let journal = r.journal_text();
+    assert!(!journal.contains("cloudscraper indisponible"), "{journal}");
+    assert!(formulaires_blocage(&hote).is_empty(), "pas de proposition d'installation");
+    let messages = hote.messages.lock().unwrap();
+    let bloque: Vec<&String> = messages.iter().filter(|m| m.contains("même avec cloudscraper")).collect();
+    assert_eq!(bloque.len(), 1, "{messages:?}");
+    assert!(bloque[0].contains("réessayez plus tard"), "{}", bloque[0]);
 }

@@ -108,11 +108,15 @@ impl ComicRustApp {
         let mut failed = None;
         for ev in book.loader.poll() {
             match ev {
-                Event::Opened { format, pages, info } => {
+                Event::Opened { format, pages, numbers, total, info } => {
                     book.format = Some(format);
                     book.pages = pages;
+                    book.numbers = numbers;
+                    book.total = total;
                     book.info = info.map(|b| *b);
                     book.opened = true;
+                    // Page mémorisée = numéro de page du livre → rang de lecture.
+                    book.current = book.position_of(book.current);
                     if book.current >= book.pages.len() {
                         book.current = 0;
                     }

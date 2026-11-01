@@ -498,6 +498,29 @@ mod tests {
         assert!(xml.contains(r#"<Page Image="0" Type="FrontCover"/>"#));
     }
 
+    /// Pages modifiées dans l'onglet « Pages » (base ComicRust) : le ComicInfo.xml les
+    /// reçoit, ordre et attributs compris, et le lecteur les relit.
+    #[test]
+    fn edited_pages_go_to_the_comic_info() {
+        let mut l = crate::pages::full_list(&[], 3);
+        crate::pages::move_to_start(&mut l, &[2]);
+        crate::pages::set_type(&mut l, &[1], "Deleted");
+        crate::pages::set_rotation(&mut l, &[0], "Rotate180");
+        let b = crate::library::LibraryBook {
+            id: "x".into(),
+            series: Some("S".into()),
+            pages: crate::library::PageList { page: l },
+            ..Default::default()
+        };
+        let old = r#"<ComicInfo><Pages><Page Image="0" Type="FrontCover"/></Pages></ComicInfo>"#;
+        let xml = comic_info_from_record(&b.to_record_xml().unwrap(), Some(old)).unwrap();
+        let ci = ComicInfo::from_xml(&xml).unwrap();
+        let read = crate::pages::from_comic_info(&ci);
+        assert_eq!(read.iter().map(|p| p.image).collect::<Vec<_>>(), [2, 0, 1], "{xml}");
+        let order = crate::pages::reading_order(&read, 3);
+        assert_eq!(order.iter().map(|p| (p.image, p.rotation)).collect::<Vec<_>>(), [(2, 0), (0, 180)], "{xml}");
+    }
+
     #[test]
     fn comparison_ignores_layout() {
         let a = "<ComicInfo><Series>S</Series>\n<Pages>\n  <Page Image=\"0\" />\n</Pages></ComicInfo>";

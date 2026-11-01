@@ -38,6 +38,15 @@ pub struct PageInfo {
     pub image_width: Option<u32>,
     #[serde(rename = "@ImageHeight", default, skip_serializing_if = "Option::is_none")]
     pub image_height: Option<u32>,
+    /// Signet (favori) posé sur la page.
+    #[serde(rename = "@Bookmark", default, skip_serializing_if = "Option::is_none")]
+    pub bookmark: Option<String>,
+    /// Rotation (`None`, `Rotate90`, `Rotate180`, `Rotate270`).
+    #[serde(rename = "@Rotation", default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<String>,
+    /// Position en double page (`Default`, `Near`, `Far`).
+    #[serde(rename = "@PagePosition", default, skip_serializing_if = "Option::is_none")]
+    pub page_position: Option<String>,
 }
 
 fn is_story(t: &PageType) -> bool {

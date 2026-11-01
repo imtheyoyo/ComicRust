@@ -25,7 +25,13 @@ pub struct Book {
     pub title: String,
     pub loader: BookLoader,
     pub format: Option<BookFormat>,
+    /// Noms des images, dans l'ordre de lecture (pages supprimées masquées).
     pub pages: Vec<String>,
+    /// Numéro de page du livre (ComicRack : rang dans la liste complète des pages) de
+    /// chaque page lue ; `current` est un rang dans `pages`.
+    pub numbers: Vec<usize>,
+    /// Nombre d'images du fichier.
+    pub total: usize,
     pub info: Option<ComicInfo>,
     /// Taille d'origine des pages déjà décodées.
     pub sizes: HashMap<usize, [u32; 2]>,
@@ -52,6 +58,8 @@ impl Book {
             loader,
             format: None,
             pages: Vec::new(),
+            numbers: Vec::new(),
+            total: 0,
             info: None,
             sizes: HashMap::new(),
             textures: HashMap::new(),
@@ -68,5 +76,19 @@ impl Book {
 
     pub fn page_count(&self) -> usize {
         self.pages.len()
+    }
+
+    /// Numéro de page du livre (ComicRack) du rang de lecture `pos`.
+    pub fn number(&self, pos: usize) -> usize {
+        self.numbers.get(pos).copied().unwrap_or(pos)
+    }
+
+    /// Rang de lecture de la page n° `number` du livre (la suivante visible si elle est
+    /// supprimée).
+    pub fn position_of(&self, number: usize) -> usize {
+        if self.numbers.is_empty() {
+            return number;
+        }
+        self.numbers.iter().position(|&n| n >= number).unwrap_or(self.numbers.len() - 1)
     }
 }
