@@ -27,7 +27,7 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.10.3 | [v0.10.3.md](v0.10.3.md) — [page à cocher](https://claude.ai/artifact/KRJvFA8kWwzzF8FVbPvF31) — [rapport](rapports/v0.10.3-2026-11-01.txt) | **GO** (01/11/2026) : 11/11 OK |
 | v0.10.4 | [v0.10.4.md](v0.10.4.md) — [page à cocher](https://claude.ai/artifact/T7deZbFCjVYsU7fH62mvkg) — [rapport](rapports/v0.10.4-2026-11-01.txt) | **GO** (01/11/2026) : 5/5 OK ; adresses de référence à corriger |
 | v0.10.5 | [v0.10.5.md](v0.10.5.md) — [page à cocher](https://claude.ai/artifact/XABqksQANyCsYfNvE9Gzng) — [rapport](rapports/v0.10.5-2026-11-01.txt) | **GO** (01/11/2026) : 3/3 OK ; 20/20 champs sur le vrai site |
-| v0.10.6 | [v0.10.6.md](v0.10.6.md) | en recette |
+| v0.10.6 | [v0.10.6.md](v0.10.6.md) — [page à cocher](https://claude.ai/artifact/LsxtZ1xNmWBWQ39wB1vov5) | en recette |
 
 ## Déroulé
 
