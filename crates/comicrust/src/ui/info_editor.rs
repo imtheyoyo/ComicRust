@@ -332,6 +332,14 @@ impl ComicRustApp {
         } else {
             Vec::new()
         };
+        // « Appliquer » laisse la fenêtre ouverte : l'onglet « Pages » libère le fichier
+        // avant son écriture (sous Windows, un fichier ouvert ne peut pas être remplacé) et
+        // le relira une fois l'écriture finie (`info_editor_frame`).
+        if let Some(p) = &mut ed.pages {
+            if write_info.iter().any(|id| id.eq_ignore_ascii_case(&p.book_id)) {
+                p.release();
+            }
+        }
         let plan = ApplyPlan { edits, renames: Vec::new(), write_info };
         if plan.is_empty() {
             self.info_after(ed, then);
@@ -356,6 +364,12 @@ impl ComicRustApp {
             }
             Err(e) => ed.message = Some((format!("Enregistrement impossible : {e}"), true)),
         }
+    }
+
+    /// Écriture des infos dans le fichier du livre `id` en attente ou en cours ?
+    fn write_info_busy(&self, id: &str) -> bool {
+        self.scripts.pending_write_info.iter().any(|(i, _)| i.eq_ignore_ascii_case(id))
+            || self.file_job.as_ref().is_some_and(|j| !j.is_finished())
     }
 
     /// Après un enregistrement réussi (ou sans rien à écrire).
@@ -493,6 +507,11 @@ impl ComicRustApp {
             return false;
         }
         self.poll_info_script(ed);
+        // Fichier écrit (ou écriture abandonnée) : l'onglet « Pages » le relit.
+        let written = ed.pages.as_ref().is_some_and(|p| p.released() && !self.write_info_busy(&p.book_id));
+        if let (Some(p), true, None) = (&mut ed.pages, written, &ed.saving) {
+            p.reload(ctx);
+        }
         let Some(db) = self.library.database() else { return false };
         let books: Vec<LibraryBook> = ed.form.ids.iter().filter_map(|i| db.get(i)).cloned().collect();
         if books.is_empty() {

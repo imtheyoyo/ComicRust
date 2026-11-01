@@ -92,9 +92,21 @@ ses dépendances dans `scripts\lib` (voir ci-dessous). Journaux de l'original
 `ComicRust.exe` (réglage avancé `dossier_journaux` pour un autre dossier).
 
 **Site qui bloque le script.** Une page de protection anti-robot à la place de la page
-demandée (« Just a moment… », « Attention Required! | Cloudflare », `cf-chl`, captcha…) ou
-trois refus HTTP 403 de suite pour une page, malgré de nouveaux cookies à chaque essai,
-arrêtent les requêtes de pages pour le reste de l'exécution ; une explication est donnée
+demandée ou trois refus HTTP 403 de suite pour une page, malgré de nouveaux cookies à
+chaque essai, arrêtent les requêtes de pages pour le reste de l'exécution. Page
+anti-robot :
+
+- réponse refusée (403, 429, 503) avec une marque de défi (`cf-chl`, `challenge-platform`,
+  Turnstile, captcha, « Just a moment », Cloudflare…) ;
+- réponse normale (200) seulement si c'est une page de défi **complète** (titre « Just a
+  moment... » ou « Attention Required! \| Cloudflare », formulaire `challenge-form`,
+  `cf_chl_opt`, script `/cdn-cgi/challenge-platform/h/…`), courte et sans aucun élément de
+  mise en page du site (classes `bdt-…`, `bandeau`, `liste-albums`). Les scripts Cloudflare
+  (`/cdn-cgi/challenge-platform/scripts/jsd/main.js`, widget Turnstile) et le mot
+  « captcha » que contiennent les pages ordinaires du site ne comptent pas. Une page du
+  site sans les champs attendus relève de « Quand le site change », pas du blocage.
+
+Une explication est donnée
 **une seule fois** par exécution (journal du script, et fenêtre si le script a une
 interface) :
 

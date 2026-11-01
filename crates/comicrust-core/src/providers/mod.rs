@@ -13,10 +13,16 @@
 //! | DjVu       | djvu, djv         | `djvu-rs` (pur Rust)            |
 //! | WebComic   | cbw               | XML ComicRack + HTTP            |
 //! | Dossier    | —                 | système de fichiers             |
+//!
+//! **Aucun fournisseur ne garde son fichier ouvert** entre deux lectures (ZIP, TAR et PDF
+//! passent par [`on_demand::OnDemandFile`], RAR et 7z rouvrent l'archive à chaque lecture,
+//! DjVu la lit en mémoire) : sous Windows, un livre affiché peut ainsi être réécrit,
+//! renommé ou déplacé.
 
 mod djvu;
 mod folder;
 pub mod heif;
+pub mod on_demand;
 mod pdf;
 mod rar;
 mod sevenz;
@@ -367,6 +373,30 @@ mod tests {
         assert_eq!(BookFormat::sniff(b"AT&TFORM\0\0\0\0DJVU"), Some(BookFormat::Djvu));
         assert_eq!(BookFormat::sniff(b"<?xml version=\"1.0\"?><WebComic>"), Some(BookFormat::WebComic));
         assert_eq!(BookFormat::from_extension("CB7"), Some(BookFormat::SevenZip));
+    }
+
+    /// Aucun format ne garde son fichier ouvert après ouverture, lecture des pages et du
+    /// ComicInfo.xml (sinon Windows refuse de remplacer le fichier : os error 5).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn no_provider_keeps_its_file_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let cbz = dir.path().join("a.cbz");
+        zip::tests::write_cbz(&cbz);
+        let mut books = vec![cbz];
+        for fixture in ["rar4.cbr", "solid_rar5.cbr"] {
+            let p = dir.path().join(fixture);
+            std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture), &p).unwrap();
+            books.push(p);
+        }
+        for path in &books {
+            let mut book = open_book(path).unwrap();
+            for i in 0..book.pages().len() {
+                book.render_page(i).unwrap();
+            }
+            book.comic_info().unwrap();
+            assert_eq!(on_demand::open_descriptors(path), 0, "{}", path.display());
+        }
     }
 
     #[test]

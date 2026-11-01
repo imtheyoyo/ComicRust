@@ -771,28 +771,55 @@ def _une_fois(cle):
     return True
 
 
-# Marques d'une page de protection anti-robot (Cloudflare, captcha…) à la place de la page
-# demandée.
-_MARQUES_ANTI_ROBOT = ("cf-chl", "cf_chl_opt", "challenge-platform", "/cdn-cgi/challenge", "cf-browser-verification")
-_TITRES_ANTI_ROBOT = ("just a moment", "attention required", "un instant", "captcha", "access denied",
-                      "vérification", "verification")
+# Page de protection anti-robot (Cloudflare…) à la place de la page demandée.
+#
+# Attention aux faux positifs (recette v0.10.6) : les pages ordinaires du site peuvent
+# contenir des scripts Cloudflare (« /cdn-cgi/challenge-platform/scripts/jsd/main.js »
+# ajouté par la détection des robots de Cloudflare, widget Turnstile des commentaires,
+# formulaire de connexion avec « captcha »…). D'où deux niveaux :
+# - réponse refusée (403, 429, 503) : n'importe quelle marque de défi suffit ;
+# - réponse 200 : seulement une page de défi **complète** (titre « Just a moment... » ou
+#   « Attention Required! | Cloudflare », formulaire « challenge-form », « cf_chl_opt »,
+#   script de défi « /cdn-cgi/challenge-platform/h/… »), sans aucun élément de mise en page
+#   du site (classes « bdt-… » des motifs, « bandeau », « liste-albums ») et courte.
+# Une page du site sans les champs attendus relève de « structure changée »
+# (signaler_structure), pas du blocage.
+
+# Marques d'un défi dans une réponse refusée.
+_MARQUES_DEFI_REFUS = ("cf-chl", "cf_chl", "challenge-platform", "/cdn-cgi/challenge", "challenge-form",
+                       "cf-browser-verification", "cf-turnstile", "turnstile", "g-recaptcha", "h-captcha",
+                       "hcaptcha", "captcha", "just a moment", "attention required", "cloudflare")
+# Titres des pages de défi complètes (Cloudflare, en anglais et en français).
+_TITRES_DEFI = re.compile(r"^(?:just a moment|un instant|attention required!? \| cloudflare|"
+                          r"access denied \| [^|]+ used cloudflare)")
+# Marques d'une page de défi complète, en dehors du titre. « challenge-platform » seulement
+# pour le script du défi (« /h/… »), pas pour celui de détection (« /scripts/jsd/main.js »)
+# que Cloudflare ajoute aux pages ordinaires.
+_MARQUES_DEFI_COMPLET = re.compile(r"""id\s*=\s*["']challenge-form["']|cf_chl_opt|"""
+                                   r"""/cdn-cgi/challenge-platform/h/|cf-browser-verification""")
+# Éléments de mise en page du site (classes des motifs.json : bdt-sheet, bdt-liste-libelle,
+# bdt-box-albums-liste…) : une page qui en contient est une page du site. Seulement dans
+# les attributs class/id : une page de défi recopie l'adresse demandée (« serie-… »).
+_MARQUES_SITE = re.compile(r"""(?:class|id)\s*=\s*["'][^"']*(?:bdt-|bandeau|liste-albums)""")
+# Au-delà, une réponse 200 n'est jamais une page de défi (les pages du site sont longues).
+_TAILLE_MAX_DEFI = 100000
 
 
-def page_anti_robot(texte):
-    """Vrai si ``texte`` est une page de protection anti-robot (« Just a moment… »,
-    « Attention Required! | Cloudflare », captcha…) et non une page du site."""
+def page_anti_robot(texte, code=200):
+    """Vrai si ``texte`` (réponse de code HTTP ``code``) est une page de protection
+    anti-robot (« Just a moment… », « Attention Required! | Cloudflare »…) et non une page
+    du site. Voir les règles ci-dessus : les scripts Cloudflare ou le mot « captcha » d'une
+    page ordinaire ne suffisent jamais."""
     if not texte:
         return False
     bas = texte[:200000].lower()
-    if any(m in bas for m in _MARQUES_ANTI_ROBOT):
-        return True
+    if code in (403, 429, 503):
+        return any(m in bas for m in _MARQUES_DEFI_REFUS)
+    if len(texte) > _TAILLE_MAX_DEFI or _MARQUES_SITE.search(bas):
+        return False
     t = re.search(r"<title[^>]*>(.*?)</title>", bas, re.S)
-    titre = html.unescape(t.group(1)).strip() if t else ""
-    if any(m in titre for m in _TITRES_ANTI_ROBOT):
-        return True
-    # Captcha seul : seulement sur une page courte (une vraie page du site est longue et
-    # peut contenir un formulaire de contact avec captcha).
-    return len(bas) < 20000 and any(m in bas for m in ("g-recaptcha", "h-captcha", "hcaptcha", "turnstile"))
+    titre = re.sub(r"\s+", " ", html.unescape(t.group(1))).strip() if t else ""
+    return bool(_TITRES_DEFI.search(titre) or _MARQUES_DEFI_COMPLET.search(bas))
 
 
 def _corps_erreur(e):
@@ -925,7 +952,7 @@ class Web:
         """Réponse refusée (403, 429, 503) au ``essai``-ième essai : blocage si c'est une
         page anti-robot ou le dernier essai d'un refus 403 ; sinon on réessaie (403) ou
         l'erreur suit son cours."""
-        if page_anti_robot(corps):
+        if page_anti_robot(corps, code):
             self._bloquer(_t("page anti-robot, HTTP %s" % code, "anti-bot page, HTTP %s" % code))
         if code == 403 and essai >= REFUS_MAX:
             self._bloquer(_t("%d refus HTTP 403 de suite malgré de nouveaux cookies" % essai,

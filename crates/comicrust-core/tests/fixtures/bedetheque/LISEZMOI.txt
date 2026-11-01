@@ -37,3 +37,14 @@ schéma « //www.bedetheque.com/… » ou relatives, « data-src », « Dépot l
 n'a pas de couverture dans la page (lue au survol, sur sa page). images/couv_webp.webp :
 servie pour « Couv_950.jpg » (image WebP derrière une adresse « .jpg »). Le serveur de test
 refuse (403) toute image demandée sans Referer du site.
+
+Détection d'un blocage par le site (faux positif de la recette v0.10.6) :
+album_blacksad_1_cloudflare.html = album_blacksad_1.html tel que le site peut le servir
+normalement (200) avec des scripts Cloudflare : script de détection des robots
+« /cdn-cgi/challenge-platform/scripts/jsd/main.js », widget Turnstile du formulaire d'avis,
+formulaire de connexion avec « captcha », mots « Just a moment » et « Cloudflare » dans la
+page : ce n'est PAS une page anti-robot. defi_cloudflare.html : vraie page de défi
+Cloudflare (« Just a moment... », challenge-form, _cf_chl_opt qui recopie l'adresse
+demandée, script /cdn-cgi/challenge-platform/h/…/orchestrate), servie en 403 et en 200 ;
+defi_cloudflare_attention.html : page « Attention Required! | Cloudflare » avec reCAPTCHA
+(200). Les deux doivent être reconnues comme blocage.

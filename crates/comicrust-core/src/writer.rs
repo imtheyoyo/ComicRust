@@ -252,15 +252,54 @@ fn temp_path(path: &Path) -> PathBuf {
     PathBuf::from(tmp)
 }
 
+/// Attentes entre les tentatives de remplacement (environ 3 s en tout) : un antivirus,
+/// l'indexation de Windows ou un partage SMB peuvent tenir le fichier un court instant
+/// (après sa lecture, le serveur relâche parfois le verrou avec un léger délai).
+const REPLACE_RETRY_DELAYS_MS: &[u64] = &[100, 200, 300, 500, 800, 1200];
+
+/// Refus passager ? (« Accès refusé », fichier en cours d'utilisation, verrouillé.)
+fn is_transient_refusal(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    if matches!(e.kind(), ErrorKind::PermissionDenied | ErrorKind::ResourceBusy) {
+        return true;
+    }
+    // Windows : ERROR_ACCESS_DENIED (5), ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33).
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
+}
+
 /// Remplace `path` par `tmp` (même dossier). Sous Windows, échoue si le fichier est ouvert
-/// par un autre programme : le fichier temporaire est alors supprimé.
+/// par un autre programme : quelques nouvelles tentatives courtes sont faites, puis le
+/// fichier temporaire est supprimé.
 fn replace(tmp: &Path, path: &Path) -> Result<(), Error> {
-    std::fs::rename(tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(tmp);
-        Error::Archive(format!(
-            "impossible de remplacer le fichier ({e}) : il est peut-être ouvert dans ComicRack ou un autre programme"
-        ))
-    })
+    let delays: Vec<std::time::Duration> =
+        REPLACE_RETRY_DELAYS_MS.iter().map(|&ms| std::time::Duration::from_millis(ms)).collect();
+    replace_with(tmp, path, &delays, |a, b| std::fs::rename(a, b))
+}
+
+/// [`replace`] avec ses attentes et sa fonction de renommage (tests).
+fn replace_with(
+    tmp: &Path,
+    path: &Path,
+    delays: &[std::time::Duration],
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), Error> {
+    let mut attempt = 0usize;
+    loop {
+        match rename(tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(e) if is_transient_refusal(&e) && attempt < delays.len() => {
+                std::thread::sleep(delays[attempt]);
+                attempt += 1;
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(tmp);
+                let tries = if attempt > 0 { format!(", {} tentatives", attempt + 1) } else { String::new() };
+                return Err(Error::Archive(format!(
+                    "impossible de remplacer le fichier ({e}{tries}) : il est peut-être ouvert dans ComicRack ou un autre programme"
+                )));
+            }
+        }
+    }
 }
 
 fn check_not_rewritten(path: &Path) -> Result<(), Error> {
@@ -564,6 +603,76 @@ mod tests {
         assert_eq!(write_comic_info(&bare, RECORD).unwrap(), Outcome::Written);
         let mut book = providers::open_book(&bare).unwrap();
         assert_eq!(book.comic_info().unwrap().unwrap().number.as_deref(), Some("1"));
+    }
+
+    /// Refus passager (antivirus, indexation, verrou SMB relâché avec retard) : nouvelles
+    /// tentatives, puis succès ; refus persistant : abandon, fichier temporaire supprimé.
+    #[test]
+    fn replace_retries_on_access_denied() {
+        use std::io::{Error as IoError, ErrorKind};
+        let dir = tempfile::tempdir().unwrap();
+        let (tmp, path) = (dir.path().join("a.cbz.comicrust.tmp"), dir.path().join("a.cbz"));
+        std::fs::write(&tmp, b"nouveau").unwrap();
+        std::fs::write(&path, b"ancien").unwrap();
+        let delays = [std::time::Duration::from_millis(1); 4];
+
+        let mut calls = 0;
+        replace_with(&tmp, &path, &delays, |a, b| {
+            calls += 1;
+            if calls < 3 {
+                Err(IoError::new(ErrorKind::PermissionDenied, "Accès refusé. (os error 5)"))
+            } else {
+                std::fs::rename(a, b)
+            }
+        })
+        .unwrap();
+        assert_eq!(calls, 3);
+        assert_eq!(std::fs::read(&path).unwrap(), b"nouveau");
+        assert!(!tmp.exists());
+
+        std::fs::write(&tmp, b"encore").unwrap();
+        let mut calls = 0;
+        let err = replace_with(&tmp, &path, &delays, |_, _| {
+            calls += 1;
+            Err(IoError::new(ErrorKind::PermissionDenied, "Accès refusé. (os error 5)"))
+        })
+        .unwrap_err()
+        .to_string();
+        assert_eq!(calls, delays.len() + 1, "une tentative + une par attente");
+        assert!(err.contains("5 tentatives") && err.contains("ouvert dans ComicRack"), "{err}");
+        assert!(!tmp.exists(), "fichier temporaire supprimé");
+        assert_eq!(std::fs::read(&path).unwrap(), b"nouveau", "original intact");
+
+        // Autre erreur (dossier disparu…) : pas d'attente inutile.
+        std::fs::write(&tmp, b"x").unwrap();
+        let mut calls = 0;
+        assert!(replace_with(&tmp, &path, &delays, |_, _| {
+            calls += 1;
+            Err(IoError::new(ErrorKind::NotFound, "introuvable"))
+        })
+        .is_err());
+        assert_eq!(calls, 1);
+    }
+
+    /// Le livre affiché (fournisseur ouvert, pages et ComicInfo.xml lus) ne garde aucune
+    /// poignée : l'écriture des infos réussit et l'ancien fournisseur signale le changement
+    /// au lieu de lire des octets décalés.
+    #[test]
+    fn writes_while_the_book_is_displayed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Akira 02.cbz");
+        cbz(&path, Some("<ComicInfo><Series>Ancien</Series></ComicInfo>"));
+        let mut shown = providers::open_book(&path).unwrap();
+        shown.render_page(0).unwrap();
+        shown.comic_info().unwrap();
+        #[cfg(target_os = "linux")]
+        assert_eq!(providers::on_demand::open_descriptors(&path), 0);
+        assert_eq!(write_comic_info(&path, RECORD).unwrap(), Outcome::Written);
+        #[cfg(target_os = "linux")]
+        assert_eq!(providers::on_demand::open_descriptors(&path), 0, "écriture : tout refermé");
+        assert!(shown.read_page(0).unwrap_err().to_string().contains("a changé"));
+        let mut fresh = providers::open_book(&path).unwrap();
+        assert_eq!(fresh.comic_info().unwrap().unwrap().series.as_deref(), Some("Thanos & Cie"));
     }
 
     #[test]

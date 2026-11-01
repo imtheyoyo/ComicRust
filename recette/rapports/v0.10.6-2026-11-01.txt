@@ -1,0 +1,7 @@
+Rapport de recette ComicRust v0.10.6 — 01/11/2026 22:03
+Résultat : 6 OK, 2 échec(s), 0 non testé(s) sur 8.
+Décision proposée : NO-GO (1 bloquant(s) en échec).
+
+ÉCHECS (2)
+- P-01 [Bloquant] Onglet Pages : OK fonctionne ; « Appliquer » (avec écriture dans le fichier) → ERREUR : archive : impossible de remplacer le fichier (Accès refusé. (os error 5)).
+- B-01 [Mineur] Bedetheque Scraper 2 : « site bloqué (page anti-robot) » alors que le site répondait (faux positif sur l'album Akira tome 3 et la série 6184).

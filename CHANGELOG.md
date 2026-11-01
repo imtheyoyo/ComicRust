@@ -5,6 +5,26 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.7] — 2026-11-01
+
+Correctifs de la v0.10.6 (recette NO-GO).
+
+### Corrections
+- **Onglet Pages, « Appliquer » avec écriture dans le fichier** : l'erreur « Accès refusé (os
+  error 5) » est corrigée. ComicRust gardait lui-même le CBZ ouvert, pour les vignettes et le
+  lecteur. Désormais :
+  - les fichiers CBZ, CBT et PDF ne sont ouverts que le temps d'une lecture ;
+  - les vignettes sont libérées avant l'écriture, puis rechargées ;
+  - le lecteur rouvre un livre réécrit ;
+  - en cas d'accès refusé passager (antivirus, partage réseau), l'écriture est retentée
+    pendant environ 3 s.
+- **Bedetheque Scraper 2** : une page normale du site n'est plus prise pour une page
+  anti-robot, même si Cloudflare y ajoute un script. Seules les vraies pages de défi
+  déclenchent la proposition d'installer cloudscraper.
+
+### Recette
+[recette/v0.10.7.md](recette/v0.10.7.md).
+
 ## [v0.10.6] — 2026-11-01
 
 ### Nouveautés
@@ -22,7 +42,7 @@ ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa
   une fenêtre propose d'installer cloudscraper, avec Python 3.13 et la commande à copier.
 
 ### Recette
-[recette/v0.10.6.md](recette/v0.10.6.md).
+[recette/v0.10.6.md](recette/v0.10.6.md) — NO-GO (6/8) : corrigé en v0.10.7.
 
 ## [v0.10.5] — 2026-11-01
 

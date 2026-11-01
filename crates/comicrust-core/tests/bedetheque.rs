@@ -141,10 +141,28 @@ enum Mode {
     Normal,
     /// Toujours « 403 Forbidden », même avec de nouveaux cookies.
     Refus403,
-    /// Page de protection Cloudflare (« Just a moment… ») en 403.
+    /// Page de défi Cloudflare (« Just a moment… », `defi_cloudflare.html`) en 403.
     AntiRobot,
-    /// Captcha servi en 200 à la place de la page.
+    /// La même page de défi servie en 200 à la place de la page.
+    Defi200,
+    /// Page « Attention Required! | Cloudflare » avec captcha (`defi_cloudflare_attention.html`)
+    /// servie en 200.
     Captcha,
+    /// Site normal, mais pages avec les scripts Cloudflare ajoutés aux pages ordinaires
+    /// (détection « /cdn-cgi/challenge-platform/scripts/jsd/main.js ») et page d'album avec
+    /// Turnstile et formulaire « captcha » (`album_blacksad_1_cloudflare.html`) : faux
+    /// positif de la recette v0.10.6, ce n'est **pas** un blocage.
+    ScriptsCloudflare,
+}
+
+/// Script que Cloudflare ajoute aux pages ordinaires (détection des robots, abrégé).
+const SCRIPT_JSD_CLOUDFLARE: &str = "<script>(function(){var a=document.createElement('script');\
+    a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';window.__CF$cv$params={r:'8db1c2f3a4e5d6c7'};\
+    document.getElementsByTagName('head')[0].appendChild(a);})();</script>";
+
+/// Fixture lue en texte.
+fn fixture_texte(nom: &str) -> Vec<u8> {
+    std::fs::read(fixtures().join(nom)).unwrap()
 }
 
 fn serveur() -> Serveur {
@@ -186,27 +204,32 @@ fn serveur_mode(mode: Mode) -> Serveur {
                 _ if !image && mode == Mode::Refus403 => {
                     ("403 Forbidden", "text/html", b"<html><body>Forbidden</body></html>".to_vec())
                 }
-                _ if !image && mode == Mode::AntiRobot => (
-                    "403 Forbidden",
-                    "text/html",
-                    b"<html><head><title>Just a moment...</title></head><body><div id=\"cf-chl-widget\"></div>\
-                      <script src=\"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1\"></script></body></html>"
-                        .to_vec(),
-                ),
-                _ if !image && mode == Mode::Captcha => (
-                    "200 OK",
-                    "text/html; charset=utf-8",
-                    b"<html><head><title>Attention Required! | Cloudflare</title></head><body>\
-                      <div class=\"g-recaptcha\"></div></body></html>"
-                        .to_vec(),
-                ),
+                _ if !image && mode == Mode::AntiRobot => {
+                    ("403 Forbidden", "text/html; charset=utf-8", fixture_texte("defi_cloudflare.html"))
+                }
+                _ if !image && mode == Mode::Defi200 => {
+                    ("200 OK", "text/html; charset=utf-8", fixture_texte("defi_cloudflare.html"))
+                }
+                _ if !image && mode == Mode::Captcha => {
+                    ("200 OK", "text/html; charset=utf-8", fixture_texte("defi_cloudflare_attention.html"))
+                }
                 _ if image && !referer_ok => ("403 Forbidden", "text/html", b"<html>Interdit</html>".to_vec()),
                 Some((t, f)) => {
+                    let f = if mode == Mode::ScriptsCloudflare && f == "album_blacksad_1.html" {
+                        "album_blacksad_1_cloudflare.html".to_string()
+                    } else {
+                        f
+                    };
                     let chemin = fixtures().join(f);
                     let mut octets = std::fs::read(chemin).unwrap();
                     if t.starts_with("text/") {
-                        octets =
-                            String::from_utf8(octets).unwrap().replace("https://www.bedetheque.com", &b2).into_bytes();
+                        let mut texte = String::from_utf8(octets).unwrap().replace("https://www.bedetheque.com", &b2);
+                        // Comme Cloudflare : script ajouté avant « </body> » des pages
+                        // complètes (pas des fragments « ajax/resume »).
+                        if let Some(i) = texte.rfind("</body>").filter(|_| mode == Mode::ScriptsCloudflare) {
+                            texte = format!("{}{SCRIPT_JSD_CLOUDFLARE}{}", &texte[..i], &texte[i..]);
+                        }
+                        octets = texte.into_bytes();
                     }
                     ("200 OK", t, octets)
                 }
@@ -1595,13 +1618,14 @@ fn site_bloque_403_propose_cloudscraper() {
     assert!(pages.len() <= 8, "{pages:?}");
 }
 
-/// Page anti-robot (« Just a moment… », en 403) ou captcha servi en 200 : blocage reconnu
-/// dès la première page, proposition une fois ; sans interface (formulaire refusé) le
-/// journal garde l'explication.
+/// Vraie page de défi Cloudflare (« Just a moment… ») en 403 ou en 200, ou page
+/// « Attention Required! | Cloudflare » avec captcha en 200 : blocage reconnu dès la
+/// première page, proposition une fois ; sans interface (formulaire refusé) le journal garde
+/// l'explication.
 #[test]
 fn page_anti_robot_reconnue() {
     let py = need_python!();
-    for mode in [Mode::AntiRobot, Mode::Captcha] {
+    for mode in [Mode::AntiRobot, Mode::Defi200, Mode::Captcha] {
         let srv = serveur_mode(mode);
         let journaux = tempfile::tempdir().unwrap();
         let hote = Arc::new(Hote::avec(vec![livre("x", "Blacksad", "1"), livre("y", "Blacksad", "2")]).reglages(
@@ -1618,6 +1642,74 @@ fn page_anti_robot_reconnue() {
         let pages = srv.chemins().into_iter().filter(|c| c.starts_with("/search") || c.starts_with("/bandes")).count();
         assert!(pages <= 1, "{:?}", srv.chemins());
     }
+}
+
+/// Faux positif de la recette v0.10.6 : pages ordinaires avec les scripts Cloudflare
+/// (détection « challenge-platform/scripts/jsd », Turnstile des avis, formulaire de connexion
+/// avec « captcha ») : pas de blocage, fiche remplie normalement.
+#[test]
+fn scripts_cloudflare_pas_un_blocage() {
+    let py = need_python!();
+    let srv = serveur_mode(Mode::ScriptsCloudflare);
+    let journaux = tempfile::tempdir().unwrap();
+    let hote = Arc::new(Hote::avec(vec![livre("b1", "Blacksad", "1")]).reglages(&srv, journaux.path(), json!({})));
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b1"]), hote.clone());
+    let journal = r.journal_text();
+    assert!(formulaires_blocage(&hote).is_empty(), "{journal}");
+    assert!(!journal.contains("anti-robot") && !journal.contains("site bloqué"), "{journal}");
+    let c = champs(&r, "b1");
+    assert_eq!(c["Penciller"], json!("Juanjo Guarnido"), "{c:?}\n{journal}");
+    assert_eq!(c["Publisher"], json!("Dargaud"), "{c:?}");
+    assert!(c["Summary"].as_str().unwrap().contains("John Blacksad, détective privé"), "{c:?}");
+    assert!(srv.chemins().iter().any(|c| c.starts_with("/bd-blacksad-tome-1-")), "{:?}", srv.chemins());
+}
+
+/// `page_anti_robot` sur toutes les fixtures : pages du site (même avec scripts
+/// Cloudflare, Turnstile, « captcha ») jamais anti-robot en 200 ; vraies pages de défi
+/// reconnues en 200 et en 403 ; en 403/429/503, une marque de défi suffit, pas un refus nu.
+#[test]
+fn detection_anti_robot_sur_les_fixtures() {
+    let py = need_python!();
+    let tmp = tempfile::tempdir().unwrap();
+    let module = module_dans(tmp.path());
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::write(module.join("comicrust.py"), comicrust_core::scripting::PYTHON_MODULE).unwrap();
+    let code = r#"
+import glob, os, sys
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+import bedetheque_scraper2 as b
+defis = {"defi_cloudflare.html", "defi_cloudflare_attention.html"}
+pages = sorted(glob.glob(os.path.join(sys.argv[3], "*.html")))
+assert len(pages) > 20 and "album_blacksad_1_cloudflare.html" in map(os.path.basename, pages), pages
+for p in pages:
+    nom = os.path.basename(p)
+    texte = open(p, encoding="utf-8").read()
+    assert b.page_anti_robot(texte) == (nom in defis), nom
+    if nom in defis:
+        for code in (403, 429, 503):
+            assert b.page_anti_robot(texte, code), (nom, code)
+jsd = "<script src='/cdn-cgi/challenge-platform/scripts/jsd/main.js'></script>"
+# Page du site longue (plus de 100 000 caractères) avec un titre trompeur : jamais un défi.
+assert not b.page_anti_robot("<title>Just a moment...</title>" + jsd + "<p>x</p>" * 20000)
+# Page courte sans mise en page du site, seulement le script de détection : pas un défi.
+assert not b.page_anti_robot("<html><head>" + jsd + "</head><body>Bonjour</body></html>")
+# Refus nu (403 sans marque de défi) : laissé aux essais avec de nouveaux cookies.
+assert not b.page_anti_robot("<html><body>Forbidden</body></html>", 403)
+assert not b.page_anti_robot("", 403)
+# Défi qui recopie l'adresse demandée (« serie-… ») : toujours reconnu.
+defi = open(os.path.join(sys.argv[3], "defi_cloudflare.html"), encoding="utf-8").read()
+assert "serie-6184" in defi and b.page_anti_robot(defi)
+print("ok")
+"#;
+    let sortie = std::process::Command::new(&py)
+        .args(["-I", "-c", code])
+        .arg(&module)
+        .arg(dossier_exemples().join("exemples"))
+        .arg(fixtures())
+        .output()
+        .unwrap();
+    let texte = String::from_utf8_lossy(&sortie.stdout).into_owned() + &String::from_utf8_lossy(&sortie.stderr);
+    assert!(sortie.status.success() && texte.trim() == "ok", "{texte}");
 }
 
 /// cloudscraper disponible (module factice dans `scripts\lib`) mais le site refuse

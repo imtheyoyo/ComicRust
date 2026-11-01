@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 
 use pdfium_render::prelude::*;
 
+use super::on_demand::OnDemandFile;
 use super::{encode_png, BookFormat, PageImage, PageProvider};
 use crate::{ComicInfo, Error};
 
@@ -59,6 +60,8 @@ pub fn pdfium_status() -> Result<(), String> {
 
 pub struct PdfProvider {
     doc: PdfDocument<'static>,
+    /// Fichier lu par PDFium à la demande, refermé après chaque opération.
+    file: OnDemandFile,
     pages: Vec<String>,
 }
 
@@ -68,11 +71,14 @@ fn err(e: PdfiumError) -> Error {
 
 impl PdfProvider {
     pub fn open(path: &Path) -> Result<Self, Error> {
-        let doc = pdfium()?.load_pdf_from_file(path, None).map_err(err)?;
+        let file = OnDemandFile::open(path)?;
+        let doc = pdfium()?.load_pdf_from_reader(file.clone(), None).map_err(err);
+        file.close();
+        let doc = doc?;
         let n = doc.pages().len() as usize;
         let width = n.to_string().len().max(3);
         let pages = (1..=n).map(|i| format!("Page {i:0width$}")).collect();
-        Ok(Self { doc, pages })
+        Ok(Self { doc, file, pages })
     }
 }
 
@@ -90,13 +96,17 @@ impl PageProvider for PdfProvider {
         if index >= self.pages.len() {
             return Err(Error::PageOutOfRange(index));
         }
-        let page = self.doc.pages().get(index as PdfPageIndex).map_err(err)?;
-        let cfg = PdfRenderConfig::new()
-            .set_target_height(RENDER_HEIGHT)
-            .set_maximum_width(RENDER_HEIGHT * 2)
-            .render_form_data(true);
-        let bitmap = page.render_with_config(&cfg).map_err(err)?;
-        Ok(bitmap.as_image().map_err(err)?.into_rgba8())
+        let rendered = (|| {
+            let page = self.doc.pages().get(index as PdfPageIndex).map_err(err)?;
+            let cfg = PdfRenderConfig::new()
+                .set_target_height(RENDER_HEIGHT)
+                .set_maximum_width(RENDER_HEIGHT * 2)
+                .render_form_data(true);
+            let bitmap = page.render_with_config(&cfg).map_err(err)?;
+            Ok(bitmap.as_image().map_err(err)?.into_rgba8())
+        })();
+        self.file.close();
+        rendered
     }
     fn comic_info(&mut self) -> Result<Option<ComicInfo>, Error> {
         // ComicRack lit les métadonnées PDF de base (titre, auteur).
@@ -104,6 +114,7 @@ impl PageProvider for PdfProvider {
         let get = |t| meta.get(t).map(|m| m.value().to_string()).filter(|v| !v.trim().is_empty());
         let title = get(PdfDocumentMetadataTagType::Title);
         let writer = get(PdfDocumentMetadataTagType::Author);
+        self.file.close();
         if title.is_none() && writer.is_none() {
             return Ok(None);
         }
@@ -132,5 +143,19 @@ mod tests {
         let px = img.get_pixel(img.width() / 2, img.height() / 2).0;
         assert!(px[0] > 200 && px[1] < 60, "{px:?}");
         assert!(book.read_page(0).unwrap().starts_with(b"\x89PNG"));
+        // Aucune poignée gardée sur le fichier entre deux lectures (copie privée : d'autres
+        // tests lisent le même fichier en parallèle).
+        #[cfg(target_os = "linux")]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let own = dir.path().join("sample.pdf");
+            std::fs::copy(&path, &own).unwrap();
+            let mut book = PdfProvider::open(&own).unwrap();
+            book.render_page(0).unwrap();
+            book.comic_info().unwrap();
+            assert_eq!(crate::providers::on_demand::open_descriptors(&own), 0);
+            assert!(book.render_page(1).is_ok(), "rouvert à la demande");
+            assert_eq!(crate::providers::on_demand::open_descriptors(&own), 0);
+        }
     }
 }

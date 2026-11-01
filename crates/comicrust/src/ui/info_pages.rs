@@ -10,7 +10,10 @@
 //! - « Pages ▾ » : affichage (vignettes / détails) et taille des vignettes ;
 //!   « Réinitialiser ▾ » : ordre d'origine (clic), tri par nom, types, tout.
 //! - Les vignettes sont décodées par un [`BookLoader`] (fil dédié, ordre brut du fichier) :
-//!   l'interface ne bloque jamais.
+//!   l'interface ne bloque jamais. Le fichier n'est ouvert que le temps de chaque lecture ;
+//!   avant d'écrire les infos dans le fichier (« Appliquer », fenêtre ouverte), l'onglet
+//!   **libère** son chargeur et ses vignettes ([`PagesTab::release`]) puis les **recharge**
+//!   une fois l'écriture finie ([`PagesTab::reload`]).
 //! - Lecture seule : consultation (sélection, copie), aucune modification.
 //!
 //! La logique (déplacements, types, réinitialisations, vérification) est dans
@@ -69,7 +72,9 @@ struct Drag {
 pub struct PagesTab {
     pub book_id: String,
     path: PathBuf,
-    loader: BookLoader,
+    /// Chargeur des vignettes ; `None` pendant l'écriture des infos dans le fichier.
+    loader: Option<BookLoader>,
+    max_side: u32,
     opened: bool,
     error: Option<String>,
     /// Noms des images du fichier (ordre naturel).
@@ -101,7 +106,8 @@ impl PagesTab {
         let max_side = ctx.input(|i| i.max_texture_side).min(16384) as u32;
         PagesTab {
             book_id: book.id.clone(),
-            loader: BookLoader::open(path.clone(), ctx.clone(), max_side, Order::Raw),
+            loader: Some(BookLoader::open(path.clone(), ctx.clone(), max_side, Order::Raw)),
+            max_side,
             path,
             opened: false,
             error: None,
@@ -132,6 +138,28 @@ impl PagesTab {
         self.dirty().then(|| FieldEdit::pages(&self.book_id, self.pages.clone()))
     }
 
+    /// Libère le fichier avant de l'écrire : chargeur arrêté, vignettes oubliées.
+    pub fn release(&mut self) {
+        self.loader = None;
+        self.thumbs.clear();
+        self.requested.clear();
+        self.copy_wanted = None;
+        self.drag = None;
+    }
+
+    /// Fichier libéré (écriture en cours) ?
+    pub fn released(&self) -> bool {
+        self.loader.is_none()
+    }
+
+    /// Relit le fichier (après son écriture) : pages et vignettes rechargées.
+    pub fn reload(&mut self, ctx: &Context) {
+        self.release();
+        self.opened = false;
+        self.error = None;
+        self.loader = Some(BookLoader::open(self.path.clone(), ctx.clone(), self.max_side, Order::Raw));
+    }
+
     /// Fiche enregistrée (relue) : elle devient la référence.
     pub fn saved(&mut self, book: &LibraryBook) {
         self.stored = book.pages.page.clone();
@@ -143,7 +171,8 @@ impl PagesTab {
 
     /// Événements du chargeur.
     fn poll(&mut self, ctx: &Context) {
-        for ev in self.loader.poll() {
+        let Some(loader) = &self.loader else { return };
+        for ev in loader.poll() {
             match ev {
                 Event::Opened { pages: names, total, .. } => {
                     self.names = names;
@@ -254,10 +283,11 @@ impl PagesTab {
             }
             PageAction::Refresh => {
                 let targets: Vec<i32> = if sel.is_empty() { self.pages.iter().map(|p| p.image).collect() } else { sel };
+                let Some(loader) = &self.loader else { return };
                 for i in targets {
                     self.thumbs.remove(&(i as usize));
                     self.requested.remove(&(i as usize));
-                    self.loader.request(Request::RefreshThumb(i as usize));
+                    loader.request(Request::RefreshThumb(i as usize));
                     self.requested.insert(i as usize);
                 }
             }
@@ -265,8 +295,9 @@ impl PagesTab {
                 [] => {}
                 [img] => {
                     // Image décodée par le chargeur, puis mise dans le presse-papiers.
+                    let Some(loader) = &self.loader else { return };
                     self.copy_wanted = Some(img as usize);
-                    self.loader.request(Request::Page(img as usize));
+                    loader.request(Request::Page(img as usize));
                     self.message = Some("Copie de la page…".into());
                 }
                 _ => {
@@ -419,6 +450,13 @@ impl PagesTab {
             });
         });
 
+        if self.released() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Écriture des infos dans le fichier… (pages rechargées ensuite)");
+            });
+            return;
+        }
         if let Some(e) = &self.error {
             ui.colored_label(crate::ui::theme::error(ui), format!("Fichier illisible : {e}"));
             return;
@@ -526,8 +564,9 @@ impl PagesTab {
 
     /// Vignettes demandées au chargeur.
     fn want_thumb(&mut self, image: usize) {
+        let Some(loader) = &self.loader else { return };
         if self.requested.insert(image) {
-            self.loader.request(Request::Thumb(image));
+            loader.request(Request::Thumb(image));
         }
     }
 
@@ -844,5 +883,66 @@ mod tests {
         assert!(e.is_none());
         pages::set_type(&mut t.pages, &[2], "Deleted");
         assert_eq!(t.edit().unwrap().field, "Pages");
+    }
+
+    /// Vignettes chargées, fenêtre restée ouverte (« Appliquer ») : aucune poignée sur le
+    /// fichier (Linux : `/proc/self/fd`), l'écriture des infos réussit, puis l'onglet relit
+    /// le fichier réécrit.
+    #[test]
+    fn thumbnails_keep_no_handle_and_reload_after_writing() {
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+        let ctx = Context::default();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Akira 02.cbz");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for (i, n) in ["p1.png", "p2.png", "p3.png"].iter().enumerate() {
+            w.start_file(*n, zip::write::SimpleFileOptions::default()).unwrap();
+            let img = image::RgbaImage::from_pixel(8, 12, image::Rgba([i as u8 * 60, 0, 0, 255]));
+            let mut png = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+            w.write_all(&png).unwrap();
+        }
+        w.finish().unwrap();
+        let book = LibraryBook { id: "akira".into(), ..Default::default() };
+        let mut t = PagesTab::new(&ctx, &book, path.clone());
+        let wait = |t: &mut PagesTab, done: &dyn Fn(&PagesTab) -> bool| {
+            let start = Instant::now();
+            while !done(t) {
+                assert!(start.elapsed() < Duration::from_secs(20), "chargement trop long");
+                std::thread::sleep(Duration::from_millis(10));
+                t.poll(&ctx);
+            }
+        };
+        wait(&mut t, &|t| t.opened);
+        for i in 0..3 {
+            t.want_thumb(i);
+        }
+        wait(&mut t, &|t| t.thumbs.len() == 3);
+        assert!(t.thumbs.values().all(Option::is_some));
+        #[cfg(target_os = "linux")]
+        assert_eq!(comicrust_core::providers::on_demand::open_descriptors(&path), 0, "vignettes chargées");
+
+        // « Appliquer » : libéré, écrit, rechargé.
+        t.release();
+        assert!(t.released() && t.thumbs.is_empty());
+        let record = r#"<ComicBook Id="akira"><Series>Akira</Series><Number>2</Number></ComicBook>"#;
+        let outcome = comicrust_core::writer::write_comic_info(&path, record).unwrap();
+        assert_eq!(outcome, comicrust_core::writer::Outcome::Written);
+        t.reload(&ctx);
+        assert!(!t.released() && !t.opened);
+        wait(&mut t, &|t| t.opened);
+        assert_eq!(t.names, ["p1.png", "p2.png", "p3.png"]);
+        t.want_thumb(2);
+        wait(&mut t, &|t| t.thumbs.contains_key(&2));
+        assert!(t.error.is_none() && t.thumbs[&2].is_some());
+        #[cfg(target_os = "linux")]
+        assert_eq!(comicrust_core::providers::on_demand::open_descriptors(&path), 0, "après rechargement");
+        // « OK » ensuite : rien de modifié, rien à réécrire (pas de seconde écriture).
+        assert!(!t.dirty() && t.edit().is_none());
+        assert_eq!(
+            comicrust_core::writer::write_comic_info(&path, record).unwrap(),
+            comicrust_core::writer::Outcome::Unchanged
+        );
     }
 }

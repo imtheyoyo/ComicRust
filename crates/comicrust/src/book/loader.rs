@@ -4,6 +4,11 @@
 //! PDFium, ne sont pas transférables entre fils), puis décode les pages et les
 //! vignettes à la demande. Les pages demandées pour l'affichage passent avant
 //! les vignettes. L'interface ne bloque jamais sur une archive lente.
+//!
+//! Le fil ne garde **aucune poignée** sur le fichier entre deux lectures (les fournisseurs
+//! le referment après chaque page) : le livre affiché peut être réécrit (infos écrites dans
+//! le CBZ), y compris sous Windows. Si le fichier a changé depuis son ouverture (taille ou
+//! date), le livre est rouvert avant la lecture suivante.
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -12,7 +17,8 @@ use std::thread;
 
 use comicrust_core::library::PageInfo;
 use comicrust_core::pages::{self, ReadingPage};
-use comicrust_core::{open_book_patiently, BookFormat, ComicInfo, PageImage};
+use comicrust_core::providers::on_demand::file_stamp;
+use comicrust_core::{open_book_patiently, BookFormat, ComicInfo, PageImage, PageProvider};
 use eframe::egui::{self, ColorImage};
 
 pub const THUMB_HEIGHT: u32 = 180;
@@ -116,10 +122,12 @@ impl BookLoader {
                     ctx.request_repaint();
                 };
                 // ComicRack peut être en train de réécrire le fichier (quelques secondes).
+                let mut stamp = file_stamp(&path);
                 let mut book = match open_book_patiently(&path, std::time::Duration::from_secs(20)) {
                     Ok(b) => b,
                     Err(e) => return send(Event::Failed(e.to_string())),
                 };
+                let raw_names = book.pages().to_vec();
                 let info = book.comic_info().ok().flatten().map(Box::new);
                 let total = book.pages().len();
                 let plan = plan(&order, total, info.as_deref());
@@ -150,6 +158,10 @@ impl BookLoader {
                     }
                     if debug {
                         eprintln!("[loader] file pages={pages:?} vignettes={thumbs:?}");
+                    }
+                    // Fichier réécrit depuis l'ouverture (infos écrites dans le CBZ…) : rouvert.
+                    if let Err(e) = refresh(&path, &mut stamp, &mut book, &raw_names) {
+                        return send(Event::Failed(e));
                     }
                     if let Some(index) = pages.pop_front() {
                         let (image, degrees) = source(index);
@@ -184,6 +196,30 @@ impl BookLoader {
     pub fn poll(&self) -> Vec<Event> {
         self.rx.try_iter().collect()
     }
+}
+
+/// Rouvre le livre si le fichier a changé depuis la dernière ouverture (empreinte
+/// `stamp`). Les images doivent rester les mêmes (`raw_names`) : sinon l'ordre servi n'a
+/// plus de sens et le livre est à rouvrir.
+fn refresh(
+    path: &std::path::Path,
+    stamp: &mut Option<(u64, Option<std::time::SystemTime>)>,
+    book: &mut Box<dyn PageProvider>,
+    raw_names: &[String],
+) -> Result<(), String> {
+    let now = file_stamp(path);
+    if now == *stamp {
+        return Ok(());
+    }
+    let fresh = open_book_patiently(path, std::time::Duration::from_secs(20)).map_err(|e| e.to_string())?;
+    if fresh.pages() != raw_names {
+        return Err("le fichier a changé (pages différentes) : rouvrir le livre".into());
+    }
+    *book = fresh;
+    // Empreinte relevée avant la réouverture (une réécriture entre-temps sera vue) ; fichier
+    // absent à ce moment-là (ComicRack le réécrivait) : celle du fichier rouvert.
+    *stamp = if now.is_some() { now } else { file_stamp(path) };
+    Ok(())
 }
 
 fn push(r: Request, pages: &mut VecDeque<usize>, thumbs: &mut VecDeque<usize>, done: &mut HashSet<usize>) {
@@ -233,5 +269,48 @@ mod tests {
         assert_eq!(file.iter().map(|r| r.image).collect::<Vec<_>>(), [1, 2], "ComicInfo.xml du fichier");
         let img = image::RgbaImage::new(4, 2);
         assert_eq!(rotated(img, 90).dimensions(), (2, 4));
+    }
+
+    /// Livre affiché dans le lecteur pendant l'écriture de ses infos : le fil ne garde pas
+    /// le fichier ouvert, puis rouvre le fichier réécrit au lieu d'échouer.
+    #[test]
+    fn reopens_the_book_after_it_was_rewritten() {
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("livre.cbz");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for n in ["a.png", "b.png"] {
+            w.start_file(n, zip::write::SimpleFileOptions::default()).unwrap();
+            let mut png = Vec::new();
+            image::RgbaImage::new(6, 9).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+            w.write_all(&png).unwrap();
+        }
+        w.finish().unwrap();
+        let loader = BookLoader::open(path.clone(), egui::Context::default(), 4096, Order::Reading(None));
+        let next_page = |loader: &BookLoader, want: usize| {
+            let start = Instant::now();
+            loop {
+                assert!(start.elapsed() < Duration::from_secs(20), "pas de réponse");
+                for ev in loader.poll() {
+                    match ev {
+                        Event::Page { index, result } if index == want => return result.map(|(_, s)| s),
+                        Event::Failed(e) => return Err(e),
+                        _ => {}
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        loader.request(Request::Page(0));
+        assert_eq!(next_page(&loader, 0), Ok([6, 9]));
+        #[cfg(target_os = "linux")]
+        assert_eq!(comicrust_core::providers::on_demand::open_descriptors(&path), 0);
+        let record = r#"<ComicBook Id="x"><Series>S</Series></ComicBook>"#;
+        comicrust_core::writer::write_comic_info(&path, record).unwrap();
+        loader.request(Request::Page(1));
+        assert_eq!(next_page(&loader, 1), Ok([6, 9]), "fichier réécrit : rouvert");
+        #[cfg(target_os = "linux")]
+        assert_eq!(comicrust_core::providers::on_demand::open_descriptors(&path), 0);
     }
 }

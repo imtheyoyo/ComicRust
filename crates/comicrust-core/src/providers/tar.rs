@@ -6,11 +6,13 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+use super::on_demand::OnDemandFile;
 use super::{index_entries, parse_comic_info, BookFormat, PageProvider};
 use crate::{ComicInfo, Error};
 
 pub struct TarProvider {
-    file: File,
+    /// Ouvert le temps d'une lecture seulement (voir `on_demand`).
+    file: OnDemandFile,
     entries: HashMap<String, (u64, u64)>,
     pages: Vec<String>,
     info_entry: Option<String>,
@@ -29,14 +31,17 @@ impl TarProvider {
             entries.insert(name, (entry.raw_file_position(), entry.size()));
         }
         let (pages, info_entry) = index_entries(entries.keys().cloned());
-        Ok(Self { file: File::open(path)?, entries, pages, info_entry })
+        let file = OnDemandFile::open(path)?;
+        file.close();
+        Ok(Self { file, entries, pages, info_entry })
     }
 
     fn read_entry(&mut self, name: &str) -> Result<Vec<u8>, Error> {
         let (pos, size) = *self.entries.get(name).ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))?;
-        self.file.seek(SeekFrom::Start(pos))?;
         let mut buf = vec![0; size as usize];
-        self.file.read_exact(&mut buf)?;
+        let read = self.file.seek(SeekFrom::Start(pos)).and_then(|_| self.file.read_exact(&mut buf));
+        self.file.close();
+        read?;
         Ok(buf)
     }
 }
@@ -84,6 +89,10 @@ mod tests {
         b.finish().unwrap();
         drop(b);
         assert_eq!(BookFormat::detect(&path), Some(BookFormat::Tar));
-        check_book(&mut TarProvider::open(&path).unwrap());
+        let mut book = TarProvider::open(&path).unwrap();
+        check_book(&mut book);
+        // Aucune poignée gardée sur le fichier entre deux lectures.
+        #[cfg(target_os = "linux")]
+        assert_eq!(crate::providers::on_demand::open_descriptors(&path), 0);
     }
 }

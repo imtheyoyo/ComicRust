@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-comicrust-core = { version = "0.10.6", path = "../comicrust-core" }
+comicrust-core = { version = "0.10.7", path = "../comicrust-core" }
 eframe = { version = "0.37", features = ["persistence"] }
 egui_extras = { version = "0.37", default-features = false }
 # Polices d'emoji monochromes (Noto Emoji, emoji-icon-font), plus chargées par défaut depuis
