@@ -102,7 +102,7 @@ impl ComicRustApp {
     pub(crate) fn error_window(&mut self, ctx: &Context) {
         let Some(msg) = self.error.clone() else { return };
         let mut close = false;
-        egui::Modal::new(egui::Id::unique("comicrust-error")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-error")).show(ctx, |ui| {
             ui.set_max_width(460.0);
             ui.heading("⚠ Erreur");
             ui.label(msg);

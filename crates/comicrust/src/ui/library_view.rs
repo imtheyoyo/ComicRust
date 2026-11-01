@@ -41,7 +41,6 @@ const CAPTION_H: f32 = 40.0;
 const GAP: f32 = 14.0;
 /// Rapport largeur/hauteur des emplacements de couverture (format comics).
 pub(crate) const COVER_RATIO: f32 = 0.66;
-pub(crate) const ACCENT: Color32 = Color32::from_rgb(214, 110, 40);
 
 /// Dessine une couverture dans `rect` (alignée en bas, proportions gardées).
 pub(crate) fn paint_cover(ui: &Ui, covers: &mut CoverCache, book: &LibraryBook, rect: Rect) -> Rect {
@@ -51,8 +50,10 @@ pub(crate) fn paint_cover(ui: &Ui, covers: &mut CoverCache, book: &LibraryBook, 
             let s = tex.size_vec2();
             let k = (rect.width() / s.x).min(rect.height() / s.y);
             let r = Rect::from_center_size(pos2(rect.center().x, rect.max.y - s.y * k / 2.0), s * k);
-            painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-            painter.rect_stroke(r, 0.0, (1.0, Color32::from_black_alpha(90)), StrokeKind::Inside);
+            let radius = crate::ui::theme::cover_radius();
+            crate::ui::theme::paint_cover_shadow(ui, r);
+            egui::Image::from_texture(egui::load::SizedTexture::new(tex.id(), s)).corner_radius(radius).paint_at(ui, r);
+            painter.rect_stroke(r, radius, (1.0, Color32::from_black_alpha(90)), StrokeKind::Inside);
             r
         }
         Cover::Pending => {
@@ -66,7 +67,7 @@ pub(crate) fn paint_cover(ui: &Ui, covers: &mut CoverCache, book: &LibraryBook, 
                 Align2::CENTER_CENTER,
                 "⚠",
                 FontId::proportional(26.0),
-                Color32::from_rgb(200, 120, 90),
+                crate::ui::theme::warning(ui),
             );
             rect
         }
@@ -321,7 +322,15 @@ impl ComicRustApp {
         self.remember_position();
         self.ensure_covers(&ctx);
 
-        egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| self.library_toolbar(ui));
+        let bar = match crate::ui::theme::is_modern() {
+            true => egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(egui::Margin::symmetric(12, 8)),
+            false => egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12, 8)),
+        };
+        bar.show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            crate::ui::theme::pill_buttons(ui);
+            self.library_toolbar(ui);
+        });
         ui.separator();
 
         match &self.library.status {
@@ -795,16 +804,12 @@ impl ComicRustApp {
                                 ui.interact(rect, ui.scope_id().with(("livre", &book.id)), Sense::click_and_drag());
                             let cover_rect = Rect::from_min_size(min, vec2(cell.x, cover_h));
                             let selected = self.library.is_selected(&book.id);
-                            if selected {
-                                ui.painter().rect_filled(rect.expand(5.0), 6.0, ui.visuals().selection.bg_fill);
-                            } else if resp.hovered() {
-                                ui.painter().rect_filled(rect.expand(4.0), 6.0, ui.visuals().widgets.hovered.bg_fill);
-                            }
+                            crate::ui::theme::paint_card_state(ui, rect, selected, resp.hovered());
                             if cursor_mark.as_deref() == Some(book.id.as_str()) {
                                 ui.painter().rect_stroke(
                                     rect.expand(5.0),
-                                    6.0,
-                                    Stroke::new(2.0, ACCENT),
+                                    if crate::ui::theme::is_modern() { 10.0 } else { 6.0 },
+                                    Stroke::new(2.0, crate::ui::theme::accent(ui)),
                                     StrokeKind::Outside,
                                 );
                             }
@@ -816,11 +821,8 @@ impl ComicRustApp {
                             let painter = ui.painter();
                             // Avancement de lecture enregistré par ComicRack.
                             if let Some(pct) = self.read_percent(book) {
-                                let bar = Rect::from_min_size(
-                                    pos2(cover_rect.min.x, cover_rect.max.y - 4.0),
-                                    vec2(cover_rect.width() * pct as f32 / 100.0, 4.0),
-                                );
-                                painter.rect_filled(bar, 0.0, ACCENT);
+                                let cover = if crate::ui::theme::is_modern() { drawn } else { cover_rect };
+                                crate::ui::theme::paint_read_bar(ui, cover, pct as f32 / 100.0);
                             }
                             let mut caption = if compact {
                                 let mut c = book.number.as_deref().map(|n| format!("#{n}")).unwrap_or_default();
@@ -844,7 +846,7 @@ impl ComicRustApp {
                                 painter.layout(caption, FontId::proportional(12.5), ui.visuals().text_color(), cell.x);
                             let text_rect =
                                 Rect::from_min_size(pos2(min.x, cover_rect.max.y + 4.0), vec2(cell.x, CAPTION_H - 6.0));
-                            painter.with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::WHITE);
+                            painter.with_clip_rect(text_rect).galley(text_rect.min, galley, ui.visuals().text_color());
 
                             let resp = resp.on_hover_ui(|ui| book_tooltip(ui, book));
                             if resp.secondary_clicked() && !selected {
@@ -904,11 +906,7 @@ impl ComicRustApp {
                             let selected = self.library.group_selected(&groups[gi].1)
                                 || (self.library.selected_stack.as_deref() == Some(stack.series.as_str())
                                     && selection.is_empty());
-                            if selected {
-                                ui.painter().rect_filled(rect.expand(5.0), 6.0, ui.visuals().selection.bg_fill);
-                            } else if resp.hovered() {
-                                ui.painter().rect_filled(rect.expand(4.0), 6.0, ui.visuals().widgets.hovered.bg_fill);
-                            }
+                            crate::ui::theme::paint_card_state(ui, rect, selected, resp.hovered());
                             // Feuilles décalées derrière la couverture : effet de pile.
                             let off = (cell.x * 0.05).clamp(3.0, 8.0);
                             let cover_rect = Rect::from_min_size(
@@ -929,13 +927,13 @@ impl ComicRustApp {
                             let badge = egui::pos2(drawn.max.x - 4.0, drawn.min.y + 4.0);
                             let label = stack.books.len().to_string();
                             let r = 9.0 + 3.0 * label.len().saturating_sub(1) as f32;
-                            painter.circle_filled(badge, r, ACCENT);
+                            painter.circle_filled(badge, r, crate::ui::theme::accent_fill(ui));
                             painter.text(
                                 badge,
                                 Align2::CENTER_CENTER,
                                 label,
                                 FontId::proportional(12.0),
-                                Color32::WHITE,
+                                crate::ui::theme::on_accent(),
                             );
                             // Avancement : part des livres de la série déjà lus.
                             let read = stack
@@ -944,11 +942,7 @@ impl ComicRustApp {
                                 .filter(|&&i| self.read_percent(&db.books[i]).is_some_and(|p| p >= 95))
                                 .count();
                             if read > 0 {
-                                let bar = Rect::from_min_size(
-                                    pos2(drawn.min.x, drawn.max.y - 4.0),
-                                    vec2(drawn.width() * read as f32 / stack.books.len() as f32, 4.0),
-                                );
-                                painter.rect_filled(bar, 0.0, ACCENT);
+                                crate::ui::theme::paint_read_bar(ui, drawn, read as f32 / stack.books.len() as f32);
                             }
                             let caption = format!(
                                 "{}\n{} livre{}",
@@ -960,7 +954,7 @@ impl ComicRustApp {
                                 painter.layout(caption, FontId::proportional(12.5), ui.visuals().text_color(), cell.x);
                             let text_rect =
                                 Rect::from_min_size(pos2(min.x, min.y + cover_h + 4.0), vec2(cell.x, CAPTION_H - 6.0));
-                            painter.with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::WHITE);
+                            painter.with_clip_rect(text_rect).galley(text_rect.min, galley, ui.visuals().text_color());
                             let resp = resp.on_hover_ui(|ui| {
                                 ui.label(RichText::new(&stack.series).strong());
                                 ui.label(format!("{} livres, {} lus", stack.books.len(), read));

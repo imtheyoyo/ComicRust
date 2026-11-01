@@ -87,7 +87,7 @@ pub(crate) fn form_window(ctx: &Context, script: &str, st: &mut FormState) -> Ac
     let (width, max_h) = sized(ctx, st.spec.width.unwrap_or(560.0));
     let mut clicked: Option<String> = None;
     let mut stop = false;
-    egui::Modal::new(Id::unique("comicrust-script-formulaire")).show(ctx, |ui| {
+    crate::ui::theme::modal(ctx, Id::unique("comicrust-script-formulaire")).show(ctx, |ui| {
         ui.set_width(width);
         ui.label(RichText::new(format!("📜 {script}")).weak().small());
         if !st.spec.title.is_empty() {
@@ -719,7 +719,7 @@ pub(crate) fn choose_window(ctx: &Context, script: &str, st: &mut ChooseState) -
     if arrows != 0 {
         st.step(&view, arrows);
     }
-    egui::Modal::new(Id::unique("comicrust-script-choix")).show(ctx, |ui| {
+    crate::ui::theme::modal(ctx, Id::unique("comicrust-script-choix")).show(ctx, |ui| {
         ui.set_width(width);
         ui.label(RichText::new(format!("📜 {script}")).weak().small());
         if !st.spec.title.is_empty() {

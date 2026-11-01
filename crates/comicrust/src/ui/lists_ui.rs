@@ -727,7 +727,7 @@ impl ComicRustApp {
         let busy = self.lists_ui.ops.busy();
         let mut close = false;
         let mut confirm = false;
-        let modal = egui::Modal::new(egui::Id::unique("dialogue-listes")).show(ctx, |ui| {
+        let modal = crate::ui::theme::modal(ctx, egui::Id::unique("dialogue-listes")).show(ctx, |ui| {
             ui.set_width(440.0);
             match &mut dialog {
                 ListDialog::Props { name, description, combine, .. } => {

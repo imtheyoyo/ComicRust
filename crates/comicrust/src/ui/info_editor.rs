@@ -34,7 +34,8 @@ use crate::app::ComicRustApp;
 use crate::library::files::FileAction;
 use crate::library::info_form::{self, InfoForm, TABS};
 use crate::scripts::apply::{apply_plan, ApplyOutcome, ApplyPlan, ApplyTarget};
-use crate::ui::library_view::{paint_cover, ACCENT};
+use crate::ui::library_view::paint_cover;
+use crate::ui::theme::accent;
 
 /// Que faire une fois l'enregistrement fini.
 #[derive(Debug, Clone, PartialEq)]
@@ -731,7 +732,7 @@ impl ComicRustApp {
                 ui.label("Script en cours…");
             } else if dirty {
                 let n = ed.form.fields.iter().filter(|f| f.touched).count();
-                ui.label(RichText::new(format!("● {n} champ(s) modifié(s)")).color(ACCENT));
+                ui.label(RichText::new(format!("● {n} champ(s) modifié(s)")).color(accent(ui)));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let can_save = editable && dirty && errors.is_empty();
@@ -771,7 +772,7 @@ impl ComicRustApp {
 /// Libellé d'un champ (● si modifié).
 fn field_label(ui: &mut Ui, label: &str, touched: bool) {
     if touched {
-        ui.label(RichText::new(format!("● {label}")).color(ACCENT)).on_hover_text("Modifié : sera enregistré");
+        ui.label(RichText::new(format!("● {label}")).color(accent(ui))).on_hover_text("Modifié : sera enregistré");
     } else {
         ui.label(label);
     }
@@ -842,7 +843,7 @@ fn field_control(ui: &mut Ui, ed: &mut InfoEditor, db: &Arc<ComicDatabase>, i: u
             let value: f32 = f.text.replace(',', ".").trim().parse().unwrap_or(0.0);
             for s in 1..=5 {
                 let full = value >= s as f32 - 0.25 && !(f.mixed() && !f.touched);
-                let star = RichText::new(if full { "★" } else { "☆" }).size(18.0).color(ACCENT);
+                let star = RichText::new(if full { "★" } else { "☆" }).size(18.0).color(accent(ui));
                 if ui.add(egui::Button::new(star).frame(false)).on_hover_text(format!("{s} / 5")).clicked() {
                     f.text = s.to_string();
                     changed = true;

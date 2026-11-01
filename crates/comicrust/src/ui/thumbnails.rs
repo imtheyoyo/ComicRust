@@ -50,14 +50,14 @@ impl ComicRustApp {
                             egui::Align2::CENTER_CENTER,
                             "⚠",
                             egui::FontId::proportional(20.0),
-                            Color32::LIGHT_RED,
+                            crate::ui::theme::error(ui),
                         );
                     }
                     None => {
                         painter.rect_stroke(
                             img_rect.shrink(img_rect.width() * 0.2),
                             2.0,
-                            (1.0, Color32::DARK_GRAY),
+                            (1.0, crate::ui::theme::placeholder_stroke(ui)),
                             egui::StrokeKind::Inside,
                         );
                         needed.push(i);

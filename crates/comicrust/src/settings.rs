@@ -136,8 +136,10 @@ pub struct Settings {
     pub manga: bool,
     pub show_thumbnails: bool,
     pub show_status_bar: bool,
-    /// Thème de l'interface.
+    /// Luminosité de l'interface (sombre, clair, comme Windows).
     pub theme: crate::ui::theme::Theme,
+    /// Style de l'interface : Moderne (par défaut depuis la v0.10.3) ou Classique.
+    pub ui_style: crate::ui::theme::UiStyle,
     pub recent: Vec<PathBuf>,
     /// Dernière page lue par fichier (équivalent de `CurrentPage` dans ComicRack).
     pub last_pages: HashMap<PathBuf, usize>,
@@ -229,6 +231,7 @@ impl Default for Settings {
             show_thumbnails: true,
             show_status_bar: true,
             theme: crate::ui::theme::Theme::Dark,
+            ui_style: crate::ui::theme::UiStyle::Modern,
             recent: Vec::new(),
             last_pages: HashMap::new(),
             read_progress: HashMap::new(),

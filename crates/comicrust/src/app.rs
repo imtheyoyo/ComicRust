@@ -110,7 +110,7 @@ impl ComicRustApp {
         if let Some(v) = settings.list_views.get(crate::settings::LIBRARY_VIEW_KEY).copied() {
             settings.set_current_view(v);
         }
-        settings.theme.apply(&cc.egui_ctx);
+        crate::ui::theme::apply(&cc.egui_ctx, settings.theme, settings.ui_style);
         crate::ui::fonts::install(&cc.egui_ctx);
         let mut app = Self {
             settings,
@@ -598,13 +598,21 @@ impl eframe::App for ComicRustApp {
         }
 
         if !self.fullscreen {
-            egui::Panel::top("toolbar").show(ui, |ui| {
+            let mut top = egui::Panel::top("toolbar");
+            if let Some(f) = crate::ui::theme::panel_frame(ui, 10, 6) {
+                top = top.frame(f);
+            }
+            top.show(ui, |ui| {
                 ui.add_space(2.0);
                 self.toolbar(ui);
                 ui.add_space(2.0);
             });
             if self.settings.show_status_bar {
-                egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+                let mut bottom = egui::Panel::bottom("status");
+                if let Some(f) = crate::ui::theme::panel_frame(ui, 12, 4) {
+                    bottom = bottom.frame(f);
+                }
+                bottom.show(ui, |ui| self.status_bar(ui));
             }
             self.update_banner(ui);
             if self.mode == Mode::Reader
@@ -639,7 +647,7 @@ impl eframe::App for ComicRustApp {
         // Lecteur : fond peint par la vue ; bibliothèque : fond du thème (clair ou sombre).
         let frame = match self.mode {
             Mode::Reader => egui::Frame::NONE,
-            Mode::Library => egui::Frame::NONE.fill(ui.visuals().panel_fill),
+            Mode::Library => egui::Frame::NONE.fill(crate::ui::theme::canvas(ui)),
         };
         egui::CentralPanel::default().frame(frame).show(ui, |ui| match self.mode {
             Mode::Library => self.library_view(ui),

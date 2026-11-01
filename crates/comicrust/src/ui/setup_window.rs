@@ -457,7 +457,7 @@ impl ComicRustApp {
         }
         let mut close = false;
         let mut finish = false;
-        egui::Modal::new(egui::Id::unique("comicrust-assistant")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-assistant")).show(ctx, |ui| {
             ui.set_width(560.0);
             match w.page {
                 Page::Choice => {

@@ -601,7 +601,7 @@ impl ComicRustApp {
         let Some(pending) = &self.cr_writes.prompt else { return };
         let n = pending.len();
         let mut choice = None;
-        egui::Modal::new(egui::Id::unique("comicrust-report-lecture")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-report-lecture")).show(ctx, |ui| {
             ui.set_max_width(520.0);
             ui.heading("Reporter la lecture dans ComicRack ?");
             ui.add_space(4.0);

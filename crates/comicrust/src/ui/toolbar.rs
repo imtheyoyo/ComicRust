@@ -8,6 +8,7 @@ use crate::settings::FitMode;
 impl ComicRustApp {
     pub(crate) fn toolbar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        crate::ui::theme::pill_buttons(ui);
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.mode, Mode::Library, "📚 Bibliothèque");
             ui.selectable_value(&mut self.mode, Mode::Reader, "📖 Lecteur");
@@ -137,13 +138,29 @@ impl ComicRustApp {
                     {
                         self.restart_watch(&ctx);
                     }
-                    ui.menu_button(format!("Thème : {}", self.settings.theme.label()), |ui| {
-                        for t in crate::ui::theme::Theme::ALL {
-                            if ui.radio_value(&mut self.settings.theme, t, t.label()).changed() {
-                                t.apply(&ctx);
+                    ui.menu_button(
+                        format!(
+                            "Thème : {} {}",
+                            self.settings.ui_style.label(),
+                            self.settings.theme.label().to_lowercase()
+                        ),
+                        |ui| {
+                            use crate::ui::theme::{Theme, UiStyle};
+                            let mut changed = false;
+                            ui.label(egui::RichText::new("Style").weak().small());
+                            for s in UiStyle::ALL {
+                                changed |= ui.radio_value(&mut self.settings.ui_style, s, s.label()).changed();
                             }
-                        }
-                    });
+                            ui.separator();
+                            ui.label(egui::RichText::new("Luminosité").weak().small());
+                            for t in Theme::ALL {
+                                changed |= ui.radio_value(&mut self.settings.theme, t, t.label()).changed();
+                            }
+                            if changed {
+                                crate::ui::theme::apply(&ctx, self.settings.theme, self.settings.ui_style);
+                            }
+                        },
+                    );
                     ui.menu_button(format!("Reprise de lecture : {}", self.settings.resume.label()), |ui| {
                         use crate::settings::ResumeChoice;
                         ui.label(

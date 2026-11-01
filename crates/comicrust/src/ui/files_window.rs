@@ -216,7 +216,7 @@ impl ComicRustApp {
         let Some(d) = &mut self.file_dialog else { return };
         let mut go = false;
         let mut cancel = false;
-        egui::Modal::new(egui::Id::unique("comicrust-fichiers-confirmation")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-fichiers-confirmation")).show(ctx, |ui| {
             ui.set_max_width(520.0);
             ui.heading(d.action.title());
             ui.add_space(4.0);

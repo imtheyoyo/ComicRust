@@ -224,6 +224,7 @@ impl ComicRustApp {
         let bg = ui.interact(ui.available_rect_before_wrap(), ui.scope_id().with("fond-tableau"), Sense::click());
         // Colonnes plus larges que la fenêtre : défilement horizontal.
         egui::ScrollArea::horizontal().id_salt("tableau-h").auto_shrink(false).show(ui, |ui| {
+            crate::ui::theme::paint_table_header(ui, row_h + 2.0);
             let mut t = TableBuilder::new(ui)
                 .id_salt("tableau-bibliotheque")
                 .striped(true)
@@ -534,7 +535,7 @@ fn cursor_stroke(resp: &egui::Response, clip: egui::Rect) {
     p.rect_stroke(
         resp.rect.shrink(1.0),
         2.0,
-        egui::Stroke::new(1.5, crate::ui::library_view::ACCENT),
+        egui::Stroke::new(1.5, crate::ui::theme::accent_of(&resp.ctx)),
         egui::StrokeKind::Inside,
     );
 }

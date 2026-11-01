@@ -3,7 +3,7 @@
 //!
 //! Les calculs (positions, règles d'acceptation) sont dans [`crate::library::mouse`].
 
-use eframe::egui::{self, pos2, vec2, Color32, Context, CursorIcon, FontId, Id, LayerId, Order, Rect, Ui};
+use eframe::egui::{self, pos2, vec2, Context, CursorIcon, FontId, Id, LayerId, Order, Rect, Ui};
 
 use crate::app::ComicRustApp;
 use crate::library::mouse::edge_scroll_speed;
@@ -106,7 +106,7 @@ impl ComicRustApp {
         };
         let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("badge-livres")));
         let visuals = ctx.global_style().visuals.clone();
-        let strong = painter.layout_no_wrap(title, FontId::proportional(13.0), Color32::WHITE);
+        let strong = painter.layout_no_wrap(title, FontId::proportional(13.0), crate::ui::theme::on_accent());
         let detail_color = match hint {
             Some(DropHint::Refused(_)) => visuals.error_fg_color,
             _ => visuals.text_color(),
@@ -132,8 +132,8 @@ impl ComicRustApp {
         painter.rect_filled(frame, 6.0, visuals.window_fill.gamma_multiply(0.96));
         painter.rect_stroke(frame, 6.0, visuals.window_stroke, egui::StrokeKind::Inside);
         let badge = Rect::from_min_size(min, badge_size);
-        painter.rect_filled(badge.shrink(2.0), 5.0, super::library_view::ACCENT);
-        painter.galley(badge.min + pad, strong, Color32::WHITE);
+        painter.rect_filled(badge.shrink(2.0), 5.0, crate::ui::theme::accent_fill_of(ctx));
+        painter.galley(badge.min + pad, strong, crate::ui::theme::on_accent());
         if let Some(g) = small {
             painter.galley(pos2(min.x + pad.x, badge.max.y + pad.y * 0.5), g, detail_color);
         }

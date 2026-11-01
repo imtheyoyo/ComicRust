@@ -420,7 +420,7 @@ impl ComicRustApp {
             return;
         }
         let status = self.scripts.shutdown_status().unwrap_or("Fermeture…");
-        egui::Modal::new(egui::Id::unique("comicrust-fermeture-scripts")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-fermeture-scripts")).show(ctx, |ui| {
             ui.set_max_width(460.0);
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -480,7 +480,7 @@ impl ComicRustApp {
         let mut answer: Option<Option<serde_json::Value>> = None;
         let mut stop = false;
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-        egui::Modal::new(egui::Id::unique("comicrust-script-question")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-script-question")).show(ctx, |ui| {
             ui.set_max_width(520.0);
             ui.label(RichText::new(format!("📜 {name}")).weak().small());
             match pending {

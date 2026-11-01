@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use comicrust_core::library::LibraryBook;
 use comicrust_core::missing::{volume_root, CheckReport, Progress};
 use comicrust_core::providers::BOOK_EXTENSIONS;
-use eframe::egui::{self, Color32, Context, FontId, Rect, RichText, Ui};
+use eframe::egui::{self, Context, FontId, Rect, RichText, Ui};
 
 use crate::app::{ComicRustApp, Start};
 use crate::library::missing::{
@@ -142,14 +142,15 @@ pub struct MissingMenu {
 /// Grise une couverture et ajoute le badge « manquant ».
 pub fn paint_missing(ui: &Ui, rect: Rect) {
     let p = ui.painter();
-    p.rect_filled(rect, 0.0, ui.visuals().panel_fill.gamma_multiply(0.7));
+    p.rect_filled(rect, crate::ui::theme::cover_radius(), ui.visuals().panel_fill.gamma_multiply(0.7));
     let h = (rect.height() * 0.13).clamp(16.0, 24.0);
     let band = Rect::from_min_max(
         egui::pos2(rect.min.x, rect.center().y - h / 2.0),
         egui::pos2(rect.max.x, rect.center().y + h / 2.0),
     );
-    p.rect_filled(band, 2.0, Color32::from_rgb(170, 40, 40));
-    p.text(band.center(), egui::Align2::CENTER_CENTER, "⚠ manquant", FontId::proportional(h * 0.62), Color32::WHITE);
+    p.rect_filled(band, 2.0, crate::ui::theme::missing_fill(ui));
+    let text_color = crate::ui::theme::on_accent();
+    p.text(band.center(), egui::Align2::CENTER_CENTER, "⚠ manquant", FontId::proportional(h * 0.62), text_color);
 }
 
 /// Entrées du menu contextuel d'un livre (ou de la sélection `books`).
@@ -738,7 +739,7 @@ impl ComicRustApp {
         let reason = self.missing_target().err();
         let mut close = false;
         let mut req = None;
-        egui::Modal::new(egui::Id::unique("comicrust-fichier-introuvable")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-fichier-introuvable")).show(ctx, |ui| {
             ui.set_max_width(520.0);
             ui.heading("⚠ Fichier introuvable");
             ui.add_space(4.0);
@@ -828,7 +829,7 @@ impl ComicRustApp {
         let n = d.ids.len();
         let mut go = false;
         let mut cancel = false;
-        egui::Modal::new(egui::Id::unique("comicrust-retirer")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-retirer")).show(ctx, |ui| {
             ui.set_max_width(560.0);
             ui.heading("Retirer de la bibliothèque");
             ui.add_space(4.0);
@@ -980,7 +981,7 @@ impl ComicRustApp {
         let Some(d) = &mut self.missing_ui.relocate else { return };
         let mut go = false;
         let mut cancel = false;
-        egui::Modal::new(egui::Id::unique("comicrust-retrouver")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-retrouver")).show(ctx, |ui| {
             ui.set_max_width(640.0);
             ui.heading("Retrouver les fichiers");
             ui.label(RichText::new(format!("Source : {}", d.source)).weak().small());
@@ -1142,7 +1143,7 @@ impl ComicRustApp {
     fn missing_info_window(&mut self, ctx: &Context) {
         let Some(msg) = self.missing_ui.info.clone() else { return };
         let mut close = false;
-        egui::Modal::new(egui::Id::unique("comicrust-manquants-info")).show(ctx, |ui| {
+        crate::ui::theme::modal(ctx, egui::Id::unique("comicrust-manquants-info")).show(ctx, |ui| {
             ui.set_max_width(460.0);
             ui.label(msg);
             ui.add_space(8.0);

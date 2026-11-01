@@ -11,7 +11,7 @@ use eframe::egui::{self, vec2, Rect, RichText, Ui};
 
 use super::book_drag::{BooksDrag, DropHint};
 use super::library_table::{human_size, long_date, short_date};
-use super::library_view::{paint_cover, ACCENT, COVER_RATIO};
+use super::library_view::{paint_cover, COVER_RATIO};
 use super::lists_ui::{handle_books_drop, handle_drop, list_menu, new_menu, rename_field, NodeCtx, PanelAction};
 use crate::app::ComicRustApp;
 use crate::library::keynav::{tree_move, KeyFocus, TreeAction, TreeRecorder};
@@ -348,11 +348,15 @@ impl ComicRustApp {
                 crate::ui::missing_ui::paint_missing(ui, drawn);
             }
             if let Some(pct) = self.read_percent(&book) {
-                let bar = Rect::from_min_size(
-                    egui::pos2(drawn.min.x, drawn.max.y - 5.0),
-                    vec2(drawn.width() * pct as f32 / 100.0, 5.0),
-                );
-                ui.painter().rect_filled(bar, 0.0, ACCENT);
+                if crate::ui::theme::is_modern() {
+                    crate::ui::theme::paint_read_bar(ui, drawn, pct as f32 / 100.0);
+                } else {
+                    let bar = Rect::from_min_size(
+                        egui::pos2(drawn.min.x, drawn.max.y - 5.0),
+                        vec2(drawn.width() * pct as f32 / 100.0, 5.0),
+                    );
+                    ui.painter().rect_filled(bar, 0.0, crate::ui::theme::accent(ui));
+                }
             }
             ui.add_space(6.0);
             ui.label(RichText::new(book.caption()).heading().strong());
@@ -405,7 +409,12 @@ impl ComicRustApp {
 /// elle après un déplacement au clavier.
 fn focus_frame(ui: &Ui, r: &egui::Response, tree: &TreeRecorder) {
     if tree.focused {
-        ui.painter().rect_stroke(r.rect.expand(1.0), 3.0, egui::Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
+        ui.painter().rect_stroke(
+            r.rect.expand(1.0),
+            3.0,
+            egui::Stroke::new(1.5, crate::ui::theme::accent(ui)),
+            egui::StrokeKind::Outside,
+        );
     }
     if tree.scroll {
         r.scroll_to_me(None);

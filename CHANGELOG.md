@@ -5,6 +5,30 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.3] — 2026-11-01
+
+Demandes de la recette de la v0.10.2.
+
+### Nouveautés
+- **Thème « Moderne »**, inspiré de la maquette Nebula BD, devenu le thème par défaut. Il existe
+  en sombre et en clair :
+  - accent violet, panneaux et fenêtres en plusieurs niveaux, coins arrondis, ombres douces ;
+  - boutons « pilule » dans les barres d'outils ;
+  - couvertures arrondies avec bord d'accent pour la sélection ;
+  - tableau à lignes alternées ;
+  - contrastes AA vérifiés.
+
+  ⚙ → Thème : Style (Moderne / Classique) et Luminosité (Sombre / Clair / Comme Windows).
+  L'ancien thème reste disponible sous le nom « Classique ».
+
+### Corrections
+- **Bedetheque Scraper 2 / QuickScrape BD2** : plus de choix automatique, la fenêtre de choix
+  attend toujours ta décision. L'option « fermeture automatique » est retirée des réglages ;
+  un `App.Config` importé garde sa valeur pour ComicRack.
+
+### Recette
+[recette/v0.10.3.md](recette/v0.10.3.md).
+
 ## [v0.10.2] — 2026-11-01
 
 Améliorations demandées à la recette de la v0.10.1.

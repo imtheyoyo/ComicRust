@@ -71,7 +71,7 @@ impl ComicRustApp {
                         painter.rect_stroke(
                             r.shrink(8.0),
                             4.0,
-                            (1.0, Color32::from_rgb(160, 60, 60)),
+                            (1.0, crate::ui::theme::error(ui).gamma_multiply(0.7)),
                             egui::StrokeKind::Inside,
                         );
                         painter.text(
@@ -79,7 +79,7 @@ impl ComicRustApp {
                             egui::Align2::CENTER_CENTER,
                             format!("⚠ Page {} illisible\n{err}", idx + 1),
                             egui::FontId::proportional(15.0),
-                            Color32::LIGHT_RED,
+                            crate::ui::theme::error(ui),
                         );
                     } else {
                         painter.rect_filled(r.shrink(4.0), 2.0, crate::ui::theme::placeholder(ui));
@@ -88,7 +88,7 @@ impl ComicRustApp {
                             egui::Align2::CENTER_CENTER,
                             "Chargement…",
                             egui::FontId::proportional(16.0),
-                            Color32::GRAY,
+                            ui.visuals().weak_text_color(),
                         );
                     }
                 }
