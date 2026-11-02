@@ -8,3 +8,33 @@ body {
   font-family: var(--cr-police, system-ui, sans-serif);
   font-size: 14px;
 }
+
+/* Éléments communs (boutons, champs, boîtes de dialogue), uniquement via les variables --cr-*. */
+button, select, input[type='search'], input[type='text'] {
+  font: inherit;
+  color: var(--cr-texte);
+  background: var(--cr-fond-panneau);
+  border: 1px solid var(--cr-bordure);
+  border-radius: var(--cr-rayon);
+  padding: 5px 10px;
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { background: var(--cr-fond-survol); }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 1px; }
+dialog {
+  color: var(--cr-texte);
+  background: var(--cr-fond-panneau);
+  border: 1px solid var(--cr-bordure);
+  border-radius: var(--cr-rayon);
+  box-shadow: var(--cr-ombre);
+  padding: 20px;
+  width: min(620px, calc(100vw - 32px));
+}
+dialog::backdrop { background: color-mix(in srgb, var(--cr-fond) 65%, transparent); }
+dialog h2 { margin: 0 0 12px; font-size: 18px; }
+.barre-progression {
+  height: 8px; overflow: hidden; background: var(--cr-fond-survol);
+  border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon);
+}
+.barre-progression > div { height: 100%; background: var(--cr-accent); transition: width 0.12s linear; }

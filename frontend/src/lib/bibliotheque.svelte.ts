@@ -1,0 +1,142 @@
+// État d'affichage de la bibliothèque : requête courante et pages de livres chargées à la demande.
+// Aucune logique métier : recherche, tri et groupement sont faits par le backend (lister_livres).
+import { SvelteMap } from 'svelte/reactivity';
+import {
+  ecouter, listerLivres, type ClefTri, type ErreurScan, type Groupe, type LivreResume,
+  type ProgressionScan, type ResultatScan, type SensTri,
+} from './api';
+
+export const TAILLE_PAGE = 200;
+/** Pages gardées en mémoire de part et d'autre de la fenêtre visible. */
+const PAGES_GARDEES = 8;
+
+export interface ParametresRequete {
+  recherche: string;
+  tri: ClefTri;
+  sensTri: SensTri;
+  groupe: Groupe;
+}
+
+export class Bibliotheque {
+  params = $state<ParametresRequete>({ recherche: '', tri: 'serie', sensTri: 'asc', groupe: 'aucun' });
+  total = $state(0);
+  /** Incrémenté à chaque nouvelle requête : les vues remettent alors le défilement en haut. */
+  version = $state(0);
+  erreur = $state('');
+  pages = new SvelteMap<number, LivreResume[]>();
+
+  private generation = 0;
+  private enCours = new Set<number>();
+  private fenetre = { premier: 0, dernier: 0 };
+
+  livre(i: number): LivreResume | undefined {
+    return this.pages.get(Math.floor(i / TAILLE_PAGE))?.[i % TAILLE_PAGE];
+  }
+
+  /** Vrai si le livre précédent appartient à un autre groupe (ou s'il n'y a pas de précédent). */
+  debutGroupe(i: number): boolean {
+    if (this.params.groupe === 'aucun') return false;
+    const l = this.livre(i);
+    if (!l) return false;
+    if (i === 0) return true;
+    const p = this.livre(i - 1);
+    return !!p && this.nomGroupe(p) !== this.nomGroupe(l);
+  }
+
+  nomGroupe(l: LivreResume): string {
+    const v = this.params.groupe === 'serie' ? l.serie : l.editeur;
+    return v || (this.params.groupe === 'serie' ? 'Sans série' : 'Sans éditeur');
+  }
+
+  /** Nouvelle requête (ou rafraîchissement) : charge la page 0, puis la fenêtre visible. */
+  async reinitialiser(nouvelle = true): Promise<void> {
+    const gen = ++this.generation;
+    this.enCours.clear();
+    try {
+      const r = await listerLivres({ ...this.params, debut: 0, nombre: TAILLE_PAGE });
+      if (gen !== this.generation) return;
+      this.erreur = '';
+      this.total = r.total;
+      this.pages.clear();
+      this.pages.set(0, r.livres);
+      if (nouvelle) this.version++;
+    } catch (e) {
+      if (gen === this.generation) this.erreur = String(e);
+      return;
+    }
+    this.assurer(this.fenetre.premier, this.fenetre.dernier);
+  }
+
+  /** Charge les pages couvrant les index [premier, dernier] (+ une page de chaque côté). */
+  assurer(premier: number, dernier: number): void {
+    this.fenetre = { premier, dernier };
+    if (this.total === 0) return;
+    const derniere = Math.floor((this.total - 1) / TAILLE_PAGE);
+    const pa = Math.max(0, Math.floor(premier / TAILLE_PAGE) - 1);
+    const pb = Math.min(derniere, Math.floor(dernier / TAILLE_PAGE) + 1);
+    for (let p = pa; p <= pb; p++) {
+      if (!this.pages.has(p) && !this.enCours.has(p)) void this.chargerPage(p);
+    }
+    for (const p of [...this.pages.keys()]) {
+      if (p < pa - PAGES_GARDEES || p > pb + PAGES_GARDEES) this.pages.delete(p);
+    }
+  }
+
+  private async chargerPage(p: number): Promise<void> {
+    const gen = this.generation;
+    this.enCours.add(p);
+    try {
+      const r = await listerLivres({ ...this.params, debut: p * TAILLE_PAGE, nombre: TAILLE_PAGE });
+      if (gen !== this.generation) return;
+      this.total = r.total;
+      this.pages.set(p, r.livres);
+    } catch (e) {
+      if (gen === this.generation) this.erreur = String(e);
+    } finally {
+      if (gen === this.generation) this.enCours.delete(p);
+    }
+  }
+}
+
+/** État du scan des dossiers surveillés, alimenté par les événements du backend. */
+export class SuiviScan {
+  enCours = $state(false);
+  fait = $state(0);
+  total = $state(0);
+  resultat = $state<ResultatScan | null>(null);
+  erreur = $state('');
+  private desabonner: Array<() => void> = [];
+
+  async demarrer(surTermine: () => void): Promise<void> {
+    this.desabonner.push(
+      await ecouter<ProgressionScan>('scan-progression', (p) => {
+        this.enCours = true;
+        this.fait = p.fait;
+        this.total = p.total;
+      }),
+      await ecouter<ResultatScan>('scan-termine', (r) => {
+        this.enCours = false;
+        this.resultat = r;
+        surTermine();
+      }),
+      await ecouter<ErreurScan>('scan-erreur', (e) => {
+        this.enCours = false;
+        this.erreur = e.message;
+      }),
+    );
+  }
+
+  /** À appeler juste après `lancer_scan()` pour afficher la barre sans attendre le 1er événement. */
+  annoncer(): void {
+    this.enCours = true;
+    this.fait = 0;
+    this.total = 0;
+    this.resultat = null;
+    this.erreur = '';
+  }
+
+  arreter(): void {
+    this.desabonner.forEach((f) => f());
+    this.desabonner = [];
+  }
+}

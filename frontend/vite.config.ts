@@ -5,7 +5,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
-  server: { port: 5173, strictPort: true },
+  // fs.allow : le mode simulé lit les thèmes livrés (crates/comicrust-tauri/themes) hors de frontend/.
+  server: { port: 5173, strictPort: true, fs: { allow: ['..'] } },
   // WebView2 (Chromium récent) : pas besoin de cibler d'anciens navigateurs.
   build: { target: 'es2022', outDir: 'dist', emptyOutDir: true },
 });

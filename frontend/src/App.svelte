@@ -1,127 +1,81 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { dansTauri, infos, listerThemes, type InfosApplication, type Theme } from './lib/api';
+  import BarreLaterale, { type Section } from './components/BarreLaterale.svelte';
+  import DialogDossiers from './components/DialogDossiers.svelte';
+  import DialogReglages from './components/DialogReglages.svelte';
+  import PremierDemarrage from './components/PremierDemarrage.svelte';
+  import VueBibliotheque from './components/VueBibliotheque.svelte';
+  import { dansTauri, ouvrirBibliotheque, type EtatBiblio } from './lib/api';
+  import { SuiviScan } from './lib/bibliotheque.svelte';
   import { appliquerTheme, themeMemorise } from './lib/theme';
 
-  let info = $state<InfosApplication | null>(null);
-  let themes = $state<Theme[]>([]);
-  let themeActif = $state('');
+  let etat = $state<EtatBiblio | null>(null);
   let erreur = $state('');
-  const tauri = dansTauri();
+  let section = $state<Section>('bibliotheque');
+  let themeActif = $state('');
+  let nbLivres = $state(0);
+  let rafraichir = $state(0);
+  const scan = new SuiviScan();
+  let dossiers = $state<DialogDossiers>();
+  let reglages = $state<DialogReglages>();
 
-  async function choisir(id: string) {
-    try {
-      themeActif = await appliquerTheme(id);
-    } catch (e) {
-      erreur = String(e);
-    }
-  }
-
-  async function actualiser() {
-    try {
-      themes = await listerThemes();
-    } catch (e) {
-      erreur = String(e);
-    }
-  }
-
-  onMount(async () => {
-    if (!tauri) return;
-    try {
-      info = await infos();
-      themes = await listerThemes();
-      await choisir(themeMemorise());
-    } catch (e) {
-      erreur = String(e);
-    }
+  onMount(() => {
+    void (async () => {
+      try {
+        themeActif = await appliquerTheme(themeMemorise());
+        await scan.demarrer(() => rafraichir++);
+        etat = await ouvrirBibliotheque();
+        nbLivres = etat.nbLivres;
+      } catch (e) {
+        erreur = String(e);
+      }
+    })();
+    return () => scan.arreter();
   });
+
+  function pret(e: EtatBiblio) {
+    etat = e;
+    nbLivres = e.nbLivres;
+  }
 </script>
 
-<main>
-  <header>
-    <h1>ComicRust</h1>
-    <span class="version">{info ? `v${info.version} (Tauri)` : 'Tauri'}</span>
-  </header>
-
-  {#if !tauri}
-    <p class="carte">
-      Cette page doit s'ouvrir dans la fenêtre ComicRust (Tauri) : lancez
-      <code>cargo tauri dev</code> ou <code>ComicRust-Tauri.exe</code>.
-    </p>
-  {:else}
-    <section class="carte">
-      <h2>Bienvenue</h2>
-      <p>
-        Squelette de la version Tauri 2 : la fenêtre, les commandes IPC et les thèmes sont en
-        place ; les fonctions de ComicRust y seront portées étape par étape (voir
-        <code>docs/tauri/PLAN.md</code>).
-      </p>
-    </section>
-
-    <section class="carte">
-      <h2>Thème</h2>
-      <div class="ligne">
-        <label for="theme">Apparence</label>
-        <select id="theme" value={themeActif} onchange={(e) => choisir(e.currentTarget.value)}>
-          {#each themes as t (t.id)}
-            <option value={t.id}>{t.nom}{t.livre ? '' : ' (perso)'}</option>
-          {/each}
-        </select>
-        <button onclick={actualiser}>Actualiser la liste</button>
-      </div>
-      {#if info}
-        <p class="discret">
-          Ajoutez un fichier <code>.css</code> dans <code>{info.dossier_themes}</code>, puis
-          « Actualiser la liste » : aucun redémarrage ni recompilation.
+{#if erreur}
+  <p class="message erreur" role="alert">{erreur}</p>
+{:else if !etat}
+  <p class="message">Ouverture de la bibliothèque…{dansTauri() ? '' : ' (mode simulé)'}</p>
+{:else if etat.premierDemarrage}
+  <PremierDemarrage onpret={pret} />
+{:else}
+  <div class="appli">
+    <BarreLaterale
+      {section}
+      {nbLivres}
+      mode={etat.mode}
+      onsection={(s) => (section = s)}
+      ondossiers={() => dossiers?.ouvrir()}
+      onreglages={() => reglages?.ouvrir()}
+    />
+    {#if section === 'bibliotheque'}
+      <VueBibliotheque {scan} bind:nbLivres {rafraichir} />
+    {:else}
+      <main class="bientot">
+        <h1>{section === 'series' ? 'Séries' : 'Listes'}</h1>
+        <p>
+          {section === 'series'
+            ? 'La navigation par séries arrivera dans une prochaine étape.'
+            : 'Les listes ComicRack (intelligentes et manuelles) arriveront à l\'étape 5.'}
         </p>
-      {/if}
-    </section>
-
-    {#if info}
-      <section class="carte">
-        <h2>Mode portable</h2>
-        <dl>
-          <dt>Données</dt><dd><code>{info.dossier_data}</code></dd>
-          <dt>Profil WebView2</dt><dd><code>{info.dossier_webview}</code></dd>
-        </dl>
-      </section>
+      </main>
     {/if}
-  {/if}
-
-  {#if erreur}
-    <p class="carte erreur" role="alert">{erreur}</p>
-  {/if}
-</main>
+  </div>
+  <DialogDossiers bind:this={dossiers} {scan} />
+  <DialogReglages bind:this={reglages} {themeActif} onTheme={(id) => (themeActif = id)} />
+{/if}
 
 <style>
-  main { max-width: 760px; margin: 0 auto; padding: 24px 16px; display: grid; gap: 16px; }
-  header { display: flex; align-items: baseline; gap: 12px; }
-  h1 { margin: 0; font-size: 26px; }
-  h2 { margin: 0 0 8px; font-size: 16px; }
-  .version, .discret { color: var(--cr-texte-discret); }
-  .carte {
-    background: var(--cr-fond-panneau);
-    border: 1px solid var(--cr-bordure);
-    border-radius: var(--cr-rayon);
-    box-shadow: var(--cr-ombre);
-    padding: 16px;
-    margin: 0;
-  }
-  .erreur { color: var(--cr-erreur); border-color: var(--cr-erreur); }
-  .ligne { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  select, button {
-    font: inherit;
-    color: var(--cr-texte);
-    background: var(--cr-fond-panneau);
-    border: 1px solid var(--cr-bordure);
-    border-radius: var(--cr-rayon);
-    padding: 5px 10px;
-  }
-  button { cursor: pointer; }
-  button:hover { background: var(--cr-fond-survol); }
-  button:focus-visible, select:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 1px; }
-  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
-  dt { color: var(--cr-texte-discret); }
-  dd { margin: 0; word-break: break-all; }
-  code { font-family: ui-monospace, Consolas, monospace; background: var(--cr-fond-survol); padding: 1px 5px; border-radius: 3px; }
+  .appli { height: 100vh; display: flex; }
+  .message { padding: 40px; text-align: center; color: var(--cr-texte-discret); }
+  .erreur { color: var(--cr-erreur); }
+  .bientot { flex: 1; display: grid; place-content: center; text-align: center; color: var(--cr-texte-discret); }
+  .bientot h1 { color: var(--cr-texte); margin: 0 0 8px; }
 </style>
