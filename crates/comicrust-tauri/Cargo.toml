@@ -1,0 +1,38 @@
+[package]
+name = "comicrust-tauri"
+description = "ComicRust, interface Tauri 2 (WebView2) au-dessus de comicrust-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "comicrust_tauri"
+
+[[bin]]
+name = "ComicRust-Tauri"
+path = "src/main.rs"
+# L'application n'est compilée qu'avec `--features app` (CI Windows, ou Linux avec webkit2gtk) :
+# un `cargo test --all` sans les dépendances système du WebView reste vert.
+required-features = ["app"]
+
+[features]
+default = []
+# Application Tauri complète (fenêtre, commandes IPC).
+app = ["dep:tauri", "dep:tauri-build"]
+# Sert le front compilé (frontend/dist) depuis le binaire au lieu du serveur Vite :
+# obligatoire pour la version livrée, absent en développement (`npm run dev`).
+custom-protocol = ["app", "tauri/custom-protocol"]
+
+[dependencies]
+comicrust-core = { path = "../comicrust-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

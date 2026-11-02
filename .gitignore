@@ -1,3 +1,4 @@
 /target
 /python-embed/
 __pycache__/
+/crates/comicrust-tauri/gen/

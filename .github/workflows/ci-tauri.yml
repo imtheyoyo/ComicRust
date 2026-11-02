@@ -1,0 +1,54 @@
+name: CI Tauri
+
+# Vérifie la version Tauri sous Windows (le build par défaut du workspace l'ignore : voir
+# default-members dans Cargo.toml). La CI principale (ci.yml) teste le reste.
+on:
+  push:
+    branches: [tauri2-web]
+  pull_request:
+    paths:
+      - "crates/comicrust-tauri/**"
+      - "crates/comicrust-core/**"
+      - "frontend/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/*tauri*.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  PDFIUM_TAG: chromium/8111
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Front (Svelte + Vite)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run check
+          npm run build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: PDFium
+        shell: bash
+        run: |
+          mkdir -p pdfium
+          curl -sSfL -o pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}/pdfium-win-x64.tgz"
+          tar -xzf pdfium.tgz -C pdfium
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$(cygpath -w "$PWD/pdfium/bin")" >> "$GITHUB_ENV"
+      - run: cargo fmt -p comicrust-tauri --check
+      - name: Clippy (application complète)
+        run: cargo clippy --locked -p comicrust-tauri --features app,custom-protocol --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --locked -p comicrust-tauri --features app,custom-protocol
+      - name: Compilation de l'exécutable
+        run: cargo build --locked -p comicrust-tauri --features app,custom-protocol

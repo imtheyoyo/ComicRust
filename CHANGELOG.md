@@ -5,6 +5,23 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.1.0] — 2026-11-02
+
+Squelette de la version **Tauri 2** (branche `tauri2-web`), parallèle à la version egui : aucune
+fonction de ComicRust n'est encore portée. Voir [`docs/tauri/PLAN.md`](docs/tauri/PLAN.md).
+
+### Nouveautés
+- Fenêtre Tauri 2 (WebView2) avec un front Svelte + TypeScript ; la logique métier reste dans
+  `comicrust-core`.
+- **Toujours portable** : données dans `data\` à côté de l'exécutable, profil WebView2 dans
+  `data\webview2`, rien dans `%APPDATA%` ni dans le registre.
+- **Thèmes** : fichiers CSS à variables dans `data\themes\` (Moderne clair, Moderne sombre et
+  Classique livrés) ; on en ajoute sans recompiler.
+- Paquet : zip portable, sans installateur, avec empreinte SHA-256.
+
+### Recette
+[recette/tauri-v0.1.0.md](recette/tauri-v0.1.0.md)
+
 ## [v0.10.7] — 2026-11-01
 
 Correctifs de la v0.10.6 (recette NO-GO).

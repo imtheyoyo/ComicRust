@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/comicrust-core", "crates/comicrust", "crates/comicrust-cli"]
+members = ["crates/comicrust-core", "crates/comicrust", "crates/comicrust-cli", "crates/comicrust-tauri"]
+# `cargo build` / `cargo run` sans `-p` ignorent la version Tauri (WebView, dépendances système).
+# `cargo test --all` et clippy la compilent quand même, mais sans la fonction `app` (voir sa
+# Cargo.toml) : la logique testable reste vérifiée sans webkit2gtk.
+default-members = ["crates/comicrust-core", "crates/comicrust", "crates/comicrust-cli"]
 
 [workspace.package]
 version = "0.10.7"

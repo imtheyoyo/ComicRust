@@ -1,0 +1,10 @@
+/* Styles de structure uniquement : toutes les couleurs, polices et rayons viennent des
+   variables --cr-* définies par le thème (data\themes\*.css). */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--cr-fond, #f5f6f8);
+  color: var(--cr-texte, #1d2330);
+  font-family: var(--cr-police, system-ui, sans-serif);
+  font-size: 14px;
+}
