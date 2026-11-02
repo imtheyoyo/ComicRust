@@ -7,6 +7,7 @@
   import VueBibliotheque from './components/VueBibliotheque.svelte';
   import { dansTauri, ouvrirBibliotheque, type EtatBiblio, messageErreur } from './lib/api';
   import { SuiviScan } from './lib/bibliotheque.svelte';
+  import { chargerPreferences } from './lib/prefs';
   import { appliquerTheme, themeMemorise } from './lib/theme';
 
   let etat = $state<EtatBiblio | null>(null);
@@ -22,6 +23,8 @@
   onMount(() => {
     void (async () => {
       try {
+        // Préférences d'affichage d'abord : le thème et le premier lister_livres en dépendent.
+        await chargerPreferences();
         themeActif = await appliquerTheme(themeMemorise());
         await scan.demarrer(() => rafraichir++);
         etat = await ouvrirBibliotheque();

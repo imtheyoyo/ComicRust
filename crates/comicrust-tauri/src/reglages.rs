@@ -3,9 +3,14 @@
 //! Distinct du `comicrust.ron` de la version egui (formats et besoins différents ; les deux
 //! versions peuvent cohabiter dans le même dossier). Aucun mot de passe n'est écrit ici : en
 //! mode ComicRack, les paramètres MySQL sont relus à chaque ouverture dans `ComicRack.ini`.
+//!
+//! La section `vue` mémorise l'affichage (tri, groupe, grille/tableau, taille des couvertures,
+//! panneau de détails, thème) : mode portable strict, rien dans le `localStorage` de la WebView.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 /// Nom du fichier de réglages dans `data\`.
 pub const FICHIER_REGLAGES: &str = "comicrust-tauri.json";
@@ -28,6 +33,114 @@ pub struct Reglages {
     pub mode: Option<Mode>,
     /// Mode ComicRack : `ComicRack.ini` (MySQL) ou `ComicDb.xml`.
     pub chemin_ini: Option<PathBuf>,
+    /// Préférences d'affichage (absentes = valeurs par défaut du front).
+    #[serde(skip_serializing_if = "PreferencesVue::est_vide")]
+    pub vue: PreferencesVue,
+}
+
+/// Clés de tri connues du front (`ClefTri` de `frontend/src/lib/api.ts`).
+pub const TRIS: &[&str] =
+    &["serie", "titre", "parution", "ajout", "lecture", "note", "pages", "avancement", "taille", "fichier"];
+/// Sens de tri.
+pub const SENS: &[&str] = &["asc", "desc"];
+/// Regroupements.
+pub const GROUPES: &[&str] = &["aucun", "serie", "editeur"];
+/// Types de vue de la bibliothèque.
+pub const VUES: &[&str] = &["grille", "tableau"];
+/// Bornes de la taille des couvertures (px, curseur « Taille »).
+pub const ZOOM: (u32, u32) = (100, 260);
+/// Bornes de la largeur du panneau de détails (px).
+pub const LARGEUR_DETAILS: (u32, u32) = (220, 800);
+
+/// Préférences d'affichage (section `vue`). Chaque champ absent garde la valeur par défaut du
+/// front. **Lecture tolérante** : une valeur inconnue ou d'un mauvais type (fichier modifié à la
+/// main, version plus récente) est ignorée champ par champ, sans rendre le fichier illisible ;
+/// les nombres hors bornes sont ramenés dans les bornes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferencesVue {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sens_tri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groupe: Option<String>,
+    /// `grille` ou `tableau`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vue: Option<String>,
+    /// Taille des couvertures (px).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<u32>,
+    /// Panneau de détails affiché.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<bool>,
+    /// Largeur du panneau de détails (px).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub largeur_details: Option<u32>,
+    /// Identifiant du thème (nom du fichier CSS de `data\themes`, sans extension). Un thème
+    /// disparu est remplacé par le thème par défaut côté front.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+}
+
+impl PreferencesVue {
+    /// Aucune préférence enregistrée.
+    pub fn est_vide(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Construit les préférences depuis du JSON quelconque, en ignorant ce qui n'est pas valide.
+    pub fn depuis_json(v: &Value) -> Self {
+        let Some(o) = v.as_object() else { return Self::default() };
+        let parmi = |clef: &str, permis: &[&str]| {
+            o.get(clef).and_then(Value::as_str).filter(|s| permis.contains(s)).map(str::to_string)
+        };
+        let borne = |clef: &str, (min, max): (u32, u32)| {
+            o.get(clef)
+                .and_then(Value::as_f64)
+                .filter(|n| n.is_finite())
+                .map(|n| n.round().clamp(f64::from(min), f64::from(max)) as u32)
+        };
+        Self {
+            tri: parmi("tri", TRIS),
+            sens_tri: parmi("sensTri", SENS),
+            groupe: parmi("groupe", GROUPES),
+            vue: parmi("vue", VUES),
+            zoom: borne("zoom", ZOOM),
+            details: o.get("details").and_then(Value::as_bool),
+            largeur_details: borne("largeurDetails", LARGEUR_DETAILS),
+            theme: o.get("theme").and_then(Value::as_str).filter(|s| id_theme_valide(s)).map(str::to_string),
+        }
+    }
+
+    /// Applique les champs présents de `m` (les absents gardent la valeur actuelle).
+    pub fn fusionner(&mut self, m: PreferencesVue) {
+        macro_rules! prendre {
+            ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
+        }
+        prendre!(tri, sens_tri, groupe, vue, zoom, details, largeur_details, theme);
+    }
+}
+
+/// Identifiant de thème plausible (nom de fichier simple, sans chemin).
+fn id_theme_valide(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 100
+        && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+        && !s.starts_with('.')
+}
+
+impl<'de> Deserialize<'de> for PreferencesVue {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::depuis_json(&Value::deserialize(d)?))
+    }
+}
+
+/// Sérialise les lecture-modification-écriture du fichier (commandes IPC concurrentes).
+static VERROU: Mutex<()> = Mutex::new(());
+
+fn verrou() -> MutexGuard<'static, ()> {
+    VERROU.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Chemin du fichier de réglages.
@@ -57,6 +170,29 @@ pub fn ecrire(data: &Path, r: &Reglages) -> Result<(), String> {
     std::fs::rename(&tmp, &p).map_err(|e| format!("{} : {e}", p.display()))
 }
 
+/// Lit, modifie puis réécrit les réglages (atomique, sous verrou) : chaque appelant ne change
+/// que sa partie (le mode ne perd pas les préférences d'affichage, et inversement).
+pub fn modifier<T>(data: &Path, f: impl FnOnce(&mut Reglages) -> T) -> Result<T, String> {
+    let _v = verrou();
+    let mut r = lire(data)?;
+    let resultat = f(&mut r);
+    ecrire(data, &r)?;
+    Ok(resultat)
+}
+
+/// Préférences d'affichage enregistrées (vides si le fichier n'existe pas encore).
+pub fn lire_preferences_vue(data: &Path) -> Result<PreferencesVue, String> {
+    Ok(lire(data)?.vue)
+}
+
+/// Fusionne `m` dans les préférences enregistrées ; renvoie les préférences à jour.
+pub fn enregistrer_preferences_vue(data: &Path, m: PreferencesVue) -> Result<PreferencesVue, String> {
+    modifier(data, |r| {
+        r.vue.fusionner(m);
+        r.vue.clone()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,7 +201,11 @@ mod tests {
     fn absent_puis_aller_retour() {
         let d = tempfile::tempdir().unwrap();
         assert_eq!(lire(d.path()).unwrap(), Reglages::default());
-        let r = Reglages { mode: Some(Mode::Comicrack), chemin_ini: Some("C:/CR/ComicRack.ini".into()) };
+        let r = Reglages {
+            mode: Some(Mode::Comicrack),
+            chemin_ini: Some("C:/CR/ComicRack.ini".into()),
+            vue: PreferencesVue::default(),
+        };
         ecrire(d.path(), &r).unwrap();
         assert_eq!(lire(d.path()).unwrap(), r);
         let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
@@ -77,5 +217,72 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(chemin_reglages(d.path()), "{pas du json").unwrap();
         assert!(lire(d.path()).is_err());
+    }
+
+    #[test]
+    fn preferences_vue_aller_retour_et_fusion() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(lire_preferences_vue(d.path()).unwrap().est_vide());
+        let p = PreferencesVue {
+            tri: Some("parution".into()),
+            sens_tri: Some("desc".into()),
+            groupe: Some("editeur".into()),
+            vue: Some("tableau".into()),
+            zoom: Some(200),
+            details: Some(false),
+            largeur_details: Some(400),
+            theme: Some("moderne-sombre".into()),
+        };
+        assert_eq!(enregistrer_preferences_vue(d.path(), p.clone()).unwrap(), p);
+        assert_eq!(lire_preferences_vue(d.path()).unwrap(), p);
+        // Fusion : seul le champ fourni change.
+        let m = PreferencesVue { groupe: Some("serie".into()), ..Default::default() };
+        let apres = enregistrer_preferences_vue(d.path(), m).unwrap();
+        assert_eq!(apres.groupe.as_deref(), Some("serie"));
+        assert_eq!(apres.tri.as_deref(), Some("parution"));
+        let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
+        assert!(
+            texte.contains("\"vue\"") && texte.contains("\"sensTri\": \"desc\"") && texte.contains("largeurDetails"),
+            "{texte}"
+        );
+        assert!(!d.path().join("comicrust-tauri.json.tmp").exists());
+    }
+
+    #[test]
+    fn mode_et_preferences_se_conservent_mutuellement() {
+        let d = tempfile::tempdir().unwrap();
+        let m = PreferencesVue { tri: Some("titre".into()), ..Default::default() };
+        enregistrer_preferences_vue(d.path(), m).unwrap();
+        modifier(d.path(), |r| r.mode = Some(Mode::Autonome)).unwrap();
+        let r = lire(d.path()).unwrap();
+        assert_eq!(r.mode, Some(Mode::Autonome));
+        assert_eq!(r.vue.tri.as_deref(), Some("titre"));
+    }
+
+    #[test]
+    fn valeurs_inconnues_ignorees() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            chemin_reglages(d.path()),
+            r#"{"mode":"autonome","inconnu":1,"vue":{"tri":"bidule","sensTri":"desc","groupe":3,
+               "vue":"mosaique","zoom":9999,"details":"oui","largeurDetails":-5,"theme":"../x","futur":true}}"#,
+        )
+        .unwrap();
+        let r = lire(d.path()).unwrap();
+        assert_eq!(r.mode, Some(Mode::Autonome));
+        assert_eq!(
+            r.vue,
+            PreferencesVue {
+                sens_tri: Some("desc".into()),
+                zoom: Some(ZOOM.1),
+                largeur_details: Some(LARGEUR_DETAILS.0),
+                ..Default::default()
+            }
+        );
+        // Section `vue` d'un type inattendu : ignorée, le reste du fichier reste lisible.
+        std::fs::write(chemin_reglages(d.path()), r#"{"mode":"autonome","vue":"grille"}"#).unwrap();
+        let r = lire(d.path()).unwrap();
+        assert_eq!(r.mode, Some(Mode::Autonome));
+        assert!(r.vue.est_vide());
     }
 }

@@ -19,6 +19,13 @@ export interface ParametresRequete {
 
 export class Bibliotheque {
   params = $state<ParametresRequete>({ recherche: '', tri: 'serie', sensTri: 'asc', groupe: 'aucun' });
+
+  /** `initiaux` : tri et groupe mémorisés, appliqués avant la première requête. */
+  constructor(initiaux: Partial<ParametresRequete> = {}) {
+    for (const [c, v] of Object.entries(initiaux)) {
+      if (v !== undefined) (this.params as unknown as Record<string, unknown>)[c] = v;
+    }
+  }
   total = $state(0);
   /** Incrémenté à chaque nouvelle requête : les vues remettent alors le défilement en haut. */
   version = $state(0);

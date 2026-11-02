@@ -2,7 +2,7 @@
 // tester le front avec 5 000 livres factices. Il imite le contrat IPC de api.ts, y compris la
 // latence et les événements de scan. Rien de ceci n'est utilisé dans la fenêtre Tauri.
 import type {
-  ClefTri, EtatBiblio, LivreDetail, LivreResume, RequeteLivres, ReponseLivres, Theme,
+  PreferencesVue, ClefTri, EtatBiblio, LivreDetail, LivreResume, RequeteLivres, ReponseLivres, Theme,
 } from './api';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
@@ -179,6 +179,17 @@ let etat: EtatBiblio = {
   nbLivres: LIVRES.length,
   premierDemarrage: new URLSearchParams(location.search).has('premier'),
 };
+// Préférences d'affichage : repli en mémoire (perdues au rechargement). `?prefs=<json>` simule un
+// redémarrage avec des préférences déjà enregistrées ; `window.__comicrustSimule` les expose aux tests.
+const simuleTests: { prefs: PreferencesVue; requetes: RequeteLivres[] } = { prefs: {}, requetes: [] };
+try {
+  const brut = new URLSearchParams(location.search).get('prefs');
+  if (brut) simuleTests.prefs = JSON.parse(brut) as PreferencesVue;
+} catch {
+  /* paramètre illisible : préférences vides */
+}
+(globalThis as { __comicrustSimule?: typeof simuleTests }).__comicrustSimule = simuleTests;
+
 let dossiers = ['D:\\BD\\Marvel', 'D:\\BD\\Franco-belge', '\\\\NAS\\comics\\Image'];
 
 const THEMES = import.meta.glob('../../../crates/comicrust-tauri/themes/*.css', {
@@ -207,6 +218,11 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       if (!entree) throw new Error(`thème introuvable : ${String(args.id)}`);
       return entree[1]();
     }
+    case 'lire_preferences_vue':
+      return { ...simuleTests.prefs };
+    case 'enregistrer_preferences_vue':
+      simuleTests.prefs = { ...simuleTests.prefs, ...(args.preferences as PreferencesVue) };
+      return { ...simuleTests.prefs };
     case 'ouvrir_bibliotheque':
       return etat;
     case 'configurer_premier_demarrage': {
@@ -216,6 +232,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     }
     case 'lister_livres': {
       const q = args.requete as RequeteLivres;
+      simuleTests.requetes.push(q);
       const liste = ordonner(q);
       const rep: ReponseLivres = { total: liste.length, livres: liste.slice(q.debut, q.debut + q.nombre).map(resume) };
       return rep;

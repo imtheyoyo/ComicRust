@@ -64,10 +64,39 @@ interface LivreDetail {    // champs absents = non renseignés
 }
 ```
 
+## Préférences d'affichage
+
+```ts
+// Section `vue` de data\comicrust-tauri.json. Champ absent = valeur par défaut du front.
+interface PreferencesVue {
+  tri?: ClefTri;                 // 'serie' | 'titre' | 'parution' | … (liste de RequeteLivres)
+  sensTri?: 'asc' | 'desc';
+  groupe?: 'aucun' | 'serie' | 'editeur';
+  vue?: 'grille' | 'tableau';
+  zoom?: number;                 // taille des couvertures, ramenée dans [100, 260]
+  details?: boolean;             // panneau de détails affiché
+  largeurDetails?: number;       // largeur du panneau, ramenée dans [220, 800]
+  theme?: string;                // id du thème (fichier CSS de data\themes) ; disparu → thème par défaut
+}
+```
+
+Mode portable strict : **rien dans le `localStorage` de la WebView** (les anciennes clés `comicrust.*`
+de tauri-v0.2.0 sont reprises une fois puis effacées). Le front lit les préférences au démarrage,
+**avant** le thème et le premier `lister_livres`, puis enregistre les changements après 400 ms sans
+nouvelle modification (et aussitôt quand la page est masquée ou fermée). Mode simulé (navigateur) :
+repli en mémoire ; `?prefs=<json>` simule un redémarrage.
+
+Lecture tolérante : une valeur inconnue ou d'un mauvais type (fichier modifié à la main, version plus
+récente) est ignorée champ par champ, sans rendre le fichier illisible. Les écritures (préférences, choix
+du premier démarrage) passent par une lecture-modification-écriture sous verrou, dans un fichier
+temporaire renommé ensuite : chacune ne change que sa partie.
+
 ## Commandes
 
 | Commande | Arguments | Résultat |
 |---|---|---|
+| `lire_preferences_vue` | – | `PreferencesVue` (`{}` si rien n'est enregistré). Erreur si `comicrust-tauri.json` est illisible (le front prend alors les valeurs par défaut). |
+| `enregistrer_preferences_vue` | `{preferences: PreferencesVue}` | `PreferencesVue` à jour. **Fusion** : seuls les champs fournis changent ; valeurs invalides ignorées. |
 | `ouvrir_bibliotheque` | – | `EtatBiblio`. Lit `data\comicrust-tauri.json` ; si un mode est choisi, ouvre la base (autonome : SQLite `data\comicrust.db` ; comicrack : MySQL du `ComicRack.ini` ou `ComicDb.xml`, **lecture seule**). Sans choix : `{mode:'autonome', nbLivres:0, premierDemarrage:true}`. Rappelable pour recharger. |
 | `configurer_premier_demarrage` | `{choix: ChoixPremierDemarrage}` | `EtatBiblio` (avec `premierDemarrage:false`). Autonome : crée la base. Comicrack : teste la connexion (erreur lisible si MySQL injoignable) ; rien n'est copié ni écrit dans ComicRack. |
 | `lister_livres` | `{requete: RequeteLivres}` | `PageLivres` |
@@ -104,7 +133,7 @@ La CSP (`tauri.conf.json`) autorise ces deux origines dans `img-src`.
   (inversé si `desc`), « (sans série) » / « (sans éditeur) » pour les valeurs vides.
 - Mode `comicrack` : lecture seule, rien n'est copié ni écrit ; le mot de passe MySQL reste dans
   `ComicRack.ini` (jamais dans `comicrust-tauri.json` ni dans les messages d'erreur).
-- Réglages : `data\comicrust-tauri.json` (`{mode, cheminIni}`), distinct du `comicrust.ron` de la version egui ;
+- Réglages : `data\comicrust-tauri.json` (`{mode, cheminIni, vue}`), distinct du `comicrust.ron` de la version egui ;
   la base autonome est le même fichier `data\comicrust.db` que la version egui.
 - `ouvrir_bibliotheque` et `configurer_premier_demarrage` répondent « analyse en cours… » (erreur) tant qu'un scan tourne.
 - `fichierPresent` : vérifié avec un délai de 2 s ; un partage réseau muet donne `false`.

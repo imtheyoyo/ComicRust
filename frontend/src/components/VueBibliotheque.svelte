@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import type { ClefTri, Groupe } from '../lib/api';
   import { Bibliotheque, type SuiviScan } from '../lib/bibliotheque.svelte';
-  import { ecrirePref, lirePref } from '../lib/prefs';
+  import { enregistrerPreference, preferences } from '../lib/prefs';
   import GrilleCouvertures from './GrilleCouvertures.svelte';
   import PanneauDetails from './PanneauDetails.svelte';
   import VueTableau from './VueTableau.svelte';
@@ -18,10 +18,16 @@
   }
   let { scan, nbLivres = $bindable(), rafraichir }: Props = $props();
 
-  const bib = new Bibliotheque();
-  let vue = $state<'grille' | 'tableau'>(lirePref('vue', 'grille'));
-  let zoom = $state(lirePref('zoom', 150));
-  let details = $state(lirePref('details', true));
+  // Préférences mémorisées (data\comicrust-tauri.json), chargées par App avant ce composant :
+  // le premier lister_livres part directement avec le tri et le groupe enregistrés.
+  const prefs = preferences();
+  const bib = new Bibliotheque({ tri: prefs.tri, sensTri: prefs.sensTri, groupe: prefs.groupe });
+  let vue = $state<'grille' | 'tableau'>(prefs.vue ?? 'grille');
+  let zoom = $state(prefs.zoom ?? 150);
+  let details = $state(prefs.details ?? true);
+  const LARGEUR_MIN = 220;
+  const LARGEUR_MAX = 800;
+  let largeurDetails = $state(prefs.largeurDetails ?? 320);
   let selection = $state(-1);
   let message = $state('');
   let champRecherche = $state<HTMLInputElement>();
@@ -50,6 +56,14 @@
   onMount(() => {
     void bib.reinitialiser();
     return () => { clearTimeout(minuterie); clearTimeout(minuterieMessage); };
+  });
+
+  // Toute modification d'un réglage d'affichage est enregistrée (avec délai, voir prefs.ts).
+  $effect(() => {
+    enregistrerPreference({
+      tri: bib.params.tri, sensTri: bib.params.sensTri, groupe: bib.params.groupe,
+      vue, zoom, details, largeurDetails,
+    });
   });
 
   // Fin de scan : on recharge sans toucher au défilement ni à la sélection.
@@ -92,7 +106,35 @@
 
   function choisirVue(v: 'grille' | 'tableau') {
     vue = v;
-    ecrirePref('vue', v);
+  }
+
+  // Largeur du panneau de détails : poignée à tirer (ou flèches gauche/droite au clavier).
+  const borner = (l: number) =>
+    Math.round(Math.min(Math.max(l, LARGEUR_MIN), Math.min(LARGEUR_MAX, Math.max(LARGEUR_MIN, window.innerWidth * 0.6))));
+
+  function debutRedimension(e: PointerEvent) {
+    const poignee = e.currentTarget as HTMLElement;
+    poignee.setPointerCapture(e.pointerId);
+    const x0 = e.clientX;
+    const l0 = largeurDetails;
+    const bouger = (m: PointerEvent) => (largeurDetails = borner(l0 + x0 - m.clientX));
+    const finir = () => {
+      poignee.removeEventListener('pointermove', bouger);
+      poignee.removeEventListener('pointerup', finir);
+      poignee.removeEventListener('pointercancel', finir);
+    };
+    poignee.addEventListener('pointermove', bouger);
+    poignee.addEventListener('pointerup', finir);
+    poignee.addEventListener('pointercancel', finir);
+    e.preventDefault();
+  }
+
+  function clavierPoignee(e: KeyboardEvent) {
+    const pas = e.shiftKey ? 64 : 16;
+    if (e.key === 'ArrowLeft') largeurDetails = borner(largeurDetails + pas);
+    else if (e.key === 'ArrowRight') largeurDetails = borner(largeurDetails - pas);
+    else return;
+    e.preventDefault();
   }
 
   function clavierGlobal(e: KeyboardEvent) {
@@ -154,7 +196,7 @@
     <span class="espace"></span>
     {#if vue === 'grille'}
       <label class="outil">Taille
-        <input type="range" min="100" max="260" step="10" bind:value={zoom} onchange={() => ecrirePref('zoom', zoom)} aria-label="Taille des couvertures" />
+        <input type="range" min="100" max="260" step="10" bind:value={zoom} aria-label="Taille des couvertures" />
       </label>
     {/if}
     <div class="groupe-boutons" role="group" aria-label="Type de vue">
@@ -164,7 +206,7 @@
     <button
       aria-pressed={details}
       class:actif={details}
-      onclick={() => { details = !details; ecrirePref('details', details); }}
+      onclick={() => (details = !details)}
       title="Afficher ou masquer le panneau de détails"
     >Détails</button>
   </header>
@@ -182,7 +224,22 @@
       {/if}
     </div>
     {#if details}
-      <PanneauDetails livre={livreSelectionne} onouvrir={() => ouvrir(selection)} />
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+      <div
+        class="poignee"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Largeur du panneau de détails"
+        aria-valuemin={LARGEUR_MIN}
+        aria-valuemax={LARGEUR_MAX}
+        aria-valuenow={largeurDetails}
+        tabindex="0"
+        title="Tirer pour élargir ou réduire le panneau de détails"
+        onpointerdown={debutRedimension}
+        onkeydown={clavierPoignee}
+        data-testid="poignee-details"
+      ></div>
+      <PanneauDetails livre={livreSelectionne} largeur={largeurDetails} onouvrir={() => ouvrir(selection)} />
     {/if}
   </div>
 
@@ -223,6 +280,8 @@
   button.actif { background: var(--cr-accent); color: var(--cr-accent-texte); border-color: var(--cr-accent); }
   button.actif:hover:not(:disabled) { background: var(--cr-accent); }
   .corps { flex: 1; min-height: 0; display: flex; }
+  .poignee { flex: none; width: 5px; margin-right: -5px; position: relative; z-index: 1; cursor: col-resize; touch-action: none; }
+  .poignee:hover, .poignee:focus-visible { background: var(--cr-accent); outline: none; }
   .liste { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--cr-fond); }
   .vide, .erreur { margin: 40px auto; color: var(--cr-texte-discret); text-align: center; max-width: 420px; }
   .erreur { color: var(--cr-erreur); }

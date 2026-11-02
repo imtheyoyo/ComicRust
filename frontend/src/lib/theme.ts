@@ -1,15 +1,11 @@
 import { chargerTheme } from './api';
+import { enregistrerPreference, preferences } from './prefs';
 
-const CLE = 'comicrust.theme';
 export const THEME_DEFAUT = 'moderne-clair';
 
-/** Thème mémorisé (le profil WebView2 est dans data\webview2 : rien hors du dossier portable). */
+/** Thème mémorisé dans data\comicrust-tauri.json (après `chargerPreferences`). */
 export function themeMemorise(): string {
-  try {
-    return localStorage.getItem(CLE) ?? THEME_DEFAUT;
-  } catch {
-    return THEME_DEFAUT;
-  }
+  return preferences().theme ?? THEME_DEFAUT;
 }
 
 let feuille: CSSStyleSheet | null = null;
@@ -55,10 +51,6 @@ export async function appliquerTheme(id: string): Promise<string> {
     css = await chargerTheme(THEME_DEFAUT);
   }
   injecterCss(css);
-  try {
-    localStorage.setItem(CLE, choisi);
-  } catch {
-    /* stockage indisponible : le thème par défaut reviendra au prochain lancement */
-  }
+  enregistrerPreference({ theme: choisi });
   return choisi;
 }

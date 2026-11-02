@@ -4,9 +4,11 @@
 
   interface Props {
     livre: LivreResume | undefined;
+    /** Largeur en px (réglable, mémorisée). */
+    largeur?: number;
     onouvrir: () => void;
   }
-  let { livre, onouvrir }: Props = $props();
+  let { livre, largeur = 320, onouvrir }: Props = $props();
 
   let detail = $state<LivreDetail | null>(null);
   let erreur = $state('');
@@ -59,7 +61,7 @@
   });
 </script>
 
-<aside class="panneau" aria-label="Détails du livre" data-testid="details">
+<aside class="panneau" aria-label="Détails du livre" data-testid="details" style:width="{largeur}px">
   {#if !livre}
     <p class="vide">Sélectionnez un livre pour afficher ses détails.</p>
   {:else}
@@ -88,7 +90,7 @@
 
 <style>
   .panneau {
-    width: 320px; flex: none; overflow-y: auto; padding: 16px; background: var(--cr-fond-panneau);
+    width: 320px; max-width: 60vw; flex: none; overflow-y: auto; padding: 16px; background: var(--cr-fond-panneau);
     border-left: 1px solid var(--cr-bordure);
   }
   .vide, .discret { color: var(--cr-texte-discret); }

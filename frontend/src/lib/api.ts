@@ -96,6 +96,22 @@ export interface LivreDetail extends LivreResume {
   manquant: boolean;
 }
 
+/** Préférences d'affichage mémorisées dans data\comicrust-tauri.json (section `vue`).
+ *  Champ absent = valeur par défaut du front. */
+export interface PreferencesVue {
+  tri?: ClefTri;
+  sensTri?: SensTri;
+  groupe?: Groupe;
+  vue?: 'grille' | 'tableau';
+  /** Taille des couvertures (100 à 260 px). */
+  zoom?: number;
+  details?: boolean;
+  /** Largeur du panneau de détails (220 à 800 px). */
+  largeurDetails?: number;
+  /** Identifiant du thème (fichier CSS de data\themes). */
+  theme?: string;
+}
+
 export interface ResultatScan {
   ajoutes: number;
   misAJour: number;
@@ -141,6 +157,11 @@ export async function ecouter<T>(nom: string, rappel: (charge: T) => void): Prom
 export const infos = () => appeler<InfosApplication>('infos');
 export const listerThemes = () => appeler<Theme[]>('lister_themes');
 export const chargerTheme = (id: string) => appeler<string>('charger_theme', { id });
+
+export const lirePreferencesVue = () => appeler<PreferencesVue>('lire_preferences_vue');
+/** Fusionne les champs fournis ; renvoie l'ensemble à jour. */
+export const enregistrerPreferencesVue = (preferences: PreferencesVue) =>
+  appeler<PreferencesVue>('enregistrer_preferences_vue', { preferences });
 
 export const ouvrirBibliotheque = () => appeler<EtatBiblio>('ouvrir_bibliotheque');
 export const configurerPremierDemarrage = (choix: ChoixPremierDemarrage) =>

@@ -3,6 +3,7 @@
 //! aucune règle métier côté front.
 
 use crate::biblio::{self, Biblio, ChoixPremierDemarrage, EtatBiblio, LivreDetail, PageLivres, RequeteLivres};
+use crate::reglages::{self, PreferencesVue};
 use crate::{infos_application, portable, themes, InfosApplication};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,6 +31,22 @@ fn lister_themes(data: tauri::State<'_, DossierData>) -> Result<Vec<themes::Them
 #[tauri::command]
 fn charger_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<String, String> {
     themes::charger_theme(&portable::dossier_themes(&data.0), &id).map_err(|e| e.to_string())
+}
+
+/// Préférences d'affichage mémorisées dans `data\comicrust-tauri.json` (section `vue`).
+#[tauri::command(async)]
+fn lire_preferences_vue(data: tauri::State<'_, DossierData>) -> Result<PreferencesVue, String> {
+    reglages::lire_preferences_vue(&data.0)
+}
+
+/// Fusionne les champs fournis dans la section `vue` (écriture atomique) ; renvoie l'ensemble à
+/// jour. Les valeurs inconnues sont ignorées.
+#[tauri::command(async)]
+fn enregistrer_preferences_vue(
+    data: tauri::State<'_, DossierData>,
+    preferences: PreferencesVue,
+) -> Result<PreferencesVue, String> {
+    reglages::enregistrer_preferences_vue(&data.0, preferences)
 }
 
 // ───────────────────────────── Bibliothèque ─────────────────────────────
@@ -141,6 +158,8 @@ pub fn run() {
             infos,
             lister_themes,
             charger_theme,
+            lire_preferences_vue,
+            enregistrer_preferences_vue,
             ouvrir_bibliotheque,
             configurer_premier_demarrage,
             lister_livres,
