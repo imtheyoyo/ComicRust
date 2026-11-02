@@ -14,10 +14,11 @@ use comicrust_core::library::LibraryBook;
 use comicrust_core::scanner::{path_key, ScanProgress};
 use comicrust_core::store::{new_book_id, Store, StoreConfig, SQLITE_FILE_NAME};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Fenêtre maximale d'un `lister_livres`.
 pub const NOMBRE_MAX: usize = 5000;
@@ -232,12 +233,34 @@ pub struct Biblio {
     data: PathBuf,
     interne: Arc<Mutex<Interne>>,
     pool: Arc<couvertures::Pool>,
+    /// Cache négatif : identifiants dont la couverture a échoué, avec l'heure de l'échec.
+    negatif: Arc<Mutex<HashMap<String, Instant>>>,
+}
+
+/// Durée pendant laquelle un échec de couverture n'est pas retenté.
+const DUREE_ECHEC: Duration = Duration::from_secs(180);
+/// Au-delà, `fichierPresent` est donné faux (partage réseau qui ne répond plus).
+const DELAI_FICHIER: Duration = Duration::from_secs(2);
+
+/// Remet `scan_en_cours` à faux quand elle disparaît, quelle que soit la sortie (erreur,
+/// panique du fil).
+struct GardeScan(Arc<Mutex<Interne>>);
+
+impl Drop for GardeScan {
+    fn drop(&mut self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).scan_en_cours = false;
+    }
 }
 
 impl Biblio {
     /// Bibliothèque non ouverte pour un dossier `data` (voir [`Biblio::ouvrir`]).
     pub fn nouvelle(data: PathBuf) -> Self {
-        Biblio { data, interne: Arc::default(), pool: Arc::new(couvertures::Pool::nouveau(couvertures::FILS)) }
+        Biblio {
+            data,
+            interne: Arc::default(),
+            pool: Arc::new(couvertures::Pool::nouveau(couvertures::FILS)),
+            negatif: Arc::default(),
+        }
     }
 
     fn verrou(&self) -> MutexGuard<'_, Interne> {
@@ -259,6 +282,7 @@ impl Biblio {
     /// Ouvre la bibliothèque choisie au premier démarrage ; sans choix, renvoie l'état
     /// « premier démarrage » sans rien ouvrir. Rappelable pour recharger.
     pub fn ouvrir(&self) -> Result<EtatBiblio, String> {
+        self.refuser_pendant_analyse()?;
         let r = reglages::lire(&self.data)?;
         let Some(mode) = r.mode else {
             return Ok(EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: true });
@@ -272,6 +296,7 @@ impl Biblio {
     /// Enregistre le choix du premier démarrage et ouvre la bibliothèque. Rien n'est écrit dans
     /// ComicRack (lecture seule) ni copié depuis lui.
     pub fn configurer(&self, choix: &ChoixPremierDemarrage) -> Result<EtatBiblio, String> {
+        self.refuser_pendant_analyse()?;
         let r = match choix.mode {
             Mode::Autonome => {
                 // Crée la base (schéma) : seul endroit où un fichier absent est créé.
@@ -307,6 +332,13 @@ impl Biblio {
         Ok(EtatBiblio { mode: choix.mode, nb_livres: nb, premier_demarrage: false })
     }
 
+    fn refuser_pendant_analyse(&self) -> Result<(), String> {
+        if self.verrou().scan_en_cours {
+            return Err("analyse en cours : attends sa fin avant de changer de bibliothèque".into());
+        }
+        Ok(())
+    }
+
     pub(crate) fn installer(&self, mode: Mode, base: ComicDatabase, store: Option<StoreConfig>) {
         let mut g = self.verrou();
         g.mode = Some(mode);
@@ -314,6 +346,8 @@ impl Biblio {
         g.store = store;
         g.generation += 1;
         g.vue = None;
+        drop(g);
+        self.negatif.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     fn base(&self) -> Result<Arc<ComicDatabase>, String> {
@@ -372,19 +406,66 @@ impl Biblio {
     pub fn detail(&self, id: &str) -> Result<LivreDetail, String> {
         let base = self.base()?;
         let b = base.get(id).ok_or_else(|| format!("livre introuvable : {id}"))?;
-        Ok(detail(b))
+        let mut d = detail(b);
+        // Le disque (souvent un partage réseau) peut ne plus répondre : délai maximal.
+        if let Some(f) = d.fichier.clone() {
+            d.fichier_present = fichier_existe(PathBuf::from(f), DELAI_FICHIER);
+        }
+        Ok(d)
     }
 
-    /// Couverture d'un livre : (JPEG). Appelée depuis les fils du [`Biblio::pool`].
-    pub fn couverture(&self, id: &str) -> Result<Vec<u8>, String> {
+    /// Ce qu'il faut pour produire la couverture : (dossier du cache, id, fichier, image).
+    fn plan_couverture(&self, id: &str) -> Result<(PathBuf, String, Option<PathBuf>, usize), String> {
         let base = self.base()?;
         let b = base.get(id).ok_or_else(|| format!("livre introuvable : {id}"))?;
-        couvertures::couverture_jpeg(
-            &self.dossier_couvertures(),
-            &b.id,
-            b.file.as_deref().map(Path::new),
-            b.front_cover_image(),
-        )
+        Ok((self.dossier_couvertures(), b.id.clone(), b.file.as_deref().map(PathBuf::from), b.front_cover_image()))
+    }
+
+    /// Couverture d'un livre (JPEG), avec délai maximal ; bloquant.
+    pub fn couverture(&self, id: &str) -> Result<Vec<u8>, String> {
+        let (cache, id, fichier, image) = self.plan_couverture(id)?;
+        couvertures::couverture_avec_delai(cache, id, fichier, image, couvertures::DELAI_PRODUCTION)
+    }
+
+    /// Sert une couverture au protocole `cr-couv`. Le cache disque et le cache négatif sont
+    /// consultés tout de suite, dans le fil appelant (réponse immédiate, sans file d'attente) ;
+    /// seuls les échecs de cache passent par le pool (tâches récentes d'abord, périmées
+    /// rejetées). `repondre` reçoit les octets JPEG, ou `None` (404).
+    pub fn servir(&self, id: &str, repondre: impl FnOnce(Option<Vec<u8>>) + Send + 'static) {
+        let Ok((cache, id, fichier, image)) = self.plan_couverture(id) else {
+            return repondre(None);
+        };
+        if self.echec_recent(&id) {
+            return repondre(None);
+        }
+        if let Some(octets) = couvertures::depuis_le_cache(&cache, &id, image) {
+            return repondre(Some(octets));
+        }
+        let negatif = self.negatif.clone();
+        self.pool.executer(move |perime| {
+            if perime {
+                return repondre(None); // abandonnée depuis longtemps ; pas d'échec mémorisé
+            }
+            match couvertures::couverture_avec_delai(cache, id.clone(), fichier, image, couvertures::DELAI_PRODUCTION) {
+                Ok(octets) => repondre(Some(octets)),
+                Err(_) => {
+                    negatif.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Instant::now());
+                    repondre(None)
+                }
+            }
+        });
+    }
+
+    fn echec_recent(&self, id: &str) -> bool {
+        let mut n = self.negatif.lock().unwrap_or_else(|e| e.into_inner());
+        match n.get(id) {
+            Some(t) if t.elapsed() < DUREE_ECHEC => true,
+            Some(_) => {
+                n.remove(id);
+                false
+            }
+            None => false,
+        }
     }
 
     // ───────────── Dossiers surveillés ─────────────
@@ -451,7 +532,7 @@ impl Biblio {
     /// (environ 5 fois par seconde) puis `Termine` ou `Erreur`. La bibliothèque affichée est
     /// rechargée avant `Termine`.
     pub fn lancer_scan(&self, sortie: Arc<dyn Fn(EvenementScan) + Send + Sync>) -> Result<(), String> {
-        let (cfg, base) = {
+        let (cfg, base, generation) = {
             let mut g = self.verrou();
             let cfg = match (g.mode, &g.store) {
                 (Some(Mode::Autonome), Some(c)) => c.clone(),
@@ -467,31 +548,29 @@ impl Biblio {
             }
             let base = g.base.clone().ok_or("aucune bibliothèque ouverte")?;
             g.scan_en_cours = true;
-            (cfg, base)
+            (cfg, base, g.generation)
         };
+        // À partir d'ici, toute sortie (erreur, panique du fil) remet l'indicateur à faux.
+        let garde = GardeScan(self.interne.clone());
         // Dossiers lus avant de rendre la main : « aucun dossier » est une erreur de la commande.
         let dossiers = match Store::open_existing(&cfg).and_then(|mut s| s.folders()) {
             Ok(d) if !d.is_empty() => d,
             Ok(_) => {
-                self.verrou().scan_en_cours = false;
                 return Err("aucun dossier à analyser : ajoute d'abord un dossier de BD".into());
             }
-            Err(e) => {
-                self.verrou().scan_en_cours = false;
-                return Err(e.to_string());
-            }
+            Err(e) => return Err(e.to_string()),
         };
         let me = self.clone();
         let lancement = std::thread::Builder::new().name("comicrust-analyse".into()).spawn(move || {
-            let resultat = me.analyser(&cfg, &dossiers, &base, &*sortie);
-            me.verrou().scan_en_cours = false;
+            let resultat = me.analyser(&cfg, &dossiers, &base, generation, &*sortie);
+            // Libéré avant l'événement final : le front peut relancer aussitôt.
+            drop(garde);
             sortie(match resultat {
                 Ok(e) => e,
                 Err(message) => EvenementScan::Erreur { message },
             });
         });
         if let Err(e) = lancement {
-            self.verrou().scan_en_cours = false;
             return Err(format!("fil d'analyse impossible : {e}"));
         }
         Ok(())
@@ -502,7 +581,8 @@ impl Biblio {
         &self,
         cfg: &StoreConfig,
         dossiers: &[PathBuf],
-        base: &ComicDatabase,
+        base: &Arc<ComicDatabase>,
+        generation: u64,
         sortie: &(dyn Fn(EvenementScan) + Send + Sync),
     ) -> Result<EvenementScan, String> {
         let progression = ScanProgress::default();
@@ -530,10 +610,15 @@ impl Biblio {
         let neuve = Store::open_existing(cfg).and_then(|mut s| s.load(None)).map_err(|e| e.to_string())?;
         {
             let mut g = self.verrou();
-            g.base = Some(Arc::new(neuve));
-            g.generation += 1;
-            g.vue = None;
+            // Remplacée seulement si la bibliothèque affichée est toujours celle qui a été
+            // analysée (jamais d'écrasement après un changement de mode).
+            if g.generation == generation && g.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, base)) {
+                g.base = Some(Arc::new(neuve));
+                g.generation += 1;
+                g.vue = None;
+            }
         }
+        self.negatif.lock().unwrap_or_else(|e| e.into_inner()).clear();
         Ok(EvenementScan::Termine {
             ajoutes: rapport.added.len(),
             mis_a_jour: rapport.updated.len(),
@@ -548,6 +633,15 @@ fn config_autonome(data: &Path) -> StoreConfig {
     // Chemin explicite (et non `PortableSqlite`, calculé d'après l'exécutable) : même fichier
     // en production (`data\comicrust.db`), mais testable dans un dossier temporaire.
     StoreConfig::Sqlite(data.join(SQLITE_FILE_NAME))
+}
+
+/// `is_file` avec délai maximal (thread détaché si le disque ne répond pas).
+fn fichier_existe(chemin: PathBuf, delai: Duration) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let lance = std::thread::Builder::new().name("comicrust-fichier".into()).spawn(move || {
+        let _ = tx.send(chemin.is_file());
+    });
+    lance.is_ok() && rx.recv_timeout(delai).unwrap_or(false)
 }
 
 fn lire_dossiers(cfg: &StoreConfig) -> Result<Vec<String>, String> {
@@ -717,7 +811,7 @@ fn detail(b: &LibraryBook) -> LivreDetail {
         taille_fichier: b.file_size,
         date_ajout: non_vide(&b.added).filter(|d| !d.starts_with("0001-01-01")),
         derniere_lecture: non_vide(&b.opened).filter(|d| !d.starts_with("0001-01-01")),
-        fichier_present: fichier.as_deref().is_some_and(|f| Path::new(f).is_file()),
+        fichier_present: false, // calculé par `Biblio::detail` (avec délai)
         fichier,
         manquant: b.missing.unwrap_or(false),
         url_couverture: url_couverture(&b.id),

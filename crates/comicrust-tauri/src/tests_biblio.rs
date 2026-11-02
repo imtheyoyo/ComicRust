@@ -172,7 +172,7 @@ fn scan_liste_detail_couverture_et_manquants() {
     // Couverture : JPEG miniature, mise en cache dans data/couvertures.
     let jpeg = b.couverture(&id).unwrap();
     let img = image::load_from_memory(&jpeg).unwrap();
-    assert_eq!(img.height(), 300);
+    assert_eq!(img.height(), 360);
     let nb_cache = std::fs::read_dir(b.dossier_couvertures()).unwrap().count();
     assert_eq!(nb_cache, 1);
 
@@ -340,4 +340,89 @@ fn urls_de_couverture() {
     // Aller-retour avec ce que le protocole reçoit comme chemin.
     let chemin = url.rsplit_once("localhost").unwrap().1;
     assert_eq!(id_depuis_uri(chemin, None), "a b/é");
+}
+
+#[test]
+fn changement_de_bibliotheque_refuse_pendant_une_analyse() {
+    let d = tempfile::tempdir().unwrap();
+    let bd = d.path().join("bd");
+    creer_bd(&bd);
+    let b = autonome(&d.path().join("data"));
+    b.ajouter_dossier(&bd.to_string_lossy()).unwrap();
+    // Le rappel bloque sur le premier événement : l'analyse reste « en cours » tant qu'on ne
+    // la libère pas.
+    let (vu_tx, vu_rx) = mpsc::channel();
+    let (porte_tx, porte_rx) = mpsc::channel::<()>();
+    let (fin_tx, fin_rx) = mpsc::channel();
+    let vu_tx = std::sync::Mutex::new(vu_tx);
+    let porte_rx = std::sync::Mutex::new(porte_rx);
+    let fin_tx = std::sync::Mutex::new(fin_tx);
+    let premier = std::sync::atomic::AtomicBool::new(true);
+    b.lancer_scan(Arc::new(move |e| match e {
+        EvenementScan::Termine { .. } | EvenementScan::Erreur { .. } => {
+            let _ = fin_tx.lock().unwrap().send(e);
+        }
+        _ => {
+            if premier.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let _ = vu_tx.lock().unwrap().send(());
+                let _ = porte_rx.lock().unwrap().recv_timeout(Duration::from_secs(30));
+            }
+        }
+    }))
+    .unwrap();
+    vu_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    let e = b.ouvrir().unwrap_err();
+    assert!(e.contains("analyse en cours"), "{e}");
+    let choix = ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None };
+    assert!(b.configurer(&choix).unwrap_err().contains("analyse en cours"));
+    assert!(b.lancer_scan(Arc::new(|_| {})).unwrap_err().contains("déjà en cours"));
+    porte_tx.send(()).unwrap();
+    let fin = fin_rx.recv_timeout(Duration::from_secs(60)).unwrap();
+    assert!(matches!(fin, EvenementScan::Termine { ajoutes: 4, .. }), "{fin:?}");
+    // Libéré : on peut de nouveau ouvrir.
+    assert_eq!(b.ouvrir().unwrap().nb_livres, 4);
+}
+
+#[test]
+fn servir_cache_echecs_memorises_et_perimes() {
+    let d = tempfile::tempdir().unwrap();
+    let bd = d.path().join("bd");
+    creer_bd(&bd);
+    let b = autonome(&d.path().join("data"));
+    b.ajouter_dossier(&bd.to_string_lossy()).unwrap();
+    scanner(&b);
+    let ids: Vec<String> =
+        b.lister(&requete("serie", SensTri::Asc, None, None)).unwrap().livres.into_iter().map(|l| l.id).collect();
+    let servir = |id: &str| {
+        let (tx, rx) = mpsc::channel();
+        b.servir(id, move |o| tx.send(o).unwrap());
+        rx.recv_timeout(Duration::from_secs(30)).unwrap()
+    };
+    // Défaut de cache : produite par le pool, puis servie depuis le disque.
+    let jpeg = servir(&ids[1]).expect("couverture produite");
+    assert_eq!(&jpeg[..2], [0xFF, 0xD8]);
+    assert_eq!(servir(&ids[1]), Some(jpeg));
+    // Livre inconnu : 404 sans rien produire.
+    assert_eq!(servir("inconnu"), None);
+    // Fichier disparu avant toute couverture : 404, puis échec mémorisé (le fichier qui
+    // revient n'est pas relu tout de suite).
+    let fichier = b.detail(&ids[2]).unwrap().fichier.unwrap();
+    let sauve = d.path().join("sauvegarde.cbz");
+    std::fs::rename(&fichier, &sauve).unwrap();
+    assert_eq!(servir(&ids[2]), None);
+    std::fs::rename(&sauve, &fichier).unwrap();
+    assert_eq!(servir(&ids[2]), None, "échec mémorisé quelques minutes");
+}
+
+#[test]
+fn detail_avec_fichier_present_et_delai() {
+    let d = tempfile::tempdir().unwrap();
+    let b = Biblio::nouvelle(d.path().to_path_buf());
+    let f = d.path().join("a.cbz");
+    std::fs::write(&f, b"x").unwrap();
+    let livre = LibraryBook { id: "a".into(), file: Some(f.to_string_lossy().into()), ..Default::default() };
+    b.installer(Mode::Autonome, ComicDatabase::from_books(vec![livre]), None);
+    assert!(b.detail("a").unwrap().fichier_present);
+    std::fs::remove_file(&f).unwrap();
+    assert!(!b.detail("a").unwrap().fichier_present);
 }

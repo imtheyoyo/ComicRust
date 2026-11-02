@@ -93,8 +93,11 @@ fn lancer_scan(app: tauri::AppHandle, biblio: tauri::State<'_, Biblio>) -> Resul
 
 /// Réponse HTTP du protocole `cr-couv`.
 fn reponse_couverture(statut: u16, jpeg: Vec<u8>) -> tauri::http::Response<Vec<u8>> {
+    // 200 : couverture gardée par la WebView une heure ; 404 : jamais gardée.
+    let cache = if statut == 200 { "private, max-age=3600" } else { "no-store" };
     tauri::http::Response::builder()
         .status(statut)
+        .header("Cache-Control", cache)
         .header("Content-Type", "image/jpeg")
         .header("Access-Control-Allow-Origin", "*")
         .body(jpeg)
@@ -127,11 +130,10 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(biblio::PROTOCOLE_COUVERTURES, |ctx, requete, reponse| {
             let bib = ctx.app_handle().state::<Biblio>().inner().clone();
             let id = biblio::id_depuis_uri(requete.uri().path(), requete.uri().host());
-            let pour_le_fil = bib.clone();
-            bib.pool().executer(move || {
-                reponse.respond(match pour_le_fil.couverture(&id) {
-                    Ok(jpeg) => reponse_couverture(200, jpeg),
-                    Err(_) => reponse_couverture(404, Vec::new()),
+            bib.servir(&id, move |jpeg| {
+                reponse.respond(match jpeg {
+                    Some(jpeg) => reponse_couverture(200, jpeg),
+                    None => reponse_couverture(404, Vec::new()),
                 });
             });
         })
@@ -152,6 +154,16 @@ pub fn run() {
             // Thèmes livrés disponibles dès le premier lancement.
             let data = app.state::<DossierData>();
             let _ = themes::installer_themes_livres(&portable::dossier_themes(&data.0));
+            // Fenêtre créée ici (et non dans tauri.conf.json) pour fixer le profil WebView2
+            // dans `data\webview2` (chemin absolu) : cache, cookies et stockage local restent
+            // dans le dossier portable. Titre et tailles : celles de l'ancienne configuration.
+            let profil = portable::dossier_webview(&data.0);
+            tauri::WebviewWindowBuilder::new(&*app, "main", tauri::WebviewUrl::default())
+                .title("ComicRust")
+                .inner_size(1280.0, 800.0)
+                .min_inner_size(800.0, 500.0)
+                .data_directory(profil)
+                .build()?;
             Ok(())
         })
         .run(tauri::generate_context!())

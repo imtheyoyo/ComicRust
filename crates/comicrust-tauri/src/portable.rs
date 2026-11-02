@@ -16,8 +16,16 @@ pub fn exe_dir() -> PathBuf {
 }
 
 /// `data\` à côté de l'exécutable, créé si besoin.
+///
+/// Échec franc si l'emplacement de l'exécutable est introuvable : jamais de repli sur un
+/// chemin relatif (les données iraient dans le dossier courant, profil WebView2 compris).
 pub fn data_dir() -> std::io::Result<PathBuf> {
-    let dir = exe_dir().join("data");
+    let exe = std::env::current_exe()?;
+    let dossier = exe
+        .parent()
+        .filter(|d| d.is_absolute())
+        .ok_or_else(|| std::io::Error::other("dossier de l'exécutable introuvable"))?;
+    let dir = dossier.join("data");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

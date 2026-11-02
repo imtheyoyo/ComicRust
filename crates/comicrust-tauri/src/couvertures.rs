@@ -6,14 +6,16 @@
 //! sur un NAS) qu'une seule fois ; ensuite le cache disque suffit, même si le livre disparaît.
 
 use comicrust_core::open_book_patiently;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 /// Dossier des couvertures dans `data\`.
 pub const DOSSIER_COUVERTURES: &str = "couvertures";
 /// Hauteur maximale des miniatures (pixels).
-pub const HAUTEUR_MINIATURE: u32 = 300;
+pub const HAUTEUR_MINIATURE: u32 = 360;
 /// Fils de travail : un NAS ne gagne rien à plus de lectures simultanées.
 pub const FILS: usize = 4;
 
@@ -69,53 +71,100 @@ pub fn couverture_jpeg(cache: &Path, id: &str, fichier: Option<&Path>, image: us
     Ok(octets)
 }
 
-type Tache = Box<dyn FnOnce() + Send>;
+/// Une tâche reçoit `true` si elle a trop attendu (la requête a sans doute été abandonnée par
+/// la WebView : elle répond sans travailler).
+type Tache = Box<dyn FnOnce(bool) + Send>;
 
-/// Groupe de fils qui exécutent des tâches dans l'ordre d'arrivée.
+/// Attente au-delà de laquelle une tâche est jugée périmée.
+pub const ATTENTE_MAX: Duration = Duration::from_secs(30);
+/// Durée maximale de la production d'une couverture (archive sur un NAS qui ne répond plus).
+pub const DELAI_PRODUCTION: Duration = Duration::from_secs(25);
+
+#[derive(Default)]
+struct File {
+    taches: VecDeque<(Instant, Tache)>,
+    fermee: bool,
+}
+
+/// Groupe de fils qui exécutent des tâches, **les plus récentes d'abord** (ce qui vient
+/// d'apparaître à l'écran passe devant ; ce qui a défilé hors de vue attend, puis est périmé).
 pub struct Pool {
-    tx: Mutex<Option<mpsc::Sender<Tache>>>,
+    partage: Arc<(Mutex<File>, Condvar)>,
 }
 
 impl Pool {
     pub fn nouveau(fils: usize) -> Self {
-        let (tx, rx) = mpsc::channel::<Tache>();
-        let rx = Arc::new(Mutex::new(rx));
+        let partage: Arc<(Mutex<File>, Condvar)> = Arc::default();
         for n in 0..fils.max(1) {
-            let rx = rx.clone();
+            let partage = partage.clone();
             std::thread::Builder::new()
                 .name(format!("comicrust-couv-{n}"))
                 .spawn(move || loop {
-                    // Le verrou n'est tenu que le temps de prendre la tâche suivante.
-                    let tache = match rx.lock() {
-                        Ok(r) => r.recv(),
-                        Err(_) => return,
+                    let (depuis, tache) = {
+                        let (verrou, cv) = &*partage;
+                        let Ok(mut f) = verrou.lock() else { return };
+                        loop {
+                            if f.fermee {
+                                return;
+                            }
+                            if let Some(t) = f.taches.pop_back() {
+                                break t;
+                            }
+                            f = match cv.wait(f) {
+                                Ok(f) => f,
+                                Err(_) => return,
+                            };
+                        }
                     };
-                    match tache {
-                        Ok(t) => t(),
-                        Err(_) => return, // pool détruit
-                    }
+                    tache(depuis.elapsed() > ATTENTE_MAX);
                 })
                 .expect("fil des couvertures");
         }
-        Pool { tx: Mutex::new(Some(tx)) }
+        Pool { partage }
     }
 
     /// Met une tâche en file.
-    pub fn executer(&self, tache: impl FnOnce() + Send + 'static) {
-        if let Ok(g) = self.tx.lock() {
-            if let Some(tx) = g.as_ref() {
-                let _ = tx.send(Box::new(tache));
-            }
+    pub fn executer(&self, tache: impl FnOnce(bool) + Send + 'static) {
+        let (verrou, cv) = &*self.partage;
+        if let Ok(mut f) = verrou.lock() {
+            f.taches.push_back((Instant::now(), Box::new(tache)));
+            cv.notify_one();
         }
     }
 }
 
 impl Drop for Pool {
     fn drop(&mut self) {
-        if let Ok(mut g) = self.tx.lock() {
-            g.take();
+        let (verrou, cv) = &*self.partage;
+        if let Ok(mut f) = verrou.lock() {
+            f.fermee = true;
+            cv.notify_all();
         }
     }
+}
+
+/// Comme [`couverture_jpeg`], mais rend la main après [`DELAI_PRODUCTION`] même si la lecture
+/// est bloquée : le travail continue dans un fil détaché (il remplira le cache s'il aboutit).
+pub fn couverture_avec_delai(
+    cache: PathBuf,
+    id: String,
+    fichier: Option<PathBuf>,
+    image: usize,
+    delai: Duration,
+) -> Result<Vec<u8>, String> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("comicrust-couv-lecture".into())
+        .spawn(move || {
+            let _ = tx.send(couverture_jpeg(&cache, &id, fichier.as_deref(), image));
+        })
+        .map_err(|e| e.to_string())?;
+    rx.recv_timeout(delai).unwrap_or_else(|_| Err("délai dépassé".into()))
+}
+
+/// Cache disque seul (lecture rapide d'un petit fichier local) : `None` si absent.
+pub fn depuis_le_cache(cache: &Path, id: &str, image: usize) -> Option<Vec<u8>> {
+    std::fs::read(cache.join(nom_cache(id, image))).ok().filter(|o| !o.is_empty())
 }
 
 /// CBZ d'une image unie, pour les tests.
@@ -150,7 +199,7 @@ mod tests {
         let jpeg = couverture_jpeg(&cache, "id/1", Some(&livre), 0).unwrap();
         assert_eq!(&jpeg[..2], [0xFF, 0xD8], "JPEG");
         let img = image::load_from_memory(&jpeg).unwrap();
-        assert_eq!((img.width(), img.height()), (200, 300));
+        assert_eq!((img.width(), img.height()), (240, 360));
         assert!(cache.join("id_1.jpg").exists());
         // Le livre disparaît : la couverture vient du cache disque.
         std::fs::remove_file(&livre).unwrap();
@@ -170,7 +219,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         for i in 0..10 {
             let tx = tx.clone();
-            pool.executer(move || tx.send(i).unwrap());
+            pool.executer(move |_perime| tx.send(i).unwrap());
         }
         let mut recus: Vec<i32> =
             (0..10).map(|_| rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()).collect();

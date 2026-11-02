@@ -92,7 +92,7 @@ plateforme de la WebView ; **le backend la fournit toute faite dans `urlCouvertu
 - ailleurs : `cr-couv://localhost/<id>`
 
 Le front utilise donc `urlCouverture` tel quel (pas de reconstruction). Le serveur répond en JPEG
-(miniature ~300 px de haut, cache `data\couvertures\<id>.jpg`, générée à la demande, 4 fils de travail) ;
+(miniature 360 px de haut, cache `data\couvertures\<id>.jpg`, générée à la demande, 4 fils de travail) ;
 404 si le fichier est absent ou illisible (le front affiche un visuel de remplacement). Aucun base64 dans l'IPC.
 La CSP (`tauri.conf.json`) autorise ces deux origines dans `img-src`.
 
@@ -106,3 +106,8 @@ La CSP (`tauri.conf.json`) autorise ces deux origines dans `img-src`.
   `ComicRack.ini` (jamais dans `comicrust-tauri.json` ni dans les messages d'erreur).
 - Réglages : `data\comicrust-tauri.json` (`{mode, cheminIni}`), distinct du `comicrust.ron` de la version egui ;
   la base autonome est le même fichier `data\comicrust.db` que la version egui.
+- `ouvrir_bibliotheque` et `configurer_premier_demarrage` répondent « analyse en cours… » (erreur) tant qu'un scan tourne.
+- `fichierPresent` : vérifié avec un délai de 2 s ; un partage réseau muet donne `false`.
+- Couvertures : cache disque lu tout de suite ; seules les absentes sont produites (tâches récentes d'abord,
+  abandon au-delà de 30 s d'attente, 25 s max par lecture). 200 : `Cache-Control: private, max-age=3600` ;
+  404 : `no-store`, mais l'échec est mémorisé 3 minutes côté Rust (rechargé après un scan).
