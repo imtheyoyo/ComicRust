@@ -1,0 +1,6 @@
+Rapport de recette ComicRust v0.10.7 — 02/11/2026 06:28
+Résultat : 5 OK, 0 échec(s), 0 non testé(s) sur 5.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
