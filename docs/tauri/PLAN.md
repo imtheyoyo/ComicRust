@@ -45,15 +45,21 @@ Le workspace garde `crates/comicrust-tauri` hors de `default-members` : `cargo b
 et `cargo test` sans `-p` l'ignorent ; `cargo test --all` le compile **sans** la fonction `app`
 (donc sans webkit2gtk) et en exécute les tests unitaires.
 
-## Point d'attention : code hors du cœur
+## Code hors du cœur : on duplique (décision de Yoyo, 02/11/2026)
 
-Une partie de la logique de la version egui vit dans `crates/comicrust` et non dans le cœur
-(`library/` : scan, surveillance, couvertures, dossiers manquants, écriture ComicRack ; `scripts/` :
-hôte de scripts et formulaires ; `update/` : mise à jour ; `book/` : chargement et navigation du
-lecteur). Pour la parité sans dupliquer, il faudra **extraire** ce code vers `comicrust-core` (ou un
-crate partagé) *sans changer son comportement*. Chaque étape ci-dessous l'indique ; l'extraction
-touche donc un peu la version egui (déplacement de code, tests inchangés) et se fait en fin
-d'étape, une fois la fonction validée côté Tauri. **Décision à confirmer avant l'étape 1.**
+Une partie de la logique de la version egui vit dans `crates/comicrust` (`library/`, `scripts/`,
+`update/`, `book/`). **Décision : on ne déplace rien et on ne touche pas à `crates/comicrust`.**
+Le code nécessaire est **dupliqué** dans `crates/comicrust-tauri` (ou repris dans `comicrust-core`
+côté branche Tauri uniquement), adapté à l'IPC. Conséquence : une correction de `main` est **reportée
+à la main** sur `tauri2-web` quand elle touche du code dupliqué (voir « Reports de correctifs »).
+
+## Décisions complémentaires (02/11/2026)
+
+- Numérotation : `tauri-v0.1.0`, `tauri-v0.2.0`… en parallèle de la série `v0.10.x`.
+- Reports de correctifs : les corrections de `main` sont reportées sur `tauri2-web`.
+- Thèmes : CSS à variables uniquement pour l'instant (pas de modèles HTML complets).
+- Les deux versions (egui sur `main`, Tauri) restent publiées.
+- v0.11.0 (OPDS/HTTP) reste sur sa propre branche, après GO ; code du cœur, utilisable par les deux.
 
 ## Étapes
 
