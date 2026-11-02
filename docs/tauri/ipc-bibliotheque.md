@@ -1,0 +1,95 @@
+# Contrat IPC : bibliothèque (étape 1, `tauri-v0.2.0`)
+
+Contrat entre le backend (`crates/comicrust-tauri`) et le front (`frontend/`). Toutes les commandes
+sont asynchrones côté front (`invoke`), renvoient une promesse rejetée avec un **texte en français**
+en cas d'erreur, et sérialisent en **camelCase**. Le front n'a aucune logique métier : recherche, tri
+et regroupement sont faits par le backend.
+
+## Types
+
+```ts
+type Mode = 'autonome' | 'comicrack';
+
+interface EtatBiblio {
+  mode: Mode;              // 'autonome' tant que rien n'est choisi
+  nbLivres: number;
+  premierDemarrage: boolean; // true : le front affiche l'assistant, rien n'est encore ouvert
+}
+
+interface ChoixPremierDemarrage {
+  mode: Mode;
+  cheminIni?: string;      // mode 'comicrack' : ComicRack.ini (MySQL) ou ComicDb.xml ; absent = recherche auto
+}
+
+interface RequeteLivres {
+  recherche?: string;      // mots séparés par des espaces, tous requis (série, titre, auteurs, éditeur, fichier…)
+  tri: string;             // 'serie' | 'titre' | 'parution' | 'ajout' | 'lecture' | 'note'
+                           // | 'pages' | 'avancement' | 'taille' | 'fichier'
+  sensTri: 'asc' | 'desc';
+  groupe?: 'aucun' | 'serie' | 'editeur'; // défaut 'aucun' ; les groupes se suivent, puis le tri joue dedans
+  debut: number;           // rang du premier livre demandé (0 = début)
+  nombre: number;          // taille de la fenêtre (plafonnée à 5000)
+}
+
+interface LivreResume {
+  id: string;
+  titre: string;           // titre, sinon « Série #n », sinon nom du fichier
+  serie?: string; numero?: string; editeur?: string; annee?: number;
+  pages: number;           // 0 si inconnu
+  lu: boolean;             // 100 % lu
+  urlCouverture: string;   // URL directement utilisable dans <img src> (voir « Couvertures »)
+}
+
+interface PageLivres { total: number; livres: LivreResume[]; } // total = après recherche, avant fenêtre
+
+interface LivreDetail {    // champs absents = non renseignés
+  id: string; titre: string; serie?: string; numero?: string; volume?: number;
+  annee?: number; mois?: number; jour?: number; editeur?: string; collection?: string;
+  pages: number; lu: boolean; progression?: number;   // 0-100
+  pageCourante?: number;   // dernière page lue (à partir de 0)
+  scenariste?: string; dessinateur?: string; encreur?: string; coloriste?: string;
+  lettreur?: string; artisteCouverture?: string; redacteur?: string; traducteur?: string;
+  genre?: string; arcNarratif?: string; personnages?: string; equipes?: string; lieux?: string;
+  etiquettes?: string; resume?: string; notes?: string; critique?: string;
+  format?: string; langue?: string; classementAge?: string; noirEtBlanc?: string; manga?: string;
+  note?: number; noteCommunaute?: number; isbn?: string; web?: string;
+  tailleFichier?: number;  // octets
+  dateAjout?: string; derniereLecture?: string;       // ISO 8601
+  fichier?: string;        // chemin complet
+  fichierPresent: boolean; // le fichier existe sur le disque à l'instant de l'appel
+  manquant: boolean;       // marqué manquant par le dernier scan / par ComicRack
+  urlCouverture: string;
+}
+```
+
+## Commandes
+
+| Commande | Arguments | Résultat |
+|---|---|---|
+| `ouvrir_bibliotheque` | – | `EtatBiblio`. Lit `data\comicrust-tauri.json` ; si un mode est choisi, ouvre la base (autonome : SQLite `data\comicrust.db` ; comicrack : MySQL du `ComicRack.ini` ou `ComicDb.xml`, **lecture seule**). Sans choix : `{mode:'autonome', nbLivres:0, premierDemarrage:true}`. Rappelable pour recharger. |
+| `configurer_premier_demarrage` | `{choix: ChoixPremierDemarrage}` | `EtatBiblio` (avec `premierDemarrage:false`). Autonome : crée la base. Comicrack : teste la connexion (erreur lisible si MySQL injoignable) ; rien n'est copié ni écrit dans ComicRack. |
+| `lister_livres` | `{requete: RequeteLivres}` | `PageLivres` |
+| `detail_livre` | `{id}` | `LivreDetail` |
+| `lister_dossiers` | – | `string[]` (dossiers surveillés, triés ; vide en mode comicrack) |
+| `ajouter_dossier` | `{chemin}` | `string[]` (liste à jour). Erreur si le dossier n'existe pas ou en mode comicrack. Doublon ignoré. |
+| `retirer_dossier` | `{chemin}` | `string[]` (liste à jour). Les livres déjà en base restent affichés. |
+| `lancer_scan` | – | `void`, rend la main aussitôt. Erreur si un scan tourne déjà, si aucun dossier, ou en mode comicrack. |
+
+## Événements (`listen` côté front)
+
+- `scan-progression` : `{fait: number, total: number}` environ 5 fois par seconde. `total` grandit pendant le parcours.
+- `scan-termine` : `{ajoutes: number, misAJour: number, manquants: number}`. Le front recharge ensuite `lister_livres`.
+- `scan-erreur` (extension au contrat) : `{message: string}` si le scan échoue (base illisible…) ; il remplace alors `scan-termine`.
+
+## Couvertures
+
+Protocole de ressources `cr-couv`, id du livre pour chemin. L'URL réellement chargeable dépend de la
+plateforme de la WebView ; **le backend la fournit toute faite dans `urlCouverture`** :
+
+- Windows (WebView2) : `http://cr-couv.localhost/<id>`
+- ailleurs : `cr-couv://localhost/<id>`
+
+Le front utilise donc `urlCouverture` tel quel (pas de reconstruction). Le serveur répond en JPEG
+(miniature ~300 px de haut, cache `data\couvertures\<id>.jpg`, générée à la demande, 4 fils de travail) ;
+404 si le fichier est absent ou illisible (le front affiche un visuel de remplacement). Aucun base64 dans l'IPC.
+La CSP (`tauri.conf.json`) autorise ces deux origines dans `img-src`.
