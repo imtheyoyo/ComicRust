@@ -3,13 +3,22 @@
 //! Règle : **aucune logique métier ici ni dans le front**. Ce crate ne contient que
 //! - l'emplacement portable des données ([`portable`]),
 //! - les thèmes CSS de l'utilisateur ([`themes`]),
+//! - la bibliothèque ([`biblio`] : ouverture, liste, détail, dossiers, scan ; [`couvertures`] ;
+//!   [`tri`] ; [`reglages`]),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
 //! Le code sans dépendance à Tauri est compilé et testé partout (Linux compris) ; la fenêtre
 //! n'est compilée qu'avec `--features app`.
 
+pub mod biblio;
+pub mod couvertures;
 pub mod portable;
+pub mod reglages;
 pub mod themes;
+pub mod tri;
+
+#[cfg(test)]
+mod tests_biblio;
 
 use serde::Serialize;
 use std::path::Path;

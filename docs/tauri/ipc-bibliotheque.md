@@ -23,8 +23,10 @@ interface ChoixPremierDemarrage {
 
 interface RequeteLivres {
   recherche?: string;      // mots séparés par des espaces, tous requis (série, titre, auteurs, éditeur, fichier…)
-  tri: string;             // 'serie' | 'titre' | 'parution' | 'ajout' | 'lecture' | 'note'
+  tri: string;             // 'serie' | 'titre' | 'editeur' | 'parution' | 'ajout' | 'lecture' | 'note'
                            // | 'pages' | 'avancement' | 'taille' | 'fichier'
+                           // synonymes acceptés : 'numero' (= 'serie', qui trie déjà série puis numéro
+                           // en ordre naturel : 2 avant 10) et 'annee' (= 'parution'). Autre valeur : erreur.
   sensTri: 'asc' | 'desc';
   groupe?: 'aucun' | 'serie' | 'editeur'; // défaut 'aucun' ; les groupes se suivent, puis le tri joue dedans
   debut: number;           // rang du premier livre demandé (0 = début)
@@ -32,7 +34,7 @@ interface RequeteLivres {
 }
 
 interface LivreResume {
-  id: string;
+  id: string;              // GUID du livre (texte, pas un nombre)
   titre: string;           // titre, sinon « Série #n », sinon nom du fichier
   serie?: string; numero?: string; editeur?: string; annee?: number;
   pages: number;           // 0 si inconnu
@@ -93,3 +95,14 @@ Le front utilise donc `urlCouverture` tel quel (pas de reconstruction). Le serve
 (miniature ~300 px de haut, cache `data\couvertures\<id>.jpg`, générée à la demande, 4 fils de travail) ;
 404 si le fichier est absent ou illisible (le front affiche un visuel de remplacement). Aucun base64 dans l'IPC.
 La CSP (`tauri.conf.json`) autorise ces deux origines dans `img-src`.
+
+## Notes
+
+- Livres « manquants » (fichier disparu) : conservés dans la liste (`manquant:true` dans le détail) ;
+  la couverture reste servie depuis le cache disque.
+- Tri : valeurs vides toujours en dernier ; avec un groupe, les groupes se suivent par ordre alphabétique
+  (inversé si `desc`), « (sans série) » / « (sans éditeur) » pour les valeurs vides.
+- Mode `comicrack` : lecture seule, rien n'est copié ni écrit ; le mot de passe MySQL reste dans
+  `ComicRack.ini` (jamais dans `comicrust-tauri.json` ni dans les messages d'erreur).
+- Réglages : `data\comicrust-tauri.json` (`{mode, cheminIni}`), distinct du `comicrust.ron` de la version egui ;
+  la base autonome est le même fichier `data\comicrust.db` que la version egui.

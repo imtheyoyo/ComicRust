@@ -1192,11 +1192,14 @@ name = "comicrust-tauri"
 version = "0.1.0"
 dependencies = [
  "comicrust-core",
+ "image",
+ "natord",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tempfile",
+ "zip",
 ]
 
 [[package]]

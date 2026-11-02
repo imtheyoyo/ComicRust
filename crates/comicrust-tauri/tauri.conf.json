@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: cr-couv: http://cr-couv.localhost https://cr-couv.localhost; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
