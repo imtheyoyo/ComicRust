@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.2.0 (pré-release : vue Bibliothèque de la version Tauri 2, sans lecteur) |
 | Paquet | `ComicRust-Tauri-tauri-v0.2.0-windows-x64.zip` |
-| SHA-256 | à renseigner après la publication (fichier `.sha256` de la release) |
+| SHA-256 | `af1b713f0ab4d102bd57b72a9005707200064ba1b0033224b152e748a5098cd0` |
 | Contenu | **premier démarrage** (autonome ou lié à ComicRack), **vue Bibliothèque** (grille virtualisée, tableau, recherche, tri, groupement, panneau de détails), **dossiers surveillés** (scan, ajout, mise à jour, manquants), couvertures en cache (`data\couvertures`) servies par le protocole `cr-couv` |
 | Origine | étape 1 de `docs/tauri/PLAN.md` ; tauri-v0.1.0 ; tests L-/C- des recettes v0.3.0 à v0.5.x et v0.7.0 (version egui) ; contrat `docs/tauri/ipc-bibliotheque.md` |
 
