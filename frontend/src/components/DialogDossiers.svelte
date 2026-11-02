@@ -1,6 +1,6 @@
 <script lang="ts">
   // Dossiers surveillés : liste, ajout, retrait, lancement du scan avec barre de progression.
-  import { ajouterDossier, lancerScan, listerDossiers, retirerDossier } from '../lib/api';
+  import { ajouterDossier, lancerScan, listerDossiers, retirerDossier, messageErreur } from '../lib/api';
   import type { SuiviScan } from '../lib/bibliotheque.svelte';
 
   interface Props {
@@ -22,7 +22,7 @@
     try {
       dossiers = await listerDossiers();
     } catch (e) {
-      erreur = String(e);
+      erreur = messageErreur(e);
     }
   }
 
@@ -33,7 +33,7 @@
       if (liste) dossiers = liste;
       else await actualiser();
     } catch (e) {
-      erreur = String(e);
+      erreur = messageErreur(e);
     }
   }
 

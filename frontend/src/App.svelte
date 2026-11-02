@@ -5,7 +5,7 @@
   import DialogReglages from './components/DialogReglages.svelte';
   import PremierDemarrage from './components/PremierDemarrage.svelte';
   import VueBibliotheque from './components/VueBibliotheque.svelte';
-  import { dansTauri, ouvrirBibliotheque, type EtatBiblio } from './lib/api';
+  import { dansTauri, ouvrirBibliotheque, type EtatBiblio, messageErreur } from './lib/api';
   import { SuiviScan } from './lib/bibliotheque.svelte';
   import { appliquerTheme, themeMemorise } from './lib/theme';
 
@@ -27,7 +27,7 @@
         etat = await ouvrirBibliotheque();
         nbLivres = etat.nbLivres;
       } catch (e) {
-        erreur = String(e);
+        erreur = messageErreur(e);
       }
     })();
     return () => scan.arreter();

@@ -2,7 +2,7 @@
 // Aucune logique métier : recherche, tri et groupement sont faits par le backend (lister_livres).
 import { SvelteMap } from 'svelte/reactivity';
 import {
-  ecouter, listerLivres, type ClefTri, type ErreurScan, type Groupe, type LivreResume,
+  ecouter, listerLivres, messageErreur, type ClefTri, type ErreurScan, type Groupe, type LivreResume,
   type ProgressionScan, type ResultatScan, type SensTri,
 } from './api';
 
@@ -61,7 +61,7 @@ export class Bibliotheque {
       this.pages.set(0, r.livres);
       if (nouvelle) this.version++;
     } catch (e) {
-      if (gen === this.generation) this.erreur = String(e);
+      if (gen === this.generation) this.erreur = messageErreur(e);
       return;
     }
     this.assurer(this.fenetre.premier, this.fenetre.dernier);
@@ -91,7 +91,7 @@ export class Bibliotheque {
       this.total = r.total;
       this.pages.set(p, r.livres);
     } catch (e) {
-      if (gen === this.generation) this.erreur = String(e);
+      if (gen === this.generation) this.erreur = messageErreur(e);
     } finally {
       if (gen === this.generation) this.enCours.delete(p);
     }
@@ -107,7 +107,7 @@ export class SuiviScan {
   erreur = $state('');
   private desabonner: Array<() => void> = [];
 
-  async demarrer(surTermine: () => void): Promise<void> {
+  async demarrer(surTermine: () => void, surErreur: () => void = surTermine): Promise<void> {
     this.desabonner.push(
       await ecouter<ProgressionScan>('scan-progression', (p) => {
         this.enCours = true;
@@ -121,7 +121,8 @@ export class SuiviScan {
       }),
       await ecouter<ErreurScan>('scan-erreur', (e) => {
         this.enCours = false;
-        this.erreur = e.message;
+        this.erreur = e?.message || 'Erreur inconnue.';
+        surErreur(); // le scan a pu ajouter des livres avant d'échouer : on recharge la liste
       }),
     );
   }

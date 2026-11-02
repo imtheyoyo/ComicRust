@@ -154,3 +154,14 @@ export const listerDossiers = () => appeler<string[]>('lister_dossiers');
 export const ajouterDossier = (chemin: string) => appeler<string[]>('ajouter_dossier', { chemin });
 export const retirerDossier = (chemin: string) => appeler<string[]>('retirer_dossier', { chemin });
 export const lancerScan = () => appeler<void>('lancer_scan');
+
+/** Message lisible pour une erreur d'IPC : le backend rejette avec un texte français (qui peut
+ *  contenir un chemin) ; on tolère aussi Error, objet `{message}` ou valeur absente. */
+export function messageErreur(e: unknown): string {
+  if (typeof e === 'string' && e.trim()) return e;
+  if (e instanceof Error && e.message) return e.message;
+  if (e && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string') {
+    return (e as { message: string }).message || 'Erreur inconnue.';
+  }
+  return 'Erreur inconnue.';
+}

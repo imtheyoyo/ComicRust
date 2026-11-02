@@ -1,6 +1,6 @@
 <script lang="ts">
   // Écran de premier démarrage : bibliothèque autonome ou liée à une installation ComicRack.
-  import { configurerPremierDemarrage, type EtatBiblio, type ModeBiblio } from '../lib/api';
+  import { configurerPremierDemarrage, type EtatBiblio, type ModeBiblio, messageErreur } from '../lib/api';
 
   interface Props {
     onpret: (etat: EtatBiblio) => void;
@@ -21,7 +21,7 @@
     try {
       onpret(await configurerPremierDemarrage({ mode, cheminIni: mode === 'comicrack' ? cheminIni.trim() : undefined }));
     } catch (e) {
-      erreur = String(e);
+      erreur = messageErreur(e);
     } finally {
       occupe = false;
     }

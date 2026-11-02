@@ -1,6 +1,6 @@
 <script lang="ts">
   // Panneau de détails du livre sélectionné : résumé immédiat, puis détail complet (detail_livre).
-  import { detailLivre, type LivreDetail, type LivreResume } from '../lib/api';
+  import { detailLivre, type LivreDetail, type LivreResume, messageErreur } from '../lib/api';
 
   interface Props {
     livre: LivreResume | undefined;
@@ -23,7 +23,7 @@
     if (cible === undefined) return;
     detailLivre(cible)
       .then((d) => { if (n === sequence) detail = d; })
-      .catch((e) => { if (n === sequence) erreur = String(e); });
+      .catch((e) => { if (n === sequence) erreur = messageErreur(e); });
   });
 
   const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];

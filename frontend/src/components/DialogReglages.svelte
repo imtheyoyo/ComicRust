@@ -1,6 +1,6 @@
 <script lang="ts">
   // Réglages d'affichage : choix du thème (fichiers CSS de data\themes) et dossiers du mode portable.
-  import { infos, listerThemes, type InfosApplication, type Theme } from '../lib/api';
+  import { infos, listerThemes, type InfosApplication, type Theme, messageErreur } from '../lib/api';
   import { appliquerTheme } from '../lib/theme';
 
   interface Props {
@@ -23,7 +23,7 @@
     try {
       [themes, info] = await Promise.all([listerThemes(), infos()]);
     } catch (e) {
-      erreur = String(e);
+      erreur = messageErreur(e);
     }
   }
 
@@ -31,7 +31,7 @@
     try {
       onTheme(await appliquerTheme(id));
     } catch (e) {
-      erreur = String(e);
+      erreur = messageErreur(e);
     }
   }
 </script>
