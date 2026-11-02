@@ -7,6 +7,11 @@ name: Release Tauri
 on:
   push:
     tags: ["tauri-v*"]
+    # Le proxy de développement interdit de pousser des tags : on publie en poussant sur la branche un
+    # fichier `.github/release-tauri.tag` contenant le tag voulu (ex. tauri-v0.2.0). L'action de
+    # publication crée alors le tag sur le commit.
+    branches: ["tauri2-web"]
+    paths: [".github/release-tauri.tag"]
   workflow_dispatch:
     inputs:
       tag:
@@ -30,10 +35,18 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      - name: Déterminer le tag
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then t="${{ github.event.inputs.tag }}";
+          elif [ "${{ github.ref_type }}" = "tag" ]; then t="${{ github.ref_name }}";
+          else t=$(tr -d '[:space:]' < .github/release-tauri.tag); fi
+          echo "TAG=$t" >> "$GITHUB_ENV"
+
       - name: Tag, recette et notes de version
         shell: bash
         run: |
-          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          tag="$TAG"
           case "$tag" in tauri-v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::tag « $tag » attendu sous la forme tauri-vX.Y.Z"; exit 1;; esac
           test -f "recette/$tag.md" || { echo "::error::recette/$tag.md manquant : rédiger la recette avant de publier"; exit 1; }
           # Le numéro du tag doit être celui de la crate (affiché dans l'application).
@@ -86,7 +99,7 @@ jobs:
         id: pkg
         shell: pwsh
         run: |
-          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $tag = "$env:TAG"
           $name = "ComicRust-Tauri-$tag-windows-x64"
           $out = "target/$env:TARGET/release"
           New-Item -ItemType Directory -Force "$name/licences" | Out-Null
