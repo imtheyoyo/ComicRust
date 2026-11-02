@@ -7,7 +7,7 @@
 //! plan : on ne touche pas à `crates/comicrust`).
 
 use crate::couvertures;
-use crate::reglages::{self, Mode, Reglages};
+use crate::reglages::{self, Mode, PreferencesVue, Reglages};
 use crate::tri::{self, ClefTri, Regroupement};
 use comicrust_core::db::{ComicDatabase, DbConfig};
 use comicrust_core::library::LibraryBook;
@@ -302,7 +302,7 @@ impl Biblio {
                 // Crée la base (schéma) : seul endroit où un fichier absent est créé.
                 let cfg = config_autonome(&self.data);
                 Store::open(&cfg).map_err(|e| e.to_string())?;
-                Reglages { mode: Some(Mode::Autonome), chemin_ini: None }
+                Reglages { mode: Some(Mode::Autonome), chemin_ini: None, vue: PreferencesVue::default() }
             }
             Mode::Comicrack => {
                 let saisi = choix.chemin_ini.as_deref().map(nettoyer_chemin).filter(|s| !s.is_empty());
@@ -316,7 +316,7 @@ impl Biblio {
                 if !chemin.is_file() {
                     return Err(format!("fichier introuvable : {}", chemin.display()));
                 }
-                Reglages { mode: Some(Mode::Comicrack), chemin_ini: Some(chemin) }
+                Reglages { mode: Some(Mode::Comicrack), chemin_ini: Some(chemin), vue: PreferencesVue::default() }
             }
         };
         // Charge d'abord : un choix qui échoue (MySQL injoignable…) n'est pas enregistré.
@@ -326,7 +326,11 @@ impl Biblio {
                         (ComicRack utilise sans doute une base MySQL : indique son ComicRack.ini)"
                 .into());
         }
-        reglages::ecrire(&self.data, &r)?;
+        // Seuls le mode et le chemin changent : les préférences d'affichage sont conservées.
+        reglages::modifier(&self.data, |actuels| {
+            actuels.mode = r.mode;
+            actuels.chemin_ini = r.chemin_ini.clone();
+        })?;
         let nb = base.len();
         self.installer(choix.mode, base, store);
         Ok(EtatBiblio { mode: choix.mode, nb_livres: nb, premier_demarrage: false })
@@ -381,9 +385,7 @@ impl Biblio {
             Some(v) => v,
             None => {
                 // Calcul hors du verrou : un tri de 5 000 livres ne bloque pas les couvertures.
-                let mots = tri::mots(&recherche);
-                let mut v: Vec<usize> =
-                    (0..base.books.len()).filter(|&i| tri::correspond(&base.books[i], &mots)).collect();
+                let mut v = tri::filtrer(&base.books, &recherche);
                 tri::trier(&mut v, &base.books, clef, desc, groupe);
                 let v = Arc::new(v);
                 let mut g = self.verrou();

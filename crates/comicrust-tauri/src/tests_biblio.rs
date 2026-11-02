@@ -65,6 +65,17 @@ fn autonome(data: &Path) -> Biblio {
 }
 
 #[test]
+fn configurer_conserve_les_preferences_de_vue() {
+    let d = tempfile::tempdir().unwrap();
+    let p = reglages::PreferencesVue { tri: Some("titre".into()), groupe: Some("serie".into()), ..Default::default() };
+    reglages::enregistrer_preferences_vue(d.path(), p.clone()).unwrap();
+    autonome(d.path());
+    let r = reglages::lire(d.path()).unwrap();
+    assert_eq!(r.mode, Some(Mode::Autonome));
+    assert_eq!(r.vue, p);
+}
+
+#[test]
 fn premier_demarrage_puis_choix_autonome_persistant() {
     let d = tempfile::tempdir().unwrap();
     let b = Biblio::nouvelle(d.path().to_path_buf());
@@ -145,8 +156,15 @@ fn scan_liste_detail_couverture_et_manquants() {
     // Sens inverse, recherche, groupe par éditeur, pagination.
     let desc = b.lister(&requete("serie", SensTri::Desc, None, None)).unwrap();
     assert_eq!(desc.livres[0].numero.as_deref(), Some("10"));
-    let rech = b.lister(&requete("serie", SensTri::Asc, None, Some("  MARVEL  hickman "))).unwrap();
+    // Recherche rapide de ComicRack : tous les mots dans **un même** champ, casse ignorée.
+    let rech = b.lister(&requete("serie", SensTri::Asc, None, Some("  MARVEL  "))).unwrap();
     assert_eq!(rech.total, 2);
+    let rech = b.lister(&requete("serie", SensTri::Asc, None, Some("jonathan  HICKMAN"))).unwrap();
+    assert_eq!(rech.total, 3);
+    let rech = b.lister(&requete("serie", SensTri::Asc, None, Some("marvel hickman"))).unwrap();
+    assert_eq!(rech.total, 0, "éditeur et scénariste sont deux champs distincts");
+    let rech = b.lister(&requete("serie", SensTri::Asc, None, Some("thanos"))).unwrap();
+    assert_eq!(rech.total, 3, "le hors-série est trouvé par le chemin de son fichier");
     assert_eq!(b.lister(&requete("serie", SensTri::Asc, None, Some("inexistant"))).unwrap().total, 0);
     let groupe = b.lister(&requete("pages", SensTri::Asc, Some(Groupe::Editeur), None)).unwrap();
     let eds: Vec<_> = groupe.livres.iter().map(|l| l.editeur.clone()).collect();
@@ -283,8 +301,13 @@ fn cinq_mille_livres_restent_fluides() {
         premier < Duration::from_secs(2) && defilement < Duration::from_millis(500),
         "{premier:?} / {defilement:?}"
     );
+    r.recherche = Some("série 12".into());
+    let t = std::time::Instant::now();
+    // « série » et « 12 » dans la série : 12, 112, 120…129 (13 livres chacune), 212 et 312 (12).
+    assert_eq!(b.lister(&r).unwrap().total, 12 * 13 + 2 * 12);
+    assert!(t.elapsed() < Duration::from_secs(1), "recherche : {:?}", t.elapsed());
     r.recherche = Some("série 12 éditeur".into());
-    assert!(b.lister(&r).unwrap().total > 0);
+    assert_eq!(b.lister(&r).unwrap().total, 0, "mots répartis sur deux champs");
 }
 
 #[test]

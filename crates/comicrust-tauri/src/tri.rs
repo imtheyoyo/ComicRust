@@ -3,8 +3,13 @@
 //! egui), réduite aux clés de l'IPC et adaptée (texte en entrée au lieu d'énumérations egui).
 //!
 //! Report de correctif : une correction de `sorting.rs` sur `main` se reporte ici à la main.
+//!
+//! Exception : la recherche rapide ([`filtrer`]) ne reprend plus `sorting::matches` (qui
+//! s'écartait de ComicRack, recette tauri-v0.2.0 R-01) mais l'évaluateur fidèle des listes
+//! intelligentes de `comicrust-core` (critère « Toutes les propriétés »).
 
 use comicrust_core::library::LibraryBook;
+use comicrust_core::smart::{Matcher, Mode, SmartQuery};
 use std::cmp::Ordering;
 
 /// Clé de tri (texte de l'IPC).
@@ -68,40 +73,36 @@ impl Regroupement {
     }
 }
 
-/// Recherche : chaque mot (déjà en minuscules) doit apparaître dans un des champs principaux.
-pub fn correspond(b: &LibraryBook, mots: &[String]) -> bool {
-    if mots.is_empty() {
-        return true;
+/// Recherche rapide de la vue livres, **fidèle à ComicRack CE** (boîte de recherche en mode
+/// « Tout », `ComicBrowserControl.UpdateQuickFilter`) : un critère
+/// `ComicBookAllPropertiesMatcher` (option `All`) avec l'opérateur 3 « contient tous les mots »,
+/// casse ignorée. On réutilise l'évaluateur des listes intelligentes de `comicrust-core`
+/// (`smart.rs`, `all_properties_values` = `GetOptionValueSet`), donc les mêmes règles :
+///
+/// - un livre est retenu si **un même champ** contient **tous** les mots (pas un mot par champ) ;
+/// - champs examinés : série (ou proposée), série alternative, titre, groupe de séries, arc,
+///   scénariste, dessinateur, encreur, coloriste, lettreur, éditeur, traducteur, couverture,
+///   **résumé**, chemin du fichier, genre, **notes**, **critique**, éditeur, label, volume (« V3 »),
+///   numéro, numéro alternatif, année, format, âge, étiquettes, **personnages**, **équipes**,
+///   **personnage principal**, **lieux**, champs du catalogue (âge, état, notes, propriétaire,
+///   magasin, emplacement, ISBN), **infos de scan** et valeurs personnalisées ;
+/// - découpage : sur `,` ou `;` s'il y en a, sinon sur les espaces (pas de guillemets) ;
+/// - casse ignorée, accents **non** ignorés (`StringComparison.OrdinalIgnoreCase`).
+///
+/// Non repris : les requêtes commençant par `NOT` ou `MATCH` (langage des listes
+/// intelligentes) sont cherchées comme de simples mots.
+///
+/// Renvoie les indices (ordre conservé) des livres retenus ; recherche vide = tous.
+pub fn filtrer(livres: &[LibraryBook], recherche: &str) -> Vec<usize> {
+    if recherche.trim().is_empty() {
+        return (0..livres.len()).collect();
     }
-    let champs = [
-        &b.series,
-        &b.title,
-        &b.writer,
-        &b.penciller,
-        &b.story_arc,
-        &b.publisher,
-        &b.characters,
-        &b.teams,
-        &b.tags,
-        &b.genre,
-        &b.alternate_series,
-        &b.file,
-    ];
-    let mut botte = b.caption();
-    for c in champs.into_iter().flatten() {
-        botte.push(' ');
-        botte.push_str(c);
-    }
-    if let Some(y) = b.year {
-        botte.push_str(&format!(" {y}"));
-    }
-    let botte = botte.to_lowercase();
-    mots.iter().all(|m| botte.contains(m))
-}
-
-/// Mots d'une recherche (minuscules, séparés par des espaces).
-pub fn mots(recherche: &str) -> Vec<String> {
-    recherche.split_whitespace().map(str::to_lowercase).collect()
+    let requete = SmartQuery {
+        mode: Mode::And,
+        matchers: vec![Matcher::value("ComicBookAllPropertiesMatcher", 3, recherche, "", false, true)],
+        ..Default::default()
+    };
+    requete.select(livres, 0..livres.len())
 }
 
 fn minuscules(v: &Option<String>) -> String {
@@ -219,13 +220,75 @@ mod tests {
         assert_eq!(v, [0, 2, 1], "le livre sans date reste à la fin");
     }
 
+    /// Indices retenus par la recherche rapide.
+    fn cherche(l: &[LibraryBook], q: &str) -> Vec<usize> {
+        filtrer(l, q)
+    }
+
     #[test]
     fn recherche_par_mots() {
         let mut b = livre("a", "Thanos", "1");
         b.publisher = Some("Marvel".into());
-        assert!(correspond(&b, &mots("thanos marvel")));
-        assert!(!correspond(&b, &mots("thanos dc")));
-        assert!(correspond(&b, &mots("")));
+        let l = [b];
+        assert_eq!(cherche(&l, "thanos"), [0]);
+        assert_eq!(cherche(&l, "THANOS"), [0], "casse ignorée");
+        assert_eq!(cherche(&l, ""), [0]);
+        assert_eq!(cherche(&l, "thanos dc"), [] as [usize; 0]);
+    }
+
+    #[test]
+    fn recherche_dans_resume_personnages_et_autres_champs() {
+        // R-01 : « thanos » n'apparaît que dans le résumé, les personnages, etc.
+        let mk = |id: &str| LibraryBook { id: id.into(), series: Some("Avengers".into()), ..Default::default() };
+        let mut l: Vec<LibraryBook> = (0..9).map(|i| mk(&i.to_string())).collect();
+        l[0].summary = Some("Les Vengeurs affrontent Thanos.".into());
+        l[1].characters = Some("Captain America, Thanos".into());
+        l[2].notes = Some("Scanned by thanos-team".into());
+        l[3].locations = Some("Titan, Thanos' ship".into());
+        l[4].main_character_or_team = Some("Thanos".into());
+        l[5].scan_information = Some("THANOS-DCP".into());
+        l[6].review = Some("Le meilleur Thanos".into());
+        l[7].series_group = Some("Thanos Saga".into());
+        // l[8] : aucun champ ne mentionne Thanos.
+        assert_eq!(cherche(&l, "thanos"), [0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn tous_les_mots_dans_un_meme_champ() {
+        // ComicRack : « contient tous les mots » est testé champ par champ.
+        let mut a = livre("a", "Thanos", "1");
+        a.publisher = Some("Marvel".into());
+        let mut b = livre("b", "Avengers", "1");
+        b.summary = Some("Thanos attaque la Terre (Marvel)".into());
+        let l = [a, b];
+        assert_eq!(cherche(&l, "thanos marvel"), [1], "mots répartis sur deux champs : non retenu");
+        assert_eq!(cherche(&l, "marvel thanos"), [1], "ordre des mots indifférent");
+    }
+
+    #[test]
+    fn decoupage_virgules_et_accents() {
+        let mut a = livre("a", "Silver Surfer", "1");
+        a.summary = Some("Le Surfeur d'argent rencontre Galactus".into());
+        let mut b = livre("b", "Héros", "1");
+        b.title = Some("Été".into());
+        let l = [a, b];
+        // Avec une virgule, découpage sur la virgule seulement : « surfer » et « silver » restent ensemble.
+        assert_eq!(cherche(&l, "silver surfer, galactus"), [] as [usize; 0]);
+        assert_eq!(cherche(&l, "silver surfer"), [0]);
+        assert_eq!(cherche(&l, "argent;galactus"), [0]);
+        // Accents non ignorés (OrdinalIgnoreCase), casse ignorée.
+        assert_eq!(cherche(&l, "ÉTÉ"), [1]);
+        assert_eq!(cherche(&l, "ete"), [] as [usize; 0]);
+    }
+
+    #[test]
+    fn recherche_numero_annee_fichier() {
+        let mut a = livre("a", "Infinity Gauntlet", "3");
+        a.year = Some(1991);
+        a.file = Some(r"D:\BD\Marvel\Infinity Gauntlet 003.cbz".into());
+        let l = [a];
+        assert_eq!(cherche(&l, "1991"), [0]);
+        assert_eq!(cherche(&l, "bd\\marvel"), [0], "chemin complet du fichier");
     }
 
     #[test]
