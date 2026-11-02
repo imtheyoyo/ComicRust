@@ -129,6 +129,17 @@
     e.preventDefault();
   }
 
+  /** Écouteurs posés par attachement : un séparateur focalisable est un composant interactif
+   *  (ARIA), ce que la règle a11y de Svelte ne reconnaît pas sur une `<div>`. */
+  function ecouteursPoignee(el: HTMLElement) {
+    el.addEventListener('pointerdown', debutRedimension);
+    el.addEventListener('keydown', clavierPoignee);
+    return () => {
+      el.removeEventListener('pointerdown', debutRedimension);
+      el.removeEventListener('keydown', clavierPoignee);
+    };
+  }
+
   function clavierPoignee(e: KeyboardEvent) {
     const pas = e.shiftKey ? 64 : 16;
     if (e.key === 'ArrowLeft') largeurDetails = borner(largeurDetails + pas);
@@ -224,7 +235,7 @@
       {/if}
     </div>
     {#if details}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div
         class="poignee"
         role="separator"
@@ -235,8 +246,7 @@
         aria-valuenow={largeurDetails}
         tabindex="0"
         title="Tirer pour élargir ou réduire le panneau de détails"
-        onpointerdown={debutRedimension}
-        onkeydown={clavierPoignee}
+        {@attach ecouteursPoignee}
         data-testid="poignee-details"
       ></div>
       <PanneauDetails livre={livreSelectionne} largeur={largeurDetails} onouvrir={() => ouvrir(selection)} />
