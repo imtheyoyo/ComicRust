@@ -5,6 +5,29 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.2.1] — 2026-11-02
+
+Correctifs de la tauri-v0.2.0 (recette NO-GO, [rapport](recette/rapports/tauri-v0.2.0-2026-11-02.txt)).
+
+### Corrections
+- **Recherche fidèle à ComicRack** (R-01 : « thanos » donnait 130 livres contre 483 dans
+  ComicRack) : la zone de recherche reproduit la recherche rapide de ComicRack en mode « Tout ».
+  Elle porte sur tous les champs (dont résumé, notes, personnages, lieux, groupe de séries, infos
+  de scan…), tous les mots doivent se trouver dans un même champ, la virgule ou le point-virgule
+  séparent les termes (sinon les espaces), la casse est ignorée mais pas les accents, comme dans
+  ComicRack. Une recherche à plusieurs mots peut donc donner moins de résultats qu'avant.
+- **Préférences d'affichage mémorisées** (R-08, G-03) : tri, sens, groupe, vue grille/tableau,
+  taille des couvertures, panneau de détails (affiché, largeur) et thème sont enregistrés dans
+  `data\comicrust-tauri.json` (section `vue`) et repris au redémarrage ; plus rien dans le stockage
+  local du WebView2 (les anciens réglages sont repris une fois). Valeur inconnue ou fausse dans le
+  fichier : ignorée sans erreur.
+- **Panneau de détails redimensionnable** : nouvelle poignée (souris ou flèches au clavier).
+- D-05 : le message « aucun livre… indique son ComicRack.ini » sur le `ComicDb.xml` d'une
+  installation MySQL est le comportement attendu ; le test est reformulé.
+
+### Recette
+[recette/tauri-v0.2.1.md](recette/tauri-v0.2.1.md)
+
 ## [tauri-v0.2.0] — 2026-11-02
 
 Étape 1 de la version **Tauri 2** (branche `tauri2-web`) : la **vue Bibliothèque**. Pas encore de

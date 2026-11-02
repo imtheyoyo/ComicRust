@@ -154,14 +154,21 @@ mode portable sous Windows (sections 1 à 12).
 
 | N° test | Gravité | Description | Capture / fichier | Statut |
 |---|---|---|---|---|
-| | | | | |
+| R-01 | [B] | « thanos » : 130 livres dans ComicRust contre 483 dans ComicRack (recherche limitée à une douzaine de champs) | rapport | corrigé en tauri-v0.2.1 |
+| D-05 | [M] | `ComicDb.xml` d'une installation MySQL : « aucun livre… indique son ComicRack.ini ». Comportement attendu (le fichier est vide quand ComicRack utilise MySQL) ; Yoyo n'utilise pas `ComicDb.xml` | rapport | test reformulé en tauri-v0.2.1 |
+| R-08 | [m] | Tri et groupe reviennent aux valeurs par défaut : il faut conserver les réglages | rapport | corrigé en tauri-v0.2.1 (avec G-03) |
+| D-01, G-03, V-05 | [B]/[B]/[M] | Non testés | rapport | repris en tauri-v0.2.1 |
 
 ## Bilan
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| Bloquants [B] | 34 | | |
-| Majeurs [M] | 20 | | |
-| Mineurs [m] | 14 | | |
+| Bloquants [B] | 34 | 31 | 1 |
+| Majeurs [M] | 20 | 18 | 1 |
+| Mineurs [m] | 14 | 14 | 0 |
 
-Décision et remarques :
+Décision et remarques : **NO-GO** (02/11/2026) — 63/68 OK, 2 échecs, 3 non testés (D-01, G-03, V-05)
+([rapport](rapports/tauri-v0.2.0-2026-11-02.txt)). R-01 [B] en échec (« thanos » : 130 contre 483
+dans ComicRack) ; D-05 : message attendu sur une installation MySQL. Valeurs notées : D-03 5 324 livres,
+S-02 10 livres / 15 s, V-01 2 s, V-03 1 s, V-04 52 Mo, V-05 4 944 fichiers / 60 s. Correctifs
+(R-01, R-08/G-03) en tauri-v0.2.1.

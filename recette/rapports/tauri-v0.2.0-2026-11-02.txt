@@ -1,0 +1,26 @@
+Rapport de recette ComicRust v0.2.0 — 02/11/2026 22:42
+Résultat : 63 OK, 2 échec(s), 3 non testé(s) sur 68.
+Décision proposée : NO-GO (1 bloquant(s) en échec).
+
+ÉCHECS (2)
+- D-05 [Majeur] Mode lié avec un ComicDb.xml (saisir son chemin à la place du .ini, ou une installation sans MySQL) : les livres du fichier s'affichent.
+  Note : Je n'ai jamais utilisé ComicDb.xml.
+         
+         '\\SERVEURNAS\Disque_DATA_1\_BDZ\ComicRack\Data\ComicDb.xml
+         cette bibliothèque ComicRack ne contient aucun livre (ComicRack utilise sans doute une base MySQL : indique son ComicRack.ini)'
+- R-01 [Bloquant] Zone de recherche : taper un mot de série filtre la liste en direct (sans geler la saisie) ; le compteur du pied de page indique « N livres (filtré) ». Noter pour « thanos » : ……… livres (comparer avec ComicRack).
+  Note : ComicRust : 130
+         ComicRack : 483
+
+VALEURS NOTÉES ET REMARQUES
+- P-02 : F:\Projet REA par Claude\REA ComicRack\ComicRust-echantillons
+- D-03 : 5324
+- S-02 : 10  / 15s
+- R-08 : Reviennent proprement aux valeurs par défaut. / Il faut conserver les réglages.
+- C-04 : COSMIC COLLECTION #224; COSMIC COLLECTION #61; COSMIC COLLECTION #63
+- V-01 : 2
+- V-03 : 1
+- V-04 : 52
+- V-05 : 4944/60
+
+NON TESTÉS (3) : D-01*, G-03*, V-05   (* = bloquant)
