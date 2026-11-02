@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.2.1 (pré-release corrective de la vue Bibliothèque de la version Tauri 2, sans lecteur) |
 | Paquet | `ComicRust-Tauri-tauri-v0.2.1-windows-x64.zip` |
-| SHA-256 | *(à reporter après la release)* |
+| SHA-256 | `59812b095fb4318343b7b76891e87d834876969c7a0a6fc25a9516740ccbcc7c` |
 | Contenu | **recherche fidèle à ComicRack** (R-01), **préférences d'affichage mémorisées** dans `data\comicrust-tauri.json` (R-08, G-03), **poignée** de largeur du panneau de détails ; reprise des tests non testés (D-01, G-03, V-05) et D-05 reformulé |
 | Origine | rapport de recette [tauri-v0.2.0 du 02/11/2026](rapports/tauri-v0.2.0-2026-11-02.txt) : **NO-GO** (R-01 [B] en échec : « thanos » 130 livres contre 483 dans ComicRack) |
 
