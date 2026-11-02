@@ -5,6 +5,36 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.2.0] — 2026-11-02
+
+Étape 1 de la version **Tauri 2** (branche `tauri2-web`) : la **vue Bibliothèque**. Pas encore de
+lecteur. Voir [`docs/tauri/PLAN.md`](docs/tauri/PLAN.md) et le contrat
+[`docs/tauri/ipc-bibliotheque.md`](docs/tauri/ipc-bibliotheque.md).
+
+### Nouveautés
+- **Premier démarrage** : assistant au premier lancement, au choix **bibliothèque autonome**
+  (base SQLite `data\comicrust.db`) ou **liée à ComicRack** (`ComicRack.ini` / MySQL ou
+  `ComicDb.xml`, en lecture seule : rien n'est copié ni écrit dans ComicRack). Le choix est
+  mémorisé dans `data\comicrust-tauri.json`.
+- **Vue Bibliothèque** : grille de couvertures virtualisée et tableau, taille des couvertures
+  réglable, recherche en direct (tous les mots requis), tri (11 critères, ordre naturel des
+  numéros, valeurs vides en dernier), groupement par série ou éditeur, panneau de détails,
+  navigation au clavier (flèches, Début/Fin, pages, Entrée, `/` et Ctrl+F) et à la souris.
+- **Dossiers surveillés** (mode autonome) : ajout et retrait, scan avec progression, livres
+  ajoutés, mis à jour ou **manquants** (conservés dans la liste).
+- **Couvertures** : miniatures en cache dans `data\couvertures`, servies par le protocole
+  `cr-couv` (aucune image en base64 dans l'IPC), visuel de remplacement si illisible.
+- Volume : 5 000 livres restent fluides (défilement, recherche, tri).
+- Les thèmes de la tauri-v0.1.0 s'appliquent à toute la vue ; le mode portable est conservé
+  (rien hors de `data\`).
+
+### Corrections
+- Aucune : première version de cette vue. Limites connues : pas de lecteur, pas de sélection
+  multiple, groupes sans vraies sections, chemins saisis à la main.
+
+### Recette
+[recette/tauri-v0.2.0.md](recette/tauri-v0.2.0.md)
+
 ## [tauri-v0.1.0] — 2026-11-02
 
 Squelette de la version **Tauri 2** (branche `tauri2-web`), parallèle à la version egui : aucune
@@ -353,7 +383,7 @@ Se passer de ComicRack : sa bibliothèque peut être transférée dans la base d
   identifiant), la lecture la plus récente est gardée.
 - **Transfert relancé** : pas de doublon de livres ni de listes. La lecture faite dans ComicRust
   et les fichiers convertis ou déplacés dans ComicRust sont gardés.
-- **Même partage sous deux noms** (`Z:\…` et `\\SERVEURNAS\…`) : le dossier n'est pas ajouté
+- **Même partage sous deux noms** (`Z:\…` et `\SERVEURNAS\…`) : le dossier n'est pas ajouté
   deux fois, les chemins des livres sont ramenés sous le dossier surveillé ; les livres hors de
   tout dossier surveillé sont signalés.
 - **Mode autonome : les listes s'affichent** (relues dans la base de ComicRust quand elles
