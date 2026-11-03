@@ -629,6 +629,57 @@ impl Biblio {
     }
 }
 
+// ───────────────────────────── Pour le lecteur ─────────────────────────────
+
+impl Biblio {
+    /// Fiche d'un livre (copie), si une bibliothèque est ouverte.
+    pub fn livre(&self, id: &str) -> Option<LibraryBook> {
+        self.verrou().base.as_ref()?.get(id).cloned()
+    }
+
+    /// Fiche du livre dont le fichier est `chemin` (casse indifférente, comme la version egui).
+    pub fn livre_par_chemin(&self, chemin: &Path) -> Option<LibraryBook> {
+        let base = self.verrou().base.clone()?;
+        let p = chemin.to_string_lossy();
+        base.books
+            .iter()
+            .find(|b| b.file.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(&p) || Path::new(f) == chemin))
+            .cloned()
+    }
+
+    /// Mode de la bibliothèque ouverte.
+    pub fn mode(&self) -> Option<Mode> {
+        self.verrou().mode
+    }
+
+    /// Base SQLite de ComicRust, en mode autonome seulement.
+    pub fn store_autonome(&self) -> Option<StoreConfig> {
+        let g = self.verrou();
+        match (g.mode, &g.store) {
+            (Some(Mode::Autonome), Some(c)) => Some(c.clone()),
+            _ => None,
+        }
+    }
+
+    /// Reporte dans la bibliothèque affichée une lecture écrite dans la base (page courante,
+    /// dernière page lue, date d'ouverture), sans la recharger. Pendant une analyse, rien n'est
+    /// changé : la base rechargée à la fin de l'analyse contient déjà la lecture.
+    pub fn noter_lecture(&self, id: &str, courante: u32, derniere: u32, ouvert: &str) {
+        let mut g = self.verrou();
+        if g.scan_en_cours {
+            return;
+        }
+        let Some(base) = g.base.as_mut() else { return };
+        if let Some(b) = Arc::make_mut(base).get_mut(id) {
+            b.current_page = Some(courante);
+            b.last_page_read = Some(derniere);
+            b.opened = Some(ouvert.to_string());
+            // Les tris « lecture » / « avancement » changent : vue recalculée.
+            g.vue = None;
+        }
+    }
+}
+
 // ───────────────────────────── Fonctions utilitaires ─────────────────────────────
 
 fn config_autonome(data: &Path) -> StoreConfig {

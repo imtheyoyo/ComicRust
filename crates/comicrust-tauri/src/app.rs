@@ -3,6 +3,7 @@
 //! aucune règle métier côté front.
 
 use crate::biblio::{self, Biblio, ChoixPremierDemarrage, EtatBiblio, LivreDetail, PageLivres, RequeteLivres};
+use crate::lecteur::{self, Lecteur, LivreOuvert, ReponsePage};
 use crate::reglages::{self, PreferencesVue};
 use crate::{infos_application, portable, themes, InfosApplication};
 use std::path::PathBuf;
@@ -108,6 +109,58 @@ fn lancer_scan(app: tauri::AppHandle, biblio: tauri::State<'_, Biblio>) -> Resul
     }))
 }
 
+// ───────────────────────────── Lecteur ─────────────────────────────
+// Contrat : docs/tauri/ipc-lecteur.md. Pages servies par le protocole `cr-page`.
+
+/// Ouvre un livre de la bibliothèque (ordre des pages de sa fiche, page de reprise).
+#[tauri::command(async)]
+fn ouvrir_livre(lecteur: tauri::State<'_, Lecteur>, id: String) -> Result<LivreOuvert, String> {
+    lecteur.ouvrir_livre(&id)
+}
+
+/// Ouvre un fichier ou un dossier d'images hors bibliothèque.
+#[tauri::command(async)]
+fn ouvrir_fichier(lecteur: tauri::State<'_, Lecteur>, chemin: String) -> Result<LivreOuvert, String> {
+    lecteur.ouvrir_fichier(&chemin)
+}
+
+/// Préfixe des URL de pages d'un livre ouvert (`urlBase` de `LivreOuvert`).
+#[tauri::command]
+fn url_page_base(lecteur: tauri::State<'_, Lecteur>, jeton: String) -> Result<String, String> {
+    lecteur.url_page_base(&jeton)
+}
+
+/// Note la page courante ; `termine` : livre lu jusqu'au bout.
+#[tauri::command(async)]
+fn enregistrer_avancement(
+    lecteur: tauri::State<'_, Lecteur>,
+    jeton: String,
+    page: usize,
+    termine: bool,
+) -> Result<(), String> {
+    lecteur.enregistrer_avancement(&jeton, page, termine)
+}
+
+/// Ferme un livre (lecture écrite dans la base en mode autonome).
+#[tauri::command(async)]
+fn fermer_livre(lecteur: tauri::State<'_, Lecteur>, jeton: String) -> Result<(), String> {
+    lecteur.fermer_livre(&jeton)
+}
+
+/// Réponse HTTP du protocole `cr-page`.
+fn reponse_page(p: ReponsePage) -> tauri::http::Response<Vec<u8>> {
+    // Une URL de page ne vaut que pour une séance (jeton) : gardée par la WebView tant que
+    // la séance dure ; les erreurs (404, 504…) ne sont jamais gardées.
+    let cache = if p.statut == 200 { "private, max-age=3600" } else { "no-store" };
+    tauri::http::Response::builder()
+        .status(p.statut)
+        .header("Cache-Control", cache)
+        .header("Content-Type", p.mime)
+        .header("Access-Control-Allow-Origin", "*")
+        .body(p.octets)
+        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
 /// Réponse HTTP du protocole `cr-couv`.
 fn reponse_couverture(statut: u16, jpeg: Vec<u8>) -> tauri::http::Response<Vec<u8>> {
     // 200 : couverture gardée par la WebView une heure ; 404 : jamais gardée.
@@ -138,8 +191,10 @@ pub fn run() {
     let _ = std::fs::create_dir_all(&webview);
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview);
 
+    let bibliotheque = Biblio::nouvelle(data.clone());
     tauri::Builder::default()
-        .manage(Biblio::nouvelle(data.clone()))
+        .manage(Lecteur::nouveau(data.clone(), bibliotheque.clone()))
+        .manage(bibliotheque)
         .manage(DossierData(data))
         // Couvertures : `cr-couv://localhost/<id>` (Windows : `http://cr-couv.localhost/<id>`), servies
         // depuis le cache `data\couvertures` par les fils de `Biblio::pool` (jamais le fil principal :
@@ -154,6 +209,23 @@ pub fn run() {
                 });
             });
         })
+        // Pages du lecteur : `cr-page://localhost/<jeton>/<index>?l=<largeur>` (Windows :
+        // `http://cr-page.localhost/...`), produites par le fil du livre (jamais le fil
+        // principal) ; 404 si jeton ou page inconnus, 504 après le délai (NAS muet).
+        .register_asynchronous_uri_scheme_protocol(lecteur::PROTOCOLE_PAGES, |ctx, requete, reponse| {
+            let lect = ctx.app_handle().state::<Lecteur>().inner().clone();
+            let uri = requete.uri();
+            match lecteur::analyser_uri(uri.path(), uri.query()) {
+                Some((jeton, index, largeur)) => {
+                    lect.servir(&jeton, index, largeur, move |p| reponse.respond(reponse_page(p)))
+                }
+                None => reponse.respond(reponse_page(ReponsePage {
+                    statut: 404,
+                    mime: "text/plain; charset=utf-8",
+                    octets: b"adresse de page invalide".to_vec(),
+                })),
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             infos,
             lister_themes,
@@ -167,7 +239,12 @@ pub fn run() {
             lister_dossiers,
             ajouter_dossier,
             retirer_dossier,
-            lancer_scan
+            lancer_scan,
+            ouvrir_livre,
+            ouvrir_fichier,
+            url_page_base,
+            enregistrer_avancement,
+            fermer_livre
         ])
         .setup(|app| {
             // Thèmes livrés disponibles dès le premier lancement.
@@ -185,6 +262,13 @@ pub fn run() {
                 .build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("erreur au lancement de ComicRust-Tauri");
+        .build(tauri::generate_context!())
+        .expect("erreur au lancement de ComicRust-Tauri")
+        .run(|app, evenement| {
+            // Fermeture de l'application : la lecture des livres ouverts est enregistrée
+            // (comme la version egui à la fermeture de la fenêtre).
+            if let tauri::RunEvent::Exit = evenement {
+                app.state::<Lecteur>().fermer_tout();
+            }
+        });
 }

@@ -5,13 +5,17 @@
 //! - les thèmes CSS de l'utilisateur ([`themes`]),
 //! - la bibliothèque ([`biblio`] : ouverture, liste, détail, dossiers, scan ; [`couvertures`] ;
 //!   [`tri`] ; [`reglages`]),
+//! - le lecteur ([`lecteur`] : livres ouverts, pages du protocole `cr-page`, avancement ;
+//!   [`avancement`] : mémoire locale de lecture),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
 //! Le code sans dépendance à Tauri est compilé et testé partout (Linux compris) ; la fenêtre
 //! n'est compilée qu'avec `--features app`.
 
+pub mod avancement;
 pub mod biblio;
 pub mod couvertures;
+pub mod lecteur;
 pub mod portable;
 pub mod reglages;
 pub mod themes;
