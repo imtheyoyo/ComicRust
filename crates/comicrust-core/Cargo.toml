@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-quick-xml = { version = "0.37", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 zip = { version = "2", default-features = false, features = ["bzip2", "deflate", "deflate64", "lzma", "zstd"] }
 thiserror = "2"
