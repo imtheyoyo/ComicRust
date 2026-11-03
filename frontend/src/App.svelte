@@ -72,7 +72,7 @@
     {/if}
   </div>
   <DialogDossiers bind:this={dossiers} {scan} />
-  <DialogReglages bind:this={reglages} {themeActif} onTheme={(id) => (themeActif = id)} />
+  <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} />
 {/if}
 
 <style>

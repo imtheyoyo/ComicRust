@@ -3,15 +3,18 @@
   import type { ClefTri } from '../lib/api';
   import type { Bibliotheque } from '../lib/bibliotheque.svelte';
   import { cibleClavier } from '../lib/navigation';
+  import { modificateurs, type Selection } from '../lib/selection.svelte';
 
   interface Props {
     bib: Bibliotheque;
-    selection: number;
-    onselection: (i: number) => void;
+    /** Sélection multiple (curseur = livre courant). */
+    sel: Selection;
+    /** Clic droit sur un livre (menu contextuel), en coordonnées de la fenêtre. */
+    onmenu: (i: number, x: number, y: number) => void;
     onouvrir: (i: number) => void;
     ontri: (clef: ClefTri) => void;
   }
-  let { bib, selection, onselection, onouvrir, ontri }: Props = $props();
+  let { bib, sel, onmenu, onouvrir, ontri }: Props = $props();
 
   const HAUT_LIGNE = 40;
   const HAUT_ENTETE = 34;
@@ -57,18 +60,34 @@
   }
 
   function clavier(e: KeyboardEvent) {
-    if (e.key === 'Enter' && selection >= 0) {
+    if (e.key === 'Enter' && sel.curseur >= 0) {
       e.preventDefault();
-      onouvrir(selection);
+      onouvrir(sel.curseur);
+      return;
+    }
+    // Ctrl+A : tous les livres de la vue (recherche comprise).
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      sel.tout(bib.total);
+      return;
+    }
+    // Touche « Menu » ou Maj+F10 : menu contextuel du livre courant.
+    if ((e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && sel.curseur >= 0) {
+      e.preventDefault();
+      const r = zone?.querySelector(`[data-index="${sel.curseur}"]`)?.getBoundingClientRect();
+      sel.cliquerDroit(sel.curseur);
+      onmenu(sel.curseur, r ? r.left + 20 : 100, r ? r.top + 20 : 100);
       return;
     }
     const lignesPage = Math.max(1, Math.floor((hauteur - HAUT_ENTETE) / HAUT_LIGNE) - 1);
-    const cible = cibleClavier(e.key, selection, bib.total, 1, lignesPage);
+    const cible = cibleClavier(e.key, sel.curseur, bib.total, 1, lignesPage);
     if (cible === null) return;
     e.preventDefault();
-    onselection(cible);
+    // Maj+flèches : étend la sélection depuis l'ancre.
+    sel.deplacer(cible, modificateurs(e));
     afficher(cible);
   }
+
 
   const fleche = (clef: ClefTri | null) =>
     clef && bib.params.tri === clef ? (bib.params.sensTri === 'asc' ? ' ▲' : ' ▼') : '';
@@ -105,15 +124,18 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div
         class="ligne"
-        class:selectionne={i === selection}
+        class:selectionne={sel.contient(i)}
+        class:courant={i === sel.curseur}
+        data-index={i}
         class:debut-groupe={bib.debutGroupe(i)}
         style:transform="translateY({i * HAUT_LIGNE}px)"
         style:height="{HAUT_LIGNE}px"
         role="row"
         aria-rowindex={i + 1}
-        aria-selected={i === selection}
+        aria-selected={sel.contient(i)}
         tabindex="-1"
-        onclick={() => onselection(i)}
+        onclick={(e) => sel.cliquer(i, modificateurs(e))}
+        oncontextmenu={(e) => { e.preventDefault(); sel.cliquerDroit(i); onmenu(i, e.clientX, e.clientY); }}
         ondblclick={() => onouvrir(i)}
       >
         {#if l}
@@ -151,6 +173,7 @@
   .ligne:hover { background: var(--cr-fond-survol); }
   .ligne.selectionne { background: var(--cr-accent); color: var(--cr-accent-texte); }
   .ligne.selectionne .discret { color: inherit; }
+  .ligne.courant:not(.selectionne) { box-shadow: inset 0 0 0 1px var(--cr-accent); }
   .ligne.debut-groupe { border-top: 2px solid var(--cr-accent); }
   .cellule { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .discret { color: var(--cr-texte-discret); }

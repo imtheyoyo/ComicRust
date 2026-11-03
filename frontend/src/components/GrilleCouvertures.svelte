@@ -3,16 +3,19 @@
   // chargées par pages via la Bibliotheque (lister_livres debut/nombre).
   import type { Bibliotheque } from '../lib/bibliotheque.svelte';
   import { cibleClavier } from '../lib/navigation';
+  import { modificateurs, type Selection } from '../lib/selection.svelte';
 
   interface Props {
     bib: Bibliotheque;
-    selection: number;
+    /** Sélection multiple (curseur = livre courant). */
+    sel: Selection;
     /** Largeur visée d'une couverture, en pixels. */
     zoom: number;
-    onselection: (i: number) => void;
+    /** Clic droit sur un livre (menu contextuel), en coordonnées de la fenêtre. */
+    onmenu: (i: number, x: number, y: number) => void;
     onouvrir: (i: number) => void;
   }
-  let { bib, selection, zoom, onselection, onouvrir }: Props = $props();
+  let { bib, sel, zoom, onmenu, onouvrir }: Props = $props();
 
   const MARGE = 16;
   const ESPACE = 16;
@@ -60,18 +63,34 @@
   }
 
   function clavier(e: KeyboardEvent) {
-    if (e.key === 'Enter' && selection >= 0) {
+    if (e.key === 'Enter' && sel.curseur >= 0) {
       e.preventDefault();
-      onouvrir(selection);
+      onouvrir(sel.curseur);
+      return;
+    }
+    // Ctrl+A : tous les livres de la vue (recherche comprise).
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      sel.tout(bib.total);
+      return;
+    }
+    // Touche « Menu » ou Maj+F10 : menu contextuel du livre courant.
+    if ((e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && sel.curseur >= 0) {
+      e.preventDefault();
+      const r = zone?.querySelector(`[data-index="${sel.curseur}"]`)?.getBoundingClientRect();
+      sel.cliquerDroit(sel.curseur);
+      onmenu(sel.curseur, r ? r.left + 20 : 100, r ? r.top + 20 : 100);
       return;
     }
     const lignesPage = Math.max(1, Math.floor(hauteur / hautLigne));
-    const cible = cibleClavier(e.key, selection, bib.total, colonnes, lignesPage);
+    const cible = cibleClavier(e.key, sel.curseur, bib.total, colonnes, lignesPage);
     if (cible === null) return;
     e.preventDefault();
-    onselection(cible);
+    // Maj+flèches : étend la sélection depuis l'ancre.
+    sel.deplacer(cible, modificateurs(e));
     afficher(cible);
   }
+
 </script>
 
 <!-- svelte-ignore a11y_interactive_supports_focus -->
@@ -85,7 +104,8 @@
   role="listbox"
   tabindex="0"
   aria-label="Couvertures des livres"
-  aria-activedescendant={selection >= 0 ? `livre-${selection}` : undefined}
+  aria-activedescendant={sel.curseur >= 0 ? `livre-${sel.curseur}` : undefined}
+  aria-multiselectable="true"
   data-testid="grille"
 >
   <div class="piste" style:height="{hautTotal}px">
@@ -98,13 +118,16 @@
       <div
         id="livre-{i}"
         class="cellule"
-        class:selectionne={i === selection}
+        class:selectionne={sel.contient(i)}
+        class:courant={i === sel.curseur}
+        data-index={i}
         style:width="{largeurCellule}px"
         style:transform="translate({MARGE + col * (largeurCellule + ESPACE)}px, {MARGE + ligne * hautLigne}px)"
         role="option"
-        aria-selected={i === selection}
+        aria-selected={sel.contient(i)}
         tabindex="-1"
-        onclick={() => onselection(i)}
+        onclick={(e) => sel.cliquer(i, modificateurs(e))}
+        oncontextmenu={(e) => { e.preventDefault(); sel.cliquerDroit(i); onmenu(i, e.clientX, e.clientY); }}
         ondblclick={() => onouvrir(i)}
       >
         <div class="couverture" style:height="{hautCouverture}px">
@@ -147,6 +170,7 @@
   .cellule:hover .couverture { border-color: var(--cr-accent); }
   .cellule.selectionne .couverture { outline: 3px solid var(--cr-accent); outline-offset: 1px; border-color: var(--cr-accent); }
   .cellule.selectionne .titre { color: var(--cr-accent); }
+  .cellule.courant:not(.selectionne) .couverture { outline: 2px dashed var(--cr-accent); outline-offset: 1px; }
   .lu {
     position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px; border-radius: 50%;
     background: var(--cr-accent); color: var(--cr-accent-texte); font-size: 12px; line-height: 20px; text-align: center;

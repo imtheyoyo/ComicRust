@@ -201,6 +201,142 @@ export interface ProgressionScan {
   total: number;
 }
 
+// ───────────────────────────── Infos et édition (étape 3, docs/tauri/ipc-edition.md) ─────────────────────────────
+
+/** Section `edition` de data\comicrust-tauri.json. */
+export interface ReglagesEdition {
+  /** Option « Lecture et écriture » du mode lié ComicRack (défaut false = lecture seule). */
+  ecritureComicrack: boolean;
+  /** Case « Écrire aussi les infos dans le fichier ». */
+  ecrireDansFichier: boolean;
+  /** Conversion : ranger l'original dans « _originaux ». */
+  rangerOriginal: boolean;
+  modeleNom?: string;
+  dossierCible?: string;
+}
+
+export type TypeChamp =
+  | 'texte' | 'texteLong' | 'liste' | 'entier' | 'note' | 'prix' | 'ouiNon' | 'manga' | 'booleen' | 'date' | 'langue';
+
+export interface Choix { valeur: string; libelle: string }
+
+export interface ChampFiche {
+  /** Nom ComicRack (`Series`, `Writer`…) ou `CustomValue:<clé>`. */
+  nom: string;
+  libelle: string;
+  type: TypeChamp;
+  /** Texte à afficher et modifier ('' si vide ou si multiple). */
+  valeur: string;
+  /** Plusieurs livres aux valeurs différentes. */
+  multiple: boolean;
+  choix?: Choix[];
+  min?: number;
+  max?: number;
+  /** Le champ propose les valeurs de la bibliothèque (proposer_valeurs). */
+  suggestions: boolean;
+  dansComicInfo: boolean;
+  /** Texte d'aide du champ vide. */
+  indication?: string;
+}
+
+export interface Onglet { nom: string; champs: string[] }
+
+export interface LivreEdite {
+  id: string;
+  titre: string;
+  fichier?: string;
+  urlCouverture: string;
+  pages: number;
+  tailleFichier?: number;
+  progression?: number;
+  /** Infos pas encore écrites dans le fichier (ComicInfoIsDirty). */
+  infosAEcrire: boolean;
+  /** Le fichier reçoit les infos (CBZ/ZIP). */
+  cbz: boolean;
+}
+
+export interface FicheEdition {
+  ids: string[];
+  multiple: boolean;
+  livres: LivreEdite[];
+  onglets: Onglet[];
+  champs: ChampFiche[];
+  /** Présent : consultation seulement, avec la marche à suivre. */
+  lectureSeule?: string;
+  ecrireDansFichierPossible: boolean;
+  ecrireDansFichier: boolean;
+  seuilConfirmation: number;
+}
+
+/** `valeur` '' : vider le champ. */
+export interface ChampModifie { nom: string; valeur: string }
+export interface ErreurChamp { nom: string; message: string }
+/** `texte` : contenu du champ si on choisit la proposition. */
+export interface Proposition { valeur: string; texte: string }
+
+export interface DemandeModification {
+  ids: string[];
+  /** SEULEMENT les champs modifiés par l'utilisateur. */
+  champs: ChampModifie[];
+  ecrireDansFichier: boolean;
+  confirme?: boolean;
+}
+
+export type Operation = 'modification' | 'ecritureInfos' | 'conversion' | 'renommage';
+export type Statut = 'ok' | 'inchange' | 'ignore' | 'erreur';
+
+export interface ResultatLivre {
+  id: string;
+  titre: string;
+  statut: Statut;
+  message?: string;
+  fichier?: string;
+}
+
+export interface BilanOperation {
+  operation: Operation;
+  /** Présent : rien n'a été fait, rappeler avec `confirme: true` après accord. */
+  confirmationRequise?: { nbLivres: number; seuil: number; message: string };
+  resume: string;
+  complet: boolean;
+  interrompu: boolean;
+  livres: ResultatLivre[];
+  /** Bilan à copier (une ligne par livre). */
+  rapport: string;
+}
+
+export interface ProgressionEdition { operation: Operation; fait: number; total: number; livre: string }
+export interface BibliothequeModifiee { ids: string[] }
+
+export interface ModeleNom { nom: string; modele: string }
+
+export interface DemandeRenommage {
+  ids: string[];
+  modele: string;
+  /** Absent ou vide : chaque fichier reste dans son dossier. */
+  dossierCible?: string;
+  apercu: boolean;
+  confirme?: boolean;
+}
+
+export interface LigneRenommage {
+  id: string;
+  titre: string;
+  de: string;
+  vers: string;
+  deNom: string;
+  versNom: string;
+  /** Présent : cette ligne ne sera pas appliquée. */
+  probleme?: string;
+  inchange: boolean;
+}
+
+export interface ResultatRenommage {
+  lignes: LigneRenommage[];
+  aRenommer: number;
+  bilan?: BilanOperation;
+}
+
 // ───────────────────────────── Aiguillage Tauri / simulé ─────────────────────────────
 
 /** `true` dans la fenêtre Tauri ; `false` dans un navigateur (mode simulé). */
@@ -260,6 +396,27 @@ export const fermerLivre = (jeton: string) => appeler<void>('fermer_livre', { je
 /** `page` : index dans le fichier de la page affichée ; `termine` : la dernière page a été vue. */
 export const enregistrerAvancement = (jeton: string, page: number, termine: boolean) =>
   appeler<void>('enregistrer_avancement', { jeton, page, termine });
+
+// Infos et édition (étape 3).
+export const lireReglagesEdition = () => appeler<ReglagesEdition>('lire_reglages_edition');
+export const enregistrerReglagesEdition = (reglages: Partial<ReglagesEdition>) =>
+  appeler<ReglagesEdition>('enregistrer_reglages_edition', { reglages });
+export const lireFiches = (ids: string[]) => appeler<FicheEdition>('lire_fiches', { ids });
+export const proposerValeurs = (champ: string, texte: string, tout = false, max?: number) =>
+  appeler<Proposition[]>('proposer_valeurs', { champ, texte, tout, max });
+export const verifierChamps = (champs: ChampModifie[]) => appeler<ErreurChamp[]>('verifier_champs', { champs });
+export const appliquerModifications = (demande: DemandeModification) =>
+  appeler<BilanOperation>('appliquer_modifications', { demande });
+export const ajouterValeurPerso = (cle: string, existantes: string[]) =>
+  appeler<ChampFiche>('ajouter_valeur_perso', { cle, existantes });
+export const ecrireInfosFichiers = (ids: string[], confirme?: boolean) =>
+  appeler<BilanOperation>('ecrire_infos_fichiers', { ids, confirme });
+export const convertirCbrCbz = (ids: string[], rangerOriginal?: boolean, confirme?: boolean) =>
+  appeler<BilanOperation>('convertir_cbr_cbz', { ids, rangerOriginal, confirme });
+export const modelesDeNom = () => appeler<ModeleNom[]>('modeles_de_nom');
+export const renommerDeplacer = (demande: DemandeRenommage) =>
+  appeler<ResultatRenommage>('renommer_deplacer', { demande });
+export const annulerOperation = () => appeler<void>('annuler_operation');
 
 /** URL d'une page. `largeurMax` : largeur souhaitée en pixels physiques (0 = taille d'origine ;
  *  le backend ne grossit jamais l'image). En mode simulé, image SVG générée. */

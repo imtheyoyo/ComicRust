@@ -1,0 +1,138 @@
+// Sélection multiple de la bibliothèque (grille et tableau), par index dans la vue courante.
+// Stockée en intervalles fermés [début, fin] triés et disjoints : Ctrl+A sur 100 000 livres ne
+// coûte qu'un intervalle. Les identifiants sont résolus à la demande (Bibliotheque.idsDe), les
+// livres hors écran n'étant pas forcément chargés.
+
+export type Intervalle = [number, number];
+
+/** Normalise : tri, fusion des intervalles qui se touchent ou se chevauchent. */
+function normaliser(liste: Intervalle[]): Intervalle[] {
+  const tries = liste.filter(([a, b]) => a <= b).sort((x, y) => x[0] - y[0]);
+  const res: Intervalle[] = [];
+  for (const [a, b] of tries) {
+    const d = res[res.length - 1];
+    if (d && a <= d[1] + 1) d[1] = Math.max(d[1], b);
+    else res.push([a, b]);
+  }
+  return res;
+}
+
+/** Retire l'index `i` des intervalles. */
+function retirer(liste: Intervalle[], i: number): Intervalle[] {
+  const res: Intervalle[] = [];
+  for (const [a, b] of liste) {
+    if (i < a || i > b) res.push([a, b]);
+    else {
+      if (a <= i - 1) res.push([a, i - 1]);
+      if (i + 1 <= b) res.push([i + 1, b]);
+    }
+  }
+  return res;
+}
+
+/** Modificateurs d'un clic ou d'une touche. */
+export interface Modificateurs {
+  ctrl: boolean;
+  maj: boolean;
+}
+
+export const modificateurs = (e: MouseEvent | KeyboardEvent): Modificateurs => ({
+  ctrl: e.ctrlKey || e.metaKey,
+  maj: e.shiftKey,
+});
+
+export class Selection {
+  /** Livre « courant » (curseur clavier, panneau de détails), -1 si aucun. */
+  curseur = $state(-1);
+  intervalles = $state<Intervalle[]>([]);
+  /** Point de départ des sélections Maj+clic / Maj+flèches. */
+  private ancre = -1;
+
+  get nombre(): number {
+    let n = 0;
+    for (const [a, b] of this.intervalles) n += b - a + 1;
+    return n;
+  }
+
+  contient(i: number): boolean {
+    for (const [a, b] of this.intervalles) {
+      if (i < a) return false;
+      if (i <= b) return true;
+    }
+    return false;
+  }
+
+  /** Index sélectionnés, dans l'ordre de la vue. */
+  indices(): number[] {
+    const res: number[] = [];
+    for (const [a, b] of this.intervalles) for (let i = a; i <= b; i++) res.push(i);
+    return res;
+  }
+
+  vider(): void {
+    this.curseur = -1;
+    this.ancre = -1;
+    this.intervalles = [];
+  }
+
+  /** Un seul livre sélectionné (clic simple, flèches sans modificateur). */
+  unique(i: number): void {
+    this.curseur = i;
+    this.ancre = i;
+    this.intervalles = i >= 0 ? [[i, i]] : [];
+  }
+
+  /** Clic sur le livre `i` (Ctrl : ajoute ou retire ; Maj : de l'ancre à `i` ; Ctrl+Maj : ajoute
+   *  de l'ancre à `i` à la sélection, comme l'Explorateur de Windows). */
+  cliquer(i: number, m: Modificateurs): void {
+    if (m.maj && this.ancre >= 0) {
+      this.etendre(i, m.ctrl);
+      return;
+    }
+    if (m.ctrl) {
+      this.intervalles = this.contient(i) ? retirer(this.intervalles, i) : normaliser([...this.intervalles, [i, i]]);
+      this.curseur = i;
+      this.ancre = i;
+      return;
+    }
+    this.unique(i);
+  }
+
+  /** Clic droit : un livre hors sélection devient la sélection ; sinon elle est gardée
+   *  (le menu porte sur tous les livres sélectionnés, comme ComicRack). */
+  cliquerDroit(i: number): void {
+    if (!this.contient(i)) this.unique(i);
+    else this.curseur = i;
+  }
+
+  /** Déplacement clavier vers `i` (Maj : étend depuis l'ancre). */
+  deplacer(i: number, m: Modificateurs): void {
+    if (m.maj) {
+      if (this.ancre < 0) this.ancre = this.curseur >= 0 ? this.curseur : i;
+      this.etendre(i, m.ctrl);
+    } else this.unique(i);
+  }
+
+  /** Ctrl+A. */
+  tout(total: number): void {
+    if (total <= 0) return;
+    this.intervalles = [[0, total - 1]];
+    if (this.curseur < 0) this.curseur = 0;
+    this.ancre = this.curseur;
+  }
+
+  /** Total de la vue réduit : retire ce qui dépasse. */
+  borner(total: number): void {
+    if (this.curseur >= total) this.curseur = total - 1;
+    const dernier = this.intervalles[this.intervalles.length - 1];
+    if (dernier && dernier[1] >= total) {
+      this.intervalles = normaliser(this.intervalles.map(([a, b]) => [a, Math.min(b, total - 1)] as Intervalle));
+    }
+  }
+
+  private etendre(i: number, ajouter: boolean): void {
+    const [a, b] = this.ancre <= i ? [this.ancre, i] : [i, this.ancre];
+    this.intervalles = normaliser([...(ajouter ? this.intervalles : []), [a, b]]);
+    this.curseur = i;
+  }
+}

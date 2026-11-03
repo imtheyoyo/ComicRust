@@ -2,10 +2,15 @@
   // Vue Bibliothèque : barre d'outils (recherche, tri, groupement, vue), grille ou tableau
   // virtualisés, panneau de détails et barre d'état. Les données viennent de lister_livres.
   import { onMount, tick } from 'svelte';
-  import type { ClefTri, Groupe, SourceLecteur } from '../lib/api';
+  import { ecouter, messageErreur, type BibliothequeModifiee, type ClefTri, type Groupe, type SourceLecteur } from '../lib/api';
   import { Bibliotheque, type SuiviScan } from '../lib/bibliotheque.svelte';
   import { enregistrerPreference, preferences } from '../lib/prefs';
+  import { Selection } from '../lib/selection.svelte';
+  import DialogInfos from './DialogInfos.svelte';
+  import DialogOperation from './DialogOperation.svelte';
+  import DialogRenommer from './DialogRenommer.svelte';
   import GrilleCouvertures from './GrilleCouvertures.svelte';
+  import MenuContextuel, { type EntreeMenu } from './MenuContextuel.svelte';
   import Lecteur from './Lecteur.svelte';
   import PanneauDetails from './PanneauDetails.svelte';
   import VueTableau from './VueTableau.svelte';
@@ -29,7 +34,17 @@
   const LARGEUR_MIN = 220;
   const LARGEUR_MAX = 800;
   let largeurDetails = $state(prefs.largeurDetails ?? 320);
-  let selection = $state(-1);
+  /** Sélection multiple (Ctrl+clic, Maj+clic, Ctrl+A, Maj+flèches) ; `sel.curseur` : livre courant. */
+  const sel = new Selection();
+  /** Menu contextuel ouvert (position). */
+  let menu = $state<{ x: number; y: number } | null>(null);
+  /** Fenêtres de l'édition (étape 3), sur les identifiants de la sélection au moment de l'ouverture. */
+  let infosDe = $state<string[] | null>(null);
+  let operation = $state<{ type: 'conversion' | 'ecritureInfos'; ids: string[] } | null>(null);
+  let renommerDe = $state<string[] | null>(null);
+  let erreurAction = $state('');
+  /** Incrémenté quand des fiches ont changé (bibliotheque-modifiee) : le panneau relit le détail. */
+  let fichesModifiees = $state(0);
   /** Livre ouvert dans le lecteur plein écran (livre de la bibliothèque ou fichier), ou null. */
   let livreLu = $state<SourceLecteur | null>(null);
   /** Ouverture d'un fichier hors bibliothèque : chemin saisi (pas de sélecteur de fichiers). */
@@ -59,7 +74,16 @@
 
   onMount(() => {
     void bib.reinitialiser();
-    return () => clearTimeout(minuterie);
+    // Fiches modifiées par l'édition : liste rechargée sans perdre défilement ni sélection.
+    let desabonner: (() => void) | undefined;
+    void ecouter<BibliothequeModifiee>('bibliotheque-modifiee', () => {
+      void bib.reinitialiser(false);
+      fichesModifiees++;
+    }).then((f) => (desabonner = f));
+    return () => {
+      clearTimeout(minuterie);
+      desabonner?.();
+    };
   });
 
   // Toute modification d'un réglage d'affichage est enregistrée (avec délai, voir prefs.ts).
@@ -80,12 +104,12 @@
 
   $effect(() => {
     if (bib.params.recherche === '') nbLivres = bib.total;
-    if (selection >= bib.total) selection = bib.total - 1;
+    sel.borner(bib.total);
   });
 
   function changer(patch: Partial<typeof bib.params>) {
     Object.assign(bib.params, patch);
-    selection = -1;
+    sel.vider();
     void bib.reinitialiser();
   }
 
@@ -103,7 +127,7 @@
   function ouvrir(i: number) {
     const l = bib.livre(i);
     if (!l) return;
-    selection = i;
+    sel.unique(i);
     livreLu = { id: l.id };
   }
 
@@ -167,9 +191,18 @@
     e.preventDefault();
   }
 
+  /** Une fenêtre de l'édition (ou une autre boîte de dialogue) est ouverte. */
+  const fenetreOuverte = () => !!(infosDe || operation || renommerDe || document.querySelector('dialog[open]'));
+
   function clavierGlobal(e: KeyboardEvent) {
     if (livreLu) return; // le lecteur a son propre clavier
     const saisieTexte = (e.target as HTMLElement | null)?.closest('input, textarea, select');
+    // Ctrl+I : infos de la sélection (comme ComicRack et la version egui).
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'i' && !fenetreOuverte()) {
+      e.preventDefault();
+      void action('infos');
+      return;
+    }
     if ((e.key === '/' && !saisieTexte) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) {
       e.preventDefault();
       champRecherche?.focus();
@@ -191,7 +224,67 @@
     }
   }
 
-  const livreSelectionne = $derived(selection >= 0 ? bib.livre(selection) : undefined);
+  const livreSelectionne = $derived(sel.curseur >= 0 ? bib.livre(sel.curseur) : undefined);
+  const nbSel = $derived(sel.nombre);
+
+  // ───── Édition (étape 3) : menu contextuel et fenêtres ─────
+
+  const entreesMenu = $derived.by<EntreeMenu[]>(() => {
+    const plusieurs = nbSel > 1;
+    return [
+      { id: 'lire', libelle: 'Lire', raccourci: 'Entrée', desactive: plusieurs, aide: plusieurs ? 'Un seul livre à la fois' : undefined },
+      { id: 'infos', libelle: plusieurs ? `✏ Modifier les infos des ${nbSel.toLocaleString('fr-FR')} livres…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: true },
+      { id: 'ecritureInfos', libelle: plusieurs ? 'Écrire les infos dans les fichiers…' : 'Écrire les infos dans le fichier', separe: true,
+        aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
+      { id: 'conversion', libelle: plusieurs ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ', aide: 'Seuls les CBR, CB7 et CBT se convertissent' },
+      { id: 'renommer', libelle: 'Renommer / déplacer…' },
+    ];
+  });
+
+  /** Identifiants des livres sélectionnés (pages non chargées demandées au backend). */
+  async function idsSelection(): Promise<string[]> {
+    if (sel.nombre === 0 && sel.curseur >= 0) sel.unique(sel.curseur);
+    return (await bib.livresDe(sel.indices())).map((l) => l.id);
+  }
+
+  async function action(id: string) {
+    erreurAction = '';
+    if (id === 'lire') {
+      if (sel.curseur >= 0) ouvrir(sel.curseur);
+      return;
+    }
+    let ids: string[];
+    try {
+      ids = await idsSelection();
+    } catch (e) {
+      erreurAction = messageErreur(e);
+      return;
+    }
+    if (ids.length === 0) return;
+    if (id === 'infos') infosDe = ids;
+    else if (id === 'conversion' || id === 'ecritureInfos') operation = { type: id, ids };
+    else if (id === 'renommer') renommerDe = ids;
+  }
+
+  /** Précédent / Suivant de « Infos du livre » : la sélection suit, comme dans ComicRack. */
+  async function voisin(pas: -1 | 1): Promise<string | null> {
+    const i = sel.curseur + pas;
+    if (sel.curseur < 0 || i < 0 || i >= bib.total) return null;
+    const [l] = await bib.livresDe([i]);
+    if (!l) return null;
+    sel.unique(i);
+    document.querySelector(`[data-index="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+    return l.id;
+  }
+  const avoisin = (pas: -1 | 1) => sel.curseur + pas >= 0 && sel.curseur + pas < bib.total;
+
+  async function fenetreFermee() {
+    infosDe = null;
+    operation = null;
+    renommerDe = null;
+    await tick();
+    document.querySelector<HTMLElement>('[data-testid="grille"], [data-testid="tableau"]')?.focus();
+  }
 </script>
 
 <svelte:window onkeydown={clavierGlobal} />
@@ -250,9 +343,9 @@
       {:else if bib.total === 0 && bib.version > 0}
         <p class="vide">{bib.params.recherche ? 'Aucun livre ne correspond à la recherche.' : 'La bibliothèque est vide : ajoutez un dossier surveillé, puis lancez un scan.'}</p>
       {:else if vue === 'grille'}
-        <GrilleCouvertures {bib} {selection} {zoom} onselection={(i) => (selection = i)} onouvrir={ouvrir} />
+        <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir} />
       {:else}
-        <VueTableau {bib} {selection} onselection={(i) => (selection = i)} onouvrir={ouvrir} ontri={trier} />
+        <VueTableau {bib} {sel} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir} ontri={trier} />
       {/if}
     </div>
     {#if details}
@@ -270,15 +363,17 @@
         {@attach ecouteursPoignee}
         data-testid="poignee-details"
       ></div>
-      <PanneauDetails livre={livreSelectionne} largeur={largeurDetails} onouvrir={() => ouvrir(selection)} />
+      <PanneauDetails livre={livreSelectionne} largeur={largeurDetails} onouvrir={() => ouvrir(sel.curseur)}
+        onmodifier={() => void action('infos')} nbSelection={nbSel} rafraichir={fichesModifiees} />
     {/if}
   </div>
 
   <footer class="etat" aria-live="polite">
     <span data-testid="compteur">
       {bib.total.toLocaleString('fr-FR')} livre{bib.total > 1 ? 's' : ''}{bib.params.recherche ? ' (filtré)' : ''}
-      {#if selection >= 0}· sélection {(selection + 1).toLocaleString('fr-FR')}{/if}
+      {#if nbSel > 1}· {nbSel.toLocaleString('fr-FR')} sélectionnés{:else if sel.curseur >= 0}· sélection {(sel.curseur + 1).toLocaleString('fr-FR')}{/if}
     </span>
+    {#if erreurAction}<span class="alerte" role="alert">{erreurAction}</span>{/if}
     <span class="espace"></span>
     {#if scan.enCours}
       <span class="scan">
@@ -305,6 +400,19 @@
     </div>
   </form>
 </dialog>
+
+{#if menu}
+  <MenuContextuel x={menu.x} y={menu.y} entrees={entreesMenu} onchoix={(id) => void action(id)} onfermer={() => (menu = null)} />
+{/if}
+{#if infosDe}
+  <DialogInfos ids={infosDe} onvoisin={voisin} {avoisin} onfermer={fenetreFermee} />
+{/if}
+{#if operation}
+  <DialogOperation operation={operation.type} ids={operation.ids} onfermer={fenetreFermee} />
+{/if}
+{#if renommerDe}
+  <DialogRenommer ids={renommerDe} onfermer={fenetreFermee} />
+{/if}
 
 {#if livreLu}
   {#key livreLu}

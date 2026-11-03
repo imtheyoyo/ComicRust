@@ -766,8 +766,13 @@
               aria-label="Aller à la page {k + 1}"
               aria-current={positions.includes(k) ? 'page' : undefined}
             >
-              <img src={url(index, 256)} alt="" loading="lazy" decoding="async" draggable="false"
-                style:transform={rotation(index) ? `rotate(${rotation(index)}deg)` : undefined} />
+              <!-- Cadre fixe : une page tournée de 90/270° garde ses proportions (largeur et
+                   hauteur échangées avant rotation) sans déborder (recette tauri-v0.3.0 E-03). -->
+              <span class="cadre-miniature">
+                <img src={url(index, 256)} alt="" loading="lazy" decoding="async" draggable="false"
+                  class:quart={rotation(index) % 180 === 90}
+                  style:transform="translate(-50%, -50%) rotate({rotation(index)}deg)" />
+              </span>
               <span>{k + 1}</span>
             </button>
           {/each}
@@ -869,6 +874,8 @@
     flex: none; width: 64px; padding: 2px; display: flex; flex-direction: column; align-items: center; gap: 2px;
     background: var(--cr-fond); font-size: 11px; color: var(--cr-texte-discret);
   }
-  .miniature img { width: 58px; height: 84px; object-fit: contain; background: var(--cr-fond-survol); }
+  .cadre-miniature { position: relative; display: block; width: 58px; height: 84px; overflow: hidden; background: var(--cr-fond-survol); }
+  .cadre-miniature img { position: absolute; left: 50%; top: 50%; width: 58px; height: 84px; object-fit: contain; }
+  .cadre-miniature img.quart { width: 84px; height: 58px; }
   .miniature.courante { border-color: var(--cr-accent); outline: 2px solid var(--cr-accent); color: var(--cr-texte); }
 </style>

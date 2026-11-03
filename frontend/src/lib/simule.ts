@@ -5,6 +5,7 @@ import type {
   PreferencesVue, ClefTri, EtatBiblio, LivreDetail, LivreOuvert, LivreResume, PageInfo, RequeteLivres,
   ReponseLivres, Theme,
 } from './api';
+import { creerEditionSimulee } from './simuleEdition';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -86,7 +87,8 @@ function genererLivres(n: number): LivreInterne[] {
       mois: 1 + Math.floor(r() * 12),
       ajout: i,
       resume: 'Résumé factice généré par le mode simulé. '.repeat(1 + Math.floor(r() * 4)).trim(),
-      fichier: `D:\\BD\\${serie.replace(/[^\w ]/g, '')}\\${serie.replace(/[^\w ]/g, '')} ${numero.padStart(3, '0')}.cbz`,
+      // Un livre sur cinq en CBR (conversion CBR → CBZ, écriture des infos refusée).
+      fichier: `D:\\BD\\${serie.replace(/[^\w ]/g, '')}\\${serie.replace(/[^\w ]/g, '')} ${numero.padStart(3, '0')}.${i % 5 === 0 ? 'cbr' : 'cbz'}`,
       fichierPresent: r() > 0.02,
       pageCourante: 0,
       note: Math.floor(r() * 11) / 2,
@@ -175,8 +177,10 @@ async function simulerScan() {
 
 // ───────────── État simulé ─────────────
 
+// `?mode=comicrack` : bibliothèque liée à ComicRack (lecture seule tant que « Lecture et écriture »
+// n'est pas cochée dans Réglages).
 let etat: EtatBiblio = {
-  mode: 'autonome',
+  mode: new URLSearchParams(location.search).get('mode') === 'comicrack' ? 'comicrack' : 'autonome',
   nbLivres: LIVRES.length,
   premierDemarrage: new URLSearchParams(location.search).has('premier'),
 };
@@ -185,7 +189,9 @@ let etat: EtatBiblio = {
 interface Avancement { jeton: string; page: number; termine: boolean }
 const simuleTests: {
   prefs: PreferencesVue; requetes: RequeteLivres[]; avancements: Avancement[]; ouverts: string[]; fermes: string[];
-} = { prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [] };
+  /** Commandes d'édition reçues (étape 3), pour vérifier ce que le front envoie. */
+  edition: Array<{ commande: string; args: Record<string, unknown> }>;
+} = { prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [], edition: [] };
 try {
   const brut = new URLSearchParams(location.search).get('prefs');
   if (brut) simuleTests.prefs = JSON.parse(brut) as PreferencesVue;
@@ -197,8 +203,9 @@ try {
 // ───────────── Lecteur simulé ─────────────
 // Pages factices : la couverture, une double page (paysage) toutes les 9 pages à partir de la 7e
 // (comme l'échantillon de la recette N-09), des pages sans dimensions connues (déduites au
-// chargement), une page supprimée (la 5e) pour les livres d'identifiant pair, et la 12e tournée de
-// 180° pour le livre n° 1. Les livres dont l'identifiant finit par 7 sont marqués manga.
+// chargement), une page supprimée (la 5e) pour les livres d'identifiant pair, la 12e tournée de 180° pour le
+// livre n° 1, et pour le livre n° 3 la 2e tournée de 90° et la 3e de 270° (miniatures, E-03). Les livres
+// dont l'identifiant finit par 7 sont marqués manga.
 const sessions = new Map<string, LivreInterne>();
 let numeroSession = 0;
 const REPRISE_DIFFERENTE = new URLSearchParams(location.search).has('repriseDiff');
@@ -216,7 +223,7 @@ function pagesSimulees(l: LivreInterne): PageInfo[] {
       double: double && !sansDims,
       type: i === 0 ? 'FrontCover' : 'Story',
       supprimee: i === 4 && Number(l.id) % 2 === 0,
-      rotation: l.id === '1' && i === 11 ? 180 : 0,
+      rotation: l.id === '1' && i === 11 ? 180 : l.id === '3' ? ({ 1: 90, 2: 270 } as Record<number, number>)[i] ?? 0 : 0,
     });
   }
   return pages;
@@ -228,6 +235,15 @@ const THEMES = import.meta.glob('../../../crates/comicrust-tauri/themes/*.css', 
   query: '?raw', import: 'default',
 }) as Record<string, () => Promise<string>>;
 const idTheme = (chemin: string) => chemin.split('/').pop()!.replace(/\.css$/, '');
+
+// Édition (étape 3) : voir simuleEdition.ts.
+const edition = creerEditionSimulee({
+  livres: LIVRES,
+  mode: () => etat.mode,
+  emettre,
+  invalider: () => { ordreCle = ''; },
+  pause,
+});
 
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
@@ -334,7 +350,11 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'lancer_scan':
       void simulerScan();
       return null;
-    default:
-      throw new Error(`commande inconnue (mode simulé) : ${commande}`);
+    default: {
+      simuleTests.edition.push({ commande, args: JSON.parse(JSON.stringify(args)) as Record<string, unknown> });
+      const r = edition(commande, args);
+      if (r === undefined) throw new Error(`commande inconnue (mode simulé) : ${commande}`);
+      return r;
+    }
   }
 }

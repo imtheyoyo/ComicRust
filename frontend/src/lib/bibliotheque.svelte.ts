@@ -89,6 +89,30 @@ export class Bibliotheque {
     }
   }
 
+  /** Livres aux index donnés (sélection multiple) : les pages absentes du cache sont demandées
+   *  au backend sans être gardées (la fenêtre visible n'est pas perturbée). */
+  async livresDe(indices: number[]): Promise<LivreResume[]> {
+    const manquantes = new Set<number>();
+    for (const i of indices) {
+      const p = Math.floor(i / TAILLE_PAGE);
+      if (!this.pages.has(p)) manquantes.add(p);
+    }
+    const chargees = new Map<number, LivreResume[]>();
+    await Promise.all(
+      [...manquantes].map(async (p) => {
+        const r = await listerLivres({ ...this.params, debut: p * TAILLE_PAGE, nombre: TAILLE_PAGE });
+        chargees.set(p, r.livres);
+      }),
+    );
+    const res: LivreResume[] = [];
+    for (const i of indices) {
+      const p = Math.floor(i / TAILLE_PAGE);
+      const l = (this.pages.get(p) ?? chargees.get(p))?.[i % TAILLE_PAGE];
+      if (l) res.push(l);
+    }
+    return res;
+  }
+
   private async chargerPage(p: number): Promise<void> {
     const gen = this.generation;
     this.enCours.add(p);

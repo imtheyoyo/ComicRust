@@ -7,8 +7,14 @@
     /** Largeur en px (réglable, mémorisée). */
     largeur?: number;
     onouvrir: () => void;
+    /** Ouvre « Infos du livre » (Ctrl+I). */
+    onmodifier?: () => void;
+    /** Nombre de livres sélectionnés (au-delà de 1 : rappel de la sélection multiple). */
+    nbSelection?: number;
+    /** Incrémenté quand les fiches ont changé (édition) : le détail est relu. */
+    rafraichir?: number;
   }
-  let { livre, largeur = 320, onouvrir }: Props = $props();
+  let { livre, largeur = 320, onouvrir, onmodifier, nbSelection = 0, rafraichir = 0 }: Props = $props();
 
   let detail = $state<LivreDetail | null>(null);
   let erreur = $state('');
@@ -17,10 +23,14 @@
   // Dérivé par valeur : un rechargement des pages (nouveaux objets, même id) ne relance pas l'appel.
   const id = $derived(livre?.id);
 
+  let dernierId: string | undefined;
   $effect(() => {
     const cible = id;
+    rafraichir;
     const n = ++sequence;
-    detail = null;
+    // Même livre relu après une modification : l'ancien détail reste affiché jusqu'à la réponse.
+    if (cible !== dernierId) detail = null;
+    dernierId = cible;
     erreur = '';
     if (cible === undefined) return;
     detailLivre(cible)
@@ -71,7 +81,14 @@
       <span class:lu={livre.lu}>{livre.lu ? 'Lu' : 'Non lu'}</span>
       {#if detail && (detail.manquant || !detail.fichierPresent)}<span class="manquant">Fichier manquant</span>{/if}
     </p>
-    <button class="ouvrir" onclick={onouvrir}>Lire</button>
+    <div class="actions">
+      <button class="ouvrir" onclick={onouvrir}>Lire</button>
+      {#if onmodifier}
+        <button onclick={onmodifier} title="Modifier les infos (Ctrl+I)" data-testid="details-modifier"
+          >✏ Modifier{nbSelection > 1 ? ` (${nbSelection})` : ''}</button>
+      {/if}
+    </div>
+    {#if nbSelection > 1}<p class="discret multi">{nbSelection.toLocaleString('fr-FR')} livres sélectionnés (détails du livre courant)</p>{/if}
     {#if erreur}
       <p class="erreur" role="alert">{erreur}</p>
     {:else if !detail}
@@ -100,8 +117,10 @@
   .etat { display: flex; justify-content: center; gap: 10px; margin: 0 0 10px; color: var(--cr-texte-discret); }
   .lu { color: var(--cr-accent); font-weight: 600; }
   .manquant, .erreur { color: var(--cr-erreur); }
+  .actions { display: flex; justify-content: center; gap: 8px; margin: 0 0 14px; }
+  .multi { text-align: center; font-size: 12px; margin: -6px 0 12px; }
   .ouvrir {
-    display: block; margin: 0 auto 14px; font: inherit; cursor: pointer; padding: 6px 28px;
+    display: block; font: inherit; cursor: pointer; padding: 6px 28px;
     background: var(--cr-accent); color: var(--cr-accent-texte); border: 1px solid var(--cr-accent); border-radius: var(--cr-rayon);
   }
   .ouvrir:hover { filter: brightness(1.1); }
