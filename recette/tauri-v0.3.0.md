@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.3.0 (pré-release de la version Tauri 2 : étape 2, **le lecteur**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.3.0-windows-x64.zip` |
-| SHA-256 | `à reporter` |
+| SHA-256 | `063be3dfa73b63a9ef98c8d438a8ab395d4121da57be3c18f3176ac633e3f517` |
 | Contenu | **lecteur plein écran** ouvert depuis la bibliothèque (double-clic, Entrée, « Lire ») et par « Ouvrir un fichier… » ; formats CBZ/CBR/CB7/CBT/PDF/DjVu/images/HEIF/AVIF/dossier/WebComic ; page simple, double page, **défilement continu (V)**, manga ; ajustements, zoom, loupe, plein écran ; miniatures et curseur ; ordre, pages supprimées et rotation de la fiche ; préchargement ; reprise de lecture et fenêtre « Reprendre la lecture » ; avancement (base ComicRust en autonome, `data\avancement.json` en mode lié) ; réglages du lecteur mémorisés |
 | Origine | étape 2 de [`docs/tauri/PLAN.md`](../docs/tauri/PLAN.md), contrat [`docs/tauri/ipc-lecteur.md`](../docs/tauri/ipc-lecteur.md) ; tauri-v0.2.1 **GO** le 03/11/2026 ([rapport](rapports/tauri-v0.2.1-2026-11-03.txt)). Tests repris des recettes lecteur de la version egui ([v0.2.0](v0.2.0.md), [v0.2.1](v0.2.1.md), [v0.6.0](v0.6.0.md), [v0.9.1](v0.9.1.md)) |
 
