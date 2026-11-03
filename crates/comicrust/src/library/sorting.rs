@@ -3,6 +3,7 @@
 use std::cmp::Ordering;
 
 use comicrust_core::library::LibraryBook;
+use comicrust_core::smart::{Matcher, Mode, SmartQuery};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -121,35 +122,39 @@ impl GroupKey {
     }
 }
 
-/// Recherche : chaque mot doit apparaître dans un des champs principaux.
-pub fn matches(b: &LibraryBook, words: &[String]) -> bool {
-    if words.is_empty() {
-        return true;
+/// Recherche rapide de la vue bibliothèque, **fidèle à ComicRack CE** (boîte de recherche en
+/// mode « Tout », `ComicBrowserControl.UpdateQuickFilter`) : un critère
+/// `ComicBookAllPropertiesMatcher` (option `All`) avec l'opérateur 3 « contient tous les mots »,
+/// casse ignorée. On réutilise l'évaluateur des listes intelligentes de `comicrust-core`
+/// (`smart.rs`, `all_properties_values` = `GetOptionValueSet`), donc les mêmes règles :
+///
+/// - un livre est retenu si **un même champ** contient **tous** les mots (pas un mot par champ) ;
+/// - champs examinés : série (ou proposée), série alternative, titre, groupe de séries, arc,
+///   scénariste, dessinateur, encreur, coloriste, lettreur, éditeur, traducteur, couverture,
+///   **résumé**, chemin du fichier, genre, **notes**, **critique**, label, volume (« V3 »),
+///   numéro, numéro alternatif, année, format, âge, étiquettes, **personnages**, **équipes**,
+///   **personnage principal**, **lieux**, champs du catalogue, **infos de scan** et valeurs
+///   personnalisées ;
+/// - découpage : sur `,` ou `;` s'il y en a, sinon sur les espaces (pas de guillemets) ;
+/// - casse ignorée, accents **non** ignorés (`StringComparison.OrdinalIgnoreCase`).
+///
+/// Non repris : les requêtes commençant par `NOT` ou `MATCH` (langage des listes
+/// intelligentes) sont cherchées comme de simples mots.
+///
+/// Même correctif que `tri::filtrer` de la branche Tauri (ancienne version : une douzaine de
+/// champs seulement, mots répartis sur plusieurs champs, « thanos » 130 livres au lieu de 483).
+///
+/// Renvoie, dans l'ordre de `candidates`, ceux qui correspondent ; recherche vide = tous.
+pub fn filter(books: &[LibraryBook], candidates: Vec<usize>, search: &str) -> Vec<usize> {
+    if search.trim().is_empty() {
+        return candidates;
     }
-    let fields = [
-        &b.series,
-        &b.title,
-        &b.writer,
-        &b.penciller,
-        &b.story_arc,
-        &b.publisher,
-        &b.characters,
-        &b.teams,
-        &b.tags,
-        &b.genre,
-        &b.alternate_series,
-        &b.file,
-    ];
-    let mut hay = b.caption();
-    for f in fields.into_iter().flatten() {
-        hay.push(' ');
-        hay.push_str(f);
-    }
-    if let Some(y) = b.year {
-        hay.push_str(&format!(" {y}"));
-    }
-    let hay = hay.to_lowercase();
-    words.iter().all(|w| hay.contains(w))
+    let query = SmartQuery {
+        mode: Mode::And,
+        matchers: vec![Matcher::value("ComicBookAllPropertiesMatcher", 3, search, "", false, true)],
+        ..Default::default()
+    };
+    query.select(books, candidates)
 }
 
 fn lower(v: &Option<String>) -> String {
@@ -267,6 +272,114 @@ pub fn sort(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn livre(id: &str, series: &str, number: &str) -> LibraryBook {
+        LibraryBook { id: id.into(), series: Some(series.into()), number: Some(number.into()), ..Default::default() }
+    }
+
+    /// Indices retenus par la recherche rapide parmi tous les livres.
+    fn cherche(l: &[LibraryBook], q: &str) -> Vec<usize> {
+        filter(l, (0..l.len()).collect(), q)
+    }
+
+    #[test]
+    fn recherche_par_mots() {
+        let mut b = livre("a", "Thanos", "1");
+        b.publisher = Some("Marvel".into());
+        let l = [b];
+        assert_eq!(cherche(&l, "thanos"), [0]);
+        assert_eq!(cherche(&l, "THANOS"), [0], "casse ignorée");
+        assert_eq!(cherche(&l, ""), [0]);
+        assert_eq!(cherche(&l, "   "), [0]);
+        assert_eq!(cherche(&l, "thanos dc"), [] as [usize; 0]);
+    }
+
+    #[test]
+    fn recherche_dans_resume_personnages_et_autres_champs() {
+        // « thanos » n'apparaît que dans le résumé, les personnages, les notes, etc.
+        let mk = |id: &str| LibraryBook { id: id.into(), series: Some("Avengers".into()), ..Default::default() };
+        let mut l: Vec<LibraryBook> = (0..9).map(|i| mk(&i.to_string())).collect();
+        l[0].summary = Some("Les Vengeurs affrontent Thanos.".into());
+        l[1].characters = Some("Captain America, Thanos".into());
+        l[2].notes = Some("Scanned by thanos-team".into());
+        l[3].locations = Some("Titan, Thanos' ship".into());
+        l[4].main_character_or_team = Some("Thanos".into());
+        l[5].scan_information = Some("THANOS-DCP".into());
+        l[6].review = Some("Le meilleur Thanos".into());
+        l[7].series_group = Some("Thanos Saga".into());
+        // l[8] : aucun champ ne mentionne Thanos.
+        assert_eq!(cherche(&l, "thanos"), [0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn tous_les_mots_dans_un_meme_champ() {
+        // ComicRack : « contient tous les mots » est testé champ par champ.
+        let mut a = livre("a", "Thanos", "1");
+        a.publisher = Some("Marvel".into());
+        let mut b = livre("b", "Avengers", "1");
+        b.summary = Some("Thanos attaque la Terre (Marvel)".into());
+        let l = [a, b];
+        assert_eq!(cherche(&l, "thanos marvel"), [1], "mots répartis sur deux champs : non retenu");
+        assert_eq!(cherche(&l, "marvel thanos"), [1], "ordre des mots indifférent");
+    }
+
+    #[test]
+    fn decoupage_virgules_et_accents() {
+        let mut a = livre("a", "Silver Surfer", "1");
+        a.summary = Some("Le Surfeur d'argent rencontre Galactus".into());
+        let mut b = livre("b", "Héros", "1");
+        b.title = Some("Été".into());
+        let mut c = livre("c", "Infinity Gauntlet", "1");
+        c.characters = Some("Adam Warlock, Thanos".into());
+        let l = [a, b, c];
+        // Avec une virgule, découpage sur la virgule seulement : « silver surfer » reste un seul mot.
+        assert_eq!(cherche(&l, "silver surfer, galactus"), [] as [usize; 0]);
+        assert_eq!(cherche(&l, "silver surfer"), [0]);
+        assert_eq!(cherche(&l, "argent;galactus"), [0]);
+        assert_eq!(cherche(&l, "adam warlock, thanos"), [2], "les deux dans les personnages");
+        assert_eq!(cherche(&l, "infinity gauntlet, thanos"), [] as [usize; 0], "série et personnages : deux champs");
+        // Accents non ignorés (OrdinalIgnoreCase), casse ignorée.
+        assert_eq!(cherche(&l, "ÉTÉ"), [1]);
+        assert_eq!(cherche(&l, "ete"), [] as [usize; 0]);
+    }
+
+    #[test]
+    fn recherche_numero_annee_fichier_et_candidats() {
+        let mut a = livre("a", "Infinity Gauntlet", "3");
+        a.year = Some(1991);
+        a.file = Some(r"D:\BD\Marvel\Infinity Gauntlet 003.cbz".into());
+        let b = livre("b", "Infinity Gauntlet", "4");
+        let l = [a, b];
+        assert_eq!(cherche(&l, "1991"), [0]);
+        assert_eq!(cherche(&l, "bd\\marvel"), [0], "chemin complet du fichier");
+        // Ordre et sous-ensemble des candidats (liste affichée) conservés.
+        assert_eq!(filter(&l, vec![1, 0], "gauntlet"), [1, 0]);
+        assert_eq!(filter(&l, vec![1], "gauntlet"), [1]);
+    }
+
+    /// Recherche en direct : 5 000 livres bien remplis filtrés à chaque frappe sans gel.
+    #[test]
+    fn recherche_rapide_sur_5000_livres() {
+        let l: Vec<LibraryBook> = (0..5000)
+            .map(|i| LibraryBook {
+                id: format!("{i}"),
+                series: Some(format!("Série {}", i % 300)),
+                number: Some(format!("{}", i % 50)),
+                title: Some(format!("Titre du numéro {i}")),
+                writer: Some("Jim Starlin".into()),
+                penciller: Some("George Pérez".into()),
+                summary: Some("Un long résumé qui raconte toute l'histoire, avec Thanos ".repeat(8)),
+                characters: Some("Adam Warlock, Gamora, Pip, Drax".into()),
+                file: Some(format!(r"D:\BD\Marvel\Série {}\{i:05}.cbz", i % 300)),
+                ..Default::default()
+            })
+            .collect();
+        let t = std::time::Instant::now();
+        let n = cherche(&l, "infinity gauntlet").len();
+        let ms = t.elapsed().as_millis();
+        assert_eq!(n, 0);
+        assert!(ms < 2000, "recherche sur 5 000 livres : {ms} ms");
+    }
 
     #[test]
     fn read_state_groups() {

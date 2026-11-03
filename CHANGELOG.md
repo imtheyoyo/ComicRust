@@ -5,6 +5,24 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.8] — 2026-11-03
+
+### Corrections
+- **Recherche rapide de la bibliothèque fidèle à ComicRack** : elle ne regardait qu'une
+  douzaine de champs (série, titre, scénariste, dessinateur, arc, éditeur, personnages,
+  équipes, étiquettes, genre, série alternative, fichier). Les livres où le mot n'apparaît que
+  dans le résumé, les notes, la critique, les lieux, le personnage principal, le groupe de
+  séries, les infos de scan… étaient oubliés (« thanos » : 130 livres au lieu de 483).
+  Elle suit désormais la boîte de recherche de ComicRack en mode « Tout » :
+  - tous les champs de « Toutes les propriétés » sont examinés ;
+  - un livre est retenu si **un même champ** contient **tous** les mots ;
+  - les mots sont séparés par `,` ou `;` s'il y en a, sinon par les espaces
+    (« infinity gauntlet, thanos ») ;
+  - majuscules et minuscules sont confondues, les accents ne le sont pas.
+
+### Recette
+[recette/v0.10.8.md](recette/v0.10.8.md).
+
 ## [v0.10.7] — 2026-11-01
 
 Correctifs de la v0.10.6 (recette NO-GO).
