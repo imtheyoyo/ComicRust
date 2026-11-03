@@ -1,11 +1,12 @@
 <script lang="ts">
   // Vue Bibliothèque : barre d'outils (recherche, tri, groupement, vue), grille ou tableau
   // virtualisés, panneau de détails et barre d'état. Les données viennent de lister_livres.
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { ClefTri, Groupe } from '../lib/api';
   import { Bibliotheque, type SuiviScan } from '../lib/bibliotheque.svelte';
   import { enregistrerPreference, preferences } from '../lib/prefs';
   import GrilleCouvertures from './GrilleCouvertures.svelte';
+  import Lecteur from './Lecteur.svelte';
   import PanneauDetails from './PanneauDetails.svelte';
   import VueTableau from './VueTableau.svelte';
 
@@ -29,11 +30,11 @@
   const LARGEUR_MAX = 800;
   let largeurDetails = $state(prefs.largeurDetails ?? 320);
   let selection = $state(-1);
-  let message = $state('');
+  /** Livre ouvert dans le lecteur plein écran (identifiant), ou null. */
+  let livreLu = $state<string | null>(null);
   let champRecherche = $state<HTMLInputElement>();
   let saisie = $state('');
   let minuterie: ReturnType<typeof setTimeout> | undefined;
-  let minuterieMessage: ReturnType<typeof setTimeout> | undefined;
 
   const tris: Array<{ id: ClefTri; titre: string }> = [
     { id: 'serie', titre: 'Série' },
@@ -55,7 +56,7 @@
 
   onMount(() => {
     void bib.reinitialiser();
-    return () => { clearTimeout(minuterie); clearTimeout(minuterieMessage); };
+    return () => clearTimeout(minuterie);
   });
 
   // Toute modification d'un réglage d'affichage est enregistrée (avec délai, voir prefs.ts).
@@ -99,9 +100,17 @@
   function ouvrir(i: number) {
     const l = bib.livre(i);
     if (!l) return;
-    message = `Lecteur : disponible à l'étape 2 (« ${l.titre} »).`;
-    clearTimeout(minuterieMessage);
-    minuterieMessage = setTimeout(() => (message = ''), 4000);
+    selection = i;
+    livreLu = l.id;
+  }
+
+  /** Lecteur fermé : l'avancement a changé (lu, page courante), on recharge sans perdre la
+   *  sélection ni le défilement, puis on rend le focus à la liste. */
+  async function lecteurFerme() {
+    livreLu = null;
+    void bib.reinitialiser(false);
+    await tick();
+    document.querySelector<HTMLElement>('[data-testid="grille"], [data-testid="tableau"]')?.focus();
   }
 
   function choisirVue(v: 'grille' | 'tableau') {
@@ -149,6 +158,7 @@
   }
 
   function clavierGlobal(e: KeyboardEvent) {
+    if (livreLu) return; // le lecteur a son propre clavier
     const saisieTexte = (e.target as HTMLElement | null)?.closest('input, textarea, select');
     if ((e.key === '/' && !saisieTexte) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) {
       e.preventDefault();
@@ -258,7 +268,6 @@
       {bib.total.toLocaleString('fr-FR')} livre{bib.total > 1 ? 's' : ''}{bib.params.recherche ? ' (filtré)' : ''}
       {#if selection >= 0}· sélection {(selection + 1).toLocaleString('fr-FR')}{/if}
     </span>
-    {#if message}<span class="message">{message}</span>{/if}
     <span class="espace"></span>
     {#if scan.enCours}
       <span class="scan">
@@ -273,6 +282,12 @@
     {/if}
   </footer>
 </div>
+
+{#if livreLu}
+  {#key livreLu}
+    <Lecteur id={livreLu} onfermer={lecteurFerme} />
+  {/key}
+{/if}
 
 <style>
   .vue { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -299,7 +314,6 @@
     display: flex; align-items: center; gap: 16px; padding: 4px 12px; min-height: 28px; font-size: 12px;
     background: var(--cr-fond-panneau); border-top: 1px solid var(--cr-bordure); color: var(--cr-texte-discret);
   }
-  .message { color: var(--cr-texte); }
   .alerte { color: var(--cr-erreur); }
   .scan { display: flex; align-items: center; gap: 8px; }
   .petite { display: inline-block; width: 140px; height: 8px; overflow: hidden; background: var(--cr-fond-survol); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); }

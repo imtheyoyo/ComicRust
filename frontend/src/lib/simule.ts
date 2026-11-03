@@ -2,7 +2,8 @@
 // tester le front avec 5 000 livres factices. Il imite le contrat IPC de api.ts, y compris la
 // latence et les événements de scan. Rien de ceci n'est utilisé dans la fenêtre Tauri.
 import type {
-  PreferencesVue, ClefTri, EtatBiblio, LivreDetail, LivreResume, RequeteLivres, ReponseLivres, Theme,
+  PreferencesVue, ClefTri, EtatBiblio, LivreDetail, LivreOuvert, LivreResume, PageInfo, RequeteLivres,
+  ReponseLivres, Theme,
 } from './api';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
@@ -181,7 +182,10 @@ let etat: EtatBiblio = {
 };
 // Préférences d'affichage : repli en mémoire (perdues au rechargement). `?prefs=<json>` simule un
 // redémarrage avec des préférences déjà enregistrées ; `window.__comicrustSimule` les expose aux tests.
-const simuleTests: { prefs: PreferencesVue; requetes: RequeteLivres[] } = { prefs: {}, requetes: [] };
+interface Avancement { jeton: string; page: number; termine: boolean }
+const simuleTests: {
+  prefs: PreferencesVue; requetes: RequeteLivres[]; avancements: Avancement[]; ouverts: string[]; fermes: string[];
+} = { prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [] };
 try {
   const brut = new URLSearchParams(location.search).get('prefs');
   if (brut) simuleTests.prefs = JSON.parse(brut) as PreferencesVue;
@@ -189,6 +193,32 @@ try {
   /* paramètre illisible : préférences vides */
 }
 (globalThis as { __comicrustSimule?: typeof simuleTests }).__comicrustSimule = simuleTests;
+
+// ───────────── Lecteur simulé ─────────────
+// Pages factices : la couverture, une double page (paysage) toutes les 9 pages à partir de la 7e
+// (comme l'échantillon de la recette N-09), des pages sans dimensions connues (déduites au
+// chargement), une page supprimée (la 5e) pour les livres d'identifiant pair, et la 12e tournée de
+// 180° pour le livre n° 1. Les livres dont l'identifiant finit par 7 sont marqués manga.
+const sessions = new Map<string, LivreInterne>();
+let numeroSession = 0;
+
+function pagesSimulees(l: LivreInterne): PageInfo[] {
+  const pages: PageInfo[] = [];
+  for (let i = 0; i < l.pages; i++) {
+    const double = i >= 6 && (i - 6) % 9 === 0;
+    const sansDims = i % 13 === 4;
+    pages.push({
+      index: i,
+      largeur: sansDims ? undefined : double ? 2000 : 1000,
+      hauteur: sansDims ? undefined : 1500,
+      double: double && !sansDims,
+      type: i === 0 ? 'FrontCover' : 'Story',
+      supprimee: i === 4 && Number(l.id) % 2 === 0,
+      rotation: l.id === '1' && i === 11 ? 180 : 0,
+    });
+  }
+  return pages;
+}
 
 let dossiers = ['D:\\BD\\Marvel', 'D:\\BD\\Franco-belge', '\\\\NAS\\comics\\Image'];
 
@@ -240,9 +270,36 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'detail_livre': {
       const l = LIVRES[Number(args.id) - 1];
       if (!l) throw new Error('Livre introuvable.');
-      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : 0 };
+      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : Math.round((l.pageCourante / Math.max(1, l.pages - 1)) * 100), pageCourante: l.pageCourante };
       return d;
     }
+    case 'ouvrir_livre': {
+      const l = LIVRES[Number(args.id) - 1];
+      if (!l) throw new Error('Livre introuvable.');
+      if (!l.fichierPresent) throw new Error(`Fichier introuvable : ${l.fichier}`);
+      const jeton = `s${++numeroSession}`;
+      sessions.set(jeton, l);
+      simuleTests.ouverts.push(String(args.id));
+      const ouvert: LivreOuvert = {
+        jeton, id: l.id, titre: l.serie ? `${l.serie} #${l.numero} — ${l.titre}` : l.titre, nbPages: l.pages,
+        pageReprise: l.lu ? 0 : Math.min(l.pageCourante, l.pages - 1), manga: l.id.endsWith('7'),
+        urlBase: `simule://page/${jeton}`, pages: pagesSimulees(l),
+      };
+      return ouvert;
+    }
+    case 'enregistrer_avancement': {
+      const l = sessions.get(args.jeton as string);
+      if (!l) throw new Error('Session de lecture inconnue.');
+      const a = { jeton: args.jeton as string, page: args.page as number, termine: args.termine as boolean };
+      simuleTests.avancements.push(a);
+      l.pageCourante = a.page;
+      if (a.termine) l.lu = true;
+      return null;
+    }
+    case 'fermer_livre':
+      sessions.delete(args.jeton as string);
+      simuleTests.fermes.push(args.jeton as string);
+      return null;
     case 'lister_dossiers':
       return dossiers.slice();
     case 'ajouter_dossier':

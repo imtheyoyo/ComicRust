@@ -2,7 +2,9 @@
 // Mode portable strict : elles sont gardées par le backend dans data\comicrust-tauri.json (section
 // `vue`), jamais dans le localStorage de la WebView. Chargées une fois au démarrage (avant le premier
 // lister_livres), puis enregistrées avec un délai pour regrouper les changements rapides.
-import { dansTauri, enregistrerPreferencesVue, lirePreferencesVue, type PreferencesVue } from './api';
+import {
+  dansTauri, enregistrerPreferencesVue, lirePreferencesVue, type PreferencesLecteur, type PreferencesVue,
+} from './api';
 
 /** Délai d'enregistrement après le dernier changement (ms). */
 export const DELAI_ENREGISTREMENT = 400;
@@ -67,6 +69,26 @@ export function enregistrerPreference(patch: PreferencesVue): void {
     change = true;
   }
   if (!change) return;
+  clearTimeout(minuterie);
+  minuterie = setTimeout(vider, DELAI_ENREGISTREMENT);
+}
+
+/** Réglages du lecteur mémorisés (sous-objet `lecteur`). */
+export function reglagesLecteur(): PreferencesLecteur {
+  return { ...(courantes.lecteur ?? {}) };
+}
+
+/** Fusionne les réglages du lecteur et programme l'enregistrement du sous-objet `lecteur` complet
+ *  (le backend fusionne les champs de premier niveau : le sous-objet est donc envoyé en entier). */
+export function enregistrerReglagesLecteur(patch: PreferencesLecteur): void {
+  const avant = courantes.lecteur ?? {};
+  const apres: PreferencesLecteur = { ...avant };
+  for (const [c, v] of Object.entries(patch)) {
+    if (v !== undefined) (apres as Record<string, unknown>)[c] = v;
+  }
+  if (JSON.stringify(apres) === JSON.stringify(avant)) return;
+  courantes.lecteur = apres;
+  enAttente.lecteur = { ...apres };
   clearTimeout(minuterie);
   minuterie = setTimeout(vider, DELAI_ENREGISTREMENT);
 }
