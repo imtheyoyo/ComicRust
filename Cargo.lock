@@ -1191,8 +1191,10 @@ dependencies = [
 name = "comicrust-tauri"
 version = "0.3.0"
 dependencies = [
+ "chrono",
  "comicrust-core",
  "image",
+ "mysql",
  "natord",
  "serde",
  "serde_json",

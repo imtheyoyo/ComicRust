@@ -7,7 +7,7 @@
 //! plan : on ne touche pas à `crates/comicrust`).
 
 use crate::couvertures;
-use crate::reglages::{self, Mode, PreferencesVue, Reglages};
+use crate::reglages::{self, Mode, Reglages};
 use crate::tri::{self, ClefTri, Regroupement};
 use comicrust_core::db::{ComicDatabase, DbConfig};
 use comicrust_core::library::LibraryBook;
@@ -225,6 +225,21 @@ struct Interne {
     generation: u64,
     vue: Option<(CleVue, Arc<Vec<usize>>)>,
     scan_en_cours: bool,
+    /// Mode lié à ComicRack par MySQL : paramètres de connexion (en mémoire seulement, relus
+    /// dans `ComicRack.ini` à chaque ouverture ; jamais écrits dans les réglages).
+    comicrack: Option<DbConfig>,
+}
+
+/// D'où vient la bibliothèque ouverte (pour l'édition : où écrire).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SourceBiblio {
+    /// Base de ComicRust.
+    Autonome(StoreConfig),
+    /// Base MySQL de ComicRack.
+    ComicrackMysql(DbConfig),
+    /// `ComicDb.xml` de ComicRack.
+    ComicrackXml,
+    Aucune,
 }
 
 /// Bibliothèque ouverte, partageable entre les commandes et les fils (clonage bon marché).
@@ -235,6 +250,9 @@ pub struct Biblio {
     pool: Arc<couvertures::Pool>,
     /// Cache négatif : identifiants dont la couverture a échoué, avec l'heure de l'échec.
     negatif: Arc<Mutex<HashMap<String, Instant>>>,
+    /// Révision de la couverture des livres modifiés (ajoutée à `urlCouverture` : la WebView
+    /// garde une heure l'image d'une même URL).
+    revisions: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 /// Durée pendant laquelle un échec de couverture n'est pas retenté.
@@ -260,7 +278,13 @@ impl Biblio {
             interne: Arc::default(),
             pool: Arc::new(couvertures::Pool::nouveau(couvertures::FILS)),
             negatif: Arc::default(),
+            revisions: Arc::default(),
         }
+    }
+
+    /// Dossier `data\` portable.
+    pub fn data(&self) -> &Path {
+        &self.data
     }
 
     fn verrou(&self) -> MutexGuard<'_, Interne> {
@@ -287,9 +311,10 @@ impl Biblio {
         let Some(mode) = r.mode else {
             return Ok(EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: true });
         };
-        let (base, store) = charger(&self.data, &r)?;
+        let (base, store, cr) = charger(&self.data, &r)?;
         let nb = base.len();
         self.installer(mode, base, store);
+        self.verrou().comicrack = cr;
         Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false })
     }
 
@@ -302,7 +327,7 @@ impl Biblio {
                 // Crée la base (schéma) : seul endroit où un fichier absent est créé.
                 let cfg = config_autonome(&self.data);
                 Store::open(&cfg).map_err(|e| e.to_string())?;
-                Reglages { mode: Some(Mode::Autonome), chemin_ini: None, vue: PreferencesVue::default() }
+                Reglages { mode: Some(Mode::Autonome), ..Default::default() }
             }
             Mode::Comicrack => {
                 let saisi = choix.chemin_ini.as_deref().map(nettoyer_chemin).filter(|s| !s.is_empty());
@@ -316,11 +341,11 @@ impl Biblio {
                 if !chemin.is_file() {
                     return Err(format!("fichier introuvable : {}", chemin.display()));
                 }
-                Reglages { mode: Some(Mode::Comicrack), chemin_ini: Some(chemin), vue: PreferencesVue::default() }
+                Reglages { mode: Some(Mode::Comicrack), chemin_ini: Some(chemin), ..Default::default() }
             }
         };
         // Charge d'abord : un choix qui échoue (MySQL injoignable…) n'est pas enregistré.
-        let (base, store) = charger(&self.data, &r)?;
+        let (base, store, cr) = charger(&self.data, &r)?;
         if r.mode == Some(Mode::Comicrack) && base.is_empty() {
             return Err("cette bibliothèque ComicRack ne contient aucun livre \
                         (ComicRack utilise sans doute une base MySQL : indique son ComicRack.ini)"
@@ -333,6 +358,7 @@ impl Biblio {
         })?;
         let nb = base.len();
         self.installer(choix.mode, base, store);
+        self.verrou().comicrack = cr;
         Ok(EtatBiblio { mode: choix.mode, nb_livres: nb, premier_demarrage: false })
     }
 
@@ -348,13 +374,14 @@ impl Biblio {
         g.mode = Some(mode);
         g.base = Some(Arc::new(base));
         g.store = store;
+        g.comicrack = None;
         g.generation += 1;
         g.vue = None;
         drop(g);
         self.negatif.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
-    fn base(&self) -> Result<Arc<ComicDatabase>, String> {
+    pub(crate) fn base(&self) -> Result<Arc<ComicDatabase>, String> {
         self.verrou().base.clone().ok_or_else(|| "aucune bibliothèque ouverte".to_string())
     }
 
@@ -400,7 +427,15 @@ impl Biblio {
         let total = vue.len();
         let debut = req.debut.min(total);
         let fin = debut.saturating_add(req.nombre.min(NOMBRE_MAX)).min(total);
-        let livres = vue[debut..fin].iter().map(|&i| resume(&base.books[i])).collect();
+        let revs = self.revisions.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let livres = vue[debut..fin]
+            .iter()
+            .map(|&i| {
+                let mut r = resume(&base.books[i]);
+                r.url_couverture = avec_revision(r.url_couverture, revs.get(&r.id.to_ascii_lowercase()));
+                r
+            })
+            .collect();
         Ok(PageLivres { total, livres })
     }
 
@@ -409,6 +444,7 @@ impl Biblio {
         let base = self.base()?;
         let b = base.get(id).ok_or_else(|| format!("livre introuvable : {id}"))?;
         let mut d = detail(b);
+        d.url_couverture = self.url_couverture(&d.id);
         // Le disque (souvent un partage réseau) peut ne plus répondre : délai maximal.
         if let Some(f) = d.fichier.clone() {
             d.fichier_present = fichier_existe(PathBuf::from(f), DELAI_FICHIER);
@@ -629,9 +665,80 @@ impl Biblio {
     }
 }
 
-// ───────────────────────────── Pour le lecteur ─────────────────────────────
+// ───────────────────────────── Pour le lecteur et l'édition ─────────────────────────────
 
 impl Biblio {
+    /// URL de la couverture d'un livre, révision comprise.
+    pub fn url_couverture(&self, id: &str) -> String {
+        let rev = self.revisions.lock().unwrap_or_else(|e| e.into_inner()).get(&id.to_ascii_lowercase()).copied();
+        avec_revision(url_couverture(id), rev.as_ref())
+    }
+
+    /// Source de la bibliothèque ouverte.
+    pub fn source(&self) -> SourceBiblio {
+        let g = self.verrou();
+        match (g.mode, &g.store, &g.comicrack) {
+            (Some(Mode::Autonome), Some(c), _) => SourceBiblio::Autonome(c.clone()),
+            (Some(Mode::Comicrack), _, Some(c)) => SourceBiblio::ComicrackMysql(c.clone()),
+            (Some(Mode::Comicrack), _, None) if g.base.is_some() => SourceBiblio::ComicrackXml,
+            _ => SourceBiblio::Aucune,
+        }
+    }
+
+    /// Mode lié MySQL : paramètres de connexion (tests).
+    #[cfg(test)]
+    pub(crate) fn installer_comicrack_mysql(&self, cfg: DbConfig) {
+        self.verrou().comicrack = Some(cfg);
+    }
+
+    /// Base MySQL de ComicRack où écrire, si l'option « Lecture et écriture » est choisie
+    /// (`comicrack_write_config` de la version egui).
+    pub fn config_comicrack_ecriture(&self) -> Option<DbConfig> {
+        let SourceBiblio::ComicrackMysql(cfg) = self.source() else { return None };
+        let ecriture = reglages::lire(&self.data).ok()?.edition.ecriture_comicrack.unwrap_or(false);
+        ecriture.then_some(cfg)
+    }
+
+    /// Une analyse est-elle en cours ?
+    pub fn analyse_en_cours(&self) -> bool {
+        self.verrou().scan_en_cours
+    }
+
+    /// Reporte dans la bibliothèque affichée des fiches relues après écriture (la plus récente
+    /// l'emporte) ; avec `couvertures`, leurs couvertures sont oubliées (cache disque, cache
+    /// négatif, révision de l'URL). Renvoie les identifiants mis à jour.
+    pub fn remplacer_fiches(&self, fiches: &[LibraryBook], couvertures: bool) -> Vec<String> {
+        let mut faits = Vec::new();
+        {
+            let mut g = self.verrou();
+            if let Some(base) = g.base.as_mut() {
+                let base = Arc::make_mut(base);
+                for f in fiches {
+                    if let Some(b) = base.get_mut(&f.id) {
+                        *b = f.clone();
+                        faits.push(f.id.clone());
+                    }
+                }
+            }
+            if !faits.is_empty() {
+                g.vue = None;
+            }
+        }
+        for f in fiches.iter().filter(|f| couvertures && faits.contains(&f.id)) {
+            self.oublier_couverture(&f.id, f.front_cover_image());
+        }
+        faits
+    }
+
+    /// Couverture d'un livre à refaire (fichier réécrit, converti, déplacé).
+    pub fn oublier_couverture(&self, id: &str, image: usize) {
+        let cache = self.dossier_couvertures();
+        for i in [0, image] {
+            let _ = std::fs::remove_file(cache.join(couvertures::nom_cache(id, i)));
+        }
+        self.negatif.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        *self.revisions.lock().unwrap_or_else(|e| e.into_inner()).entry(id.to_ascii_lowercase()).or_insert(0) += 1;
+    }
     /// Fiche d'un livre (copie), si une bibliothèque est ouverte.
     pub fn livre(&self, id: &str) -> Option<LibraryBook> {
         self.verrou().base.as_ref()?.get(id).cloned()
@@ -707,31 +814,41 @@ fn nettoyer_chemin(s: &str) -> String {
     s.trim().trim_matches('"').trim().to_string()
 }
 
+/// URL avec la révision de la couverture (`?v=n`), si elle a changé.
+fn avec_revision(url: String, rev: Option<&u32>) -> String {
+    match rev {
+        Some(n) if *n > 0 => format!("{url}?v={n}"),
+        _ => url,
+    }
+}
+
+/// Bibliothèque chargée : livres, base ComicRust (autonome), connexion MySQL (ComicRack).
+type Chargee = (ComicDatabase, Option<StoreConfig>, Option<DbConfig>);
+
 /// Charge la bibliothèque décrite par les réglages (dans le fil de l'appelant).
-fn charger(data: &Path, r: &Reglages) -> Result<(ComicDatabase, Option<StoreConfig>), String> {
+fn charger(data: &Path, r: &Reglages) -> Result<Chargee, String> {
     match r.mode {
         None => Err("aucun mode choisi".into()),
         Some(Mode::Autonome) => {
             let cfg = config_autonome(data);
             let base = Store::open_existing(&cfg).and_then(|mut s| s.load(None)).map_err(|e| e.to_string())?;
-            Ok((base, Some(cfg)))
+            Ok((base, Some(cfg), None))
         }
         Some(Mode::Comicrack) => {
             let chemin = r.chemin_ini.as_deref().ok_or("ComicRack.ini non indiqué")?;
             let xml = chemin.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("xml"));
-            let base = if xml {
-                charger_comicdb_xml(chemin)?
-            } else {
-                let cfg = DbConfig::from_comicrack_ini(chemin).map_err(|e| e.to_string())?;
-                ComicDatabase::load(&cfg, None).map_err(|e| {
-                    if cfg.password.is_empty() {
-                        format!("{e}\n\nAucun mot de passe dans ce ComicRack.ini : la base ne peut pas être ouverte.")
-                    } else {
-                        e.to_string()
-                    }
-                })?
-            };
-            Ok((base, None))
+            if xml {
+                return Ok((charger_comicdb_xml(chemin)?, None, None));
+            }
+            let cfg = DbConfig::from_comicrack_ini(chemin).map_err(|e| e.to_string())?;
+            let base = ComicDatabase::load(&cfg, None).map_err(|e| {
+                if cfg.password.is_empty() {
+                    format!("{e}\n\nAucun mot de passe dans ce ComicRack.ini : la base ne peut pas être ouverte.")
+                } else {
+                    e.to_string()
+                }
+            })?;
+            Ok((base, None, Some(cfg)))
         }
     }
 }

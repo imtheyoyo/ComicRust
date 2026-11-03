@@ -36,6 +36,90 @@ pub struct Reglages {
     /// Préférences d'affichage (absentes = valeurs par défaut du front).
     #[serde(skip_serializing_if = "PreferencesVue::est_vide")]
     pub vue: PreferencesVue,
+    /// Réglages de l'édition (infos, fichiers, écriture dans ComicRack).
+    #[serde(skip_serializing_if = "ReglagesEdition::est_vide")]
+    pub edition: ReglagesEdition,
+}
+
+/// Réglages de l'édition (section `edition`, `ReglagesEdition` de `docs/tauri/ipc-edition.md`).
+///
+/// `ecriture_comicrack` est l'option « Lecture et écriture » du mode lié de la version egui
+/// (`Settings::comicrack_write`, faux par défaut : lecture seule) ; `ecrire_dans_fichier` la case
+/// « Écrire aussi les infos dans le fichier » (`info_write_file`) ; `ranger_original` le choix
+/// « ranger l'original dans _originaux » (`move_converted_original`). Lecture tolérante, comme
+/// [`PreferencesVue`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReglagesEdition {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ecriture_comicrack: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ecrire_dans_fichier: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranger_original: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modele_nom: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dossier_cible: Option<String>,
+}
+
+impl ReglagesEdition {
+    pub fn est_vide(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Depuis du JSON quelconque (champ invalide ignoré).
+    pub fn depuis_json(v: &Value) -> Self {
+        let Some(o) = v.as_object() else { return Self::default() };
+        let booleen = |c: &str| o.get(c).and_then(Value::as_bool);
+        let texte = |c: &str| o.get(c).and_then(Value::as_str).filter(|s| s.len() <= 4096).map(str::to_string);
+        Self {
+            ecriture_comicrack: booleen("ecritureComicrack"),
+            ecrire_dans_fichier: booleen("ecrireDansFichier"),
+            ranger_original: booleen("rangerOriginal"),
+            modele_nom: texte("modeleNom"),
+            dossier_cible: texte("dossierCible"),
+        }
+    }
+
+    /// Applique les champs présents de `m`.
+    pub fn fusionner(&mut self, m: ReglagesEdition) {
+        macro_rules! prendre {
+            ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
+        }
+        prendre!(ecriture_comicrack, ecrire_dans_fichier, ranger_original, modele_nom, dossier_cible);
+    }
+}
+
+impl<'de> Deserialize<'de> for ReglagesEdition {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::depuis_json(&Value::deserialize(d)?))
+    }
+}
+
+/// Réglages de l'édition vus par le front : valeurs par défaut remplies.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReglagesEditionComplets {
+    pub ecriture_comicrack: bool,
+    pub ecrire_dans_fichier: bool,
+    pub ranger_original: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modele_nom: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dossier_cible: Option<String>,
+}
+
+impl From<&ReglagesEdition> for ReglagesEditionComplets {
+    fn from(r: &ReglagesEdition) -> Self {
+        Self {
+            ecriture_comicrack: r.ecriture_comicrack.unwrap_or(false),
+            ecrire_dans_fichier: r.ecrire_dans_fichier.unwrap_or(false),
+            ranger_original: r.ranger_original.unwrap_or(false),
+            modele_nom: r.modele_nom.clone(),
+            dossier_cible: r.dossier_cible.clone(),
+        }
+    }
 }
 
 /// Clés de tri connues du front (`ClefTri` de `frontend/src/lib/api.ts`).
@@ -251,6 +335,19 @@ pub fn lire_preferences_vue(data: &Path) -> Result<PreferencesVue, String> {
     Ok(lire(data)?.vue)
 }
 
+/// Réglages de l'édition (valeurs par défaut si rien n'est enregistré).
+pub fn lire_reglages_edition(data: &Path) -> Result<ReglagesEditionComplets, String> {
+    Ok((&lire(data)?.edition).into())
+}
+
+/// Fusionne `m` dans les réglages de l'édition ; renvoie l'ensemble à jour.
+pub fn enregistrer_reglages_edition(data: &Path, m: ReglagesEdition) -> Result<ReglagesEditionComplets, String> {
+    modifier(data, |r| {
+        r.edition.fusionner(m);
+        (&r.edition).into()
+    })
+}
+
 /// Fusionne `m` dans les préférences enregistrées ; renvoie les préférences à jour.
 pub fn enregistrer_preferences_vue(data: &Path, m: PreferencesVue) -> Result<PreferencesVue, String> {
     modifier(data, |r| {
@@ -271,6 +368,7 @@ mod tests {
             mode: Some(Mode::Comicrack),
             chemin_ini: Some("C:/CR/ComicRack.ini".into()),
             vue: PreferencesVue::default(),
+            edition: ReglagesEdition::default(),
         };
         ecrire(d.path(), &r).unwrap();
         assert_eq!(lire(d.path()).unwrap(), r);
@@ -385,6 +483,36 @@ mod tests {
         let json: Value = serde_json::from_str(r#"{"lecteur":{"mode":"defilement"}}"#).unwrap();
         let apres = enregistrer_preferences_vue(d.path(), PreferencesVue::depuis_json(&json)).unwrap();
         assert_eq!(apres.lecteur, Some(PreferencesLecteur { mode: Some("defilement".into()), ..Default::default() }));
+    }
+
+    #[test]
+    fn reglages_edition_defaut_fusion_et_tolerance() {
+        let d = tempfile::tempdir().unwrap();
+        let r = lire_reglages_edition(d.path()).unwrap();
+        assert!(!r.ecriture_comicrack && !r.ecrire_dans_fichier && !r.ranger_original, "lecture seule par défaut");
+        enregistrer_preferences_vue(d.path(), PreferencesVue { tri: Some("titre".into()), ..Default::default() })
+            .unwrap();
+        let m = ReglagesEdition {
+            ecriture_comicrack: Some(true),
+            modele_nom: Some("{series}".into()),
+            ..Default::default()
+        };
+        let r = enregistrer_reglages_edition(d.path(), m).unwrap();
+        assert!(r.ecriture_comicrack && !r.ecrire_dans_fichier);
+        let r = enregistrer_reglages_edition(
+            d.path(),
+            ReglagesEdition { ecrire_dans_fichier: Some(true), ..Default::default() },
+        )
+        .unwrap();
+        assert!(r.ecriture_comicrack && r.ecrire_dans_fichier && r.modele_nom.as_deref() == Some("{series}"));
+        assert_eq!(lire_preferences_vue(d.path()).unwrap().tri.as_deref(), Some("titre"));
+        let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
+        assert!(texte.contains("\"ecritureComicrack\": true"), "{texte}");
+        // Valeurs d'un mauvais type ignorées.
+        std::fs::write(chemin_reglages(d.path()), r#"{"edition":{"ecritureComicrack":"oui","rangerOriginal":true}}"#)
+            .unwrap();
+        let r = lire_reglages_edition(d.path()).unwrap();
+        assert!(!r.ecriture_comicrack && r.ranger_original);
     }
 
     #[test]

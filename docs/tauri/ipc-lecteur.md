@@ -111,9 +111,12 @@ Repris de la version egui (`remember_position`, `store_progress`) :
    page la plus loin vue ; avec `termine`, la dernière page lue), `Opened` = maintenant,
    `OpenCount + 1`. La bibliothèque affichée (`lister_livres`, `detail_livre`) est mise à jour sans
    rechargement.
-3. **Mode lié à ComicRack** : lecture seule, **rien n'est écrit dans ComicRack** (comme la version
-   egui sans l'option « écriture dans ComicRack », qui arrive avec l'étape 6) : seule la mémoire
-   locale garde la lecture.
+3. **Mode lié à ComicRack** : par défaut lecture seule, **rien n'est écrit dans ComicRack** ; seule
+   la mémoire locale garde la lecture. Avec l'option « Lecture et écriture » (réglage
+   `edition.ecritureComicrack`, base MySQL seulement, voir `ipc-edition.md`), la lecture est écrite
+   dans la fiche ComicRack au même moment que ci-dessus (`CurrentPage`, `LastPageRead` jamais
+   reculée, `Opened`, `OpenCount + 1`, `NewPages = 0`, `PageCount` s'il manque), comme la version
+   egui ; une erreur d'écriture est rendue par `fermer_livre` (la lecture reste dans la mémoire locale).
 
 **Reprise** à l'ouverture (`Start::Auto` de la version egui) : page de ComicRust (mémoire locale)
 sinon page de la fiche (`CurrentPage` : base ComicRust en autonome, base ComicRack en mode lié) ;

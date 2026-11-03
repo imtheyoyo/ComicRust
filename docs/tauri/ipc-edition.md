@@ -156,7 +156,9 @@ Rien n'est écrit pour un champ non envoyé ; un champ envoyé égal à la valeu
 dossier (pages recopiées sans recompression), vérifiée, puis **remplacement atomique** de l'original
 (nouvelles tentatives pendant ~3 s si le fichier est momentanément refusé : antivirus, partage SMB,
 ComicRack). Aucun fichier n'est gardé ouvert ; les livres ouverts dans le lecteur relisent le fichier
-à la page suivante. Couvertures en cache et pages en cache du livre sont oubliées après l'écriture.
+à la page suivante. Couvertures en cache et pages en cache du livre sont oubliées après l'écriture :
+l'`urlCouverture` d'un livre dont la couverture a pu changer reçoit un suffixe `?v=<n>` (la WebView
+garde une heure l'image d'une même URL) ; le front l'utilise toujours telle quelle.
 
 ## Renommage et déplacement
 
@@ -260,4 +262,7 @@ Une seule opération d'édition à la fois (sinon erreur « une opération est d
   ci-dessus est propre à Tauri (seuil de la confirmation des retraits en masse).
 - Lecture seule (ComicRack) : la version egui garde une table « converti → CBZ » dans ses réglages pour
   ranger l'original ; ici `rangerOriginal` est refusé en lecture seule (l'original reste en place).
+- Écritures « Fichiers » non reportées dans ComicRack (base injoignable, conflit) : la version egui les
+  garde dans ses réglages et les refait au lancement suivant ; ici elles sont signalées en erreur dans le
+  bilan (le fichier, lui, est bien écrit ; relancer « Écrire les infos » refait le report).
 - Onglet « Pages » et scripts `Editor` : étapes 4 et 7.

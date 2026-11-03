@@ -7,6 +7,7 @@
 //!   [`tri`] ; [`reglages`]),
 //! - le lecteur ([`lecteur`] : livres ouverts, pages du protocole `cr-page`, avancement ;
 //!   [`avancement`] : mémoire locale de lecture),
+//! - l'édition ([`edition`] : infos des livres, ComicInfo.xml, conversion en CBZ, renommage),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
 //! Le code sans dépendance à Tauri est compilé et testé partout (Linux compris) ; la fenêtre
@@ -15,6 +16,7 @@
 pub mod avancement;
 pub mod biblio;
 pub mod couvertures;
+pub mod edition;
 pub mod lecteur;
 pub mod portable;
 pub mod reglages;

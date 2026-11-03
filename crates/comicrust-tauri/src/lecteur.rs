@@ -20,11 +20,14 @@
 //! - Avancement : page courante notée à chaque appel dans `data\avancement.json` (tous modes,
 //!   comme `last_pages` / `read_progress` de la version egui) ; **base de ComicRust** écrite une
 //!   fois par séance (fermeture du livre, fin du livre, fermeture de l'application) en mode
-//!   autonome. Mode lié à ComicRack : lecture seule, rien n'est écrit dans ComicRack (comme la
-//!   version egui sans l'option « écriture dans ComicRack », qui n'existe pas encore ici).
+//!   autonome. Mode lié à ComicRack MySQL avec l'option « Lecture et écriture » (réglage
+//!   `edition.ecritureComicrack`) : la lecture est écrite dans la fiche ComicRack au même moment,
+//!   comme `write_reading_to_comicrack` de la version egui (`library/comicrack_write.rs`) ;
+//!   sans l'option (défaut), rien n'est écrit dans ComicRack.
 
 use crate::avancement::Memoire;
 use crate::biblio::Biblio;
+use comicrust_core::db::{BookEdit, Value};
 use comicrust_core::library::{LibraryBook, PageInfo as PageFiche};
 use comicrust_core::pages::{self, ReadingPage};
 use comicrust_core::providers::on_demand::file_stamp;
@@ -608,6 +611,8 @@ struct Session {
     plus_loin: usize,
     /// Mode autonome : base où écrire la lecture.
     store: Option<StoreConfig>,
+    /// Heure d'ouverture (`Opened` de la fiche ComicRack).
+    ouvert_a: chrono::DateTime<chrono::FixedOffset>,
     /// Lecture déjà écrite dans la base (une fois par séance, comme `Book::stored`).
     enregistree: bool,
     touchee: Instant,
@@ -616,14 +621,46 @@ struct Session {
 /// Lecture à écrire dans la base (numéros de page du livre).
 struct Ecriture {
     id: String,
-    cfg: StoreConfig,
+    /// Mode autonome : base de ComicRust ; `None` : base ComicRack si l'écriture y est permise.
+    cfg: Option<StoreConfig>,
     courante: u32,
     vue: u32,
+    /// Pages du fichier (0 : inconnu).
+    pages: u32,
+    ouvert_a: chrono::DateTime<chrono::FixedOffset>,
+}
+
+/// Lecture d'un livre dans le lecteur, pour la fiche ComicRack (`Reading` de la version egui).
+#[derive(Debug, Clone, Copy)]
+pub struct LectureComicrack {
+    /// Page courante (à partir de 0).
+    pub courante: u32,
+    /// Page la plus loin affichée pendant cette lecture.
+    pub plus_loin: u32,
+    /// Pages du fichier (0 : inconnu).
+    pub pages: u32,
+    /// Heure d'ouverture du livre.
+    pub ouvert_a: chrono::DateTime<chrono::FixedOffset>,
+}
+
+/// Fiche ComicRack à écrire après une lecture (copie de `reading_edit` de la version egui) :
+/// `CurrentPage`, `LastPageRead` (maximum, jamais reculée), `Opened` + `OpenCount + 1`,
+/// `NewPages = 0`, et `PageCount` seulement s'il manque.
+pub fn edition_lecture_comicrack(fiche: &LibraryBook, l: &LectureComicrack) -> BookEdit {
+    let mut e = BookEdit::new(&fiche.id)
+        .set("CurrentPage", Value::Int(l.courante.into()))
+        .set("LastPageRead", Value::Max(l.plus_loin.max(l.courante).into()))
+        .opened(l.ouvert_a)
+        .set("NewPages", Value::Int(0));
+    if l.pages > 0 && fiche.page_count.unwrap_or(0) == 0 {
+        e = e.set("PageCount", Value::Int(l.pages.into()));
+    }
+    e
 }
 
 impl Session {
     /// Lecture à écrire, une seule fois par séance (marque la séance comme enregistrée).
-    /// `None` : déjà fait, fichier hors bibliothèque, ou mode lié à ComicRack (lecture seule).
+    /// `None` : déjà fait ou fichier hors bibliothèque.
     fn a_ecrire(&mut self) -> Option<Ecriture> {
         if self.enregistree || self.nb == 0 {
             return None;
@@ -631,9 +668,11 @@ impl Session {
         self.enregistree = true;
         Some(Ecriture {
             id: self.id.clone()?,
-            cfg: self.store.clone()?,
+            cfg: self.store.clone(),
             courante: self.courante as u32,
             vue: self.plus_loin as u32,
+            pages: self.total.max(self.nb) as u32,
+            ouvert_a: self.ouvert_a,
         })
     }
 }
@@ -800,6 +839,7 @@ impl Lecteur {
             courante: page_reprise,
             plus_loin: page_reprise,
             store,
+            ouvert_a: comicrust_core::db::write::now(),
             enregistree: false,
             touchee: Instant::now(),
         };
@@ -924,18 +964,59 @@ impl Lecteur {
         }
     }
 
-    /// Mode autonome : écrit dans la base de ComicRust la lecture préparée par
-    /// [`Session::a_ecrire`] (page courante, page la plus loin, date), comme `store_progress`
-    /// de la version egui.
+    /// Oublie les pages en cache des livres ouverts sur `chemin` (fichier réécrit) ; le fil du
+    /// livre relit le fichier à la page suivante (empreinte changée).
+    pub fn oublier_fichier(&self, chemin: &Path) {
+        let jetons: Vec<String> =
+            self.verrou().iter().filter(|(_, s)| meme_chemin(&s.chemin, chemin)).map(|(j, _)| j.clone()).collect();
+        let mut c = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        for j in jetons {
+            c.purger(&j);
+        }
+    }
+
+    /// Écrit la lecture préparée par [`Session::a_ecrire`] : base de ComicRust en mode autonome
+    /// (page courante, page la plus loin, date, comme `store_progress` de la version egui), fiche
+    /// ComicRack en mode lié avec l'option « Lecture et écriture » ; rien sinon.
     fn ecrire_base(&self, e: Ecriture) -> Result<(), String> {
+        let Some(cfg) = e.cfg.clone() else {
+            return self.ecrire_comicrack(&e);
+        };
         let derniere = self.biblio.livre(&e.id).and_then(|f| f.last_page_read).unwrap_or(0).max(e.vue);
         let ouvert = comicrust_core::scanner::now_iso();
-        Store::open_existing(&e.cfg)
+        Store::open_existing(&cfg)
             .and_then(|mut st| st.set_progress(&e.id, e.courante, derniere, &ouvert))
             .map_err(|err| format!("lecture non enregistrée dans la base ComicRust : {err}"))?;
         self.biblio.noter_lecture(&e.id, e.courante, derniere, &ouvert);
         Ok(())
     }
+
+    /// Mode lié, écriture permise : lecture dans la fiche ComicRack (seuls ces éléments sont
+    /// réécrits, protocole des compteurs de `db/write.rs`), fiche relue reportée dans la
+    /// bibliothèque affichée. La lecture reste de toute façon dans `data\avancement.json`.
+    fn ecrire_comicrack(&self, e: &Ecriture) -> Result<(), String> {
+        let Some(cfg) = self.biblio.config_comicrack_ecriture() else { return Ok(()) };
+        let Some(fiche) = self.biblio.livre(&e.id) else { return Ok(()) };
+        let l = LectureComicrack { courante: e.courante, plus_loin: e.vue, pages: e.pages, ouvert_a: e.ouvert_a };
+        let rapport =
+            comicrust_core::db::update_books(&cfg, &[edition_lecture_comicrack(&fiche, &l)]).map_err(|err| {
+                format!("lecture non enregistrée dans la base de ComicRack (gardée dans ComicRust) : {err}")
+            })?;
+        let fraiches: Vec<LibraryBook> = rapport.written.iter().map(|w| w.book.clone()).collect();
+        self.biblio.remplacer_fiches(&fraiches, false);
+        if !rapport.is_complete() {
+            return Err(format!(
+                "lecture non enregistrée dans la base de ComicRack (gardée dans ComicRust) : {}",
+                rapport.summary()
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Même fichier ? (casse ignorée, comme les chemins Windows de la bibliothèque)
+fn meme_chemin(a: &Path, b: &Path) -> bool {
+    a == b || a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
 }
 
 #[cfg(test)]

@@ -33,6 +33,8 @@ serde_json = "1"
 natord = "1.0"
 # Miniatures de couvertures et pages du lecteur (mêmes formats que le cœur ; JPEG/PNG en sortie).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp"] }
+# Dates de lecture écrites dans la base ComicRack (`Opened`), comme le cœur.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { version = "2", optional = true }
 
 [build-dependencies]
@@ -40,4 +42,6 @@ tauri-build = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# Base MySQL de test (COMICRUST_TEST_MYSQL) : tables de ComicRack créées par les tests.
+mysql = { version = "28", default-features = false, features = ["default-rust", "client_ed25519"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }

@@ -3,8 +3,12 @@
 //! aucune règle métier côté front.
 
 use crate::biblio::{self, Biblio, ChoixPremierDemarrage, EtatBiblio, LivreDetail, PageLivres, RequeteLivres};
+use crate::edition::{
+    self, BilanOperation, ChampFiche, ChampModifie, DemandeModification, DemandeRenommage, Edition, ErreurChamp,
+    EvenementEdition, FicheEdition, ModeleNom, Proposition, ResultatRenommage,
+};
 use crate::lecteur::{self, Lecteur, LivreOuvert, ReponsePage};
-use crate::reglages::{self, PreferencesVue};
+use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
 use crate::{infos_application, portable, themes, InfosApplication};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -147,6 +151,118 @@ fn fermer_livre(lecteur: tauri::State<'_, Lecteur>, jeton: String) -> Result<(),
     lecteur.fermer_livre(&jeton)
 }
 
+// ───────────────────────────── Édition ─────────────────────────────
+// Contrat : docs/tauri/ipc-edition.md. Les lots s'exécutent hors du fil principal (commandes
+// `async`) ; la progression et les changements arrivent par événements.
+
+/// Sortie des événements de l'édition vers le front.
+fn sortie_edition(app: tauri::AppHandle) -> impl Fn(EvenementEdition) + Send + Sync {
+    move |e| {
+        let (nom, charge) = e.pour_le_front();
+        let _ = app.emit(nom, charge);
+    }
+}
+
+/// Réglages de l'édition (section `edition` de `data\comicrust-tauri.json`).
+#[tauri::command(async)]
+fn lire_reglages_edition(data: tauri::State<'_, DossierData>) -> Result<ReglagesEditionComplets, String> {
+    reglages::lire_reglages_edition(&data.0)
+}
+
+/// Fusionne les champs fournis dans les réglages de l'édition.
+#[tauri::command(async)]
+fn enregistrer_reglages_edition(
+    data: tauri::State<'_, DossierData>,
+    reglages: ReglagesEdition,
+) -> Result<ReglagesEditionComplets, String> {
+    reglages::enregistrer_reglages_edition(&data.0, reglages)
+}
+
+/// Fiche(s) à modifier (valeurs communes / multiples, onglets, lecture seule).
+#[tauri::command(async)]
+fn lire_fiches(edition: tauri::State<'_, Edition>, ids: Vec<String>) -> Result<FicheEdition, String> {
+    edition.lire_fiches(&ids)
+}
+
+/// Valeurs de la bibliothèque proposées pendant la saisie.
+#[tauri::command(async)]
+fn proposer_valeurs(
+    edition: tauri::State<'_, Edition>,
+    champ: String,
+    texte: String,
+    tout: Option<bool>,
+    max: Option<usize>,
+) -> Result<Vec<Proposition>, String> {
+    edition.proposer_valeurs(&champ, &texte, tout.unwrap_or(false), max)
+}
+
+/// Erreurs des valeurs saisies (vide : tout est accepté).
+#[tauri::command]
+fn verifier_champs(champs: Vec<ChampModifie>) -> Vec<ErreurChamp> {
+    edition::verifier_champs(&champs)
+}
+
+/// Nouvelle valeur personnalisée (vide).
+#[tauri::command]
+fn ajouter_valeur_perso(cle: String, existantes: Vec<String>) -> Result<ChampFiche, String> {
+    edition::nouvelle_valeur_perso(&cle, &existantes)
+}
+
+/// Enregistre les champs modifiés (et les infos dans les fichiers si demandé).
+#[tauri::command(async)]
+fn appliquer_modifications(
+    app: tauri::AppHandle,
+    edition: tauri::State<'_, Edition>,
+    demande: DemandeModification,
+) -> Result<BilanOperation, String> {
+    edition.appliquer_modifications(&demande, &sortie_edition(app))
+}
+
+/// Écrit les infos dans le ComicInfo.xml des CBZ.
+#[tauri::command(async)]
+fn ecrire_infos_fichiers(
+    app: tauri::AppHandle,
+    edition: tauri::State<'_, Edition>,
+    ids: Vec<String>,
+    confirme: Option<bool>,
+) -> Result<BilanOperation, String> {
+    edition.ecrire_infos_fichiers(&ids, confirme.unwrap_or(false), &sortie_edition(app))
+}
+
+/// Convertit les CBR / CB7 / CBT en CBZ.
+#[tauri::command(async)]
+fn convertir_cbr_cbz(
+    app: tauri::AppHandle,
+    edition: tauri::State<'_, Edition>,
+    ids: Vec<String>,
+    ranger_original: Option<bool>,
+    confirme: Option<bool>,
+) -> Result<BilanOperation, String> {
+    edition.convertir_cbr_cbz(&ids, ranger_original, confirme.unwrap_or(false), &sortie_edition(app))
+}
+
+/// Modèles de nom proposés.
+#[tauri::command]
+fn modeles_de_nom() -> Vec<ModeleNom> {
+    edition::modeles_de_nom()
+}
+
+/// Renomme / déplace d'après un modèle (aperçu d'abord).
+#[tauri::command(async)]
+fn renommer_deplacer(
+    app: tauri::AppHandle,
+    edition: tauri::State<'_, Edition>,
+    demande: DemandeRenommage,
+) -> Result<ResultatRenommage, String> {
+    edition.renommer_deplacer(&demande, &sortie_edition(app))
+}
+
+/// Demande l'arrêt du lot en cours (entre deux livres).
+#[tauri::command]
+fn annuler_operation(edition: tauri::State<'_, Edition>) {
+    edition.annuler();
+}
+
 /// Réponse HTTP du protocole `cr-page`.
 fn reponse_page(p: ReponsePage) -> tauri::http::Response<Vec<u8>> {
     // Une URL de page ne vaut que pour une séance (jeton) : gardée par la WebView tant que
@@ -192,8 +308,10 @@ pub fn run() {
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview);
 
     let bibliotheque = Biblio::nouvelle(data.clone());
+    let lecteur = Lecteur::nouveau(data.clone(), bibliotheque.clone());
     tauri::Builder::default()
-        .manage(Lecteur::nouveau(data.clone(), bibliotheque.clone()))
+        .manage(Edition::nouvelle(bibliotheque.clone(), lecteur.clone()))
+        .manage(lecteur)
         .manage(bibliotheque)
         .manage(DossierData(data))
         // Couvertures : `cr-couv://localhost/<id>` (Windows : `http://cr-couv.localhost/<id>`), servies
@@ -244,7 +362,19 @@ pub fn run() {
             ouvrir_fichier,
             url_page_base,
             enregistrer_avancement,
-            fermer_livre
+            fermer_livre,
+            lire_reglages_edition,
+            enregistrer_reglages_edition,
+            lire_fiches,
+            proposer_valeurs,
+            verifier_champs,
+            ajouter_valeur_perso,
+            appliquer_modifications,
+            ecrire_infos_fichiers,
+            convertir_cbr_cbz,
+            modeles_de_nom,
+            renommer_deplacer,
+            annuler_operation
         ])
         .setup(|app| {
             // Thèmes livrés disponibles dès le premier lancement.
