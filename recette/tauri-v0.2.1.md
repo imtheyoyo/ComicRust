@@ -114,8 +114,9 @@ WebView2**.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| Bloquants [B] | 15 | | |
-| Majeurs [M] | 9 | | |
-| Mineurs [m] | 2 | | |
+| Bloquants [B] | 15 | 15 | 0 |
+| Majeurs [M] | 9 | 9 | 0 |
+| Mineurs [m] | 2 | 2 | 0 |
 
 Décision et remarques :
+GO — recette validée le 03/11/2026 : 26 OK sur 26 (rapport : `recette/rapports/tauri-v0.2.1-2026-11-03.txt`). Recherche alignée sur ComicRack : « thanos » 484/483 (la base compte 5 325 livres au lieu de 5 324 lors du comptage), « Centrum » 3/3, R-03 385/385, « infinity gauntlet, thanos » 358/358.
