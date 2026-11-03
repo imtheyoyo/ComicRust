@@ -29,7 +29,7 @@ et à valider **avant de passer à l'étape suivante** du développement.
 | v0.10.5 | [v0.10.5.md](v0.10.5.md) — [page à cocher](https://claude.ai/artifact/XABqksQANyCsYfNvE9Gzng) — [rapport](rapports/v0.10.5-2026-11-01.txt) | **GO** (01/11/2026) : 3/3 OK ; 20/20 champs sur le vrai site |
 | v0.10.6 | [v0.10.6.md](v0.10.6.md) — [page à cocher](https://claude.ai/artifact/LsxtZ1xNmWBWQ39wB1vov5) — [rapport](rapports/v0.10.6-2026-11-01.txt) | **NO-GO** (01/11/2026) : 6/8 ; P-01, B-01 → v0.10.7 |
 | v0.10.7 | [v0.10.7.md](v0.10.7.md) — [page à cocher](https://claude.ai/artifact/LpUNMjMXjRxU2H1i7zANgj) — [rapport](rapports/v0.10.7-2026-11-02.txt) | **GO** (02/11/2026) : 5/5 OK |
-| v0.10.8 | [v0.10.8.md](v0.10.8.md) | en recette |
+| v0.10.8 | [v0.10.8.md](v0.10.8.md) | GO (03/11, 8/8) |
 
 ## Déroulé
 
