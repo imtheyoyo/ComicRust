@@ -5,6 +5,45 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.3.0] — 2026-11-03
+
+Étape 2 de la version **Tauri 2** (branche `tauri2-web`) : le **lecteur**. Voir
+[`docs/tauri/PLAN.md`](docs/tauri/PLAN.md) et le contrat
+[`docs/tauri/ipc-lecteur.md`](docs/tauri/ipc-lecteur.md).
+
+### Nouveautés
+- **Lecteur plein écran** ouvert depuis la bibliothèque (double-clic, Entrée, bouton « Lire ») ou
+  par **« Ouvrir un fichier… »** (chemin d'une BD, d'un dossier d'images ou d'une image ; un
+  fichier de la bibliothèque y garde sa fiche). Échap ou Ctrl+W ferment le lecteur et rendent la
+  main à la liste.
+- **Formats** : CBZ/ZIP, CBR/RAR, CB7/7z, CBT/TAR, PDF, DjVu, WebComic (`.cbw`), dossiers d'images ;
+  pages JPEG, PNG, GIF, WebP, BMP, TIFF, JPEG XL, HEIF/HEIC et AVIF.
+- **Modes** : page simple, **double page** (couverture seule, pages doubles et paysage seules),
+  **défilement vertical continu** (touche V, nouveau par rapport à la version egui), sens
+  **manga** (M, ou automatique d'après la fiche).
+- **Ajustements** page entière / largeur / hauteur / taille réelle (1 à 4), **zoom** (+ − 0,
+  Ctrl+molette autour du pointeur, glisser quand la page déborde), **loupe** (L), **plein écran**
+  (F, F11).
+- **Clavier et souris** comme la version egui : flèches, Espace, Page suiv./préc., Début, Fin,
+  clic sur les tiers de la page, clic droit, molette ; barres masquées automatiquement ;
+  **miniatures** (T) et curseur de pages.
+- **Ordre, pages supprimées et rotation** de la fiche (ComicRack ou ComicRust), à défaut ordre du
+  `ComicInfo.xml` du fichier.
+- **Préchargement** des pages suivantes et de la précédente, cache mémoire borné ; le fichier
+  n'est **jamais gardé ouvert** (on peut le renommer ou le déplacer pendant la lecture) ; NAS muet :
+  message par page, pas de gel.
+- **Reprise de lecture** à la dernière page lue ; en mode lié, fenêtre **« Reprendre la
+  lecture »** quand ComicRack et ce poste n'ont pas retenu la même page (« Toujours faire ce
+  choix » possible).
+- **Avancement** : en mode autonome, écrit dans la base de ComicRust **une fois par séance**
+  (page, page la plus loin, date et nombre d'ouvertures) ; en mode lié, mémorisé seulement dans
+  `data\avancement.json` (**rien n'est écrit dans ComicRack** avant l'étape 6).
+- **Réglages du lecteur mémorisés** (mode, ajustement, couverture seule, miniatures, loupe, manga,
+  choix de reprise) dans `data\comicrust-tauri.json` (`vue.lecteur`).
+
+### Recette
+[recette/tauri-v0.3.0.md](recette/tauri-v0.3.0.md)
+
 ## [tauri-v0.2.1] — 2026-11-02
 
 Correctifs de la tauri-v0.2.0 (recette NO-GO, [rapport](recette/rapports/tauri-v0.2.0-2026-11-02.txt)).

@@ -40,7 +40,7 @@ def parse(md: str) -> dict:
     for line in lines:
         if line.startswith("# "):
             data["title"] = line[2:].strip()
-            m = re.search(r"v\d+\.\d+\.\d+", data["title"])
+            m = re.search(r"(?:tauri-)?v\d+\.\d+\.\d+", data["title"])
             data["version"] = m.group(0) if m else data["title"]
             continue
         if line.startswith("## "):
