@@ -99,10 +99,21 @@ impl Memoire {
             return Ok(a);
         }
         table.insert(cle(fichier), a);
-        let texte = serde_json::to_string(&*table).map_err(|e| e.to_string())?;
         drop(g);
-        ecrire_atomique(&self.data, &self.chemin(), &texte)?;
+        self.ecrire()?;
         Ok(a)
+    }
+
+    /// Écrit la table. Les écritures sont sérialisées et chacune prend la table **au moment
+    /// d'écrire** : deux appels concurrents ne peuvent pas laisser sur le disque l'état le plus
+    /// ancien (la table n'est pas verrouillée pendant l'écriture disque).
+    fn ecrire(&self) -> Result<(), String> {
+        let _v = VERROU.lock().unwrap_or_else(|e| e.into_inner());
+        let texte = {
+            let g = self.charge();
+            serde_json::to_string(g.as_ref().unwrap_or(&HashMap::new())).map_err(|e| e.to_string())?
+        };
+        ecrire_atomique(&self.data, &self.chemin(), &texte)
     }
 }
 
@@ -114,7 +125,6 @@ fn cle(fichier: &Path) -> String {
 static VERROU: Mutex<()> = Mutex::new(());
 
 fn ecrire_atomique(data: &Path, p: &Path, texte: &str) -> Result<(), String> {
-    let _v = VERROU.lock().unwrap_or_else(|e| e.into_inner());
     std::fs::create_dir_all(data).map_err(|e| format!("{} : {e}", data.display()))?;
     let tmp = p.with_extension("json.tmp");
     std::fs::write(&tmp, texte).map_err(|e| format!("{} : {e}", tmp.display()))?;

@@ -7,8 +7,8 @@
   import { onMount, tick, untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import {
-    enregistrerAvancement, fermerLivre, messageErreur, ouvrirLivre, pleinEcran, urlPage, type Ajustement,
-    type LivreOuvert, type ModeLecture, type PageInfo,
+    enregistrerAvancement, fermerLivre, messageErreur, ouvrirFichier, ouvrirLivre, pleinEcran, urlPage,
+    type Ajustement, type ChoixReprise, type LivreOuvert, type ModeLecture, type PageInfo, type SourceLecteur,
   } from '../lib/api';
   import {
     borneZoom, debutPlanche, DIMENSIONS_DEFAUT, dimensionsAffichees, echelleAjustement, largeurDemandee,
@@ -17,11 +17,11 @@
   import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
 
   interface Props {
-    /** Identifiant du livre (LivreResume.id). */
-    id: string;
+    /** Livre de la bibliothèque (`{id}` = LivreResume.id) ou fichier hors bibliothèque (`{chemin}`). */
+    source: SourceLecteur;
     onfermer: () => void;
   }
-  let { id, onfermer }: Props = $props();
+  let { source, onfermer }: Props = $props();
 
   /** Délai avant l'envoi de l'avancement après un changement de page (ms). */
   const DELAI_AVANCEMENT = 800;
@@ -254,7 +254,7 @@
   async function envoyerAvancement(): Promise<void> {
     clearTimeout(minuterieAvancement);
     const a = etatAvancement;
-    if (!livre || !a) return;
+    if (!livre || !a || questionReprise) return;
     termineVu ||= a.termine; // une fois la fin vue, le livre reste « lu » pour cette session
     const clef = `${a.page}/${termineVu}`;
     if (clef === dernierEnvoi) return;
@@ -405,7 +405,7 @@
 
   // ── Clavier (input.rs) ──
   function clavier(e: KeyboardEvent) {
-    if (!livre && e.key !== 'Escape') return;
+    if ((!livre || questionReprise) && e.key !== 'Escape') return;
     const cible = e.target as HTMLElement | null;
     if (cible?.closest('input, select, textarea') && e.key !== 'Escape') return;
     if (e.altKey || ((e.ctrlKey || e.metaKey) && !['w', 'W'].includes(e.key))) return;
@@ -501,12 +501,34 @@
     bandeau.querySelector<HTMLElement>(`[data-miniature="${p}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   });
 
+  // ── Reprise : la bibliothèque et ce poste n'ont pas retenu la même page (windows.rs,
+  // `resume_window` de la version egui) ──
+  let questionReprise = $state<{ bibliotheque: number; poste: number } | null>(null);
+  let toujoursCeChoix = $state(false);
+  let boutonReprise = $state<HTMLButtonElement>();
+
+  /** Affiche le livre à partir de la page `index` (numéro de page du livre). */
+  async function demarrer(index: number) {
+    if (!livre) return;
+    const vis = pagesVisibles(livre.pages, livre.nbPages);
+    dernierEnvoi = `${vis[positionDe(vis, index)]}/false`;
+    await tick();
+    void aller(mode === 'defilement' ? positionDe(vis, index) : debutPlanche(ctx, positionDe(vis, index)));
+    racine?.focus();
+  }
+
+  function choisirReprise(index: number, choix?: Exclude<ChoixReprise, 'demander'>) {
+    questionReprise = null;
+    if (toujoursCeChoix && choix) enregistrerReglagesLecteur({ reprise: choix });
+    void demarrer(index);
+  }
+
   // ── Ouverture ──
   onMount(() => {
     racine?.focus();
     montrerBarres();
     let vivant = true;
-    ouvrirLivre(id)
+    ('id' in source ? ouvrirLivre(source.id) : ouvrirFichier(source.chemin))
       .then(async (l) => {
         if (!vivant) {
           void fermerLivre(l.jeton).catch(() => {});
@@ -514,10 +536,16 @@
         }
         manga = l.manga || (memo.manga ?? false);
         livre = l;
-        const vis = pagesVisibles(l.pages, l.nbPages);
-        dernierEnvoi = `${vis[positionDe(vis, l.pageReprise)]}/false`;
+        const autre = l.pageRepriseComicrack;
+        if (autre === undefined || autre === l.pageReprise) return demarrer(l.pageReprise);
+        const reprise = memo.reprise ?? 'demander';
+        if (reprise === 'comicrack') return demarrer(autre);
+        if (reprise === 'comicrust') return demarrer(l.pageReprise);
+        // Rien n'est envoyé tant que la page n'est pas choisie (page de départ inconnue).
+        dernierEnvoi = `${l.pageReprise}/false`;
+        questionReprise = { bibliotheque: autre, poste: l.pageReprise };
         await tick();
-        void aller(mode === 'defilement' ? positionDe(vis, l.pageReprise) : debutPlanche(ctx, positionDe(vis, l.pageReprise)));
+        boutonReprise?.focus();
       })
       .catch((e) => (erreur = messageErreur(e)));
     const quitter = () => void envoyerAvancement();
@@ -674,6 +702,20 @@
     {/if}
   {/if}
 
+  {#if questionReprise && livre}
+    {@const q = questionReprise}
+    <div class="reprise" role="alertdialog" aria-modal="true" aria-labelledby="titre-reprise" aria-describedby="texte-reprise" data-testid="question-reprise">
+      <h2 id="titre-reprise">Reprendre la lecture</h2>
+      <p class="nom">{livre.titre}</p>
+      <p id="texte-reprise">La bibliothèque et ce poste n'ont pas retenu la même page :</p>
+      <button bind:this={boutonReprise} onclick={() => choisirReprise(q.bibliotheque, 'comicrack')} data-testid="reprise-bibliotheque">📖 Page {q.bibliotheque + 1} — lue dans la bibliothèque</button>
+      <button onclick={() => choisirReprise(q.poste, 'comicrust')} data-testid="reprise-poste">📖 Page {q.poste + 1} — lue dans ComicRust (ce poste)</button>
+      <button onclick={() => choisirReprise(0)}>⏮ Depuis le début</button>
+      <label><input type="checkbox" bind:checked={toujoursCeChoix} /> Toujours faire ce choix</label>
+      <button onclick={() => void fermer()}>Annuler</button>
+    </div>
+  {/if}
+
   <header
     class="barre haut"
     class:cachee={!barres}
@@ -759,6 +801,17 @@
   .lecteur.sans-curseur .scene { cursor: none; }
   .message { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--cr-texte-discret); margin: 0; }
   .message.erreur { color: var(--cr-erreur); }
+  .reprise {
+    position: absolute; z-index: 3; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: grid; gap: 8px; min-width: min(420px, calc(100vw - 32px)); padding: 18px 20px;
+    background: var(--cr-fond-panneau); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon);
+    box-shadow: 0 8px 32px rgb(0 0 0 / 0.4);
+  }
+  .reprise h2 { margin: 0; font-size: 18px; }
+  .reprise p { margin: 0; }
+  .reprise .nom { font-weight: 600; }
+  .reprise button { text-align: left; }
+  .reprise label { display: flex; align-items: center; gap: 6px; color: var(--cr-texte-discret); }
   .scene {
     position: absolute; inset: 0; overflow: auto; user-select: none; touch-action: none;
     scrollbar-color: var(--cr-bordure) transparent;

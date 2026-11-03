@@ -2,7 +2,7 @@
   // Vue Bibliothèque : barre d'outils (recherche, tri, groupement, vue), grille ou tableau
   // virtualisés, panneau de détails et barre d'état. Les données viennent de lister_livres.
   import { onMount, tick } from 'svelte';
-  import type { ClefTri, Groupe } from '../lib/api';
+  import type { ClefTri, Groupe, SourceLecteur } from '../lib/api';
   import { Bibliotheque, type SuiviScan } from '../lib/bibliotheque.svelte';
   import { enregistrerPreference, preferences } from '../lib/prefs';
   import GrilleCouvertures from './GrilleCouvertures.svelte';
@@ -30,8 +30,11 @@
   const LARGEUR_MAX = 800;
   let largeurDetails = $state(prefs.largeurDetails ?? 320);
   let selection = $state(-1);
-  /** Livre ouvert dans le lecteur plein écran (identifiant), ou null. */
-  let livreLu = $state<string | null>(null);
+  /** Livre ouvert dans le lecteur plein écran (livre de la bibliothèque ou fichier), ou null. */
+  let livreLu = $state<SourceLecteur | null>(null);
+  /** Ouverture d'un fichier hors bibliothèque : chemin saisi (pas de sélecteur de fichiers). */
+  let dialogueFichier = $state<HTMLDialogElement>();
+  let cheminFichier = $state('');
   let champRecherche = $state<HTMLInputElement>();
   let saisie = $state('');
   let minuterie: ReturnType<typeof setTimeout> | undefined;
@@ -101,7 +104,14 @@
     const l = bib.livre(i);
     if (!l) return;
     selection = i;
-    livreLu = l.id;
+    livreLu = { id: l.id };
+  }
+
+  function ouvrirFichier() {
+    const chemin = cheminFichier.trim();
+    if (!chemin) return;
+    dialogueFichier?.close();
+    livreLu = { chemin };
   }
 
   /** Lecteur fermé : l'avancement a changé (lu, page courante), on recharge sans perdre la
@@ -230,6 +240,7 @@
       onclick={() => (details = !details)}
       title="Afficher ou masquer le panneau de détails"
     >Détails</button>
+    <button onclick={() => dialogueFichier?.showModal()} title="Lire un fichier qui n'est pas dans la bibliothèque" data-testid="ouvrir-fichier">Ouvrir un fichier…</button>
   </header>
 
   <div class="corps">
@@ -283,14 +294,28 @@
   </footer>
 </div>
 
+<dialog bind:this={dialogueFichier} aria-labelledby="titre-ouvrir-fichier" data-testid="dialogue-fichier">
+  <h2 id="titre-ouvrir-fichier">Ouvrir un fichier</h2>
+  <form class="ouvrir-fichier" onsubmit={(e) => { e.preventDefault(); ouvrirFichier(); }}>
+    <label for="chemin-fichier">Chemin d'une BD (CBZ, CBR, CB7, PDF…), d'un dossier d'images ou d'une image :</label>
+    <input id="chemin-fichier" type="text" bind:value={cheminFichier} placeholder="D:\BD\Thanos 01.cbz" spellcheck="false" autocomplete="off" data-testid="chemin-fichier" />
+    <div class="pied">
+      <button type="button" onclick={() => dialogueFichier?.close()}>Annuler</button>
+      <button type="submit" disabled={!cheminFichier.trim()}>Ouvrir</button>
+    </div>
+  </form>
+</dialog>
+
 {#if livreLu}
   {#key livreLu}
-    <Lecteur id={livreLu} onfermer={lecteurFerme} />
+    <Lecteur source={livreLu} onfermer={lecteurFerme} />
   {/key}
 {/if}
 
 <style>
   .vue { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .ouvrir-fichier { display: grid; gap: 8px; min-width: min(520px, calc(100vw - 64px)); }
+  .ouvrir-fichier .pied { display: flex; justify-content: flex-end; gap: 8px; }
   .outils {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px;
     background: var(--cr-fond-panneau); border-bottom: 1px solid var(--cr-bordure);

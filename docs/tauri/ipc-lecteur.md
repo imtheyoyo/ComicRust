@@ -88,7 +88,8 @@ Le front construit l'URL avec `${urlBase}/${index}?l=${largeurMax}` (pas de reco
   `no-store`.
 - **Préchargement** : après chaque page servie, les 3 pages lues suivantes et la précédente (pages
   supprimées sautées) sont préparées en arrière-plan, à la même largeur. Les pages demandées passent
-  toujours avant (la plus récente d'abord).
+  toujours avant (la plus récente d'abord). Une **miniature** (`l` ≤ 384, bandeau du lecteur à
+  `l=256`) ne déclenche pas de préchargement.
 - **Cache mémoire borné** : 256 Mo et 48 pages au plus, tous livres confondus (le moins récemment
   utilisé part en premier) ; pages d'un livre retirées à sa fermeture.
 - **Fichier jamais gardé ouvert** : les fournisseurs du cœur ouvrent le fichier le temps d'une
@@ -118,3 +119,22 @@ Repris de la version egui (`remember_position`, `store_progress`) :
 sinon page de la fiche (`CurrentPage` : base ComicRust en autonome, base ComicRack en mode lié) ;
 si les deux existent et diffèrent, `pageReprise` = ComicRust et `pageRepriseComicrack` = ComicRack.
 Une page de reprise supprimée donne la suivante visible.
+
+Côté front, quand `pageRepriseComicrack` est présent, le lecteur suit le réglage `vue.lecteur.reprise`
+(`demander` par défaut, `comicrack`, `comicrust`) ; « Demander » affiche la question de la version
+egui (page de la bibliothèque, page de ce poste, depuis le début, « Toujours faire ce choix »,
+Annuler).
+
+## Réglages du lecteur
+
+Section `vue.lecteur` de `data\comicrust-tauri.json`, envoyée **en entier** par
+`enregistrer_preferences_vue` (le sous-objet remplace le précédent) et relue par
+`lire_preferences_vue`. Lecture tolérante (`reglages.rs`) : `mode` ∈ {simple, double, defilement},
+`ajustement` ∈ {meilleur, largeur, hauteur, reelle}, `couvertureSeule` / `manga` / `miniatures`
+booléens, `grossissementLoupe` ramené dans 1,5–6, `reprise` ∈ {demander, comicrack, comicrust} ;
+toute autre valeur est ignorée.
+
+## Plein écran
+
+`getCurrentWindow().setFullscreen()` (permission `core:window:allow-set-fullscreen` de
+`capabilities/default.json`) ; repli sur le plein écran du document hors de Tauri.

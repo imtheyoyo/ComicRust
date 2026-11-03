@@ -201,6 +201,7 @@ try {
 // 180° pour le livre n° 1. Les livres dont l'identifiant finit par 7 sont marqués manga.
 const sessions = new Map<string, LivreInterne>();
 let numeroSession = 0;
+const REPRISE_DIFFERENTE = new URLSearchParams(location.search).has('repriseDiff');
 
 function pagesSimulees(l: LivreInterne): PageInfo[] {
   const pages: PageInfo[] = [];
@@ -209,6 +210,7 @@ function pagesSimulees(l: LivreInterne): PageInfo[] {
     const sansDims = i % 13 === 4;
     pages.push({
       index: i,
+      image: i,
       largeur: sansDims ? undefined : double ? 2000 : 1000,
       hauteur: sansDims ? undefined : 1500,
       double: double && !sansDims,
@@ -280,10 +282,31 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       const jeton = `s${++numeroSession}`;
       sessions.set(jeton, l);
       simuleTests.ouverts.push(String(args.id));
+      const reprise = l.lu ? 0 : Math.min(l.pageCourante, l.pages - 1);
       const ouvert: LivreOuvert = {
-        jeton, id: l.id, titre: l.serie ? `${l.serie} #${l.numero} — ${l.titre}` : l.titre, nbPages: l.pages,
-        pageReprise: l.lu ? 0 : Math.min(l.pageCourante, l.pages - 1), manga: l.id.endsWith('7'),
+        jeton, id: l.id, titre: l.serie ? `${l.serie} #${l.numero} — ${l.titre}` : l.titre,
+        fichier: l.fichier, format: 'eComic (ZIP)', nbPages: l.pages,
+        pageReprise: reprise, manga: l.id.endsWith('7'),
         urlBase: `simule://page/${jeton}`, pages: pagesSimulees(l),
+      };
+      // `?repriseDiff` : la bibliothèque a retenu une autre page (3e page plus loin).
+      if (REPRISE_DIFFERENTE) ouvert.pageRepriseComicrack = Math.min(reprise + 3, l.pages - 1);
+      return ouvert;
+    }
+    case 'ouvrir_fichier': {
+      const chemin = String(args.chemin ?? '').trim().replace(/^"|"$/g, '');
+      if (!chemin) throw new Error('chemin vide');
+      simuleTests.ouverts.push(chemin);
+      const l = LIVRES.find((x) => x.fichier.toLowerCase() === chemin.toLowerCase());
+      if (l) return appelerSimule('ouvrir_livre', { id: l.id });
+      if (!/\.(cb[zr7tw]|zip|rar|7z|pdf|djvu)$/i.test(chemin)) throw new Error(`fichier introuvable : ${chemin}`);
+      const nom = chemin.split(/[\\/]/).pop() ?? chemin;
+      const interne = { ...LIVRES[0], id: 'f' + numeroSession, titre: nom.replace(/\.[^.]+$/, ''), pages: 24, pageCourante: 0, lu: false };
+      const jeton = `s${++numeroSession}`;
+      sessions.set(jeton, interne);
+      const ouvert: LivreOuvert = {
+        jeton, titre: interne.titre, fichier: chemin, format: 'eComic (ZIP)', nbPages: 24, pageReprise: 0,
+        manga: false, urlBase: `simule://page/${jeton}`, pages: pagesSimulees(interne),
       };
       return ouvert;
     }

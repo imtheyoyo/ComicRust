@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions de la fenêtre principale : commandes de l'application seulement (aucun accès direct au système de fichiers depuis le front).",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Permissions de la fenêtre principale : commandes de l'application, plus le plein écran du lecteur (aucun accès direct au système de fichiers depuis le front).",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-fullscreen"
+  ]
 }

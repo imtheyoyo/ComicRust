@@ -51,12 +51,20 @@ pub const VUES: &[&str] = &["grille", "tableau"];
 pub const ZOOM: (u32, u32) = (100, 260);
 /// Bornes de la largeur du panneau de détails (px).
 pub const LARGEUR_DETAILS: (u32, u32) = (220, 800);
+/// Modes du lecteur (`ModeLecture` de `frontend/src/lib/api.ts`).
+pub const MODES_LECTURE: &[&str] = &["simple", "double", "defilement"];
+/// Ajustements de la page (`Ajustement` de `frontend/src/lib/api.ts`).
+pub const AJUSTEMENTS: &[&str] = &["meilleur", "largeur", "hauteur", "reelle"];
+/// Choix de la page de reprise quand la bibliothèque et ce poste diffèrent (`ChoixReprise`).
+pub const REPRISES: &[&str] = &["demander", "comicrack", "comicrust"];
+/// Bornes du grossissement de la loupe.
+pub const GROSSISSEMENT_LOUPE: (f64, f64) = (1.5, 6.0);
 
 /// Préférences d'affichage (section `vue`). Chaque champ absent garde la valeur par défaut du
 /// front. **Lecture tolérante** : une valeur inconnue ou d'un mauvais type (fichier modifié à la
 /// main, version plus récente) est ignorée champ par champ, sans rendre le fichier illisible ;
 /// les nombres hors bornes sont ramenés dans les bornes.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreferencesVue {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,6 +89,63 @@ pub struct PreferencesVue {
     /// disparu est remplacé par le thème par défaut côté front.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    /// Réglages du lecteur (sous-objet `lecteur`, remplacé en entier à chaque enregistrement).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lecteur: Option<PreferencesLecteur>,
+}
+
+/// Réglages du lecteur (section `vue.lecteur`, `PreferencesLecteur` de `frontend/src/lib/api.ts`).
+/// Même lecture tolérante que [`PreferencesVue`] : champ invalide ignoré, nombre ramené dans ses
+/// bornes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferencesLecteur {
+    /// `simple`, `double` ou `defilement`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// `meilleur`, `largeur`, `hauteur` ou `reelle`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ajustement: Option<String>,
+    /// Double page : couverture affichée seule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub couverture_seule: Option<bool>,
+    /// Sens manga pour les livres non marqués manga.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manga: Option<bool>,
+    /// Bandeau de miniatures affiché.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub miniatures: Option<bool>,
+    /// Grossissement de la loupe (1,5 à 6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grossissement_loupe: Option<f64>,
+    /// `demander`, `comicrack` ou `comicrust` (réglage « Reprise » de la version egui).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reprise: Option<String>,
+}
+
+impl PreferencesLecteur {
+    /// Construit les réglages depuis du JSON quelconque ; `None` si ce n'est pas un objet.
+    pub fn depuis_json(v: &Value) -> Option<Self> {
+        let o = v.as_object()?;
+        let parmi = |clef: &str, permis: &[&str]| {
+            o.get(clef).and_then(Value::as_str).filter(|s| permis.contains(s)).map(str::to_string)
+        };
+        let booleen = |clef: &str| o.get(clef).and_then(Value::as_bool);
+        let (min, max) = GROSSISSEMENT_LOUPE;
+        Some(Self {
+            mode: parmi("mode", MODES_LECTURE),
+            ajustement: parmi("ajustement", AJUSTEMENTS),
+            couverture_seule: booleen("couvertureSeule"),
+            manga: booleen("manga"),
+            miniatures: booleen("miniatures"),
+            grossissement_loupe: o
+                .get("grossissementLoupe")
+                .and_then(Value::as_f64)
+                .filter(|n| n.is_finite())
+                .map(|n| n.clamp(min, max)),
+            reprise: parmi("reprise", REPRISES),
+        })
+    }
 }
 
 impl PreferencesVue {
@@ -110,6 +175,7 @@ impl PreferencesVue {
             details: o.get("details").and_then(Value::as_bool),
             largeur_details: borne("largeurDetails", LARGEUR_DETAILS),
             theme: o.get("theme").and_then(Value::as_str).filter(|s| id_theme_valide(s)).map(str::to_string),
+            lecteur: o.get("lecteur").and_then(PreferencesLecteur::depuis_json),
         }
     }
 
@@ -118,7 +184,7 @@ impl PreferencesVue {
         macro_rules! prendre {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
-        prendre!(tri, sens_tri, groupe, vue, zoom, details, largeur_details, theme);
+        prendre!(tri, sens_tri, groupe, vue, zoom, details, largeur_details, theme, lecteur);
     }
 }
 
@@ -232,6 +298,7 @@ mod tests {
             details: Some(false),
             largeur_details: Some(400),
             theme: Some("moderne-sombre".into()),
+            lecteur: None,
         };
         assert_eq!(enregistrer_preferences_vue(d.path(), p.clone()).unwrap(), p);
         assert_eq!(lire_preferences_vue(d.path()).unwrap(), p);
@@ -284,5 +351,61 @@ mod tests {
         let r = lire(d.path()).unwrap();
         assert_eq!(r.mode, Some(Mode::Autonome));
         assert!(r.vue.est_vide());
+    }
+
+    #[test]
+    fn preferences_lecteur_conservees_et_validees() {
+        let d = tempfile::tempdir().unwrap();
+        enregistrer_preferences_vue(d.path(), PreferencesVue { tri: Some("titre".into()), ..Default::default() })
+            .unwrap();
+        // Ce qu'envoie le front (prefs.ts : sous-objet complet).
+        let json: Value = serde_json::from_str(
+            r#"{"lecteur":{"mode":"double","ajustement":"largeur","couvertureSeule":false,"manga":true,
+               "miniatures":true,"grossissementLoupe":3.5,"reprise":"comicrack"}}"#,
+        )
+        .unwrap();
+        let apres = enregistrer_preferences_vue(d.path(), PreferencesVue::depuis_json(&json)).unwrap();
+        let attendu = PreferencesLecteur {
+            mode: Some("double".into()),
+            ajustement: Some("largeur".into()),
+            couverture_seule: Some(false),
+            manga: Some(true),
+            miniatures: Some(true),
+            grossissement_loupe: Some(3.5),
+            reprise: Some("comicrack".into()),
+        };
+        assert_eq!(apres.lecteur.as_ref(), Some(&attendu));
+        assert_eq!(apres.tri.as_deref(), Some("titre"));
+        // Relu après redémarrage ; un autre champ de `vue` ne touche pas au lecteur.
+        enregistrer_preferences_vue(d.path(), PreferencesVue { zoom: Some(150), ..Default::default() }).unwrap();
+        assert_eq!(lire_preferences_vue(d.path()).unwrap().lecteur, Some(attendu));
+        let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
+        assert!(texte.contains("\"couvertureSeule\": false") && texte.contains("grossissementLoupe"), "{texte}");
+        // Le sous-objet est remplacé en entier.
+        let json: Value = serde_json::from_str(r#"{"lecteur":{"mode":"defilement"}}"#).unwrap();
+        let apres = enregistrer_preferences_vue(d.path(), PreferencesVue::depuis_json(&json)).unwrap();
+        assert_eq!(apres.lecteur, Some(PreferencesLecteur { mode: Some("defilement".into()), ..Default::default() }));
+    }
+
+    #[test]
+    fn preferences_lecteur_invalides_ignorees() {
+        let json: Value = serde_json::from_str(
+            r#"{"lecteur":{"mode":"triple","ajustement":4,"couvertureSeule":"oui","manga":true,
+               "miniatures":null,"grossissementLoupe":42,"reprise":"jamais","futur":1}}"#,
+        )
+        .unwrap();
+        let p = PreferencesVue::depuis_json(&json);
+        assert_eq!(
+            p.lecteur,
+            Some(PreferencesLecteur {
+                manga: Some(true),
+                grossissement_loupe: Some(GROSSISSEMENT_LOUPE.1),
+                ..Default::default()
+            })
+        );
+        let json: Value = serde_json::from_str(r#"{"lecteur":"double","tri":"titre"}"#).unwrap();
+        let p = PreferencesVue::depuis_json(&json);
+        assert_eq!(p.lecteur, None);
+        assert_eq!(p.tri.as_deref(), Some("titre"));
     }
 }

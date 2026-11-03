@@ -299,14 +299,18 @@ fn prechargement_des_pages_suivantes() {
     cbz_tailles(&f, 6);
     let l = Lecteur::nouveau(d.path().to_path_buf(), Biblio::nouvelle(d.path().to_path_buf()));
     let o = l.ouvrir_fichier(&f.to_string_lossy()).unwrap();
-    servir(&l, &o.jeton, 1, Some(80));
+    // Miniature (bandeau) : aucun préchargement.
+    servir(&l, &o.jeton, 3, Some(256));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(l.etat_cache().1, 1, "une miniature ne précharge rien");
+    servir(&l, &o.jeton, 1, Some(512));
     // Pages 2, 3, 4 et 0 préparées en arrière-plan (même largeur).
     let attendues = [2usize, 3, 4, 0];
     let debut = Instant::now();
     loop {
         let c = l.cache.lock().unwrap();
-        if attendues.iter().all(|&i| c.contient(&(o.jeton.clone(), i, Some(80)))) {
-            assert!(!c.contient(&(o.jeton.clone(), 5, Some(80))), "au-delà de ±N : pas préchargée");
+        if attendues.iter().all(|&i| c.contient(&(o.jeton.clone(), i, Some(512)))) {
+            assert!(!c.contient(&(o.jeton.clone(), 5, Some(512))), "au-delà de ±N : pas préchargée");
             break;
         }
         drop(c);

@@ -135,13 +135,22 @@ export interface PreferencesLecteur {
   miniatures?: boolean;
   /** Grossissement de la loupe (1,5 à 6). Défaut 2,5. */
   grossissementLoupe?: number;
+  /** Quand la bibliothèque et ce poste n'ont pas retenu la même page (`pageRepriseComicrack`) :
+   *  demander (défaut), prendre celle de la bibliothèque, ou celle de ComicRust (réglage
+   *  « Reprise » de la version egui). */
+  reprise?: ChoixReprise;
 }
+
+export type ChoixReprise = 'demander' | 'comicrack' | 'comicrust';
 
 /** Type de page ComicRack (`FrontCover`, `Story`, `Advertisement`…), informatif. */
 export interface PageInfo {
-  /** Index de la page dans le fichier (0 = première). */
+  /** Numéro de page du livre (rang dans la liste complète, pages supprimées comprises, 0 = première) :
+   *  index des URL de pages, de `pageReprise` et de `enregistrer_avancement`. `pages[i].index === i`. */
   index: number;
-  /** Dimensions en pixels de l'image d'origine, si connues (sinon déduites au chargement). */
+  /** Image du fichier (rang dans l'ordre naturel des noms) ; diffère de `index` si réordonné. */
+  image: number;
+  /** Dimensions en pixels de l'image d'origine (avant rotation), si connues (sinon déduites au chargement). */
   largeur?: number;
   hauteur?: number;
   /** Page double (scan de deux pages côte à côte) : toujours affichée seule en double page. */
@@ -156,11 +165,20 @@ export interface PageInfo {
 export interface LivreOuvert {
   /** Identifiant de la session de lecture, à rendre à fermer_livre / enregistrer_avancement. */
   jeton: string;
-  id: string;
+  /** GUID du livre ; absent pour un fichier hors bibliothèque (ouvrir_fichier). */
+  id?: string;
   titre: string;
+  /** Chemin complet du fichier ouvert. */
+  fichier: string;
+  /** Format (« eComic (ZIP) », « Document PDF », « Dossier d'images »…). */
+  format: string;
+  /** Nombre de pages du livre (pages supprimées comprises) = pages.length. */
   nbPages: number;
-  /** Index (dans le fichier) de la page à afficher à l'ouverture. */
+  /** Numéro de la page à afficher à l'ouverture (jamais une page supprimée) : celle de ComicRust. */
   pageReprise: number;
+  /** Présent si la page retenue par la bibliothèque (ComicRack, ou base ComicRust) diffère de
+   *  `pageReprise` : le lecteur propose le choix (réglage `reprise`). */
+  pageRepriseComicrack?: number;
   /** Livre marqué manga (lecture droite → gauche). */
   manga: boolean;
   /** Base des URL des pages, utilisée telle quelle : `${urlBase}/${index}?l=${largeurMax}`. */
@@ -233,6 +251,11 @@ export const retirerDossier = (chemin: string) => appeler<string[]>('retirer_dos
 export const lancerScan = () => appeler<void>('lancer_scan');
 
 export const ouvrirLivre = (id: string) => appeler<LivreOuvert>('ouvrir_livre', { id });
+/** Ouvre un fichier (ou un dossier d'images, ou une image : son dossier) hors bibliothèque. */
+export const ouvrirFichier = (chemin: string) => appeler<LivreOuvert>('ouvrir_fichier', { chemin });
+
+/** Livre à ouvrir dans le lecteur : un livre de la bibliothèque ou un fichier. */
+export type SourceLecteur = { id: string } | { chemin: string };
 export const fermerLivre = (jeton: string) => appeler<void>('fermer_livre', { jeton });
 /** `page` : index dans le fichier de la page affichée ; `termine` : la dernière page a été vue. */
 export const enregistrerAvancement = (jeton: string, page: number, termine: boolean) =>
@@ -248,7 +271,7 @@ export function urlPage(livre: LivreOuvert, index: number, largeurMax: number): 
 const imagesSimulees = new Map<string, string>();
 /** Page factice du mode simulé (SVG aux dimensions de la page, numéro bien visible). */
 function imageSimulee(livre: LivreOuvert, index: number): string {
-  const clef = livre.id + '/' + index;
+  const clef = livre.jeton + '/' + index;
   let u = imagesSimulees.get(clef);
   if (u) return u;
   const p = livre.pages.find((x) => x.index === index);

@@ -58,6 +58,10 @@ pub const DELAI_OUVERTURE: Duration = Duration::from_secs(40);
 pub const DELAI_PAGE: Duration = Duration::from_secs(25);
 /// Bornes du paramètre `l=` (largeur maximale demandée, en pixels).
 pub const LARGEUR: (u32, u32) = (16, 16384);
+/// Largeur demandée en dessous de laquelle une page est une **miniature** (bandeau du lecteur,
+/// `l=256`) : elle ne déclenche pas de préchargement (sinon chaque miniature remplacerait le
+/// préchargement des pages lues par celui de miniatures voisines).
+pub const LARGEUR_MINIATURE: u32 = 384;
 /// Qualité JPEG des pages réencodées.
 const QUALITE_JPEG: u8 = 90;
 
@@ -509,6 +513,9 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
     let cle = |i: usize, l: Option<u32>| (ctx.jeton.clone(), i, l);
     let cache = || ctx.cache.lock().unwrap_or_else(|e| e.into_inner());
     let voisines = |i: usize, l: Option<u32>, file: &mut VecDeque<(usize, Option<u32>)>| {
+        if l.is_some_and(|l| l <= LARGEUR_MINIATURE) {
+            return; // miniature : la position de lecture n'a pas changé
+        }
         // Nouvelle position : les anciens préchargements ne servent plus.
         file.clear();
         // Voisines dans l'ordre de lecture, pages supprimées sautées.
