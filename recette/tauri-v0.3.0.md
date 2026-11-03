@@ -206,8 +206,9 @@ Sur un vrai CBZ du NAS (`\\SERVEURNAS\…`), de préférence gros (> 300 pages o
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| Bloquants [B] | 41 | | |
-| Majeurs [M] | 33 | | |
-| Mineurs [m] | 9 | | |
+| Bloquants [B] | 41 | 41 | 0 |
+| Majeurs [M] | 33 | 32 | 1 (M-08 non testé) |
+| Mineurs [m] | 9 | 9 | 0 |
 
 Décision et remarques :
+GO — recette validée le 03/11/2026 : 82 OK sur 83, bloquants tous OK (rapport : `recette/rapports/tauri-v0.3.0-2026-11-03.txt`). M-08 non testé, reporté dans tauri-v0.4.0. E-03 : la miniature d'une page tournée sort de son cadre dans le bandeau → corrigé en tauri-v0.4.0.

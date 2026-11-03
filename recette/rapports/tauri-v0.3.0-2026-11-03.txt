@@ -1,0 +1,17 @@
+Rapport de recette ComicRust tauri-v0.3.0 — 03/11/2026 21:29
+Résultat : 82 OK, 1 échec(s), 0 non testé(s) sur 83.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (1)
+- M-08 [Majeur] Un livre marqué Manga (droite à gauche) dans sa fiche (ComicRack ou ComicInfo.xml) s'ouvre directement en sens manga.
+  Note : Non testé
+
+VALEURS NOTÉES ET REMARQUES
+- F-12 : 6
+- F-14 : 1
+- E-03 : Dans le bandeau de miniatures en bas, la page sort de son cadre.
+- V-01 : 1
+- V-04 : 58
+- R-02 : 3
+- X-04 : 40
+- N-01 : 484
