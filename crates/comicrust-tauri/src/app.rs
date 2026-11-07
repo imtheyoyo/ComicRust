@@ -257,6 +257,12 @@ fn renommer_deplacer(
     edition.renommer_deplacer(&demande, &sortie_edition(app))
 }
 
+/// Montre le fichier du livre dans son dossier (Explorateur de Windows, fichier sélectionné).
+#[tauri::command(async)]
+fn ouvrir_dossier_fichier(edition: tauri::State<'_, Edition>, id: String) -> Result<(), String> {
+    edition.ouvrir_dossier_fichier(&id)
+}
+
 /// Demande l'arrêt du lot en cours (entre deux livres).
 #[tauri::command]
 fn annuler_operation(edition: tauri::State<'_, Edition>) {
@@ -374,7 +380,8 @@ pub fn run() {
             convertir_cbr_cbz,
             modeles_de_nom,
             renommer_deplacer,
-            annuler_operation
+            annuler_operation,
+            ouvrir_dossier_fichier
         ])
         .setup(|app| {
             // Thèmes livrés disponibles dès le premier lancement.

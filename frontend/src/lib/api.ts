@@ -417,6 +417,8 @@ export const modelesDeNom = () => appeler<ModeleNom[]>('modeles_de_nom');
 export const renommerDeplacer = (demande: DemandeRenommage) =>
   appeler<ResultatRenommage>('renommer_deplacer', { demande });
 export const annulerOperation = () => appeler<void>('annuler_operation');
+/** Montre le fichier du livre dans son dossier (Explorateur de Windows, fichier sélectionné). */
+export const ouvrirDossierFichier = (id: string) => appeler<void>('ouvrir_dossier_fichier', { id });
 
 /** URL d'une page. `largeurMax` : largeur souhaitée en pixels physiques (0 = taille d'origine ;
  *  le backend ne grossit jamais l'image). En mode simulé, image SVG générée. */

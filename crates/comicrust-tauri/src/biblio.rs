@@ -225,6 +225,11 @@ struct Interne {
     generation: u64,
     vue: Option<(CleVue, Arc<Vec<usize>>)>,
     scan_en_cours: bool,
+    /// Une opération d'édition (fiches, fichiers, renommage) est en cours : l'analyse et le
+    /// changement de bibliothèque attendent sa fin (sinon un fichier renommé pendant l'analyse
+    /// serait ajouté comme un nouveau livre, et la bibliothèque rechargée écraserait les fiches
+    /// reportées par l'édition).
+    edition_en_cours: bool,
     /// Mode lié à ComicRack par MySQL : paramètres de connexion (en mémoire seulement, relus
     /// dans `ComicRack.ini` à chaque ouverture ; jamais écrits dans les réglages).
     comicrack: Option<DbConfig>,
@@ -267,6 +272,15 @@ struct GardeScan(Arc<Mutex<Interne>>);
 impl Drop for GardeScan {
     fn drop(&mut self) {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).scan_en_cours = false;
+    }
+}
+
+/// Remet `edition_en_cours` à faux quand elle disparaît (voir [`Biblio::prendre_edition`]).
+pub struct GardeEdition(Arc<Mutex<Interne>>);
+
+impl Drop for GardeEdition {
+    fn drop(&mut self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).edition_en_cours = false;
     }
 }
 
@@ -363,8 +377,12 @@ impl Biblio {
     }
 
     fn refuser_pendant_analyse(&self) -> Result<(), String> {
-        if self.verrou().scan_en_cours {
+        let g = self.verrou();
+        if g.scan_en_cours {
             return Err("analyse en cours : attends sa fin avant de changer de bibliothèque".into());
+        }
+        if g.edition_en_cours {
+            return Err("opération d'édition en cours : attends sa fin avant de changer de bibliothèque".into());
         }
         Ok(())
     }
@@ -584,6 +602,9 @@ impl Biblio {
             if g.scan_en_cours {
                 return Err("une analyse est déjà en cours".into());
             }
+            if g.edition_en_cours {
+                return Err("une opération d'édition est en cours : attends sa fin pour analyser les dossiers".into());
+            }
             let base = g.base.clone().ok_or("aucune bibliothèque ouverte")?;
             g.scan_en_cours = true;
             (cfg, base, g.generation)
@@ -704,6 +725,21 @@ impl Biblio {
         self.verrou().scan_en_cours
     }
 
+    /// Réserve la bibliothèque pour une opération d'édition : refusé pendant une analyse ou une
+    /// autre opération ; l'analyse est refusée tant que la garde existe. Contrôle et réservation
+    /// sous le même verrou (pas de course avec `lancer_scan`).
+    pub fn prendre_edition(&self) -> Result<GardeEdition, String> {
+        let mut g = self.verrou();
+        if g.scan_en_cours {
+            return Err("analyse des dossiers en cours : attends sa fin".into());
+        }
+        if g.edition_en_cours {
+            return Err("une opération est déjà en cours".into());
+        }
+        g.edition_en_cours = true;
+        Ok(GardeEdition(self.interne.clone()))
+    }
+
     /// Reporte dans la bibliothèque affichée des fiches relues après écriture (la plus récente
     /// l'emporte) ; avec `couvertures`, leurs couvertures sont oubliées (cache disque, cache
     /// négatif, révision de l'URL). Renvoie les identifiants mis à jour.
@@ -796,7 +832,7 @@ fn config_autonome(data: &Path) -> StoreConfig {
 }
 
 /// `is_file` avec délai maximal (thread détaché si le disque ne répond pas).
-fn fichier_existe(chemin: PathBuf, delai: Duration) -> bool {
+pub(crate) fn fichier_existe(chemin: PathBuf, delai: Duration) -> bool {
     let (tx, rx) = std::sync::mpsc::channel();
     let lance = std::thread::Builder::new().name("comicrust-fichier".into()).spawn(move || {
         let _ = tx.send(chemin.is_file());

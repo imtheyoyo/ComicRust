@@ -15,7 +15,7 @@
 //! Le travail lui-même est fait par `comicrust-core` (`edit`, `writer`, `db::update_books`,
 //! `Store`). Aucune dépendance à Tauri : tout est testé ici.
 
-use crate::biblio::{Biblio, SourceBiblio};
+use crate::biblio::{Biblio, GardeEdition, SourceBiblio};
 use crate::lecteur::Lecteur;
 use crate::reglages::{self, ReglagesEdition};
 use comicrust_core::db::{self, BookEdit, ComicDatabase, DbConfig, FileState, Record, WriteReport};
@@ -51,6 +51,8 @@ pub const LECTURE_SEULE_COMICRACK: &str = "Lecture seule : active l'écriture da
 pub const LECTURE_SEULE_XML: &str = "Lecture seule : la bibliothèque ComicDb.xml de ComicRack ne se modifie pas \
      depuis ComicRust (ComicRack la réécrit lui-même). Utilise la base MySQL de ComicRack en écriture, ou une \
      bibliothèque autonome.";
+/// Livre non traité parce que l'arrêt du lot a été demandé.
+const NON_FAIT_ARRET: &str = "non fait : arrêt demandé";
 /// Pas de bibliothèque.
 pub const AUCUNE_BIBLIOTHEQUE: &str = "Aucune bibliothèque ouverte : rien à modifier.";
 
@@ -591,6 +593,17 @@ pub fn verifier_champs(champs: &[ChampModifie]) -> Vec<ErreurChamp> {
                 continue;
             }
         };
+        // Garde-fou : le texte affiché d'un champ aux valeurs différentes ne doit jamais être
+        // écrit tel quel dans les fiches (front qui l'aurait pris pour une saisie).
+        if c.valeur.trim() == VALEURS_MULTIPLES {
+            out.push(ErreurChamp {
+                nom: c.nom.clone(),
+                message: format!(
+                    "« {VALEURS_MULTIPLES} » n'est pas une valeur : laisse le champ vide pour ne pas le modifier"
+                ),
+            });
+            continue;
+        }
         if let Err(e) = edit::validate(&modification("verification", &nom, &c.valeur)) {
             let m = e.message;
             let message = match m.find("» : ") {
@@ -735,15 +748,6 @@ impl Cible {
             Cible::LectureSeule(m) => Some(m),
             _ => None,
         }
-    }
-}
-
-/// Une opération à la fois : remis à faux quand le garde disparaît.
-struct Occupe(Arc<AtomicBool>);
-
-impl Drop for Occupe {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -938,14 +942,13 @@ type CacheSuggestions = Option<(usize, HashMap<&'static str, Arc<Vec<String>>>)>
 pub struct Edition {
     biblio: Biblio,
     lecteur: Lecteur,
-    occupe: Arc<AtomicBool>,
     annule: Arc<AtomicBool>,
     suggestions: Arc<Mutex<CacheSuggestions>>,
 }
 
 impl Edition {
     pub fn nouvelle(biblio: Biblio, lecteur: Lecteur) -> Self {
-        Edition { biblio, lecteur, occupe: Arc::default(), annule: Arc::default(), suggestions: Arc::default() }
+        Edition { biblio, lecteur, annule: Arc::default(), suggestions: Arc::default() }
     }
 
     /// Cible d'écriture des fiches, d'après la bibliothèque ouverte et les réglages.
@@ -961,15 +964,12 @@ impl Edition {
         }
     }
 
-    fn occuper(&self) -> Result<Occupe, String> {
-        if self.biblio.analyse_en_cours() {
-            return Err("analyse des dossiers en cours : attends sa fin".into());
-        }
-        if self.occupe.swap(true, Ordering::SeqCst) {
-            return Err("une opération est déjà en cours".into());
-        }
+    /// Une opération à la fois, jamais pendant une analyse des dossiers (et l'analyse attend
+    /// la fin de l'opération) : garde rendue tant que l'opération dure.
+    fn occuper(&self) -> Result<GardeEdition, String> {
+        let garde = self.biblio.prendre_edition()?;
         self.annule.store(false, Ordering::SeqCst);
-        Ok(Occupe(self.occupe.clone()))
+        Ok(garde)
     }
 
     /// Demande l'arrêt du lot en cours (entre deux livres).
@@ -1242,9 +1242,10 @@ impl Edition {
         let mut faits: Vec<(LibraryBook, bool, i64, PathBuf)> = Vec::new();
         let mut interrompu = false;
         for (i, b) in livres.iter().enumerate() {
-            if self.annule.load(Ordering::SeqCst) {
+            if interrompu || self.annule.load(Ordering::SeqCst) {
                 interrompu = true;
-                break;
+                out.push(resultat(b, Statut::Ignore, Some(NON_FAIT_ARRET.into())));
+                continue;
             }
             avance.noter(i, &b.caption());
             let chemin = PathBuf::from(b.file.as_deref().unwrap_or_default());
@@ -1362,36 +1363,31 @@ impl Edition {
         let mut avance = Avance { sortie, operation: Operation::Conversion, total: cibles.len(), derniere: None };
         avance.noter(0, "lecture des fiches dans la bibliothèque…");
         let fiches = if cibles.is_empty() { Ok(HashMap::new()) } else { self.fiches_pour_fichiers(&base, &cibles) };
-        let fiches = fiches.unwrap_or_default();
-        // (livre, CBZ, pages)
-        let mut faits: Vec<(LibraryBook, PathBuf, usize)> = Vec::new();
+        // (livre, original, CBZ, pages)
+        let mut faits: Vec<(LibraryBook, PathBuf, PathBuf, usize)> = Vec::new();
         let mut interrompu = false;
         for (i, b) in cibles.iter().enumerate() {
-            if self.annule.load(Ordering::SeqCst) {
+            if interrompu || self.annule.load(Ordering::SeqCst) {
                 interrompu = true;
-                break;
+                res.noter(resultat(b, Statut::Ignore, Some(NON_FAIT_ARRET.into())));
+                continue;
             }
             avance.noter(i, &b.caption());
             let chemin = PathBuf::from(b.file.as_deref().unwrap_or_default());
-            let fiche = fiches.get(&b.id.to_ascii_lowercase()).map(|r| r.data.as_str());
+            // Fiche illisible (base ComicRack injoignable) : pas de CBZ sans les infos de la fiche.
+            let fiche = match &fiches {
+                Ok(f) => f.get(&b.id.to_ascii_lowercase()).map(|r| r.data.as_str()),
+                Err(e) => {
+                    res.noter(resultat(b, Statut::Erreur, Some(format!("fiche non relue dans la bibliothèque : {e}"))));
+                    continue;
+                }
+            };
             match writer::convert_to_cbz(&chemin, fiche) {
                 Ok(c) => {
                     let mut r = resultat(b, Statut::Ok, Some(format!("{} pages", c.pages)));
                     r.fichier = Some(c.path.display().to_string());
-                    if ranger {
-                        match ranger_original(&chemin) {
-                            Ok(p) => {
-                                r.message = Some(format!("{} pages, original rangé dans {}", c.pages, p.display()))
-                            }
-                            Err(e) => {
-                                r.statut = Statut::Erreur;
-                                r.message = Some(format!("CBZ créé ({}), mais {e}", c.path.display()));
-                            }
-                        }
-                    }
-                    self.lecteur.oublier_fichier(&chemin);
                     res.noter(r);
-                    faits.push((b.clone(), c.path, c.pages));
+                    faits.push((b.clone(), chemin, c.path, c.pages));
                 }
                 Err(e) => res.noter(resultat(b, Statut::Erreur, Some(e.to_string()))),
             }
@@ -1399,12 +1395,15 @@ impl Edition {
         avance.noter(cibles.len(), "");
         let mut modifies = Vec::new();
         let mut erreurs: Vec<(String, String)> = Vec::new();
+        // Livres dont la fiche pointe maintenant sur le CBZ (identifiants en minuscules) : seul
+        // leur original peut être rangé (sinon la fiche pointerait sur un fichier disparu).
+        let mut suivis: HashSet<String> = HashSet::new();
         match &cible {
             Cible::Store(cfg) if !faits.is_empty() => {
                 let maj = (|| -> Result<Vec<LibraryBook>, String> {
                     let mut st = Store::open_existing(cfg).map_err(|e| e.to_string())?;
                     let mut ids = Vec::new();
-                    for (b, cbz, _) in &faits {
+                    for (b, _, cbz, _) in &faits {
                         let neuf = comicrust_core::scanner::book_from_file(cbz, b.id.clone())
                             .and_then(|f| st.replace_file(&b.id, &f));
                         match neuf {
@@ -1415,7 +1414,10 @@ impl Edition {
                     st.get(&ids).map_err(|e| e.to_string())
                 })();
                 match maj {
-                    Ok(fraiches) => modifies.extend(self.biblio.remplacer_fiches(&fraiches, true)),
+                    Ok(fraiches) => {
+                        suivis.extend(fraiches.iter().map(|f| f.id.to_ascii_lowercase()));
+                        modifies.extend(self.biblio.remplacer_fiches(&fraiches, true));
+                    }
                     Err(e) => {
                         erreurs.extend(faits.iter().map(|(b, ..)| (b.id.clone(), format!("base ComicRust : {e}"))))
                     }
@@ -1423,7 +1425,7 @@ impl Edition {
             }
             Cible::Comicrack(cfg) if !faits.is_empty() => {
                 let mut editions = Vec::new();
-                for (b, cbz, pages) in &faits {
+                for (b, _, cbz, pages) in &faits {
                     // Les pages sont recopiées dans le même ordre : la liste <Pages> reste valable.
                     match etat_fichier(cbz, Some(*pages as u32)) {
                         Ok(f) => editions.push(BookEdit::new(&b.id).file(&f)),
@@ -1433,6 +1435,7 @@ impl Edition {
                 match db::update_books(cfg, &editions) {
                     Ok(rapport) => {
                         let fraiches: Vec<LibraryBook> = rapport.written.iter().map(|w| w.book.clone()).collect();
+                        suivis.extend(fraiches.iter().map(|f| f.id.to_ascii_lowercase()));
                         modifies.extend(self.biblio.remplacer_fiches(&fraiches, true));
                         erreurs.extend(problemes_comicrack(&rapport));
                     }
@@ -1442,6 +1445,29 @@ impl Edition {
                 }
             }
             _ => {}
+        }
+        for (b, original, cbz, pages) in &faits {
+            self.lecteur.oublier_fichier(original);
+            if !ranger {
+                continue;
+            }
+            if !suivis.contains(&b.id.to_ascii_lowercase()) {
+                erreurs.push((b.id.clone(), "original laissé à sa place (la fiche pointe toujours sur lui)".into()));
+                continue;
+            }
+            let mut r = resultat(b, Statut::Ok, None);
+            match ranger_original(original) {
+                Ok(p) => r.message = Some(format!("{pages} pages, original rangé dans {}", p.display())),
+                Err(e) => {
+                    r.statut = Statut::Erreur;
+                    r.message = Some(format!("CBZ créé ({}), mais {e}", cbz.display()));
+                }
+            }
+            // Remplace le message « n pages » noté plus haut.
+            if let Some(x) = res.par_id.get_mut(&b.id.to_ascii_lowercase()) {
+                x.statut = r.statut;
+                x.message = r.message;
+            }
         }
         for (id, m) in erreurs {
             if let Some(b) = livres.iter().find(|b| b.id.eq_ignore_ascii_case(&id)) {
@@ -1579,7 +1605,7 @@ impl Edition {
             // Arrêt entre deux livres seulement : un fichier déplacé a toujours sa fiche à jour.
             if self.annule.load(Ordering::SeqCst) {
                 interrompu = true;
-                res.noter(resultat(b, Statut::Ignore, Some("non fait : arrêt demandé".into())));
+                res.noter(resultat(b, Statut::Ignore, Some(NON_FAIT_ARRET.into())));
                 continue;
             }
             avance.noter(fait, &b.caption());
@@ -1605,6 +1631,123 @@ impl Edition {
         self.signaler(sortie, modifies);
         let b = bilan(Operation::Renommage, res.livres(), interrompu, Some(format!("Modèle : {modele}")));
         Ok(ResultatRenommage { lignes, a_renommer, bilan: Some(b) })
+    }
+}
+
+// ───────────────────────────── Ouvrir le dossier du fichier ─────────────────────────────
+
+/// Commande système qui montre un fichier dans son dossier. Sous Windows, les arguments sont
+/// passés **tels quels** (`raw_arg`) : `explorer.exe` lit lui-même `/select,"chemin"`, que la
+/// mise entre guillemets automatique de Rust rendrait illisible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandeDossier {
+    pub programme: String,
+    pub arguments: Vec<String>,
+    pub brut: bool,
+}
+
+/// Système visé par [`commande_ouvrir_dossier`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Systeme {
+    Windows,
+    MacOs,
+    Autre,
+}
+
+impl Systeme {
+    pub fn courant() -> Self {
+        if cfg!(windows) {
+            Systeme::Windows
+        } else if cfg!(target_os = "macos") {
+            Systeme::MacOs
+        } else {
+            Systeme::Autre
+        }
+    }
+}
+
+/// Commande qui montre `chemin` : fichier présent, sélectionné dans l'Explorateur
+/// (`explorer.exe /select,"chemin"`) ou le Finder (`open -R`) ; ailleurs (ou fichier absent),
+/// ouverture du dossier (`xdg-open`, `explorer.exe "dossier"`, `open`).
+pub fn commande_ouvrir_dossier(chemin: &Path, fichier_present: bool, systeme: Systeme) -> CommandeDossier {
+    let dossier = chemin.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(chemin);
+    match systeme {
+        Systeme::Windows => {
+            // L'Explorateur ne comprend que les « \ » (chemins écrits avec « / » dans la fiche).
+            let w = |p: &Path| p.to_string_lossy().replace('/', "\\");
+            let arg =
+                if fichier_present { format!("/select,\"{}\"", w(chemin)) } else { format!("\"{}\"", w(dossier)) };
+            CommandeDossier { programme: "explorer.exe".into(), arguments: vec![arg], brut: true }
+        }
+        Systeme::MacOs if fichier_present => CommandeDossier {
+            programme: "open".into(),
+            arguments: vec!["-R".into(), chemin.to_string_lossy().into_owned()],
+            brut: false,
+        },
+        Systeme::MacOs => CommandeDossier {
+            programme: "open".into(),
+            arguments: vec![dossier.to_string_lossy().into_owned()],
+            brut: false,
+        },
+        Systeme::Autre => CommandeDossier {
+            programme: "xdg-open".into(),
+            arguments: vec![dossier.to_string_lossy().into_owned()],
+            brut: false,
+        },
+    }
+}
+
+/// Lance la commande sans l'attendre (l'Explorateur rend 1 même quand tout va bien).
+pub fn lancer_commande(c: &CommandeDossier) -> Result<(), String> {
+    let mut cmd = std::process::Command::new(&c.programme);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if c.brut {
+            for a in &c.arguments {
+                cmd.raw_arg(a);
+            }
+        } else {
+            cmd.args(&c.arguments);
+        }
+    }
+    #[cfg(not(windows))]
+    cmd.args(&c.arguments);
+    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let mut enfant = cmd.spawn().map_err(|e| format!("{} introuvable ou refusé : {e}", c.programme))?;
+    // Le processus est récupéré en arrière-plan (pas de processus zombie sous Linux).
+    std::thread::spawn(move || {
+        let _ = enfant.wait();
+    });
+    Ok(())
+}
+
+impl Edition {
+    /// Commande qui montre le fichier du livre `id` dans son dossier (rien n'est lancé).
+    /// Erreur lisible : livre inconnu, sans fichier, dossier introuvable (disque débranché,
+    /// partage réseau qui ne répond pas).
+    pub fn commande_dossier_fichier(&self, id: &str) -> Result<CommandeDossier, String> {
+        let b = self.biblio.livre(id).ok_or("livre inconnu")?;
+        let f = b.file.as_deref().map(str::trim).filter(|f| !f.is_empty()).ok_or("ce livre n'a pas de fichier")?;
+        let chemin = PathBuf::from(f);
+        let present = crate::biblio::fichier_existe(chemin.clone(), Duration::from_secs(2));
+        if !present {
+            let dossier = chemin.parent().map(Path::to_path_buf).unwrap_or_default();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let d = dossier.clone();
+            let _ = std::thread::Builder::new().name("comicrust-dossier".into()).spawn(move || {
+                let _ = tx.send(d.is_dir());
+            });
+            if !rx.recv_timeout(Duration::from_secs(2)).unwrap_or(false) {
+                return Err(format!("dossier introuvable : {}", dossier.display()));
+            }
+        }
+        Ok(commande_ouvrir_dossier(&chemin, present, Systeme::courant()))
+    }
+
+    /// « Ouvrir le dossier du fichier » : Explorateur de Windows, le fichier sélectionné.
+    pub fn ouvrir_dossier_fichier(&self, id: &str) -> Result<(), String> {
+        lancer_commande(&self.commande_dossier_fichier(id)?)
     }
 }
 

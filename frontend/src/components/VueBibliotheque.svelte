@@ -2,7 +2,7 @@
   // Vue Bibliothèque : barre d'outils (recherche, tri, groupement, vue), grille ou tableau
   // virtualisés, panneau de détails et barre d'état. Les données viennent de lister_livres.
   import { onMount, tick } from 'svelte';
-  import { ecouter, messageErreur, type BibliothequeModifiee, type ClefTri, type Groupe, type SourceLecteur } from '../lib/api';
+  import { ecouter, messageErreur, ouvrirDossierFichier, type BibliothequeModifiee, type ClefTri, type Groupe, type SourceLecteur } from '../lib/api';
   import { Bibliotheque, type SuiviScan } from '../lib/bibliotheque.svelte';
   import { enregistrerPreference, preferences } from '../lib/prefs';
   import { Selection } from '../lib/selection.svelte';
@@ -238,6 +238,8 @@
         aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
       { id: 'conversion', libelle: plusieurs ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ', aide: 'Seuls les CBR, CB7 et CBT se convertissent' },
       { id: 'renommer', libelle: 'Renommer / déplacer…' },
+      { id: 'dossier', libelle: 'Ouvrir le dossier du fichier', separe: true, desactive: plusieurs,
+        aide: plusieurs ? 'Un seul livre à la fois' : 'Montre le fichier dans l\'Explorateur de Windows' },
     ];
   });
 
@@ -264,6 +266,13 @@
     if (id === 'infos') infosDe = ids;
     else if (id === 'conversion' || id === 'ecritureInfos') operation = { type: id, ids };
     else if (id === 'renommer') renommerDe = ids;
+    else if (id === 'dossier') {
+      try {
+        await ouvrirDossierFichier(ids[0]);
+      } catch (e) {
+        erreurAction = `Ouvrir le dossier : ${messageErreur(e)}`;
+      }
+    }
   }
 
   /** Précédent / Suivant de « Infos du livre » : la sélection suit, comme dans ComicRack. */

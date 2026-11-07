@@ -461,6 +461,10 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
       case 'annuler_operation':
         annule = true;
         return null;
+      case 'ouvrir_dossier_fichier':
+        // Mode simulé : rien à ouvrir ; noté pour les tests (window.__dossiersOuverts).
+        ((globalThis as unknown as { __dossiersOuverts?: string[] }).__dossiersOuverts ??= []).push(String(args.id));
+        return null;
       default:
         return undefined;
     }

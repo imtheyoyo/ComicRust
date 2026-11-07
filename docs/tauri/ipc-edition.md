@@ -115,7 +115,7 @@ version egui) : un champ vide **vide** la fiche.
 |---|---|---|
 | `lire_fiches` | `{ids: string[]}` | `FicheEdition`. Erreur si aucun livre connu. Un livre : valeurs du livre. Plusieurs : valeur commune, sinon `multiple:true` et `valeur:''`. |
 | `proposer_valeurs` | `{champ, texte, tout?: boolean, max?: number}` | `Proposition[]`. Valeurs déjà présentes dans la bibliothèque (une valeur de liste à part, sans doublon de casse, ordre naturel) plus les valeurs usuelles (Public, Oui/Non…). `texte` : saisie actuelle ; pour un champ liste, seule la dernière valeur (après la dernière virgule) est complétée. Sans `tout` : celles qui **commencent** par la saisie puis celles qui la **contiennent**, au plus `max` (défaut 8), rien si la saisie est vide ou déjà complète. `tout:true` (bouton ▾) : toutes celles qui contiennent la saisie (sans limite). Champ sans suggestions : `[]`. |
-| `verifier_champs` | `{champs: ChampModifie[]}` | `ErreurChamp[]` (vide : tout est accepté). À appeler pendant la saisie (après ~300 ms) pour afficher l'erreur sous le champ ; « OK / Appliquer » doivent être désactivés tant qu'il y en a. |
+| `verifier_champs` | `{champs: ChampModifie[]}` | `ErreurChamp[]` (vide : tout est accepté). À appeler pendant la saisie (après ~300 ms) pour afficher l'erreur sous le champ ; « OK / Appliquer » doivent être désactivés tant qu'il y en a. Le texte « (valeurs multiples) » est toujours refusé (garde-fou : jamais écrit tel quel dans une fiche). |
 | `appliquer_modifications` | `{demande: DemandeModification}` | `BilanOperation`. Voir ci-dessous. |
 | `ajouter_valeur_perso` | `{cle: string, existantes: string[]}` | `ChampFiche` vide de la nouvelle valeur personnalisée. Erreur lisible si la clé est vide, contient `,` `=` ou un caractère de contrôle, ou existe déjà (sans casse) parmi `existantes`. |
 
@@ -150,7 +150,7 @@ Rien n'est écrit pour un champ non envoyé ; un champ envoyé égal à la valeu
 | Commande | Arguments | Résultat |
 |---|---|---|
 | `ecrire_infos_fichiers` | `{ids, confirme?}` | `BilanOperation`. Écrit la fiche dans le `ComicInfo.xml` des CBZ (« Écrire les infos dans le fichier »). Autres formats : ignorés. Fiches relues dans MySQL au moment d'écrire en mode ComicRack MySQL. |
-| `convertir_cbr_cbz` | `{ids, rangerOriginal?: boolean, confirme?}` | `BilanOperation`. CBR/RAR, CB7/7Z, CBT/TAR → CBZ à côté de l'original (pages recopiées telles quelles, ComicInfo.xml d'après la fiche). L'original reste en place, ou est rangé dans `_originaux` (même dossier, nom libre `a (2).cbr`) si `rangerOriginal` (défaut : réglage). Autonome / ComicRack en écriture : la fiche pointe ensuite sur le CBZ. Erreur si `rangerOriginal` en lecture seule. |
+| `convertir_cbr_cbz` | `{ids, rangerOriginal?: boolean, confirme?}` | `BilanOperation`. CBR/RAR, CB7/7Z, CBT/TAR → CBZ à côté de l'original (pages recopiées telles quelles, ComicInfo.xml d'après la fiche). L'original reste en place, ou est rangé dans `_originaux` (même dossier, nom libre `a (2).cbr`) si `rangerOriginal` (défaut : réglage). Autonome / ComicRack en écriture : la fiche pointe ensuite sur le CBZ. L'original n'est rangé qu'**après** la mise à jour de la fiche (fiche non mise à jour : original laissé à sa place, erreur dans le bilan). Fiche illisible (base ComicRack injoignable) : pas de conversion, erreur. Erreur si `rangerOriginal` en lecture seule. |
 
 Écriture d'un CBZ (`comicrust_core::writer`) : archive réécrite dans un fichier temporaire du même
 dossier (pages recopiées sans recompression), vérifiée, puis **remplacement atomique** de l'original
@@ -159,6 +159,8 @@ ComicRack). Aucun fichier n'est gardé ouvert ; les livres ouverts dans le lecte
 à la page suivante. Couvertures en cache et pages en cache du livre sont oubliées après l'écriture :
 l'`urlCouverture` d'un livre dont la couverture a pu changer reçoit un suffixe `?v=<n>` (la WebView
 garde une heure l'image d'une même URL) ; le front l'utilise toujours telle quelle.
+
+| `ouvrir_dossier_fichier` | `{id}` | `void`. Montre le fichier dans son dossier : Windows `explorer.exe /select,"chemin"` (fichier sélectionné) ; macOS `open -R` ; ailleurs `xdg-open` du dossier. Fichier absent mais dossier présent : le dossier est ouvert. Erreur lisible : livre inconnu, sans fichier, dossier introuvable (contrôles limités à ~2 s : partage réseau qui ne répond pas). Permis en lecture seule. Menu contextuel : « Ouvrir le dossier du fichier » (un seul livre). |
 
 ## Renommage et déplacement
 
@@ -243,7 +245,11 @@ interface BilanOperation {
 |---|---|---|
 | `annuler_operation` | – | `void`. Demande l'arrêt du lot en cours **entre deux livres** (jamais au milieu d'un fichier ou d'un déplacement). |
 
-Une seule opération d'édition à la fois (sinon erreur « une opération est déjà en cours »).
+Une seule opération d'édition à la fois (sinon erreur « une opération est déjà en cours »). Une
+opération d'édition et l'**analyse des dossiers** s'excluent (erreur dans les deux sens), de même que
+le changement de bibliothèque pendant une opération : un fichier renommé pendant l'analyse serait
+sinon ajouté comme un nouveau livre. Après `annuler_operation`, les livres non traités figurent dans
+le bilan en `ignore` avec le message « non fait : arrêt demandé ».
 
 Événements (`listen` côté front) :
 

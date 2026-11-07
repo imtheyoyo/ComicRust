@@ -535,6 +535,161 @@ fn evenements_pour_le_front() {
 // ───────────────────────────── MySQL de ComicRack (base de test) ─────────────────────────────
 
 /// Fiche de ComicRack CE avec des éléments que ComicRust ne modélise pas.
+/// Revue de l'étape 3 : « (valeurs multiples) » n'est jamais écrit tel quel dans une fiche.
+#[test]
+fn valeurs_multiples_jamais_ecrites_litteralement() {
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let (b, e) = autonome(&d.path().join("data"), &racine);
+    let ids = vec![id_par_fichier(&b, "Thanos 01.cbz"), id_par_fichier(&b, "Asterix 01.cbz")];
+    let err = verifier_champs(&[modif("Series", VALEURS_MULTIPLES), modif("Writer", " (valeurs multiples) ")]);
+    assert_eq!(err.len(), 2, "{err:?}");
+    let dm = DemandeModification {
+        ids: ids.clone(),
+        champs: vec![modif("Series", VALEURS_MULTIPLES)],
+        ecrire_dans_fichier: true,
+        confirme: false,
+    };
+    assert!(e.appliquer_modifications(&dm, &|_| {}).unwrap_err().contains("rien n'est enregistré"));
+    assert_eq!(b.livre(&ids[0]).unwrap().series.as_deref(), Some("Thanos"));
+    assert_eq!(b.livre(&ids[1]).unwrap().series.as_deref(), Some("Astérix"));
+    // Plusieurs livres : un seul champ envoyé, les autres (valeurs différentes) restent intacts.
+    let dm = DemandeModification { champs: vec![modif("Genre", "BD")], ..dm };
+    assert!(e.appliquer_modifications(&dm, &|_| {}).unwrap().complet);
+    assert_eq!(b.livre(&ids[0]).unwrap().series.as_deref(), Some("Thanos"));
+    assert_eq!(b.livre(&ids[1]).unwrap().series.as_deref(), Some("Astérix"));
+    let (xml, _) = comic_info(&racine.join("Asterix 01.cbz"));
+    assert!(xml.contains("<Series>Astérix</Series>") && xml.contains("<Genre>BD</Genre>"), "{xml}");
+}
+
+/// Revue de l'étape 3 : l'analyse des dossiers et une opération d'édition s'excluent (un fichier
+/// renommé pendant l'analyse serait ajouté comme nouveau livre).
+#[test]
+fn analyse_et_edition_s_excluent() {
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let (b, e) = autonome(&d.path().join("data"), &racine);
+    let garde = e.occuper().unwrap();
+    let err = b.lancer_scan(Arc::new(|_| {})).unwrap_err();
+    assert!(err.contains("édition est en cours"), "{err}");
+    assert!(b.prendre_edition().err().unwrap().contains("déjà en cours"));
+    let err = b.configurer(&ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None }).unwrap_err();
+    assert!(err.contains("édition en cours"), "{err}");
+    drop(garde);
+    // Analyse en cours : l'édition est refusée.
+    let (tx, rx) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    b.lancer_scan(Arc::new(move |ev| {
+        let _ = tx.lock().unwrap().send(ev);
+    }))
+    .unwrap();
+    let pendant = e.occuper().err();
+    loop {
+        if let EvenementScan::Termine { .. } | EvenementScan::Erreur { .. } =
+            rx.recv_timeout(Duration::from_secs(60)).unwrap()
+        {
+            break;
+        }
+    }
+    // L'analyse peut finir avant `occuper` : seul le message, s'il y en a un, est vérifié.
+    if let Some(m) = pendant {
+        assert!(m.contains("analyse"), "{m}");
+    }
+    assert!(e.occuper().is_ok(), "analyse finie : l'édition reprend");
+}
+
+/// Revue de l'étape 3 : arrêt demandé avant le premier livre : rien n'est écrit, chaque livre
+/// est noté « non fait » dans le bilan.
+#[test]
+fn arret_du_lot_entre_deux_livres() {
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let (b, e) = autonome(&d.path().join("data"), &racine);
+    let ids = vec![id_par_fichier(&b, "Thanos 01.cbz"), id_par_fichier(&b, "Thanos 02.cbz")];
+    let avant = std::fs::read(racine.join("Thanos 02.cbz")).unwrap();
+    let e2 = e.clone();
+    let sortie = move |ev: EvenementEdition| {
+        if matches!(ev, EvenementEdition::Progression { .. }) {
+            e2.annuler();
+        }
+    };
+    let dm = DemandeModification {
+        ids: ids.clone(),
+        champs: vec![modif("Genre", "Cosmique")],
+        ecrire_dans_fichier: true,
+        confirme: false,
+    };
+    let r = e.appliquer_modifications(&dm, &sortie).unwrap();
+    assert!(r.interrompu && !r.complet, "{}", r.rapport);
+    assert_eq!(std::fs::read(racine.join("Thanos 02.cbz")).unwrap(), avant, "fichier non réécrit");
+    assert!(r.livres.iter().all(|l| l.message.as_deref().unwrap_or("").contains("arrêt demandé")), "{}", r.rapport);
+    // Lot suivant : l'arrêt précédent est oublié.
+    let r = e.ecrire_infos_fichiers(&ids, false, &|_| {}).unwrap();
+    assert!(r.complet && !r.interrompu, "{}", r.rapport);
+}
+
+/// Revue de l'étape 3 : l'original converti n'est rangé dans « _originaux » que si la fiche
+/// pointe bien sur le CBZ (sinon la fiche pointerait sur un fichier disparu).
+#[test]
+fn conversion_original_garde_si_fiche_non_suivie() {
+    let cbr = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recette/echantillons/Silver Surfer 04 (1987).cbr");
+    if !cbr.is_file() {
+        eprintln!("échantillon absent : test ignoré");
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let original = racine.join("Silver Surfer 04 (1987).cbr");
+    std::fs::copy(&cbr, &original).unwrap();
+    let data = d.path().join("data");
+    let (b, e) = autonome(&data, &racine);
+    let ss = id_par_fichier(&b, "Silver Surfer 04 (1987).cbr");
+    // La fiche disparaît de la base (retirée ailleurs) : la mise à jour échouera.
+    let cfg = comicrust_core::store::StoreConfig::Sqlite(data.join(comicrust_core::store::SQLITE_FILE_NAME));
+    Store::open_existing(&cfg).unwrap().delete(std::slice::from_ref(&ss)).unwrap();
+    let r = e.convertir_cbr_cbz(std::slice::from_ref(&ss), Some(true), false, &|_| {}).unwrap();
+    assert_eq!(r.livres[0].statut, Statut::Erreur, "{}", r.rapport);
+    assert!(original.is_file(), "original resté à sa place : {}", r.rapport);
+    assert!(!racine.join(DOSSIER_ORIGINAUX).exists());
+    assert!(racine.join("Silver Surfer 04 (1987).cbz").is_file(), "le CBZ, lui, est créé");
+}
+
+/// « Ouvrir le dossier du fichier » : commandes par système, livre sans fichier, dossier absent.
+#[test]
+fn ouvrir_le_dossier_du_fichier() {
+    let w = commande_ouvrir_dossier(Path::new(r"C:\BD\Marvel\Thanos 01.cbz"), true, Systeme::Windows);
+    assert_eq!(w.programme, "explorer.exe");
+    assert_eq!(w.arguments, vec![r#"/select,"C:\BD\Marvel\Thanos 01.cbz""#.to_string()]);
+    assert!(w.brut, "arguments passés tels quels à l'Explorateur");
+    let unc = commande_ouvrir_dossier(Path::new("//nas/BD/Thanos 01.cbz"), true, Systeme::Windows);
+    assert_eq!(unc.arguments, vec![r#"/select,"\\nas\BD\Thanos 01.cbz""#.to_string()]);
+    let l = commande_ouvrir_dossier(Path::new("/srv/BD/Thanos 01.cbz"), true, Systeme::Autre);
+    assert_eq!((l.programme.as_str(), l.arguments.clone(), l.brut), ("xdg-open", vec!["/srv/BD".to_string()], false));
+    let m = commande_ouvrir_dossier(Path::new("/srv/BD/Thanos 01.cbz"), true, Systeme::MacOs);
+    assert_eq!(m.arguments, vec!["-R".to_string(), "/srv/BD/Thanos 01.cbz".to_string()]);
+    let absent = commande_ouvrir_dossier(Path::new("/srv/BD/Thanos 01.cbz"), false, Systeme::MacOs);
+    assert_eq!(absent.arguments, vec!["/srv/BD".to_string()]);
+
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let (b, e) = autonome(&d.path().join("data"), &racine);
+    let id = id_par_fichier(&b, "Thanos 01.cbz");
+    let c = e.commande_dossier_fichier(&id).unwrap();
+    assert_eq!(c, commande_ouvrir_dossier(&racine.join("Thanos 01.cbz"), true, Systeme::courant()));
+    assert!(e.commande_dossier_fichier("inconnu").unwrap_err().contains("inconnu"));
+    // Fichier disparu, dossier présent : le dossier est ouvert ; dossier disparu : erreur lisible.
+    std::fs::remove_file(racine.join("Thanos 01.cbz")).unwrap();
+    let c = e.commande_dossier_fichier(&id).unwrap();
+    assert_eq!(c, commande_ouvrir_dossier(&racine.join("Thanos 01.cbz"), false, Systeme::courant()));
+    std::fs::remove_dir_all(&racine).unwrap();
+    assert!(e.commande_dossier_fichier(&id).unwrap_err().contains("dossier introuvable"));
+}
+
 fn fiche_ce(id: &str, fichier: &Path) -> String {
     format!(
         "<ComicBook Id=\"{id}\" File=\"{}\"><Series>Thanos</Series><Number>1</Number><Year>1990</Year>\
