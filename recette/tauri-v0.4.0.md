@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.4.0 (pré-release de la version Tauri 2 : étape 3, **infos et édition**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.4.0-windows-x64.zip` |
-| SHA-256 | à reporter |
+| SHA-256 | `b3918ba674cbf1106bbb51278b3006903e1ac24e05723a0ac1cb9fa9c287336d` |
 | Contenu | **sélection multiple** (grille et tableau : Ctrl, Maj, Ctrl+A) ; **menu contextuel** ; fenêtre **« Infos du livre »** (un livre ou plusieurs, onglets, autocomplétion, validation, ↺ / ✖, Précédent / Suivant) ; **écriture du `ComicInfo.xml`** dans les CBZ ; **conversion CBR / CB7 / CBT → CBZ** ; **renommer / déplacer** avec aperçu ; garde-fou au-delà de 100 livres ; option **« Lecture et écriture »** du mode lié ComicRack (fiches, fichiers et avancement de lecture écrits dans la base MySQL de ComicRack) ; « Ouvrir le dossier du fichier » ; correctif E-03 (miniature d'une page tournée) |
 | Origine | étape 3 de [`docs/tauri/PLAN.md`](../docs/tauri/PLAN.md), contrat [`docs/tauri/ipc-edition.md`](../docs/tauri/ipc-edition.md) ; tauri-v0.3.0 **GO** le 03/11/2026 ([rapport](rapports/tauri-v0.3.0-2026-11-03.txt) : M-08 non testé, repris ici ; E-03 corrigé). Tests repris des recettes egui [v0.4.0](v0.4.0.md) / [v0.4.1](v0.4.1.md) (D-), [v0.6.0](v0.6.0.md) (W-, C-), [v0.10.0](v0.10.0.md) (rangement), [v0.10.1](v0.10.1.md) (F-) et [v0.10.7](v0.10.7.md) (P-01 sur le NAS) |
 
