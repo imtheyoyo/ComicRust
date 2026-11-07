@@ -5,6 +5,48 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.4.0] — 2026-11-07
+
+Étape 3 de la version **Tauri 2** (branche `tauri2-web`) : **infos et édition**. Voir
+[`docs/tauri/PLAN.md`](docs/tauri/PLAN.md) et le contrat
+[`docs/tauri/ipc-edition.md`](docs/tauri/ipc-edition.md).
+
+> ⚠ Première version Tauri qui modifie des fichiers BD et, sur demande, la base de ComicRack :
+> faire une sauvegarde de la base ComicRack avant d'activer « Lecture et écriture ».
+
+### Nouveautés
+- **Sélection multiple** dans la grille et le tableau : Ctrl+clic, Maj+clic, Ctrl+Maj+clic,
+  Maj+flèches, **Ctrl+A** ; nombre de livres sélectionnés dans la barre d'état et le panneau de détails.
+- **Menu contextuel** (clic droit, touche Menu, Maj+F10) : Lire, Modifier les infos (Ctrl+I), Écrire
+  les infos dans le fichier, Convertir en CBZ, Renommer / déplacer, **Ouvrir le dossier du fichier**
+  (le fichier sélectionné dans l'Explorateur).
+- Fenêtre **« Infos du livre »** (Ctrl+I, menu, bouton « ✏ Modifier » du panneau) reprise de la
+  version egui : onglets Résumé, Détails, Intrigue et notes, Catalogue, Personnalisé ;
+  **autocomplétion** avec les valeurs de la bibliothèque ; **validation** pendant la saisie ;
+  ↺ pour revenir à la valeur enregistrée ; OK / Appliquer / Annuler ; **Précédent / Suivant**.
+- **Plusieurs livres** à la fois : « (valeurs multiples) » quand les livres diffèrent, **seuls les
+  champs touchés sont écrits**, ✖ pour vider un champ pour tous ; progression, Arrêter, bilan par
+  livre et « Copier le rapport ».
+- **Écriture du `ComicInfo.xml`** dans les CBZ (case « Écrire aussi les infos dans le fichier » ou
+  menu « Écrire les infos dans le fichier ») : archive réécrite sans recompression puis remplacée
+  d'un coup, nouvelles tentatives si le fichier est momentanément refusé (NAS, antivirus).
+- **Conversion CBR / CB7 / CBT → CBZ**, original laissé en place ou rangé dans `_originaux`.
+- **Renommer / déplacer** d'après un modèle de nom (modèles de ComicRack, sous-dossiers), avec
+  **aperçu** ; collisions refusées, jamais d'écrasement ; la fiche suit le fichier.
+- **Garde-fou** : au-delà de 100 livres, une opération demande confirmation.
+- **Mode lié ComicRack** : **lecture seule par défaut** (rien n'est écrit dans ComicRack ; fichiers
+  seulement) ; nouvelle option **« Lecture et écriture »** (⚙ Réglages, avec avertissement) : fiches,
+  fichiers convertis ou renommés et **avancement de lecture** écrits dans la base MySQL de ComicRack,
+  seuls les éléments touchés de la fiche, sans écraser une modification faite dans ComicRack.
+  `ComicDb.xml` reste en lecture seule pour les fiches.
+
+### Corrections
+- Recette tauri-v0.3.0 E-03 : la miniature d'une page tournée reste dans son cadre dans le bandeau
+  des miniatures.
+
+### Recette
+[recette/tauri-v0.4.0.md](recette/tauri-v0.4.0.md)
+
 ## [tauri-v0.3.0] — 2026-11-03
 
 Étape 2 de la version **Tauri 2** (branche `tauri2-web`) : le **lecteur**. Voir
