@@ -46,7 +46,7 @@ pub const VALEURS_MULTIPLES: &str = "(valeurs multiples)";
 
 /// Lecture seule : base ComicRack sans écriture.
 pub const LECTURE_SEULE_COMICRACK: &str = "Lecture seule : active l'écriture dans la base ComicRack (Réglages ▸ \
-     Édition, « Lecture et écriture ») pour modifier les fiches. Les fichiers (infos, conversion) restent modifiables.";
+     Bibliothèque ComicRack, « Lecture et écriture ») pour modifier les fiches. Les fichiers (infos, conversion) restent modifiables.";
 /// Lecture seule : `ComicDb.xml`.
 pub const LECTURE_SEULE_XML: &str = "Lecture seule : la bibliothèque ComicDb.xml de ComicRack ne se modifie pas \
      depuis ComicRust (ComicRack la réécrit lui-même). Utilise la base MySQL de ComicRack en écriture, ou une \
