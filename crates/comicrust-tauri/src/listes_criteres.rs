@@ -455,9 +455,17 @@ fn est_note(kind: &str) -> bool {
 /// Contrôle et conversion d'un critère saisi (`rule_to_matcher` de la version egui).
 fn critere_vers(c: &Critere, origine: Option<&Matcher>) -> Result<Matcher, String> {
     let orig = origine.filter(|m| matches!(m, Matcher::Value { .. }));
-    // Critère absent du catalogue : toujours recopié tel quel.
+    // Critère absent du catalogue : toujours recopié tel quel… à condition que l'origine désigne
+    // toujours ce critère (liste modifiée dans ComicRack pendant que la fenêtre était ouverte :
+    // le chemin « 0/2 » pourrait désigner un autre critère, qui serait alors dupliqué).
     if !c.modifiable || matcher_info(&c.type_critere).is_none() {
-        return orig.cloned().ok_or_else(|| format!("critère inconnu ({})", c.type_critere));
+        return match orig {
+            Some(o @ Matcher::Value { kind, op, .. }) if *kind == c.type_critere && *op == c.op => Ok(o.clone()),
+            Some(_) => Err("la liste a changé depuis l'ouverture de la fenêtre (dans ComicRack ?) : ferme et \
+                            rouvre l'éditeur"
+                .into()),
+            None => Err(format!("critère inconnu ({})", c.type_critere)),
+        };
     }
     // Critère existant non modifié : rendu tel quel, jamais réécrit.
     if let Some(o) = orig {

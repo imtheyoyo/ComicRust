@@ -22,7 +22,9 @@ use crate::reglages;
 use crate::tri::ClefTri;
 use comicrust_core::comic_lists::{find_comicdb, load_comic_lists, resolve_all, Combine, ComicList, ListKind, Members};
 use comicrust_core::db::ComicDatabase;
-use comicrust_core::lists_edit::{comicdb::COMICRACK_RUNNING, ComicDbLists, ListsEditor, NewList, COMICRACK_UNKNOWN};
+use comicrust_core::lists_edit::{
+    comicdb::COMICRACK_RUNNING, ComicDbLists, ListRow, ListsEditor, NewList, COMICRACK_UNKNOWN,
+};
 use comicrust_core::store::{Store, StoreConfig};
 use comicrust_core::Error;
 use serde::{Deserialize, Serialize};
@@ -676,10 +678,14 @@ impl Biblio {
                 let r = (|| -> Result<_, Error> {
                     let mut store = Store::open_existing(cfg)?;
                     let snap = store.list_rows()?;
-                    let mut ed = ListsEditor::new(snap.rows);
+                    let mut ed = ListsEditor::new(snap.rows.clone());
                     let issue = op(&mut ed)?;
                     let lists = ed.lists()?;
-                    store.save_list_rows(ed.rows(), snap.counter)?;
+                    controler_identifiants(&snap.rows, ed.rows(), &lists)?;
+                    // Rien n'a changé (livres déjà présents…) : rien n'est écrit.
+                    if ed.rows() != snap.rows.as_slice() {
+                        store.save_list_rows(ed.rows(), snap.counter)?;
+                    }
                     Ok((lists, issue))
                 })()
                 .map_err(|e| texte_erreur(&e))?;
@@ -692,13 +698,18 @@ impl Biblio {
                     let mut ed = ListsEditor::new(fichier.rows.clone());
                     let issue = op(&mut ed)?;
                     let lists = ed.lists()?;
+                    controler_identifiants(&fichier.rows, ed.rows(), &lists)?;
+                    // Rien n'a changé : ComicDb.xml n'est pas réécrit (ni sauvegardé).
+                    if ed.rows() == fichier.rows.as_slice() {
+                        return Ok((lists, issue, None));
+                    }
                     let d = detecteur.clone();
                     let rapport = fichier.save_checked(ed.rows(), move || d())?;
-                    Ok((lists, issue, rapport))
+                    Ok((lists, issue, Some(rapport)))
                 })()
                 .map_err(|e| texte_erreur(&e))?;
-                let nom = r.2.backup.file_name().map(|n| n.to_string_lossy().into_owned());
-                (r.0, r.1, nom, r.2.warnings)
+                let nom = r.2.as_ref().and_then(|x| x.backup.file_name()).map(|n| n.to_string_lossy().into_owned());
+                (r.0, r.1, nom, r.2.map(|x| x.warnings).unwrap_or_default())
             }
         };
         {
@@ -1143,6 +1154,55 @@ impl Biblio {
         let Some(repere) = group_shift_anchor(&livres_groupes, k, haut) else { return self.sans_ecriture() };
         self.reordonner(id, &actuels, livres_groupes[k].clone(), repere)
     }
+}
+
+/// GUID au format écrit par ComicRack (`8-4-4-4-12` chiffres hexadécimaux).
+pub fn est_guid(s: &str) -> bool {
+    let b = s.trim().as_bytes();
+    b.len() == 36
+        && b.iter().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => *c == b'-',
+            _ => c.is_ascii_hexdigit(),
+        })
+}
+
+/// Contrôle final avant écriture : dans les listes créées ou modifiées par l'opération, chaque
+/// identifiant (liste, livres d'une liste de lecture, livres retirés à la main d'une liste
+/// intelligente) est un GUID. `XmlSerializer` lit ces valeurs comme des `Guid` : une seule valeur
+/// invalide et ComicRack ne pourrait plus charger `ComicDb.xml` (ni ses listes transférées depuis
+/// la base de ComicRust). Les listes non touchées ne sont pas contrôlées (écrites par ComicRack).
+pub(crate) fn controler_identifiants(avant: &[ListRow], apres: &[ListRow], listes: &[ComicList]) -> Result<(), Error> {
+    let inchangees: HashSet<(&str, &str)> = avant.iter().map(|r| (r.id.as_str(), r.xml.as_str())).collect();
+    let touchees: HashSet<String> = apres
+        .iter()
+        .filter(|r| !inchangees.contains(&(r.id.as_str(), r.xml.as_str())))
+        .map(|r| r.id.trim().to_ascii_lowercase())
+        .collect();
+    for (l, _) in flatten(listes) {
+        if !touchees.contains(&l.id.trim().to_ascii_lowercase()) {
+            continue;
+        }
+        let refus = |quoi: &str, v: &str| {
+            Error::Database(format!(
+                "listes non enregistrées : {quoi} de « {} » invalide (« {} », GUID attendu) ; ComicRack ne pourrait \
+                 plus lire ses listes",
+                l.name,
+                v.chars().take(60).collect::<String>()
+            ))
+        };
+        if !est_guid(&l.id) {
+            return Err(refus("identifiant", &l.id));
+        }
+        let livres: &[String] = match &l.kind {
+            ListKind::Ids(v) => v,
+            ListKind::Smart { query: Some(q), .. } => &q.filtered,
+            _ => &[],
+        };
+        if let Some(v) = livres.iter().find(|v| !est_guid(v)) {
+            return Err(refus("identifiant de livre", v));
+        }
+    }
+    Ok(())
 }
 
 /// Livres d'une liste de lecture (identifiants, dans l'ordre).

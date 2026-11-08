@@ -622,7 +622,212 @@ fn une_operation_a_la_fois_et_erreurs_lisibles() {
         .unwrap();
     assert!(b.renommer_liste(&id, "  ").unwrap_err().contains("vide"));
     assert!(b.dupliquer_liste("inconnue").unwrap_err().contains("introuvable"));
-    assert!(b.ajouter_livres_liste(&id, vec!["x".into()], None).is_ok());
+    // Identifiant de livre qui n'est pas un GUID : refusé (ComicRack ne pourrait plus lire ses
+    // listes), rien d'écrit.
+    let err = b.ajouter_livres_liste(&id, vec!["x".into()], None).unwrap_err();
+    assert!(err.contains("GUID attendu"), "{err}");
+    assert_eq!(noeud(&b.arbre_listes().unwrap(), &id).nb_livres, Some(0));
+}
+
+// ───────────────────────────── Revue de l'étape 5 ─────────────────────────────
+
+/// `ComicDb.xml` : un identifiant de livre invalide n'est jamais écrit (XmlSerializer lit des
+/// `Guid` : un seul mauvais et ComicRack ne charge plus le fichier) ; GUID en majuscules
+/// accepté et écrit en minuscules.
+#[test]
+fn comicdb_identifiants_de_livres_controles() {
+    let d = tempfile::tempdir().unwrap();
+    let (b, xml) = biblio_comicdb(d.path());
+    ecriture(&b, true);
+    let original = std::fs::read(&xml).unwrap();
+    // Identifiant vide : ignoré, rien n'est réécrit (pas même une sauvegarde).
+    let r = b.ajouter_livres_liste(TEST_LISTE, vec!["  ".into()], None).unwrap();
+    assert!(r.info.starts_with("0 livre ajouté") && r.sauvegarde.is_none(), "{r:?}");
+    assert_eq!(std::fs::read(&xml).unwrap(), original);
+    assert_eq!(sauvegardes(d.path()), (vec![], vec![]));
+    for mauvais in ["pas-un-guid", "{11111111-2222-4333-8444-555555555555}", "11111111-2222-4333-8444-55555555555g"] {
+        let err = b.ajouter_livres_liste(TEST_LISTE, vec![mauvais.into()], None).unwrap_err();
+        assert!(err.contains("GUID attendu"), "{mauvais} : {err}");
+        let err = b
+            .creer_liste(&DemandeCreation {
+                type_liste: TypeNouvelle::Lecture,
+                nom: Some("Mauvaise".into()),
+                parent: None,
+                position: None,
+                livres: Some(vec!["ffffffff-0000-4000-8000-000000000001".into(), mauvais.into()]),
+                apres_liste: None,
+            })
+            .unwrap_err();
+        assert!(err.contains("GUID attendu"), "{mauvais} : {err}");
+    }
+    assert_eq!(std::fs::read(&xml).unwrap(), original, "rien n'a été écrit");
+    let r = b.ajouter_livres_liste(TEST_LISTE, vec!["FFFFFFFF-0000-4000-8000-000000000001".into()], None).unwrap();
+    assert!(r.info.starts_with("1 livre ajouté"), "{}", r.info);
+    let t = std::fs::read_to_string(&xml).unwrap();
+    assert!(element(&t, TEST_LISTE).contains("<guid>ffffffff-0000-4000-8000-000000000001</guid>"));
+    // Le reste du fichier est relu à l'identique par le cœur (aucune liste perdue).
+    assert_eq!(load_comic_lists(&xml).unwrap().len(), load_comic_lists(Path::new(FIXTURE)).unwrap().len());
+}
+
+/// `ComicDb.xml` écrit par ComicRack (UTF-8 avec BOM, CRLF) : BOM et fins de ligne gardés, seul
+/// `<ComicLists>` change.
+#[test]
+fn comicdb_avec_bom_garde_a_l_octet() {
+    let d = tempfile::tempdir().unwrap();
+    let (b, xml) = biblio_comicdb(d.path());
+    ecriture(&b, true);
+    let mut octets = "\u{feff}".as_bytes().to_vec();
+    octets.extend(std::fs::read(FIXTURE).unwrap());
+    std::fs::write(&xml, &octets).unwrap();
+    assert!(b.etat_listes().erreur.is_none());
+    b.renommer_liste(TEST_LISTE, "Renommée").unwrap();
+    let apres = std::fs::read(&xml).unwrap();
+    assert!(apres.starts_with("\u{feff}<?xml".as_bytes()), "BOM gardé");
+    let (avant, apres) = (String::from_utf8(octets).unwrap(), String::from_utf8(apres).unwrap());
+    let hors = |t: &str| {
+        let a = t.find("<ComicLists>").unwrap();
+        let z = t.find("</ComicLists>").unwrap();
+        (t[..a].to_string(), t[z..].to_string())
+    };
+    assert_eq!(hors(&apres), hors(&avant));
+    assert!(!apres.replace("\r\n", "").contains('\n'), "CRLF");
+    assert!(element(&apres, TEST_LISTE).contains("Name=\"Renommée\""));
+    assert_eq!(element(&apres, GUIDE), element(&avant, GUIDE));
+}
+
+/// Éditeur : un critère non modifiable (absent du catalogue) n'est recopié que si son origine
+/// désigne toujours le même critère (liste modifiée dans ComicRack entre-temps : refus, plutôt
+/// que dupliquer un autre critère).
+#[test]
+fn critere_non_modifiable_et_origine_changee() {
+    use crate::listes_criteres::{vers_requete, Critere};
+    use comicrust_core::smart::{Matcher, SmartQuery};
+    let inconnu = Matcher::value("ComicBookMachinInconnuMatcher", 0, "x", "", false, true);
+    let serie = Matcher::value("ComicBookSeriesMatcher", 1, "Thanos", "", false, true);
+    let critere = Critere {
+        non: false,
+        type_critere: "ComicBookMachinInconnuMatcher".into(),
+        op: 0,
+        valeur: "x".into(),
+        valeur2: String::new(),
+        ignorer_casse: true,
+        origine: Some("0".into()),
+        modifiable: false,
+        libelle: None,
+    };
+    let saisie = CriteresListe {
+        nom: "L".into(),
+        description: String::new(),
+        mode: ModeCriteres::Tous,
+        noeuds: vec![NoeudCritere::Critere(critere)],
+        depart: None,
+        pas_dans_depart: false,
+        limite: None,
+        retires: 0,
+        reinitialiser_retires: None,
+    };
+    let q = |m: Vec<Matcher>| SmartQuery { matchers: m, ..Default::default() };
+    let ok = vers_requete(&saisie, Some(&q(vec![inconnu.clone(), serie.clone()]))).unwrap();
+    assert_eq!(ok.matchers, vec![inconnu.clone()]);
+    // ComicRack a supprimé le critère inconnu : « 0 » désigne maintenant « Série ».
+    let err = vers_requete(&saisie, Some(&q(vec![serie]))).unwrap_err();
+    assert!(err[0].contains("a changé depuis l'ouverture"), "{err:?}");
+    assert!(vers_requete(&saisie, Some(&q(vec![]))).is_err());
+}
+
+/// `.cbl` hostiles : entités (« milliard de rires »), fichier énorme, imbrication profonde,
+/// dossier au lieu d'un fichier : refus lisible, sans tout charger ni planter ; rapport borné.
+#[test]
+fn cbl_hostiles() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let ecrire = |nom: &str, t: &str| {
+        let p = d.path().join(nom);
+        std::fs::write(&p, t).unwrap();
+        p.display().to_string()
+    };
+    let rires = ecrire(
+        "rires.cbl",
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE l [<!ENTITY a \"aaaaaaaaaa\"><!ENTITY b \"&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;\">\
+         <!ENTITY c \"&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;\"><!ENTITY e \"&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;\">]>\n\
+         <ReadingList><Name>&e;</Name><Books><Book Series=\"&e;\" Number=\"1\" /></Books></ReadingList>",
+    );
+    let t = std::time::Instant::now();
+    let r = b.analyser_cbl(&rires);
+    assert!(t.elapsed() < std::time::Duration::from_secs(2));
+    if let Ok(r) = r {
+        assert!(r.nom.len() < 100 && r.texte.len() < 10_000, "entités non développées");
+    }
+    let externe = ecrire(
+        "externe.cbl",
+        "<?xml version=\"1.0\"?><!DOCTYPE l [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><ReadingList><Name>&x;</Name>\
+         <Books /></ReadingList>",
+    );
+    if let Ok(r) = b.analyser_cbl(&externe) {
+        assert!(!r.nom.contains("root"), "entité externe jamais lue");
+    }
+    // Fichier énorme (creux) : refusé d'après sa taille, sans lecture.
+    let gros = d.path().join("gros.cbl");
+    std::fs::File::create(&gros).unwrap().set_len(crate::listes_cbl::TAILLE_MAX_CBL + 1).unwrap();
+    let err = b.analyser_cbl(&gros.display().to_string()).unwrap_err();
+    assert!(err.contains("trop gros"), "{err}");
+    assert!(b.importer_cbl(&gros.display().to_string(), None, None, None, None).is_err());
+    // Imbrication très profonde : pas de débordement de pile.
+    let profond = ecrire(
+        "profond.cbl",
+        &format!("<ReadingList><Books>{}{}</Books></ReadingList>", "<x>".repeat(200_000), "</x>".repeat(200_000)),
+    );
+    let _ = b.analyser_cbl(&profond);
+    assert!(b.analyser_cbl(&d.path().display().to_string()).unwrap_err().contains("pas un fichier"));
+    // 1 500 entrées introuvables : comptées, 1 000 détaillées.
+    let livres: String = (0..1500).map(|i| format!("<Book Series=\"Absente\" Number=\"{i}\" />")).collect();
+    let beaucoup = ecrire("beaucoup.cbl", &format!("<ReadingList><Name>B</Name><Books>{livres}</Books></ReadingList>"));
+    let r = b.analyser_cbl(&beaucoup).unwrap();
+    assert_eq!((r.total, r.trouves, r.manquants.len()), (1500, 0, crate::listes_cbl::MANQUANTS_MAX));
+    assert!(
+        r.texte.contains("Manquants (1500)") && r.texte.ends_with("… et 500 autres manquants"),
+        "{}",
+        &r.texte[..80]
+    );
+    assert!(b.arbre_listes().unwrap().listes.is_empty(), "rien n'a été créé");
+}
+
+/// Performance : 5 000 livres et les 47 listes de la fixture (arbre, liste de lecture de 321
+/// livres, vue groupée, état) restent rapides, même en mode test (non optimisé).
+#[test]
+fn performance_5000_livres_47_listes() {
+    let d = tempfile::tempdir().unwrap();
+    let (b, _) = biblio_comicdb(d.path());
+    let mut livres = base_fixture().books;
+    for i in livres.len()..5000 {
+        livres.push(livre(
+            &format!("{i:08x}-0000-4000-8000-000000000000"),
+            &format!("Série {}", i / 7),
+            &(i % 7 + 1).to_string(),
+        ));
+    }
+    b.installer(Mode::Comicrack, ComicDatabase::from_books(livres), None);
+    let t = std::time::Instant::now();
+    let a = b.arbre_listes().unwrap();
+    let arbre = t.elapsed();
+    assert_eq!(tous(&a).len(), 47);
+    let t = std::time::Instant::now();
+    for _ in 0..20 {
+        b.etat_listes();
+        b.arbre_listes().unwrap();
+    }
+    let repete = t.elapsed();
+    let t = std::time::Instant::now();
+    assert_eq!(b.lister(&requete(Some(GUIDE), "ordre", Some(Groupe::Serie))).unwrap().total, 321);
+    b.groupes_vue(&requete(Some(GUIDE), "ordre", Some(Groupe::Serie))).unwrap();
+    for (_, n) in tous(&a) {
+        b.lister(&requete(Some(&n.id), "serie", None)).unwrap();
+    }
+    let vues = t.elapsed();
+    eprintln!("arbre {arbre:?}, 20 × (état + arbre) {repete:?}, 49 vues {vues:?}");
+    assert!(arbre < std::time::Duration::from_secs(5), "{arbre:?}");
+    assert!(repete < std::time::Duration::from_secs(5), "cache des comptes : {repete:?}");
+    assert!(vues < std::time::Duration::from_secs(10), "{vues:?}");
 }
 
 // ───────────────────────────── .cbl ─────────────────────────────

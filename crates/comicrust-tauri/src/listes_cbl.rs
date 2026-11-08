@@ -59,9 +59,37 @@ pub struct ExportCbl {
     pub livres: usize,
 }
 
-/// Lit un `.cbl`.
+/// Taille maximale d'un `.cbl` lu (une liste de 1 000 numéros fait environ 200 Ko) : un fichier
+/// énorme (ou qui n'est pas un `.cbl`) n'est pas chargé en mémoire.
+pub const TAILLE_MAX_CBL: u64 = 32 * 1024 * 1024;
+/// Manquants détaillés dans le rapport (les suivants sont seulement comptés).
+pub const MANQUANTS_MAX: usize = 1000;
+
+/// Lit un `.cbl`. Fichiers hostiles : taille bornée ; les entités d'un DOCTYPE ne sont pas
+/// développées (quick-xml ne connaît que les entités prédéfinies : refus lisible).
 pub fn lire_cbl(chemin: &Path) -> Result<ReadingList, String> {
-    let texte = std::fs::read(chemin).map_err(|e| format!("{} : {e}", chemin.display()))?;
+    let meta = std::fs::metadata(chemin).map_err(|e| format!("{} : {e}", chemin.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} n'est pas un fichier", chemin.display()));
+    }
+    if meta.len() > TAILLE_MAX_CBL {
+        return Err(format!(
+            "{} : fichier trop gros pour une liste .cbl ({} Mo, au plus {} Mo)",
+            chemin.display(),
+            meta.len() / (1024 * 1024),
+            TAILLE_MAX_CBL / (1024 * 1024)
+        ));
+    }
+    let mut texte = Vec::new();
+    {
+        use std::io::Read;
+        let f = std::fs::File::open(chemin).map_err(|e| format!("{} : {e}", chemin.display()))?;
+        // Borne aussi la lecture (fichier qui grossit entre-temps).
+        f.take(TAILLE_MAX_CBL + 1).read_to_end(&mut texte).map_err(|e| format!("{} : {e}", chemin.display()))?;
+    }
+    if texte.len() as u64 > TAILLE_MAX_CBL {
+        return Err(format!("{} : fichier trop gros pour une liste .cbl", chemin.display()));
+    }
     let texte = String::from_utf8_lossy(&texte);
     ReadingList::from_xml(&texte).map_err(|e| format!("{} : liste .cbl illisible ({e})", chemin.display()))
 }
@@ -131,10 +159,15 @@ pub fn rattacher(liste: &ReadingList, nom: &str, db: &ComicDatabase) -> (Vec<Str
         String::new(),
         format!("Manquants ({}) :", manquants.len()),
     ];
+    let caches = manquants.len().saturating_sub(MANQUANTS_MAX);
+    manquants.truncate(MANQUANTS_MAX);
     for m in &manquants {
         let vol = m.volume.map(|v| format!(", volume {v}")).unwrap_or_default();
         let an = m.annee.map(|a| format!(" ({a})")).unwrap_or_default();
         lignes.push(format!("{:4}. {} #{}{an}{vol}", m.rang, m.serie, m.numero));
+    }
+    if caches > 0 {
+        lignes.push(format!("… et {caches} autres manquants"));
     }
     let rapport = RapportCbl {
         nom: nom.to_string(),

@@ -364,7 +364,7 @@
     if (id === 'ajouter') {
       ajoutDe = ids;
       const l = listes.listesDeLecture();
-      choixAjout = l.find((x) => x.id === listes.courante)?.id ?? l[0]?.id ?? '';
+      choixAjout = l.find((x) => x.id === listes.courante)?.id ?? l[0]?.id ?? '+';
       nomNouvelle = 'Nouvelle liste de lecture';
       return;
     }

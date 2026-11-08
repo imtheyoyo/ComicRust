@@ -34,6 +34,11 @@ aperçu, correspondances `.cbl` : tout est calculé ici. Comportement repris de 
   leur lecture (autre poste, transfert) ; rien n'est écrit.
 - Une seule opération de modification à la fois (sinon erreur « un enregistrement des listes est
   déjà en cours »).
+- Contrôle final avant toute écriture (les deux sources) : dans les listes créées ou modifiées,
+  chaque identifiant (liste, livres d'une liste de lecture, livres retirés à la main) doit être un
+  GUID `8-4-4-4-12` (`XmlSerializer` lit des `Guid` : une seule valeur invalide et ComicRack ne
+  chargerait plus `ComicDb.xml`) ; sinon refus « … GUID attendu », rien n'est écrit.
+- Opération sans effet (livres déjà présents…) : rien n'est réécrit, aucune sauvegarde créée.
 - Les listes sont relues automatiquement quand `ComicDb.xml` change (ComicRack l'a réécrit) :
   `etat_listes` et `arbre_listes` comparent la date et la taille du fichier à chaque appel.
 
@@ -266,7 +271,7 @@ interface RapportCbl {
 
 | Commande | Arguments | Résultat |
 |---|---|---|
-| `analyser_cbl` | `{chemin}` | `RapportCbl` sans rien créer (aperçu avant import). |
+| `analyser_cbl` | `{chemin}` | `RapportCbl` sans rien créer (aperçu avant import). Fichier de plus de 32 Mo refusé (« trop gros ») ; entités d'un DOCTYPE jamais développées ; `manquants` limité aux 1 000 premiers (le nombre exact est `total - trouves`, le `texte` finit par « … et n autres manquants »). |
 | `importer_cbl` | `{chemin, nom?: string, parent?: string, position?: number, apresListe?: string}` | `{resultat: ResultatListes, rapport: RapportCbl}` : nouvelle liste de lecture (nom = `nom`, sinon celui du `.cbl`) avec les livres trouvés, dans l'ordre du fichier. Correspondance : `<Id>` dans la bibliothèque, sinon série + numéro (normalisés : casse, articles, zéros) + volume si les deux le connaissent. Listes en lecture seule : refus. |
 | `exporter_cbl` | `{id, chemin}` | `{chemin: string, livres: number}` : écrit le `.cbl` (format ComicRack : `Series`, `Number`, `Volume`, `Year`, `Format`, `<Id>`) des livres de la liste, dans l'ordre affiché par `'ordre'`. Possible en lecture seule (aucune liste modifiée). Fichier écrit dans un temporaire puis renommé ; extension `.cbl` ajoutée si absente. |
 

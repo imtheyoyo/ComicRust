@@ -4,7 +4,7 @@
   // clavier (↑ ↓ changent la liste affichée, → déplie / entre, ← replie / remonte, F2, Suppr, Menu),
   // menu contextuel, renommage dans l'arbre, glisser-déposer des listes, cible des livres glissés,
   // import / export .cbl, éditeur de listes intelligentes, messages lecture seule / ComicRack lancé.
-  import { tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import {
     analyserCbl, bilanListes, convertirEnLecture, creerListe, decalerListe, deplacerListe, deposerListe, destinationsListe,
     dupliquerListe, exporterCbl, importerCbl, infosConversion, infosSuppression, messageErreur, modifierListe, placeDepotListe,
@@ -377,7 +377,31 @@
     glisseListe = { id: n.id, x0: e.clientX, y0: e.clientY, actif: false, cible: null, place: 'avant' };
     places = {};
     window.addEventListener('pointermove', bougerListe);
-    window.addEventListener('pointerup', lacherListe, { once: true });
+    window.addEventListener('pointerup', lacherListe);
+    window.addEventListener('pointercancel', annulerGlisseListe);
+    window.addEventListener('keydown', echapGlisseListe, true);
+  }
+
+  function finGlisseListe() {
+    window.removeEventListener('pointermove', bougerListe);
+    window.removeEventListener('pointerup', lacherListe);
+    window.removeEventListener('pointercancel', annulerGlisseListe);
+    window.removeEventListener('keydown', echapGlisseListe, true);
+  }
+
+  onDestroy(finGlisseListe);
+
+  /** Glisser interrompu (pointeur perdu) ou Échap : rien n'est déplacé. */
+  function annulerGlisseListe() {
+    finGlisseListe();
+    glisseListe = null;
+  }
+
+  function echapGlisseListe(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || !glisseListe?.actif) return;
+    e.preventDefault();
+    e.stopPropagation();
+    annulerGlisseListe();
   }
 
   function bougerListe(e: PointerEvent) {
@@ -408,7 +432,7 @@
   }
 
   function lacherListe() {
-    window.removeEventListener('pointermove', bougerListe);
+    finGlisseListe();
     const g = glisseListe;
     glisseListe = null;
     if (!g?.actif) return;
@@ -610,11 +634,12 @@
         {@const r = importCbl.rapport}
         <div class="rapport" data-testid="rapport-cbl">
           <p><strong>{r.trouves} / {r.total}</strong> numéros trouvés dans la bibliothèque
-            ({r.parIdentifiant} par identifiant, {r.parSerie} par série et numéro{r.doublons ? `, ${r.doublons} doublon${r.doublons > 1 ? 's' : ''}` : ''}){r.manquants.length ? `, ${r.manquants.length} manquant${r.manquants.length > 1 ? 's' : ''}` : ''}.</p>
+            ({r.parIdentifiant} par identifiant, {r.parSerie} par série et numéro{r.doublons ? `, ${r.doublons} doublon${r.doublons > 1 ? 's' : ''}` : ''}){r.total > r.trouves ? `, ${r.total - r.trouves} manquant${r.total - r.trouves > 1 ? 's' : ''}` : ''}.</p>
           {#if r.manquants.length}
             <details open>
               <summary>Numéros manquants</summary>
               <ul class="manquants">{#each r.manquants as m, k (k)}<li>{libelleManquant(m)}</li>{/each}</ul>
+              {#if r.total - r.trouves > r.manquants.length}<p class="discret">… et {r.total - r.trouves - r.manquants.length} autres (bilan complet : « Copier le bilan »).</p>{/if}
             </details>
           {/if}
           <button type="button" onclick={() => void navigator.clipboard?.writeText(r.texte)}>📋 Copier le bilan</button>
