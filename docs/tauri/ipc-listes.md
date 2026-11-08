@@ -120,7 +120,8 @@ interface LivreResume {
   ComicRack). Le réordonnancement (glisser, Monter/Descendre) n'est possible que dans une liste de
   lecture modifiable triée `'ordre'` **croissant** ; sinon le front affiche « Trie la vue dans
   l'ordre de la liste (« # » croissant) pour réordonner ».
-- Une liste supprimée pendant qu'elle est affichée : `ResultatListes.selection = null`.
+- Une liste supprimée pendant qu'elle est affichée (`supprimer_liste` avec `listeAffichee`) :
+  `ResultatListes.selection = null`.
 
 ## Gestion de l'arbre
 
@@ -131,7 +132,7 @@ interface LivreResume {
 | `modifier_liste` | `{id, nom?, description?, combinaison?: Combinaison}` | `ResultatListes`. Fenêtre « Modifier… » (liste de lecture, dossier). Seuls les champs fournis **et différents** sont écrits. Description vide = retirée. |
 | `dupliquer_liste` | `{id}` | `ResultatListes` (« Copie de X » juste après, sous-listes comprises, nouveaux identifiants ; sélectionnée). La « Bibliothèque » ne peut pas être copiée. |
 | `infos_suppression` | `{id}` | `{nom: string, sousListes: number, dependantes: string[]}` pour la fenêtre de confirmation : « Ce dossier contient n sous-listes : elles seront supprimées avec lui », « Ces listes intelligentes partent de cette liste ; elles partiront de toute la bibliothèque : … », « Les livres eux-mêmes ne sont pas supprimés. » |
-| `supprimer_liste` | `{id}` | `ResultatListes` (`selection: null` si la liste affichée a disparu). La « Bibliothèque » ne peut pas être supprimée. |
+| `supprimer_liste` | `{id, listeAffichee?: string}` | `ResultatListes` (`selection: null` si `listeAffichee` a disparu avec elle). La « Bibliothèque » ne peut pas être supprimée. |
 | `destinations_liste` | `{id}` | `{id: string \| null, nom: string, profondeur: number, actuel: boolean}[]` : menu « Déplacer dans » (« (premier niveau) » avec `id:null`, puis les dossiers sauf la liste et ses sous-dossiers ; `actuel` : son dossier actuel, à griser). |
 | `deplacer_liste` | `{id, parent: string \| null, position?: number}` | `ResultatListes`. `position` : rang parmi les nouvelles voisines (fin si absent). Impossible dans elle-même ou un descendant. |
 | `decaler_liste` | `{id, haut: boolean}` | `ResultatListes`. « ⬆ Monter » / « ⬇ Descendre » d'un cran dans son dossier (voir `peutMonter`). |
@@ -237,7 +238,7 @@ interface Apercu { nbLivres?: number; inconnu?: string; erreurs: string[] }
 | Commande | Arguments | Résultat |
 |---|---|---|
 | `catalogue_criteres` | – | `CatalogueCriteres` (`matcher_catalog` de comicrust-core, libellés français de ComicRack corrigés). |
-| `nouveau_critere` | `{type: string, ancien?: Critere}` | `Critere` : changement de champ ; opérateur et valeurs gardés si la nature de la valeur est la même, sinon opérateur 0 et valeurs vides. Sans `ancien` : critère vide de ce type. |
+| `nouveau_critere` | `{typeCritere: string, ancien?: Critere}` | `Critere` : changement de champ ; opérateur et valeurs gardés si la nature de la valeur est la même, sinon opérateur 0 et valeurs vides. Sans `ancien` : critère vide de ce type. |
 | `lire_criteres` | `{id?: string}` | `EditeurListe`. Sans `id` : nouvelle liste (« Nouvelle liste intelligente », un critère « Série contient » vide). Dates affichées `AAAA-MM-JJ`. |
 | `apercu_criteres` | `{id?: string, criteres: CriteresListe}` | `Apercu` : erreurs de saisie (« Critère 2 (Année) : « abc » n'est pas un nombre ») ou nombre de livres trouvés (comme la liste une fois enregistrée : liste de départ, limite, sous-groupes). À appeler 250 ms après la dernière modification. OK / Appliquer grisés tant que `erreurs` n'est pas vide. |
 | `enregistrer_criteres` | `{id?: string, criteres: CriteresListe, parent?: string, position?: number, apresListe?: string}` | `ResultatListes` (nouvelle liste : `creee`, `selection`). « OK » ferme après succès ; « Appliquer » garde la fenêtre (le front rappelle `lire_criteres` avec `creee`/`id`). Seul ce qui a changé est réécrit (nom, description, critères). Refus si la liste de départ crée une boucle. |
