@@ -14,6 +14,7 @@
   } from '../lib/api';
   import { modale } from '../lib/modale';
   import ChampSuggestions from './ChampSuggestions.svelte';
+  import OngletPages from './OngletPages.svelte';
   import ResultatsLot, { pourcent } from './ResultatsLot.svelte';
 
   interface Props {
@@ -46,6 +47,10 @@
   /** Garde-fou : message du backend et suite à donner une fois confirmé. */
   let confirmation = $state<{ message: string; suite: 'fermer' | 'rester' | -1 | 1 } | null>(null);
   let nouvelleCle = $state('');
+  /** Onglet Pages (étape 4, un seul livre) : monté à la première visite puis gardé. */
+  let ongletPages = $state<ReturnType<typeof OngletPages>>();
+  let pagesVues = $state(false);
+  let pagesModifiees = $state(false);
   let minuterieVerif: ReturnType<typeof setTimeout> | undefined;
   let sequenceVerif = 0;
   let desabonner: (() => void) | undefined;
@@ -71,7 +76,8 @@
       vides = {};
       erreurs = {};
       ecrireFichier = f.ecrireDansFichier && f.ecrireDansFichierPossible;
-      if (!garderOnglet || onglet >= f.onglets.length) onglet = 0;
+      const pagesPossibles = !f.multiple && !!f.livres[0]?.fichier;
+      if (!garderOnglet || onglet > f.onglets.length || (onglet === f.onglets.length && !pagesPossibles)) onglet = 0;
     } catch (e) {
       message = { texte: messageErreur(e), erreur: true };
     } finally {
@@ -91,7 +97,12 @@
   const modifications = $derived.by<ChampModifie[]>(() =>
     (fiche?.champs ?? []).filter(modifie).map((c) => ({ nom: c.nom, valeur: vides[c.nom] ? '' : (textes[c.nom] ?? '') })),
   );
-  const sale = $derived(modifications.length > 0);
+  /** Onglet Pages : un seul livre ayant un fichier (comme la version egui et ComicRack). */
+  const avecPages = $derived(!!fiche && !fiche.multiple && !!fiche.livres[0]?.fichier);
+  const indicePages = $derived(fiche?.onglets.length ?? 0);
+  const surPages = $derived(avecPages && onglet === indicePages);
+  $effect(() => { if (surPages) pagesVues = true; });
+  const sale = $derived(modifications.length > 0 || (avecPages && pagesModifiees));
   const lectureSeule = $derived(fiche?.lectureSeule);
   const modifiable = $derived(!!fiche && !lectureSeule && !enregistrement && !confirmation);
   const nbErreurs = $derived(Object.keys(erreurs).length);
@@ -157,7 +168,8 @@
     bilan = null;
     confirmation = null;
     try {
-      const b = await appliquerModifications({ ids, champs: modifications, ecrireDansFichier: ecrireFichier, confirme });
+      const pages = avecPages && pagesModifiees ? await ongletPages?.pagesModifiees() : undefined;
+      const b = await appliquerModifications({ ids, champs: modifications, pages, ecrireDansFichier: ecrireFichier, confirme });
       if (b.confirmationRequise) {
         confirmation = { message: b.confirmationRequise.message, suite };
         return;
@@ -169,7 +181,8 @@
         return;
       }
       if (suite === 'rester') {
-        await charger(ids);
+        // Fiche relue, et vignettes relues du fichier (réécrit si la case est cochée) : nouvelle séance.
+        await Promise.all([charger(ids), pagesVues ? ongletPages?.charger() : undefined]);
         bilan = b;
         message = { texte: `Enregistré : ${b.resume}.`, erreur: false };
       } else await apres(suite);
@@ -259,7 +272,7 @@
   const estPerso = $derived(!!fiche && fiche.onglets[onglet]?.nom === 'Personnalisé');
 </script>
 
-<dialog class="infos" aria-labelledby="titre-infos" use:modale={{ peutFermer: peutFermerParEchap, fermer, ouvrirAuMontage: true }} onkeydown={clavier} data-testid="dialogue-infos">
+<dialog class="infos" class:large={surPages} aria-labelledby="titre-infos" use:modale={{ peutFermer: peutFermerParEchap, fermer, ouvrirAuMontage: true }} onkeydown={clavier} data-testid="dialogue-infos">
   <h2 id="titre-infos">{titreFenetre}</h2>
 
   {#if fiche}
@@ -297,9 +310,20 @@
         <button role="tab" id="onglet-infos-{k}" aria-selected={onglet === k} aria-controls="panneau-infos" class:actif={onglet === k}
           onclick={() => (onglet = k)}>{nomOnglet(k, o.nom)}</button>
       {/each}
+      {#if avecPages}
+        <button role="tab" id="onglet-infos-{indicePages}" aria-selected={surPages} aria-controls="panneau-infos" class:actif={surPages}
+          class:touche-onglet={pagesModifiees} onclick={() => (onglet = indicePages)} data-testid="onglet-pages-bouton"
+          title={pagesModifiees ? 'Pages modifiées : enregistrées par OK ou Appliquer' : 'Ordre, type, rotation des pages'}>{pagesModifiees ? '● ' : ''}Pages</button>
+      {/if}
     </div>
 
-    <div class="panneau-champs" id="panneau-infos" role="tabpanel" aria-labelledby="onglet-infos-{onglet}">
+    {#if avecPages && pagesVues}
+      <div class="panneau-pages" hidden={!surPages} role="tabpanel" id={surPages ? 'panneau-infos' : undefined} aria-labelledby="onglet-infos-{indicePages}">
+        <OngletPages bind:this={ongletPages} bind:modifie={pagesModifiees} id={ids[0]} fichier={livres[0]?.fichier}
+          actif={!enregistrement && !confirmation && !chargement} />
+      </div>
+    {/if}
+    <div class="panneau-champs" id={surPages ? undefined : 'panneau-infos'} role="tabpanel" aria-labelledby="onglet-infos-{onglet}" hidden={surPages}>
       {#if estPerso}
         <p class="discret petit">Valeurs personnalisées (« Personnalisé » de ComicRack), utilisées par les scripts et les listes intelligentes.</p>
         {#if fiche.onglets[onglet].champs.length === 0}<p class="discret">Aucune valeur personnalisée.</p>{/if}
@@ -398,7 +422,7 @@
             ><div style:width="{pourcent(progression)}%"></div></span>
           {#if ids.length > 1}<button class="mini" onclick={() => void annulerOperation()} title="Arrêter entre deux livres">Arrêter</button>{/if}
         {:else if sale}
-          <span class="touche">● {modifications.length} champ(s) modifié(s)</span>
+          <span class="touche">● {[modifications.length ? `${modifications.length} champ(s) modifié(s)` : '', avecPages && pagesModifiees ? 'pages modifiées' : ''].filter(Boolean).join(', ')}</span>
         {/if}
       </span>
       <span class="espace"></span>
@@ -414,6 +438,10 @@
 <style>
   .infos { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
   .infos:not([open]) { display: none; }
+  .infos.large { width: min(1040px, calc(100vw - 32px)); height: calc(100vh - 32px); }
+  .panneau-pages { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .panneau-pages[hidden], .panneau-champs[hidden] { display: none; }
+  .onglets button.touche-onglet:not(.actif) { color: var(--cr-accent); }
   .infos h2 { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .entete { display: flex; gap: 14px; align-items: flex-start; }
   .couvertures { position: relative; width: 96px; height: 140px; flex: none; }

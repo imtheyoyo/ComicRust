@@ -211,6 +211,18 @@ let numeroSession = 0;
 const REPRISE_DIFFERENTE = new URLSearchParams(location.search).has('repriseDiff');
 
 function pagesSimulees(l: LivreInterne): PageInfo[] {
+  // Ordre et attributs enregistrés par l'onglet Pages (étape 4), s'ils ont changé.
+  const fiche = edition.pages.ordre(l.id);
+  if (fiche) {
+    return fiche.map((p, i) => {
+      const double = p.image >= 6 && (p.image - 6) % 9 === 0;
+      const sansDims = p.image % 13 === 4;
+      return {
+        index: i, image: p.image, largeur: sansDims ? undefined : double ? 2000 : 1000, hauteur: sansDims ? undefined : 1500,
+        double: double && !sansDims, type: p.type, supprimee: p.type === 'Deleted', rotation: p.rotation,
+      };
+    });
+  }
   const pages: PageInfo[] = [];
   for (let i = 0; i < l.pages; i++) {
     const double = i >= 6 && (i - 6) % 9 === 0;

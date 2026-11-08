@@ -278,6 +278,8 @@ export interface DemandeModification {
   ids: string[];
   /** SEULEMENT les champs modifiés par l'utilisateur. */
   champs: ChampModifie[];
+  /** Liste COMPLÈTE des pages (un seul livre), seulement si l'onglet Pages a été modifié. */
+  pages?: PageModifiee[];
   ecrireDansFichier: boolean;
   confirme?: boolean;
 }
@@ -335,6 +337,80 @@ export interface ResultatRenommage {
   lignes: LigneRenommage[];
   aRenommer: number;
   bilan?: BilanOperation;
+}
+
+// ───── Onglet Pages (étape 4, docs/tauri/ipc-pages.md) ─────
+
+export type TypePage = 'FrontCover' | 'InnerCover' | 'Roundup' | 'Story' | 'Advertisement' | 'Editorial'
+  | 'Letters' | 'Preview' | 'BackCover' | 'Other' | 'Deleted';
+
+export interface ChoixPage { valeur: string; libelle: string; raccourci?: string }
+
+/** Une page de la liste complète (ordre de lecture). */
+export interface PageLivre {
+  /** Rang dans l'ordre de lecture (recalculé par le backend) : `pages[i].index === i`. */
+  index: number;
+  /** Rang de l'image dans le fichier : identifiant STABLE de la page (sélection, opérations). */
+  image: number;
+  /** Nom de l'image dans l'archive. */
+  nom: string;
+  /** Valeur ComicRack (une TypePage, rarement des drapeaux combinés à renvoyer tels quels). */
+  type: string;
+  libelleType: string;
+  supprimee: boolean;
+  /** Page double (lecture seule, calculée comme ComicRack). */
+  double: boolean;
+  /** 0 | 90 | 180 | 270, à appliquer à l'affichage (la vignette n'est pas tournée). */
+  rotation: number;
+  /** 'Default' | 'Near' | 'Far'. */
+  position: string;
+  favori?: string;
+  largeur?: number;
+  hauteur?: number;
+  urlVignette: string;
+}
+
+export interface PagesLivre {
+  id: string;
+  /** Séance de vignettes (protocole cr-page), à fermer par fermer_pages. */
+  jeton: string;
+  urlBase: string;
+  largeurVignette: number;
+  nbImages: number;
+  /** Liste complète dans l'ordre de lecture ENREGISTRÉ, supprimées comprises. */
+  pages: PageLivre[];
+  modifiable: boolean;
+  lectureSeule?: string;
+  ecrireDansFichierPossible: boolean;
+  types: ChoixPage[];
+  /** valeur '0' | '90' | '180' | '270'. */
+  rotations: ChoixPage[];
+  positions: ChoixPage[];
+}
+
+/** Opération sur la liste, calculée par le backend (règles de ComicRack). */
+export type OperationPages =
+  | { op: 'deplacer'; images: number[]; position: number }
+  | { op: 'mettreAuDebut'; images: number[] }
+  | { op: 'mettreALaFin'; images: number[] }
+  | { op: 'type'; images: number[]; valeur: string }
+  | { op: 'basculerSupprimee'; images: number[] }
+  | { op: 'rotation'; images: number[]; valeur: number }
+  | { op: 'position'; images: number[]; valeur: string }
+  | { op: 'favori'; image: number; texte?: string }
+  | { op: 'ordreOrigine' }
+  | { op: 'trierParNom'; numerique: boolean }
+  | { op: 'reinitialiserTypes' }
+  | { op: 'toutReinitialiser' };
+
+/** Page envoyée à appliquer_modifications (un PageLivre convient tel quel). */
+export interface PageModifiee {
+  image: number;
+  type?: string;
+  supprimee?: boolean;
+  rotation?: number;
+  position?: string;
+  favori?: string | null;
 }
 
 // ───────────────────────────── Aiguillage Tauri / simulé ─────────────────────────────
@@ -417,6 +493,23 @@ export const modelesDeNom = () => appeler<ModeleNom[]>('modeles_de_nom');
 export const renommerDeplacer = (demande: DemandeRenommage) =>
   appeler<ResultatRenommage>('renommer_deplacer', { demande });
 export const annulerOperation = () => appeler<void>('annuler_operation');
+export const lirePages = (id: string, remplace?: string) => appeler<PagesLivre>('lire_pages', { id, remplace });
+export const fermerPages = (jeton: string) => appeler<void>('fermer_pages', { jeton });
+export const transformerPages = (pages: PageLivre[], operation: OperationPages) =>
+  appeler<PageLivre[]>('transformer_pages', { pages, operation });
+
+/** URL d'une vignette, ou de l'image à la largeur `largeur` (0 = taille d'origine) pour l'aperçu
+ *  agrandi et la copie, à partir de `urlVignette`. En mode simulé, image SVG générée. */
+export function urlImagePage(livre: PagesLivre, p: PageLivre, largeur?: number): string {
+  if (!dansTauri() && livre.urlBase.startsWith('simule:')) {
+    const faux = { jeton: livre.jeton, titre: livre.id, pages: [{ ...p, index: p.image, rotation: 0 }] } as unknown as LivreOuvert;
+    return imageSimulee(faux, p.image);
+  }
+  if (largeur === undefined) return p.urlVignette;
+  const base = p.urlVignette.replace(/\?.*$/, '');
+  return largeur > 0 ? `${base}?l=${largeur}` : base;
+}
+
 /** Montre le fichier du livre dans son dossier (Explorateur de Windows, fichier sélectionné). */
 export const ouvrirDossierFichier = (id: string) => appeler<void>('ouvrir_dossier_fichier', { id });
 

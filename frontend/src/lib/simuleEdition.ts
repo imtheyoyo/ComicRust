@@ -7,6 +7,7 @@ import type {
   LigneRenommage, ModeBiblio, ModeleNom, Operation, Proposition, ReglagesEdition, ResultatLivre, ResultatRenommage,
   TypeChamp,
 } from './api';
+import { creerPagesSimulees } from './simulePages';
 
 /** Livre factice tel que simule.ts le garde (champs modifiables par l'édition). */
 export interface LivreSimule {
@@ -105,6 +106,8 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
     ctx.mode() === 'comicrack' && !reglages.ecritureComicrack
       ? "Bibliothèque ComicRack en lecture seule : les fiches ne sont pas modifiées. Pour les modifier, cochez « Lecture et écriture » dans Réglages (de préférence ComicRack fermé)."
       : undefined;
+  /** Onglet Pages (étape 4) : simulePages.ts. */
+  const pagesSim = creerPagesSimulees({ livres, lectureSeule, cbz, pause: ctx.pause });
 
   function lire(l: LivreSimule, nom: string): string {
     switch (nom) {
@@ -304,12 +307,21 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
     const err = verifier(d.champs);
     if (err.length) throw new Error(`Valeur(s) refusée(s) : ${err.map((e) => def(e.nom)?.[1] ?? e.nom).join(', ')}`);
     reglages.ecrireDansFichier = d.ecrireDansFichier;
+    if (d.pages && d.ids.length !== 1) throw new Error('Les pages ne se modifient que pour un seul livre.');
     return lot('modification', d.ids, d.confirme, (l) => {
       if (l.id === '13') return { statut: 'erreur', message: 'conflit : fiche modifiée dans ComicRack entre-temps, rien d\'écrasé' };
       const change = d.champs.filter((c) => lire(l, c.nom) !== c.valeur.trim());
-      if (change.length === 0) return { statut: 'inchange' };
+      let pagesChangees = false;
+      if (d.pages) {
+        try {
+          pagesChangees = pagesSim.enregistrer(l.id, d.pages);
+        } catch (e) {
+          return { statut: 'erreur', message: String((e as Error).message) };
+        }
+      }
+      if (change.length === 0 && !pagesChangees) return { statut: 'inchange' };
       for (const c of change) ecrire(l, c.nom, c.valeur.trim());
-      const ci = change.some((c) => def(c.nom)?.[3]);
+      const ci = pagesChangees || change.some((c) => def(c.nom)?.[3]);
       if (ci) aEcrire.add(l.id);
       if (d.ecrireDansFichier) {
         if (cbz(l)) {
@@ -412,7 +424,7 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
   ];
 
   /** Commande d'édition, ou `undefined` si la commande n'est pas de l'étape 3. */
-  return function appelerEdition(commande: string, args: Record<string, unknown>): unknown {
+  function appelerEdition(commande: string, args: Record<string, unknown>): unknown {
     switch (commande) {
       case 'lire_reglages_edition':
         return { ...reglages };
@@ -466,7 +478,8 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
         ((globalThis as unknown as { __dossiersOuverts?: string[] }).__dossiersOuverts ??= []).push(String(args.id));
         return null;
       default:
-        return undefined;
+        return pagesSim.commande(commande, args);
     }
   };
+  return Object.assign(appelerEdition, { pages: pagesSim });
 }

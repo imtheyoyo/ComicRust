@@ -8,7 +8,9 @@
 // (recette tauri-v0.4.0 I-03). Ici :
 // - Échap est traité au `keydown` (preventDefault : le navigateur ne déclenche plus `cancel`) et
 //   ferme seulement si `peutFermer()` ; un composant intérieur qui veut garder Échap pour lui
-//   (liste de suggestions…) appelle preventDefault/stopPropagation avant ;
+//   (liste de suggestions, aperçu…) appelle preventDefault ou stopPropagation. L'écoute se fait sur
+//   `window` : les gestionnaires `onkeydown` de Svelte 5 sont délégués à la racine de l'application,
+//   donc exécutés APRÈS un écouteur posé sur le <dialog> lui-même ;
 // - filet de sécurité : si le <dialog> se ferme quand même sans qu'on l'ait demandé, on le rouvre
 //   s'il ne doit pas se fermer (modifications en cours), sinon on appelle `fermer()` pour que
 //   l'état d'ouverture du parent reste cohérent.
@@ -25,7 +27,6 @@ export interface OptionsModale {
 /** Action Svelte : `<dialog use:modale={{ peutFermer, fermer }}>`. */
 export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
   let opts = options;
-  /** Vrai pendant une fermeture voulue (dialog.close() appelé par le code ou formulaire method="dialog"). */
   const peut = () => opts.peutFermer?.() ?? true;
   const fermer = () => {
     if (opts.fermer) opts.fermer();
@@ -33,7 +34,10 @@ export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
   };
 
   function clavier(e: KeyboardEvent) {
-    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    if (e.key !== 'Escape' || e.defaultPrevented || !node.open) return;
+    // Touche venue de la fenêtre (ou du corps de page, si le focus s'est perdu).
+    const t = e.target;
+    if (!(t instanceof Node) || !(node.contains(t) || t === document.body || t === document.documentElement)) return;
     e.preventDefault(); // pas de `cancel` natif, donc pas de fermeture forcée par le navigateur
     if (peut()) fermer();
   }
@@ -54,7 +58,7 @@ export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
     opts.fermer?.();
   }
 
-  node.addEventListener('keydown', clavier);
+  window.addEventListener('keydown', clavier);
   node.addEventListener('cancel', cancel);
   node.addEventListener('close', close);
   if (opts.ouvrirAuMontage && !node.open) node.showModal();
@@ -62,7 +66,7 @@ export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
   return {
     update(o: OptionsModale) { opts = o; },
     destroy() {
-      node.removeEventListener('keydown', clavier);
+      window.removeEventListener('keydown', clavier);
       node.removeEventListener('cancel', cancel);
       node.removeEventListener('close', close);
     },
