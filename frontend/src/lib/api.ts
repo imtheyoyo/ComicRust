@@ -37,7 +37,9 @@ export interface ChoixPremierDemarrage {
 
 /** Clés de tri acceptées par `lister_livres` (docs/tauri/ipc-bibliotheque.md ; le backend trie). */
 export type ClefTri =
-  | 'serie' | 'titre' | 'parution' | 'ajout' | 'lecture' | 'note' | 'pages' | 'avancement' | 'taille' | 'fichier';
+  | 'serie' | 'titre' | 'parution' | 'ajout' | 'lecture' | 'note' | 'pages' | 'avancement' | 'taille' | 'fichier'
+  /** « Ordre de la liste » (rang dans la liste affichée ; sans liste : ordre de la bibliothèque). */
+  | 'ordre';
 export type SensTri = 'asc' | 'desc';
 export type Groupe = 'aucun' | 'serie' | 'editeur';
 
@@ -46,6 +48,8 @@ export interface RequeteLivres {
   tri: ClefTri;
   sensTri: SensTri;
   groupe?: Groupe;
+  /** Étape 5 : seulement les livres de cette liste (identifiant d'un NoeudListe). */
+  liste?: string;
   debut: number;
   nombre: number;
 }
@@ -61,6 +65,8 @@ export interface LivreResume {
   lu: boolean;
   /** À utiliser telle quelle : `cr-couv://<id>`, ou `http://cr-couv.localhost/<id>` sous Windows. */
   urlCouverture: string;
+  /** Avec `liste` : rang du livre dans la liste (1 = premier), colonne « # ». */
+  rang?: number;
 }
 
 export interface ReponseLivres {
@@ -413,6 +419,169 @@ export interface PageModifiee {
   favori?: string | null;
 }
 
+// ───── Listes ComicRack (étape 5, docs/tauri/ipc-listes.md) ─────
+
+export type TypeListe = 'bibliotheque' | 'dossier' | 'lecture' | 'intelligente';
+/** Dossier : réunion, intersection, aucun livre (rangement). */
+export type Combinaison = 'ou' | 'et' | 'vide';
+
+export interface EtatListes {
+  source: 'comicrust' | 'comicdb' | 'aucune';
+  /** ComicDb.xml (source 'comicdb'). */
+  chemin?: string;
+  /** Commandes de modification utilisables maintenant. */
+  modifiable: boolean;
+  /** Sinon, la raison (infobulle des commandes grisées, 🔒 sous le panneau). */
+  lectureSeule?: string;
+  /** ComicRack.exe détecté. */
+  comicrackLance: boolean;
+  /** Listes illisibles (ComicDb.xml introuvable, XML invalide…). */
+  erreur?: string;
+  /** Libellé de l'opération en cours. */
+  enCours?: string;
+  /** Change à chaque relecture des listes : arbre à recharger si différent. */
+  version: number;
+}
+
+export interface NoeudListe {
+  /** GUID (casse d'origine), à renvoyer tel quel. */
+  id: string;
+  nom: string;
+  type: TypeListe;
+  description?: string;
+  /** Livres présents dans la bibliothèque, calculés par ComicRust. */
+  nbLivres?: number;
+  /** nbLivres absent : pourquoi (critère non pris en charge…). */
+  inconnu?: string;
+  /** Compte enregistré par ComicRack à sa dernière sauvegarde. */
+  nbComicrack: number;
+  combinaison?: Combinaison;
+  /** Liste de lecture modifiable : dépôt de livres et « Ajouter à la liste ». */
+  accepteLivres: boolean;
+  peutMonter: boolean;
+  peutDescendre: boolean;
+  enfants?: NoeudListe[];
+}
+
+export interface ArbreListes {
+  etat: EtatListes;
+  /** Premier niveau, dans l'ordre de ComicRack (la « Bibliothèque » comprise si elle existe). */
+  listes: NoeudListe[];
+}
+
+export interface ResultatListes {
+  arbre: ArbreListes;
+  /** Liste à sélectionner (null : toute la bibliothèque) ; absent : inchangée. */
+  selection?: string | null;
+  /** Liste à passer aussitôt en renommage. */
+  renommer?: string;
+  /** Liste créée (ses dossiers parents sont à déplier). */
+  creee?: string;
+  /** Bilan à montrer sous le panneau. */
+  info: string;
+  sauvegarde?: string;
+  avertissements: string[];
+}
+
+export type PlaceListe = 'avant' | 'dans' | 'apres';
+
+export interface DemandeNouvelleListe {
+  type: 'lecture' | 'dossier';
+  nom?: string;
+  parent?: string;
+  position?: number;
+  livres?: string[];
+  /** Juste après cette liste dans son dossier. */
+  apresListe?: string;
+}
+
+export interface InfosSuppression { nom: string; sousListes: number; dependantes: string[] }
+export interface InfosConversion { nom: string; nbLivres: number }
+export interface DestinationListe { id: string | null; nom: string; profondeur: number; actuel: boolean }
+export interface GroupeVue { titre: string; nombre: number }
+
+export type ModeCriteres = 'tous' | 'auMoinsUn';
+export type NatureValeur = 'texte' | 'nombre' | 'date' | 'ouiNon' | 'manga' | 'activation' | 'valeurPerso' | 'expression';
+
+export interface Operateur { op: number; libelle: string; valeurs: 0 | 1 | 2; unite?: string }
+export interface TypeCritere {
+  /** xsi:type (« ComicBookSeriesMatcher »). */
+  type: string;
+  libelle: string;
+  nature: NatureValeur;
+  unite?: string;
+  statSerie: boolean;
+  /** ComicRust sait le calculer. */
+  evalue: boolean;
+  /** Case « casse » utile (IgnoreCase). */
+  texte: boolean;
+  operateurs: Operateur[];
+}
+export interface CatalogueCriteres {
+  categories: Array<{ nom: string; criteres: TypeCritere[] }>;
+  defaut: { type: string; op: number };
+}
+
+export interface Critere {
+  genre: 'critere';
+  non: boolean;
+  type: string;
+  op: number;
+  /** valeurPerso : valeur = nom de la valeur, valeur2 = texte cherché. */
+  valeur: string;
+  valeur2: string;
+  ignorerCasse: boolean;
+  /** Fourni par lire_criteres : À RENVOYER TEL QUEL. */
+  origine?: string;
+  /** false : critère absent du catalogue, affiché en lecture seule et gardé tel quel. */
+  modifiable: boolean;
+  libelle?: string;
+}
+export interface GroupeCriteres {
+  genre: 'groupe';
+  non: boolean;
+  mode: ModeCriteres;
+  noeuds: NoeudCritere[];
+  origine?: string;
+}
+export type NoeudCritere = Critere | GroupeCriteres;
+
+export interface Limite { valeur: string; unite: 'livres' | 'mo' | 'go'; selection: 'hasard' | 'position' | 'serie' }
+export interface CriteresListe {
+  nom: string;
+  description: string;
+  mode: ModeCriteres;
+  noeuds: NoeudCritere[];
+  depart?: string | null;
+  pasDansDepart: boolean;
+  limite?: Limite | null;
+  /** Livres retirés à la main dans ComicRack (lecture). */
+  retires: number;
+  reinitialiserRetires?: boolean;
+}
+export interface ListeDepart { id: string; nom: string; profondeur: number; type: TypeListe }
+export interface EditeurListe {
+  id?: string;
+  criteres: CriteresListe;
+  listesDepart: ListeDepart[];
+  /** Présent : consultation seulement. */
+  lectureSeule?: string;
+}
+export interface Apercu { nbLivres?: number; inconnu?: string; erreurs: string[] }
+
+export interface ManquantCbl { rang: number; serie: string; numero: string; volume?: number; annee?: number }
+export interface RapportCbl {
+  nom: string;
+  total: number;
+  trouves: number;
+  parIdentifiant: number;
+  parSerie: number;
+  doublons: number;
+  manquants: ManquantCbl[];
+  /** Bilan copiable. */
+  texte: string;
+}
+
 // ───────────────────────────── Aiguillage Tauri / simulé ─────────────────────────────
 
 /** `true` dans la fenêtre Tauri ; `false` dans un navigateur (mode simulé). */
@@ -497,6 +666,54 @@ export const lirePages = (id: string, remplace?: string) => appeler<PagesLivre>(
 export const fermerPages = (jeton: string) => appeler<void>('fermer_pages', { jeton });
 export const transformerPages = (pages: PageLivre[], operation: OperationPages) =>
   appeler<PageLivre[]>('transformer_pages', { pages, operation });
+
+// Listes ComicRack (étape 5, docs/tauri/ipc-listes.md).
+export const etatListes = () => appeler<EtatListes>('etat_listes');
+export const arbreListes = () => appeler<ArbreListes>('arbre_listes');
+export const bilanListes = () => appeler<string>('bilan_listes');
+export const creerListe = (demande: DemandeNouvelleListe) => appeler<ResultatListes>('creer_liste', { demande });
+export const renommerListe = (id: string, nom: string) => appeler<ResultatListes>('renommer_liste', { id, nom });
+export const modifierListe = (id: string, champs: { nom?: string; description?: string; combinaison?: Combinaison }) =>
+  appeler<ResultatListes>('modifier_liste', { id, ...champs });
+export const dupliquerListe = (id: string) => appeler<ResultatListes>('dupliquer_liste', { id });
+export const infosSuppression = (id: string) => appeler<InfosSuppression>('infos_suppression', { id });
+export const supprimerListe = (id: string, listeAffichee?: string) => appeler<ResultatListes>('supprimer_liste', { id, listeAffichee });
+export const destinationsListe = (id: string) => appeler<DestinationListe[]>('destinations_liste', { id });
+export const deplacerListe = (id: string, parent: string | null, position?: number) =>
+  appeler<ResultatListes>('deplacer_liste', { id, parent, position });
+export const decalerListe = (id: string, haut: boolean) => appeler<ResultatListes>('decaler_liste', { id, haut });
+export const placeDepotListe = (glissee: string, cible: string, place: PlaceListe) =>
+  appeler<boolean>('place_depot_liste', { glissee, cible, place });
+export const deposerListe = (glissee: string, cible: string, place: PlaceListe) =>
+  appeler<ResultatListes>('deposer_liste', { glissee, cible, place });
+export const infosConversion = (id: string) => appeler<InfosConversion>('infos_conversion', { id });
+export const convertirEnLecture = (id: string) => appeler<ResultatListes>('convertir_en_lecture', { id });
+export const ajouterLivresListe = (id: string, livres: string[], position?: number) =>
+  appeler<ResultatListes>('ajouter_livres_liste', { id, livres, position });
+export const depotLivresPossible = (id: string, listeAffichee?: string) =>
+  appeler<string | null>('depot_livres_possible', { id, listeAffichee });
+export const retirerLivresListe = (id: string, livres: string[]) => appeler<ResultatListes>('retirer_livres_liste', { id, livres });
+export const decalerLivresListe = (id: string, livres: string[], haut: boolean) =>
+  appeler<ResultatListes>('decaler_livres_liste', { id, livres, haut });
+/** `insertion` : rang d'insertion dans la vue décrite par `requete` (0 : avant le premier, total : après le dernier). */
+export const deplacerLivresListe = (id: string, livres: string[], requete: RequeteLivres, insertion: number) =>
+  appeler<ResultatListes>('deplacer_livres_liste', { id, livres, requete, insertion });
+/** `insertion` : frontière entre groupes (0 : avant le premier groupe). */
+export const deplacerGroupesListe = (id: string, requete: RequeteLivres, groupes: string[], insertion: number) =>
+  appeler<ResultatListes>('deplacer_groupes_liste', { id, requete, groupes, insertion });
+export const decalerGroupeListe = (id: string, requete: RequeteLivres, groupe: string, haut: boolean) =>
+  appeler<ResultatListes>('decaler_groupe_liste', { id, requete, groupe, haut });
+export const groupesVue = (requete: RequeteLivres) => appeler<GroupeVue[]>('groupes_vue', { requete });
+export const catalogueCriteres = () => appeler<CatalogueCriteres>('catalogue_criteres');
+export const nouveauCritere = (typeCritere: string, ancien?: Critere) => appeler<Critere>('nouveau_critere', { typeCritere, ancien });
+export const lireCriteres = (id?: string) => appeler<EditeurListe>('lire_criteres', { id });
+export const apercuCriteres = (criteres: CriteresListe, id?: string) => appeler<Apercu>('apercu_criteres', { id, criteres });
+export const enregistrerCriteres = (criteres: CriteresListe, place: { id?: string; parent?: string; position?: number; apresListe?: string }) =>
+  appeler<ResultatListes>('enregistrer_criteres', { criteres, ...place });
+export const analyserCbl = (chemin: string) => appeler<RapportCbl>('analyser_cbl', { chemin });
+export const importerCbl = (chemin: string, place: { nom?: string; parent?: string; position?: number; apresListe?: string } = {}) =>
+  appeler<{ resultat: ResultatListes; rapport: RapportCbl }>('importer_cbl', { chemin, ...place });
+export const exporterCbl = (id: string, chemin: string) => appeler<{ chemin: string; livres: number }>('exporter_cbl', { id, chemin });
 
 /** URL d'une vignette, ou de l'image à la largeur `largeur` (0 = taille d'origine) pour l'aperçu
  *  agrandi et la copie, à partir de `urlVignette`. En mode simulé, image SVG générée. */

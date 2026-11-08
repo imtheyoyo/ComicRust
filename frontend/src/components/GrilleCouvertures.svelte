@@ -3,7 +3,7 @@
   // chargées par pages via la Bibliotheque (lister_livres debut/nombre).
   import type { Bibliotheque } from '../lib/bibliotheque.svelte';
   import { cibleClavier } from '../lib/navigation';
-  import { modificateurs, type Selection } from '../lib/selection.svelte';
+  import { modificateurs, type Modificateurs, type Selection } from '../lib/selection.svelte';
 
   interface Props {
     bib: Bibliotheque;
@@ -14,8 +14,12 @@
     /** Clic droit sur un livre (menu contextuel), en coordonnées de la fenêtre. */
     onmenu: (i: number, x: number, y: number) => void;
     onouvrir: (i: number) => void;
+    /** Appui sur un livre (début possible d'un glisser-déposer, étape 5). */
+    onappui?: (e: PointerEvent, i: number, groupes?: boolean) => void;
+    /** Clic sur l'en-tête d'un groupe : sélection de tout le groupe (Ctrl : ajoutée). */
+    ongroupe?: (i: number, m: Modificateurs) => void;
   }
-  let { bib, sel, zoom, onmenu, onouvrir }: Props = $props();
+  let { bib, sel, zoom, onmenu, onouvrir, onappui, ongroupe }: Props = $props();
 
   const MARGE = 16;
   const ESPACE = 16;
@@ -129,12 +133,19 @@
         onclick={(e) => sel.cliquer(i, modificateurs(e))}
         oncontextmenu={(e) => { e.preventDefault(); sel.cliquerDroit(i); onmenu(i, e.clientX, e.clientY); }}
         ondblclick={() => onouvrir(i)}
+        onpointerdown={(e) => onappui?.(e, i)}
       >
         <div class="couverture" style:height="{hautCouverture}px">
           {#if l}
             <img src={l.urlCouverture} alt="" loading="lazy" decoding="async" draggable="false" />
             {#if l.lu}<span class="lu" title="Lu">✓</span>{/if}
-            {#if bib.debutGroupe(i)}<span class="groupe" title={bib.nomGroupe(l)}>{bib.nomGroupe(l)}</span>{/if}
+            {#if bib.debutGroupe(i)}
+              <!-- En-tête du groupe : clic = toute la série (ou tout l'éditeur) ; on peut la glisser aussitôt. -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <span class="groupe" title="{bib.nomGroupe(l)} — cliquer pour sélectionner tout le groupe (Ctrl : l'ajouter)" data-groupe={i}
+                onpointerdown={(e) => { if (e.button !== 0) return; e.stopPropagation(); ongroupe?.(i, modificateurs(e)); onappui?.(e, i, true); }}
+                onclick={(e) => e.stopPropagation()}>{bib.nomGroupe(l)}</span>
+            {/if}
           {/if}
         </div>
         <div class="legende">
@@ -178,6 +189,7 @@
   .groupe {
     position: absolute; left: 6px; top: 6px; max-width: calc(100% - 12px); padding: 1px 7px;
     border-radius: var(--cr-rayon); background: var(--cr-accent); color: var(--cr-accent-texte);
-    font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
   }
+  .groupe:hover { filter: brightness(1.15); }
 </style>

@@ -13,8 +13,10 @@
     onTheme: (id: string) => void;
     /** Mode de la bibliothèque : l'option d'écriture ComicRack n'est proposée qu'en mode lié. */
     mode?: ModeBiblio;
+    /** L'option « Lecture et écriture » a changé (les listes relisent leur état). */
+    onecriture?: () => void;
   }
-  let { themeActif, onTheme, mode = 'autonome' }: Props = $props();
+  let { themeActif, onTheme, mode = 'autonome', onecriture }: Props = $props();
   let ecritureComicrack = $state(false);
   let confirmerEcriture = $state(false);
   let enregistre = $state('');
@@ -61,6 +63,7 @@
     try {
       ecritureComicrack = (await enregistrerReglagesEdition({ ecritureComicrack: actif })).ecritureComicrack;
       enregistre = ecritureComicrack ? 'Lecture et écriture activée.' : 'Lecture seule rétablie.';
+      onecriture?.();
     } catch (err) {
       erreur = messageErreur(err);
     }

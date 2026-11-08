@@ -15,6 +15,8 @@ export interface ParametresRequete {
   tri: ClefTri;
   sensTri: SensTri;
   groupe: Groupe;
+  /** Étape 5 : liste affichée (absent : toute la bibliothèque). */
+  liste?: string;
 }
 
 export class Bibliotheque {
@@ -30,6 +32,8 @@ export class Bibliotheque {
   /** Incrémenté à chaque nouvelle requête : les vues remettent alors le défilement en haut. */
   version = $state(0);
   erreur = $state('');
+  /** Liste dont les livres sont affichés (`total` lui correspond), une fois la page 0 reçue. */
+  listeChargee = $state<string | undefined | null>(null);
   pages = new SvelteMap<number, LivreResume[]>();
 
   private generation = 0;
@@ -64,11 +68,17 @@ export class Bibliotheque {
       if (gen !== this.generation) return;
       this.erreur = '';
       this.total = r.total;
+      this.listeChargee = this.params.liste;
       this.pages.clear();
       this.pages.set(0, r.livres);
       if (nouvelle) this.version++;
     } catch (e) {
-      if (gen === this.generation) this.erreur = messageErreur(e);
+      if (gen === this.generation) {
+        this.erreur = messageErreur(e);
+        this.total = 0;
+        this.pages.clear();
+        this.listeChargee = this.params.liste;
+      }
       return;
     }
     this.assurer(this.fenetre.premier, this.fenetre.dernier);
@@ -111,6 +121,37 @@ export class Bibliotheque {
       if (l) res.push(l);
     }
     return res;
+  }
+
+  /** Dernier index du groupe qui commence à `i` (en-tête de série : sélection de toute la série).
+   *  Les pages absentes sont demandées au backend. */
+  async finGroupe(i: number): Promise<number> {
+    const premier = (await this.livresDe([i]))[0];
+    if (!premier || this.params.groupe === 'aucun') return i;
+    const nom = this.nomGroupe(premier);
+    let j = i;
+    while (j + 1 < this.total) {
+      const lot: number[] = [];
+      for (let k = j + 1; k < Math.min(this.total, j + 1 + TAILLE_PAGE); k++) lot.push(k);
+      const livres = await this.livresDe(lot);
+      const k = livres.findIndex((l) => this.nomGroupe(l) !== nom);
+      if (k >= 0) return j + k;
+      j += livres.length;
+      if (livres.length === 0) break;
+    }
+    return j;
+  }
+
+  /** Premier index du groupe qui contient `i`. */
+  async debutDuGroupe(i: number): Promise<number> {
+    if (this.params.groupe === 'aucun') return i;
+    let k = i;
+    while (k > 0) {
+      const [p, l] = await this.livresDe([k - 1, k]);
+      if (!p || !l || this.nomGroupe(p) !== this.nomGroupe(l)) break;
+      k--;
+    }
+    return k;
   }
 
   private async chargerPage(p: number): Promise<void> {

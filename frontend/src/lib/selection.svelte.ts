@@ -113,6 +113,13 @@ export class Selection {
     } else this.unique(i);
   }
 
+  /** Sélectionne la plage [a, b] (en-tête d'un groupe) ; `ajouter` (Ctrl) : garde la sélection. */
+  plage(a: number, b: number, ajouter: boolean): void {
+    this.intervalles = normaliser([...(ajouter ? this.intervalles : []), [a, b]]);
+    this.curseur = a;
+    this.ancre = a;
+  }
+
   /** Ctrl+A. */
   tout(total: number): void {
     if (total <= 0) return;

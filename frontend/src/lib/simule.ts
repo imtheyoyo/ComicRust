@@ -6,6 +6,7 @@ import type {
   ReponseLivres, Theme,
 } from './api';
 import { creerEditionSimulee } from './simuleEdition';
+import { creerListesSimulees } from './simuleListes';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -113,6 +114,7 @@ const cle = (l: LivreInterne, c: ClefTri): string | number => {
     case 'avancement': return l.lu ? 100 : l.pageCourante;
     case 'taille': return l.pages * 310_000;
     case 'fichier': return l.fichier;
+    case 'ordre': return l.ajout; // sans liste : ordre de la bibliothèque
   }
 };
 const cmp = (a: string | number, b: string | number) =>
@@ -122,17 +124,35 @@ let ordreCle = '';
 let ordre: LivreInterne[] = LIVRES;
 
 function ordonner(q: RequeteLivres): LivreInterne[] {
+  // Étape 5 : livres d'une liste (contenu recalculé à chaque requête : les listes changent).
+  const membres = q.liste ? listes.livresDe(q.liste) : null;
   const k = JSON.stringify([q.recherche ?? '', q.tri, q.sensTri, q.groupe ?? 'aucun']);
-  if (k === ordreCle) return ordre;
+  if (!membres && k === ordreCle) return ordre;
+  const position = new Map((membres ?? []).map((id, i) => [id, i]));
+  const base = membres ? membres.map((id) => LIVRES[Number(id) - 1]).filter(Boolean) : LIVRES;
   const mot = (q.recherche ?? '').trim().toLowerCase();
   const liste = mot
-    ? LIVRES.filter((l) => {
+    ? base.filter((l) => {
         const texte = `${l.titre} ${l.serie ?? ''} ${l.editeur ?? ''} ${l.fichier}`.toLowerCase();
         return mot.split(/\s+/).every((m) => texte.includes(m)); // tous les mots requis, comme le backend
       })
-    : LIVRES.slice();
+    : base.slice();
   const sens = q.sensTri === 'desc' ? -1 : 1;
   const groupe = q.groupe && q.groupe !== 'aucun' ? q.groupe : null;
+  if (membres && q.tri === 'ordre') {
+    // « # » : ordre de la liste ; groupés, les groupes suivent la place de leur premier livre
+    // (déplacer une série entière dans la liste la déplace dans la vue, recette v0.10.2 S-01).
+    const pos = (l: LivreInterne) => position.get(l.id) ?? 0;
+    const rangGroupe = new Map<string, number>();
+    if (groupe) {
+      for (const l of liste) {
+        const g = l[groupe] ?? '';
+        rangGroupe.set(g, Math.min(rangGroupe.get(g) ?? Infinity, pos(l)));
+      }
+    }
+    liste.sort((a, b) => (groupe ? (rangGroupe.get(a[groupe] ?? '')! - rangGroupe.get(b[groupe] ?? '')!) * sens : 0) || sens * (pos(a) - pos(b)));
+    return liste;
+  }
   liste.sort((a, b) => {
     if (groupe) {
       const g = cmp(a[groupe] ?? '', b[groupe] ?? '');
@@ -140,6 +160,7 @@ function ordonner(q: RequeteLivres): LivreInterne[] {
     }
     return sens * cmp(cle(a, q.tri), cle(b, q.tri)) || Number(a.id) - Number(b.id);
   });
+  if (membres) return liste;
   ordreCle = k;
   ordre = liste;
   return liste;
@@ -257,6 +278,19 @@ const edition = creerEditionSimulee({
   pause,
 });
 
+// Listes ComicRack (étape 5) : voir simuleListes.ts. `?comicrackOuvert` : ComicRack lancé (mode lié).
+const listes = creerListesSimulees({
+  livres: LIVRES,
+  lectureSeule: () => {
+    if (etat.mode !== 'comicrack') return undefined;
+    const r = edition('lire_reglages_edition', {}) as { ecritureComicrack: boolean };
+    return r.ecritureComicrack ? undefined : 'lecture seule';
+  },
+  comicrackLance: () => etat.mode === 'comicrack' && new URLSearchParams(location.search).has('comicrackOuvert'),
+  vue: (q) => ordonner(q),
+  titreGroupe: (l, g) => (g === 'editeur' ? l.editeur ?? '(sans éditeur)' : l.serie ?? '(sans série)'),
+});
+
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
   switch (commande) {
@@ -294,7 +328,12 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       const q = args.requete as RequeteLivres;
       simuleTests.requetes.push(q);
       const liste = ordonner(q);
-      const rep: ReponseLivres = { total: liste.length, livres: liste.slice(q.debut, q.debut + q.nombre).map(resume) };
+      // Étape 5 : rang du livre dans la liste affichée (colonne « # »).
+      const rangs = q.liste ? new Map(listes.livresDe(q.liste).map((id, i) => [id, i + 1])) : null;
+      const rep: ReponseLivres = {
+        total: liste.length,
+        livres: liste.slice(q.debut, q.debut + q.nombre).map((l) => (rangs ? { ...resume(l), rang: rangs.get(l.id) } : resume(l))),
+      };
       return rep;
     }
     case 'detail_livre': {
@@ -364,6 +403,8 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       return null;
     default: {
       simuleTests.edition.push({ commande, args: JSON.parse(JSON.stringify(args)) as Record<string, unknown> });
+      const rl = listes.appeler(commande, args);
+      if (rl !== undefined) return rl;
       const r = edition(commande, args);
       if (r === undefined) throw new Error(`commande inconnue (mode simulé) : ${commande}`);
       return r;

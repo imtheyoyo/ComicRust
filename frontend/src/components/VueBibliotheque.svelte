@@ -1,9 +1,16 @@
 <script lang="ts">
   // Vue Bibliothèque : barre d'outils (recherche, tri, groupement, vue), grille ou tableau
   // virtualisés, panneau de détails et barre d'état. Les données viennent de lister_livres.
-  import { onMount, tick } from 'svelte';
-  import { ecouter, messageErreur, ouvrirDossierFichier, type BibliothequeModifiee, type ClefTri, type Groupe, type SourceLecteur } from '../lib/api';
-  import { Bibliotheque, type SuiviScan } from '../lib/bibliotheque.svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import {
+    ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, deplacerGroupesListe, deplacerLivresListe, ecouter,
+    groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
+    type BibliothequeModifiee, type ClefTri, type Groupe, type NoeudListe, type RequeteLivres, type SourceLecteur,
+  } from '../lib/api';
+  import { GlisserLivres } from '../lib/glisserLivres.svelte';
+  import { DEPOSER_SUR_LECTURE, TRIER_POUR_REORDONNER, glypheListe, type EtatListes } from '../lib/listes.svelte';
+  import type { Modificateurs } from '../lib/selection.svelte';
+  import { Bibliotheque, TAILLE_PAGE, type SuiviScan } from '../lib/bibliotheque.svelte';
   import { enregistrerPreference, preferences } from '../lib/prefs';
   import { Selection } from '../lib/selection.svelte';
   import DialogInfos from './DialogInfos.svelte';
@@ -22,13 +29,25 @@
     nbLivres: number;
     /** Incrémenté par le parent quand le contenu a pu changer (fin de scan). */
     rafraichir: number;
+    /** Étape 5 : état des listes (glisser-déposer, commandes de liste). */
+    listes: EtatListes;
+    /** Liste affichée (null : toute la bibliothèque). */
+    liste: NoeudListe | null;
   }
-  let { scan, nbLivres = $bindable(), rafraichir }: Props = $props();
+  let { scan, nbLivres = $bindable(), rafraichir, listes, liste }: Props = $props();
 
   // Préférences mémorisées (data\comicrust-tauri.json), chargées par App avant ce composant :
   // le premier lister_livres part directement avec le tri et le groupe enregistrés.
   const prefs = preferences();
-  const bib = new Bibliotheque({ tri: prefs.tri, sensTri: prefs.sensTri, groupe: prefs.groupe });
+  // Une liste de lecture s'affiche d'abord dans l'ordre de la liste (« # » croissant), comme dans
+  // ComicRack ; le tri de la bibliothèque est retrouvé en revenant à « Bibliothèque » (il n'est pas
+  // remplacé dans les préférences par celui d'une liste).
+  const listeInitiale = untrack(() => liste);
+  let triBiblio: { tri: ClefTri; sensTri: 'asc' | 'desc' } = { tri: prefs.tri ?? 'serie', sensTri: prefs.sensTri ?? 'asc' };
+  const triDe = (l: NoeudListe) => (l.type === 'lecture' ? { tri: 'ordre' as ClefTri, sensTri: 'asc' as const } : triBiblio);
+  const bib = new Bibliotheque(listeInitiale
+    ? { ...triDe(listeInitiale), groupe: prefs.groupe, liste: listeInitiale.id }
+    : { tri: prefs.tri, sensTri: prefs.sensTri, groupe: prefs.groupe });
   let vue = $state<'grille' | 'tableau'>(prefs.vue ?? 'grille');
   let zoom = $state(prefs.zoom ?? 150);
   let details = $state(prefs.details ?? true);
@@ -87,12 +106,31 @@
     };
   });
 
-  // Toute modification d'un réglage d'affichage est enregistrée (avec délai, voir prefs.ts).
+  // Toute modification d'un réglage d'affichage est enregistrée (avec délai, voir prefs.ts) ; le
+  // tri d'une liste (« # » le plus souvent) ne remplace pas celui de la bibliothèque.
   $effect(() => {
-    enregistrerPreference({
-      tri: bib.params.tri, sensTri: bib.params.sensTri, groupe: bib.params.groupe,
-      vue, zoom, details, largeurDetails,
+    const p = { groupe: bib.params.groupe, vue, zoom, details, largeurDetails };
+    if (bib.params.liste) enregistrerPreference(p);
+    else enregistrerPreference({ ...p, tri: bib.params.tri, sensTri: bib.params.sensTri });
+  });
+
+  // Liste choisie dans le panneau : la vue montre ses livres (ou revient à la bibliothèque).
+  $effect(() => {
+    const id = liste?.id;
+    untrack(() => {
+      if (id === bib.params.liste) return;
+      if (id && !bib.params.liste) triBiblio = { tri: bib.params.tri, sensTri: bib.params.sensTri };
+      changer(liste ? { liste: liste.id, ...triDe(liste) } : { liste: undefined, ...triBiblio });
     });
+  });
+
+  // Listes modifiées (ajout, retrait, réordonnancement, critères…) : la liste affichée est relue
+  // sans perdre le défilement.
+  let versionListes = untrack(() => listes.version);
+  $effect(() => {
+    const v = listes.version;
+    if (v !== versionListes && untrack(() => bib.params.liste)) void bib.reinitialiser(false);
+    versionListes = v;
   });
 
   // Fin de scan : on recharge sans toucher au défilement ni à la sélection.
@@ -104,7 +142,7 @@
   });
 
   $effect(() => {
-    if (bib.params.recherche === '') nbLivres = bib.total;
+    if (bib.params.recherche === '' && !bib.params.liste) nbLivres = bib.total;
     sel.borner(bib.total);
   });
 
@@ -204,6 +242,13 @@
       void action('infos');
       return;
     }
+    // Suppr dans une liste de lecture : retirer les livres de la liste (jamais les fichiers).
+    if (e.key === 'Delete' && !saisieTexte && !fenetreOuverte() && liste?.type === 'lecture'
+      && (e.target as HTMLElement | null)?.closest('[data-testid="grille"], [data-testid="tableau"]')) {
+      e.preventDefault();
+      void action('retirer');
+      return;
+    }
     if ((e.key === '/' && !saisieTexte) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) {
       e.preventDefault();
       champRecherche?.focus();
@@ -232,6 +277,28 @@
 
   const entreesMenu = $derived.by<EntreeMenu[]>(() => {
     const plusieurs = nbSel > 1;
+    const quoi = plusieurs ? `les ${nbSel.toLocaleString('fr-FR')} livres` : 'le livre';
+    const raison = listes.raison;
+    const refusOrdre = refusReordonner();
+    const entreesListes: EntreeMenu[] = [
+      { id: 'ajouter', libelle: `➕ Ajouter ${quoi} à une liste…`, separe: true, desactive: !!raison, aide: raison },
+      ...(liste?.type === 'lecture'
+        ? [
+            { id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, raccourci: 'Suppr', desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' },
+            { id: 'monter', libelle: '⬆ Monter dans la liste', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
+            { id: 'descendre', libelle: '⬇ Descendre dans la liste', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
+            ...(bib.params.groupe === 'serie'
+              ? [
+                  { id: 'monter-serie', libelle: '⬆ Monter la série', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
+                  { id: 'descendre-serie', libelle: '⬇ Descendre la série', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
+                ]
+              : []),
+          ]
+        : []),
+      ...(bib.params.groupe !== 'aucun'
+        ? [{ id: 'groupe', libelle: bib.params.groupe === 'serie' ? 'Sélectionner toute la série' : 'Sélectionner tout l\'éditeur' }]
+        : []),
+    ];
     return [
       { id: 'lire', libelle: 'Lire', raccourci: 'Entrée', desactive: plusieurs, aide: plusieurs ? 'Un seul livre à la fois' : undefined },
       { id: 'infos', libelle: plusieurs ? `✏ Modifier les infos des ${nbSel.toLocaleString('fr-FR')} livres…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: true },
@@ -241,6 +308,7 @@
       { id: 'renommer', libelle: 'Renommer / déplacer…' },
       { id: 'dossier', libelle: 'Ouvrir le dossier du fichier', separe: true, desactive: plusieurs,
         aide: plusieurs ? 'Un seul livre à la fois' : 'Montre le fichier dans l\'Explorateur de Windows' },
+      ...entreesListes,
     ];
   });
 
@@ -256,6 +324,24 @@
       if (sel.curseur >= 0) ouvrir(sel.curseur);
       return;
     }
+    if (id === 'groupe') {
+      if (sel.curseur >= 0) void selectionnerGroupe(sel.curseur, { ctrl: false, maj: false });
+      return;
+    }
+    if (id === 'monter-serie' || id === 'descendre-serie') {
+      if (!liste || sel.curseur < 0) return;
+      const idl = liste.id;
+      const req = requete();
+      try {
+        const g = trouverGroupe(await groupesVue(req), sel.curseur);
+        if (!g) return;
+        const r = await listes.executer('Réordonnancement de la liste', () => decalerGroupeListe(idl, req, g.titre, id === 'monter-serie'));
+        if (r) await selectionnerGroupes([g.titre]);
+      } catch (e) {
+        erreurAction = messageErreur(e);
+      }
+      return;
+    }
     let ids: string[];
     try {
       ids = await idsSelection();
@@ -264,6 +350,31 @@
       return;
     }
     if (ids.length === 0) return;
+    if (id === 'monter' || id === 'descendre') {
+      if (!liste) return;
+      const idl = liste.id;
+      const ind = sel.indices();
+      const r = await listes.executer('Réordonnancement de la liste', () => decalerLivresListe(idl, ids, id === 'monter'));
+      if (r?.info && ind.length) {
+        const pas = id === 'monter' ? -1 : 1;
+        sel.plage(ind[0] + pas, ind[ind.length - 1] + pas, false);
+      }
+      return;
+    }
+    if (id === 'ajouter') {
+      ajoutDe = ids;
+      const l = listes.listesDeLecture();
+      choixAjout = l.find((x) => x.id === listes.courante)?.id ?? l[0]?.id ?? '';
+      nomNouvelle = 'Nouvelle liste de lecture';
+      return;
+    }
+    if (id === 'retirer') {
+      if (!liste) return;
+      const idl = liste.id;
+      const r = await listes.executer('Retrait de la liste', () => retirerLivresListe(idl, ids));
+      if (r) sel.vider();
+      return;
+    }
     if (id === 'infos') infosDe = ids;
     else if (id === 'conversion' || id === 'ecritureInfos') operation = { type: id, ids };
     else if (id === 'renommer') renommerDe = ids;
@@ -288,6 +399,150 @@
   }
   const avoisin = (pas: -1 | 1) => sel.curseur + pas >= 0 && sel.curseur + pas < bib.total;
 
+  // ───── Listes (étape 5) : glisser-déposer, en-têtes de groupe, ajout à une liste ─────
+
+  /** Réordonner dans la vue : seulement une liste de lecture triée dans l'ordre de la liste, croissant. */
+  function refusReordonner(): string | null {
+    if (!liste || liste.type !== 'lecture') return DEPOSER_SUR_LECTURE;
+    if (bib.params.tri !== 'ordre' || bib.params.sensTri !== 'asc') return TRIER_POUR_REORDONNER;
+    return listes.raison ?? null;
+  }
+
+  /** Requête de la vue affichée : le backend refait la même vue pour traduire rangs et groupes. */
+  const requete = (): RequeteLivres => ({ ...bib.params, debut: 0, nombre: TAILLE_PAGE });
+
+  /** Groupes de la vue (`groupes_vue`) avec le premier et le dernier index de chacun. */
+  type GroupeIndexe = { titre: string; rang: number; debut: number; fin: number };
+  function indexer(g: Array<{ titre: string; nombre: number }>): GroupeIndexe[] {
+    let debut = 0;
+    return g.map((x, rang) => {
+      const r = { titre: x.titre, rang, debut, fin: debut + x.nombre - 1 };
+      debut += x.nombre;
+      return r;
+    });
+  }
+  const trouverGroupe = (g: Array<{ titre: string; nombre: number }>, i: number) => indexer(g).find((x) => i >= x.debut && i <= x.fin);
+  /** Groupes connus pendant un glisser de séries entières. */
+  let groupesGlisser: GroupeIndexe[] | null = null;
+
+  /** Sélectionne les groupes nommés (après un déplacement de séries). */
+  async function selectionnerGroupes(titres: string[]) {
+    const g = indexer(await groupesVue(requete())).filter((x) => titres.includes(x.titre));
+    g.forEach((x, k) => sel.plage(x.debut, x.fin, k > 0));
+  }
+
+  /** Sélectionne tout le groupe (série) qui contient `i` (Ctrl ou Maj : ajouté à la sélection). */
+  async function selectionnerGroupe(i: number, m: Modificateurs) {
+    try {
+      const a = await bib.debutDuGroupe(i);
+      const b = await bib.finGroupe(a);
+      sel.plage(a, b, m.ctrl || m.maj);
+    } catch (e) {
+      erreurAction = messageErreur(e);
+    }
+  }
+
+  async function ajouterA(idListe: string, indices: number[]) {
+    try {
+      const ids = (await bib.livresDe(indices)).map((l) => l.id);
+      await listes.executer('Ajout à la liste', () => ajouterLivresListe(idListe, ids));
+    } catch (e) {
+      erreurAction = messageErreur(e);
+    }
+  }
+
+  /** Glisser dans la vue : les livres `indices` vont au rang d'insertion `avant` (le backend calcule
+   *  le repère et la position dans la liste). */
+  function deplacer(indices: number[], avant: number) {
+    if (!liste) return;
+    const idl = liste.id;
+    const req = requete();
+    void (async () => {
+      try {
+        const ids = (await bib.livresDe(indices)).map((x) => x.id);
+        const r = await listes.executer('Réordonnancement de la liste', () => deplacerLivresListe(idl, ids, req, avant));
+        if (!r) return;
+        // Les livres déplacés restent sélectionnés, à leur nouvelle place.
+        const debut = avant - indices.filter((k) => k < avant).length;
+        sel.plage(debut, debut + indices.length - 1, false);
+      } catch (e) {
+        erreurAction = messageErreur(e);
+      }
+    })();
+  }
+
+  /** Séries entières déposées à la frontière `insertion` : les groupes entièrement sélectionnés. */
+  function deplacerGroupes(insertion: number) {
+    if (!liste || !groupesGlisser) return;
+    const idl = liste.id;
+    const req = requete();
+    const titres = groupesGlisser.filter((g) => {
+      for (let i = g.debut; i <= g.fin; i++) if (!sel.contient(i)) return false;
+      return true;
+    }).map((g) => g.titre);
+    if (!titres.length) return;
+    void (async () => {
+      const r = await listes.executer('Réordonnancement de la liste', () => deplacerGroupesListe(idl, req, titres, insertion));
+      if (r) await selectionnerGroupes(titres).catch(() => {});
+    })();
+  }
+
+  const glisser = new GlisserLivres({
+    debut: (groupes) => {
+      listes.viderDepots();
+      groupesGlisser = null;
+      if (groupes) {
+        void groupesVue(requete()).then((g) => {
+          groupesGlisser = indexer(g);
+          glisser.recalculer();
+        }, (e) => (erreurAction = messageErreur(e)));
+      }
+    },
+    groupeDe: (i) => groupesGlisser?.find((g) => i >= g.debut && i <= g.fin) ?? null,
+    deplacerGroupes,
+    contient: (i) => sel.contient(i),
+    choisir: (i) => sel.unique(i),
+    indices: () => sel.indices(),
+    series: (ind) => {
+      if (bib.params.groupe !== 'serie') return 0;
+      return new Set(ind.map((i) => bib.livre(i)).filter((l) => !!l).map((l) => bib.nomGroupe(l!))).size;
+    },
+    surListe: (id) => ({ refus: listes.depot(id), nom: listes.noeud(id)?.nom ?? '' }),
+    refusReordonner,
+    horizontal: () => vue === 'grille',
+    zone: () => document.querySelector<HTMLElement>('[data-testid="grille"], [data-testid="tableau"]'),
+    ajouter: (idListe, indices) => void ajouterA(idListe, indices),
+    deplacer,
+  });
+  $effect(() => {
+    listes.survolDepot = glisser.survol;
+  });
+  // Réponse de depot_livres_possible arrivée pendant le glisser : badge et mise en évidence à jour.
+  $effect(() => {
+    void listes.depots.size;
+    untrack(() => glisser.recalculer());
+  });
+
+  // Fenêtre « Ajouter à une liste ».
+  let ajoutDe = $state<string[] | null>(null);
+  let choixAjout = $state('');
+  let nomNouvelle = $state('');
+  async function validerAjout() {
+    const ids = ajoutDe;
+    if (!ids) return;
+    ajoutDe = null;
+    if (choixAjout === '+') {
+      const nom = nomNouvelle.trim();
+      if (!nom) return;
+      await listes.executer('Création de la liste', () => creerListe({ type: 'lecture', nom, livres: ids }));
+    } else if (choixAjout) {
+      const idl = choixAjout;
+      await listes.executer('Ajout à la liste', () => ajouterLivresListe(idl, ids));
+    }
+  }
+
+  const nomListe = $derived(liste ? `${glypheListe(liste)} ${liste.nom}` : '');
+
   async function fenetreFermee() {
     infosDe = null;
     operation = null;
@@ -301,6 +556,7 @@
 
 <div class="vue">
   <header class="outils" role="toolbar" aria-label="Outils de la bibliothèque">
+    {#if liste}<h1 class="titre-liste" title={liste.description || liste.nom} data-testid="titre-liste">{nomListe}</h1>{/if}
     <input
       bind:this={champRecherche}
       class="recherche"
@@ -314,6 +570,7 @@
     />
     <label class="outil">Tri
       <select value={bib.params.tri} onchange={(e) => changer({ tri: e.currentTarget.value as ClefTri })} data-testid="tri">
+        {#if liste}<option value="ordre"># Ordre de la liste</option>{/if}
         {#each tris as t (t.id)}<option value={t.id}>{t.titre}</option>{/each}
       </select>
     </label>
@@ -351,11 +608,17 @@
       {#if bib.erreur}
         <p class="erreur" role="alert">{bib.erreur}</p>
       {:else if bib.total === 0 && bib.version > 0}
-        <p class="vide">{bib.params.recherche ? 'Aucun livre ne correspond à la recherche.' : 'La bibliothèque est vide : ajoutez un dossier surveillé, puis lancez un scan.'}</p>
+        <p class="vide">{bib.params.recherche ? 'Aucun livre ne correspond à la recherche.'
+          : liste?.type === 'lecture' ? 'Liste vide : glisse des livres de la bibliothèque sur son nom, dans le panneau des listes.'
+          : liste?.inconnu ? `ComicRust ne connaît pas encore le contenu de cette liste : ${liste.inconnu}.`
+          : liste ? 'Aucun livre dans cette liste.'
+          : 'La bibliothèque est vide : ajoutez un dossier surveillé, puis lancez un scan.'}</p>
       {:else if vue === 'grille'}
-        <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir} />
+        <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir}
+          onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={(i, m) => void selectionnerGroupe(i, m)} />
       {:else}
-        <VueTableau {bib} {sel} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir} ontri={trier} />
+        <VueTableau {bib} {sel} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir} ontri={trier}
+          onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={(i, m) => void selectionnerGroupe(i, m)} />
       {/if}
     </div>
     {#if details}
@@ -380,7 +643,9 @@
 
   <footer class="etat" aria-live="polite">
     <span data-testid="compteur">
-      {bib.total.toLocaleString('fr-FR')} livre{bib.total > 1 ? 's' : ''}{bib.params.recherche ? ' (filtré)' : ''}
+      {#if bib.listeChargee !== (liste?.id ?? undefined)}Chargement…{:else}
+        {bib.total.toLocaleString('fr-FR')} livre{bib.total > 1 ? 's' : ''}{liste ? ` dans « ${liste.nom} »` : ''}{bib.params.recherche ? ' (filtré)' : ''}
+      {/if}
       {#if nbSel > 1}· {nbSel.toLocaleString('fr-FR')} sélectionnés{:else if sel.curseur >= 0}· sélection {(sel.curseur + 1).toLocaleString('fr-FR')}{/if}
     </span>
     {#if erreurAction}<span class="alerte" role="alert">{erreurAction}</span>{/if}
@@ -411,6 +676,38 @@
   </form>
 </dialog>
 
+{#if glisser.actif}
+  {@const b = glisser.badge}
+  <div class="badge-glisser" class:refus={b.refus} style:left="{glisser.x + 14}px" style:top="{glisser.y + 16}px" data-testid="badge-glisser" aria-hidden="true">
+    <div>{b.quoi}</div>
+    {#if b.action}<div class="action">{b.action}</div>{/if}
+  </div>
+  {#if glisser.trait}
+    <div class="trait-insertion" style:left="{glisser.trait.x}px" style:top="{glisser.trait.y}px" style:width="{glisser.trait.l}px" style:height="{glisser.trait.h}px" data-testid="trait-insertion"></div>
+  {/if}
+{/if}
+
+{#if ajoutDe}
+  <dialog use:modale={{ ouvrirAuMontage: true, fermer: () => (ajoutDe = null) }} aria-labelledby="titre-ajout" data-testid="dialogue-ajout-liste">
+    <h2 id="titre-ajout">Ajouter {ajoutDe.length > 1 ? `${ajoutDe.length.toLocaleString('fr-FR')} livres` : 'le livre'} à une liste</h2>
+    <form class="ouvrir-fichier" onsubmit={(e) => { e.preventDefault(); void validerAjout(); }}>
+      <label for="choix-liste">Liste de lecture :</label>
+      <select id="choix-liste" bind:value={choixAjout} data-testid="choix-liste">
+        {#each listes.listesDeLecture() as l (l.id)}<option value={l.id}>{l.nom}</option>{/each}
+        <option value="+">Nouvelle liste de lecture…</option>
+      </select>
+      {#if choixAjout === '+'}
+        <label for="nom-nouvelle">Nom de la nouvelle liste :</label>
+        <input id="nom-nouvelle" type="text" bind:value={nomNouvelle} spellcheck="false" />
+      {/if}
+      <div class="pied">
+        <button type="button" onclick={() => (ajoutDe = null)}>Annuler</button>
+        <button type="submit" disabled={!choixAjout || (choixAjout === '+' && !nomNouvelle.trim())} data-testid="valider-ajout">Ajouter</button>
+      </div>
+    </form>
+  </dialog>
+{/if}
+
 {#if menu}
   <MenuContextuel x={menu.x} y={menu.y} entrees={entreesMenu} onchoix={(id) => void action(id)} onfermer={() => (menu = null)} />
 {/if}
@@ -439,6 +736,16 @@
     background: var(--cr-fond-panneau); border-bottom: 1px solid var(--cr-bordure);
   }
   .recherche { width: min(340px, 100%); }
+  .titre-liste { margin: 0 6px 0 0; font-size: 15px; font-weight: 700; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge-glisser {
+    position: fixed; z-index: 60; pointer-events: none; padding: 5px 9px; font-size: 12px; max-width: 340px;
+    background: var(--cr-fond-panneau); border: 1px solid var(--cr-accent); border-radius: var(--cr-rayon); box-shadow: var(--cr-ombre);
+  }
+  .badge-glisser .action { color: var(--cr-accent); font-weight: 600; }
+  .badge-glisser.refus { border-color: var(--cr-erreur); }
+  .badge-glisser.refus .action { color: var(--cr-erreur); }
+  .trait-insertion { position: fixed; z-index: 59; pointer-events: none; background: var(--cr-accent); border-radius: 2px; }
+  :global(body.glisser-livres), :global(body.glisser-livres *) { cursor: grabbing !important; }
   .outil { display: flex; align-items: center; gap: 6px; color: var(--cr-texte-discret); }
   .outil input[type='range'] { width: 90px; padding: 0; accent-color: var(--cr-accent); }
   .espace { flex: 1; }

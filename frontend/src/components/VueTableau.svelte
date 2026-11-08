@@ -3,7 +3,7 @@
   import type { ClefTri } from '../lib/api';
   import type { Bibliotheque } from '../lib/bibliotheque.svelte';
   import { cibleClavier } from '../lib/navigation';
-  import { modificateurs, type Selection } from '../lib/selection.svelte';
+  import { modificateurs, type Modificateurs, type Selection } from '../lib/selection.svelte';
 
   interface Props {
     bib: Bibliotheque;
@@ -13,14 +13,21 @@
     onmenu: (i: number, x: number, y: number) => void;
     onouvrir: (i: number) => void;
     ontri: (clef: ClefTri) => void;
+    /** Appui sur un livre (début possible d'un glisser-déposer, étape 5). */
+    onappui?: (e: PointerEvent, i: number, groupes?: boolean) => void;
+    /** Clic sur l'en-tête d'un groupe : sélection de tout le groupe (Ctrl : ajoutée). */
+    ongroupe?: (i: number, m: Modificateurs) => void;
   }
-  let { bib, sel, onmenu, onouvrir, ontri }: Props = $props();
+  let { bib, sel, onmenu, onouvrir, ontri, onappui, ongroupe }: Props = $props();
 
   const HAUT_LIGNE = 40;
   const HAUT_ENTETE = 34;
   const SURPLUS = 6;
 
-  const colonnes: Array<{ clef: ClefTri | null; titre: string; classe?: string }> = [
+  /** Liste affichée : colonne « # » (rang dans la liste, tri « ordre »). */
+  const avecRang = $derived(!!bib.params.liste);
+  const colonnes = $derived<Array<{ clef: ClefTri | null; titre: string; classe?: string }>>([
+    ...(avecRang ? [{ clef: 'ordre' as ClefTri, titre: '#', classe: 'num' }] : []),
     { clef: null, titre: '' },
     { clef: 'titre', titre: 'Titre' },
     { clef: 'serie', titre: 'Série' },
@@ -29,7 +36,7 @@
     { clef: 'parution', titre: 'Année', classe: 'num' },
     { clef: 'pages', titre: 'Pages', classe: 'num' },
     { clef: null, titre: 'Lu', classe: 'num' },
-  ];
+  ]);
 
   let zone = $state<HTMLDivElement>();
   let hauteur = $state(600);
@@ -100,6 +107,7 @@
   onscroll={() => (haut = zone!.scrollTop)}
   onkeydown={clavier}
   role="grid"
+  class:avec-rang={avecRang}
   tabindex="0"
   aria-label="Tableau des livres"
   aria-rowcount={bib.total}
@@ -137,18 +145,28 @@
         onclick={(e) => sel.cliquer(i, modificateurs(e))}
         oncontextmenu={(e) => { e.preventDefault(); sel.cliquerDroit(i); onmenu(i, e.clientX, e.clientY); }}
         ondblclick={() => onouvrir(i)}
+        onpointerdown={(e) => onappui?.(e, i)}
       >
         {#if l}
+          {#if avecRang}<span class="cellule num discret">{l.rang ?? ''}</span>{/if}
           <span class="mini"><img src={l.urlCouverture} alt="" loading="lazy" decoding="async" draggable="false" /></span>
           <span class="cellule" title={l.titre}>{l.titre}</span>
-          <span class="cellule discret" title={l.serie}>{l.serie ?? '—'}</span>
+          {#if bib.debutGroupe(i) && bib.params.groupe === 'serie'}
+            <!-- En-tête de la série (vue groupée) : clic = toute la série ; on peut la glisser aussitôt. -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <span class="cellule tete-groupe" title="{bib.nomGroupe(l)} — cliquer pour sélectionner toute la série (Ctrl : l'ajouter)" data-groupe={i}
+              onpointerdown={(e) => { if (e.button !== 0) return; e.stopPropagation(); ongroupe?.(i, modificateurs(e)); onappui?.(e, i, true); }}
+              onclick={(e) => e.stopPropagation()}>▸ {bib.nomGroupe(l)}</span>
+          {:else}
+            <span class="cellule discret" title={l.serie}>{l.serie ?? '—'}</span>
+          {/if}
           <span class="cellule num">{l.numero ?? ''}</span>
           <span class="cellule discret" title={l.editeur}>{l.editeur ?? '—'}</span>
           <span class="cellule num">{l.annee ?? ''}</span>
           <span class="cellule num">{l.pages}</span>
           <span class="cellule num">{l.lu ? '✓' : ''}</span>
         {:else}
-          <span></span><span class="cellule"><span class="squelette"></span></span>
+          {#if avecRang}<span></span>{/if}<span></span><span class="cellule"><span class="squelette"></span></span>
         {/if}
       </div>
     {/each}
@@ -161,6 +179,9 @@
   .entete, .ligne {
     display: grid; align-items: center; column-gap: 10px; padding: 0 12px;
     grid-template-columns: 30px minmax(120px, 2fr) minmax(90px, 1.3fr) 56px minmax(80px, 1fr) 60px 56px 36px;
+  }
+  .avec-rang .entete, .avec-rang .ligne {
+    grid-template-columns: 40px 30px minmax(120px, 2fr) minmax(90px, 1.3fr) 56px minmax(80px, 1fr) 60px 56px 36px;
   }
   .entete {
     position: sticky; top: 0; z-index: 2; background: var(--cr-fond-panneau);
@@ -175,6 +196,8 @@
   .ligne.selectionne .discret { color: inherit; }
   .ligne.courant:not(.selectionne) { box-shadow: inset 0 0 0 1px var(--cr-accent); }
   .ligne.debut-groupe { border-top: 2px solid var(--cr-accent); }
+  .tete-groupe { font-weight: 600; color: var(--cr-accent); cursor: pointer; }
+  .ligne.selectionne .tete-groupe { color: inherit; }
   .cellule { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .discret { color: var(--cr-texte-discret); }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
