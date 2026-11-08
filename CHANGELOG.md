@@ -5,6 +5,54 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.6.0] — 2026-11-09
+
+Étape 5 de la version **Tauri 2** (branche `tauri2-web`) : les **listes ComicRack**. Voir
+[`docs/tauri/PLAN.md`](docs/tauri/PLAN.md) et le contrat
+[`docs/tauri/ipc-listes.md`](docs/tauri/ipc-listes.md).
+
+> ⚠ Avec « Lecture et écriture », cette version peut réécrire les listes de ComicRack
+> (`ComicDb.xml`, ComicRack fermé) : sauvegarder `ComicDb.xml` et la base MySQL de ComicRack avant
+> les essais.
+
+### Nouveautés
+- **Panneau des listes** sous la navigation : arbre **identique à ComicRack** (ordre, dossiers,
+  types), nombre de livres calculé par ComicRust à côté de chaque liste, infobulle « ComicRust : n
+  livres / ComicRack (dernier enregistrement) : m livres », « 📋 Copier le bilan des listes »
+  (comparaison avec ComicRack, lignes différentes marquées « ≠ »). Clavier : ↑ ↓, Début / Fin,
+  Pg préc. / suiv., → ← pour déplier / replier, Entrée, F2, Suppr, Maj+F10.
+- **Vue d'une liste** : titre de la liste, tri « # Ordre de la liste » et colonne « # » pour une
+  liste de lecture ; retour à « ▦ Bibliothèque » avec son propre tri.
+- **Listes de lecture** : ajout de livres par **glisser-déposer** sur l'arbre ou par « ➕ Ajouter …
+  à une liste… » (ou dans une nouvelle liste) ; retrait par **Suppr** (aucun fichier supprimé) ;
+  « ⬆ Monter / ⬇ Descendre dans la liste » ; réordonnancement **au glisser** (couvertures et
+  tableau) ; **séries entières** déplacées par leur en-tête (« ⬆ Monter / ⬇ Descendre la série »).
+- **Gestion de l'arbre** : nouvelle liste de lecture, nouvelle liste intelligente, nouveau dossier,
+  Renommer (F2), « ✏ Modifier… » (description, combinaison d'un dossier), « ⎘ Dupliquer »,
+  « 🗑 Supprimer… » (sous-listes et listes intelligentes dépendantes signalées), « 📄 Convertir en
+  liste de lecture… », « Déplacer dans… », glisser-déposer des listes, « ⬆ Monter / ⬇ Descendre ».
+- **Éditeur de listes intelligentes** (comme ComicRack et la version egui) : critères et opérateurs
+  du catalogue de ComicRack, groupes imbriqués, case **Non**, liste de départ (« pas dans cette
+  liste »), limite (livres, Mo, Go ; au hasard, par position, par série), aperçu du nombre de livres,
+  **OK / Appliquer** (Ctrl+Entrée) ; consultation seule en lecture seule.
+- **Écriture de `ComicDb.xml`** avec « Lecture et écriture », **jamais ComicRack lancé** (vérifié
+  avant l'opération et juste avant d'écrire) : seul `<ComicLists>` est remplacé, une liste non
+  modifiée reste identique à l'octet ; sauvegardes `ComicDb.comicrust-origine-….xml.bak` (la
+  première, gardée) et `ComicDb.comicrust-….xml.bak` (10 dernières) ; arbre relu tout seul quand
+  ComicRack réécrit le fichier. En autonome, les listes sont dans la base de ComicRust.
+- **Import / export `.cbl`** (nouveau par rapport à la version egui) : analyse avant import
+  (trouvés par identifiant ou par série et numéro, numéros manquants, bilan copiable), création
+  d'une liste de lecture dans l'ordre du fichier ; export au format ComicRack, possible en lecture
+  seule.
+
+### Corrections
+- Recette tauri-v0.5.0 D-01 : Échap ne ferme plus « Renommer / déplacer » quand le modèle de nom ou
+  le dossier cible a été modifié (Annuler pour fermer) ; même règle pour « Ouvrir un fichier… »,
+  « Dossiers surveillés » et les fenêtres des listes.
+
+### Recette
+[recette/tauri-v0.6.0.md](recette/tauri-v0.6.0.md)
+
 ## [tauri-v0.5.0] — 2026-11-08
 
 Étape 4 de la version **Tauri 2** (branche `tauri2-web`) : les **pages**. Voir
