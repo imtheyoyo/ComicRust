@@ -204,8 +204,9 @@ Dossier d'essai du NAS (copies), copie autonome puis copie liée en écriture.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| Bloquants [B] | 41 | | |
-| Majeurs [M] | 25 | | |
-| Mineurs [m] | 11 | | |
+| Bloquants [B] | 41 | 41 | 0 |
+| Majeurs [M] | 25 | 24 | 1 (I-03) |
+| Mineurs [m] | 11 | 10 | 1 (L-14 sans objet) |
 
 Décision et remarques :
+GO — recette validée le 08/11/2026 : 75 OK sur 77, bloquants tous OK (rapport : `recette/rapports/tauri-v0.4.0-2026-11-08.txt`). I-03 : Échap deux fois avec des modifications ferme la fenêtre Infos, qui ne se rouvre plus sans relancer ComicRust → corrigé en tauri-v0.5.0. L-14 sans objet (pas de bibliothèque ComicDb.xml).

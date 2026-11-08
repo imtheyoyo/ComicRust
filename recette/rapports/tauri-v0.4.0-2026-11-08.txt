@@ -1,0 +1,17 @@
+Rapport de recette ComicRust tauri-v0.4.0 — 08/11/2026 07:04
+Résultat : 75 OK, 2 échec(s), 0 non testé(s) sur 77.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (2)
+- I-03 [Majeur] Un champ modifié montre « ● » devant son libellé et le pied « ● N champ(s) modifié(s) » ; ↺ « Revenir à la valeur enregistrée » remet la valeur d'origine. Échap ne ferme pas la fenêtre s'il y a des modifications (il faut « Annuler ») ; sans modification, Échap la ferme. Ctrl+Entrée = OK.
+  Note : S'il y a des modifications en cours, en appuyant sur Echap deux fois, la fenêtre se ferme et il est impossible de l'ouvrir à nouveau. Il faut fermer ComicRust.
+- L-14 [Mineur] Bibliothèque ComicDb.xml (copie liée de test, si tu en as une) : l'option « Lecture et écriture » est sans effet, Ctrl+I reste en consultation (« la bibliothèque ComicDb.xml de ComicRack ne se modifie pas depuis ComicRust… »). (« Sans objet » sinon.)
+  Note : Je n'utilise pas de bibliothèque ComicDb.xml donc le test n' pas pu être réalisé.
+
+VALEURS NOTÉES ET REMARQUES
+- P-04 : 10135Ko
+- W-03 : version egui
+- G-02 : 159
+- L-07 : 26
+- L-13 : 1
+- N-01 : 484
