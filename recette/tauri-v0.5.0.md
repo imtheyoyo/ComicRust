@@ -41,11 +41,11 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Vérification | Où | Résultat |
 |---|---|---|
-| **78 tests** du backend `comicrust-tauri` (69 de la tauri-v0.4.0 + 9) : pages d'une fiche **complétées comme ComicRack** (images manquantes ajoutées, couverture avant par défaut, doublons écartés), **opérations comme ComicRack** (déplacer, début / fin, type, Supprimée ↔ Histoire, rotation, position, favori, réinitialisations, tri par nom) et leur forme JSON, liste vérifiée à l'enregistrement (chaque image une fois, tailles reprises de la fiche) ; onglet Pages sur un CBZ généré (lecture, vignettes, réordonner, supprimer, type, rotation, favori), **base modifiée puis fichier écrit seulement si demandé** ; `ComicDb.xml` en **consultation seulement** ; **fichier libéré pendant l'écriture puis rechargé** (aucun descripteur ouvert après le service des pages, lectures de pages / vignettes / couvertures suspendues jusqu'à la fin de l'écriture) | `cargo test` (`comicrust-tauri`) | à reporter |
-| **Base MySQL de test** (MariaDB locale, jamais la base de démonstration) : onglet Pages en **« Lecture et écriture »** : élément `<Pages>` de la fiche ComicRack réécrit (protocole des compteurs, fiche relue avant l'écriture), puis `ComicInfo.xml` du fichier ; lecture seule : enregistrement refusé | `cargo test` avec `COMICRUST_TEST_MYSQL` (Linux) | à reporter |
-| Front : `svelte-check` (179 fichiers, 0 erreur, 0 avertissement), `vite build` | local + CI Windows (`ci-tauri.yml`) | ✅ svelte-check (08/11/2026) ; build : à reporter |
-| Parcours simulé dans un navigateur (Playwright, mode simulé sans Tauri) : onglet Pages (vignettes / détails, sélection, glisser-déposer au pointeur avec trait d'insertion, ◀ ▶, types, rotation, Supprimer, favori, aperçu, Réinitialiser ▾, ● « Pages » puis Appliquer et OK) ; **Échap** 1, 2 et 3 fois dans Infos avec et sans modification, réouverture par Ctrl+I ; aucune erreur JavaScript | Playwright (mode simulé) | à reporter |
-| Clippy `-D warnings`, rustfmt, tests, compilation de l'application complète (`--features app,custom-protocol`) | CI Windows (`ci-tauri.yml`) | à reporter |
+| **79 tests** du backend `comicrust-tauri` (69 de la tauri-v0.4.0 + 10, dont favori retiré et libération sans interblocage) : pages d'une fiche **complétées comme ComicRack** (images manquantes ajoutées, couverture avant par défaut, doublons écartés), **opérations comme ComicRack** (déplacer, début / fin, type, Supprimée ↔ Histoire, rotation, position, favori, réinitialisations, tri par nom) et leur forme JSON, liste vérifiée à l'enregistrement (chaque image une fois, tailles reprises de la fiche) ; onglet Pages sur un CBZ généré (lecture, vignettes, réordonner, supprimer, type, rotation, favori), **base modifiée puis fichier écrit seulement si demandé** ; `ComicDb.xml` en **consultation seulement** ; **fichier libéré pendant l'écriture puis rechargé** (aucun descripteur ouvert après le service des pages, lectures de pages / vignettes / couvertures suspendues jusqu'à la fin de l'écriture) | `cargo test` (`comicrust-tauri`) | ✅ 79/79 (08/11/2026) |
+| **Base MySQL de test** (MariaDB locale, jamais la base de démonstration) : onglet Pages en **« Lecture et écriture »** : élément `<Pages>` de la fiche ComicRack réécrit (protocole des compteurs, fiche relue avant l'écriture), puis `ComicInfo.xml` du fichier ; lecture seule : enregistrement refusé | `cargo test` avec `COMICRUST_TEST_MYSQL` (Linux) | ✅ (08/11/2026) |
+| Front : `svelte-check` (179 fichiers, 0 erreur, 0 avertissement), `vite build` | local + CI Windows (`ci-tauri.yml`) | ✅ svelte-check (08/11/2026) ; build ✅ |
+| Parcours simulé dans un navigateur (Playwright, mode simulé sans Tauri) : onglet Pages (vignettes / détails, sélection, glisser-déposer au pointeur avec trait d'insertion, ◀ ▶, types, rotation, Supprimer, favori, aperçu, Réinitialiser ▾, ● « Pages » puis Appliquer et OK) ; **Échap** 1, 2 et 3 fois dans Infos avec et sans modification, réouverture par Ctrl+I ; aucune erreur JavaScript | Playwright (mode simulé) | ✅ pages, Échap, édition, lecteur, course Suppr+Ctrl+Entrée (08/11/2026) |
+| Clippy `-D warnings`, rustfmt, tests, compilation de l'application complète (`--features app,custom-protocol`) | CI Windows (`ci-tauri.yml`) | ✅ CI Tauri verte (run 42456349554) |
 
 **Non vérifiable ici** : la vraie fenêtre WebView2 (glisser-déposer, presse-papiers, comportement
 d'Échap de Chromium), les écritures sur le partage SMB du NAS (os error 5), le verrouillage des
@@ -94,6 +94,7 @@ Copie autonome, livres du dossier d'essai local (copies). Ctrl+I sur **un** livr
 - [ ] **PG-15 [B]** **Réinitialiser ▾** : « Réinitialiser » remet l'ordre du fichier (types gardés) ; ▾ : « Remettre dans l'ordre d'origine », « Trier par nom », « Trier par nom (numérique) », « Réinitialiser les types » (1re page Couverture avant, les autres Histoire), « Tout réinitialiser (ordre, types, rotation, position, favoris) » : effets visibles ; revenir exactement à la liste enregistrée enlève le « ● » de « Pages ».
 - [ ] **PG-16 [B]** **Lecture seule** : copie **liée en lecture seule** (« Lecture et écriture » décochée), Ctrl+I sur un livre → Pages : « Pages du livre (consultation seulement) : » et « 🔒 … » (marche à suivre) ; **pas** de barre d'outils ni de « Réinitialiser » ; glisser, Suppr, Alt+Maj+… sont sans effet ; le clic droit ne propose que Aperçu agrandi, Copier la page, Tout sélectionner, Inverser la sélection, Rafraîchir ; sélection, aperçu et Ctrl+C marchent ; « OK » ferme sans rien écrire (relancer ComicRack : pages du livre inchangées).
 - [ ] **PG-17 [m]** Clic droit → « 🔄 Rafraîchir » : vignettes relues, modifications non enregistrées gardées. Touche **Menu** / **Maj+F10** ouvre le menu sur la page courante. Un livre PDF : onglet Pages avec « Page 001 »… en noms d'images.
+- [ ] **PG-18 [M]** Favori retiré : poser un favori sur une page, **Appliquer**, le retirer (Ctrl+Maj+D), **OK**, rouvrir Ctrl+I → Pages : le favori n'est plus là (vérifier aussi dans le `ComicInfo.xml` si la case était cochée).
 
 ## 4. Enregistrer les pages : Appliquer, OK
 
@@ -151,6 +152,8 @@ Copie autonome, plusieurs livres du dossier d'essai à la suite dans la vue.
 
 ## Limites connues (ne pas compter comme anomalies)
 
+- Ouvrir 4 livres dans le lecteur pendant que la fenêtre Infos est ouverte peut fermer la séance de vignettes de l'onglet Pages (vignettes vides : rouvrir l'onglet ou « 🔄 Rafraîchir »).
+- Sur un NAS très lent (lecture d'une page de plus de 10 s), l'écriture peut démarrer pendant la lecture : nouvelles tentatives automatiques, os error 5 possible dans ce cas extrême.
 - **Page double (⧉) non modifiable** : elle est **calculée** comme ComicRack (`IsDoublePage` : image
   plus large que haute, ou attribut `DoublePage` du fichier), qui ne la rend pas modifiable non plus.
   Pour l'affichage en double page, seule la **position** (Proche / Éloignée) se règle.
@@ -179,7 +182,7 @@ Copie autonome, plusieurs livres du dossier d'essai à la suite dans la vue.
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
 | Bloquants [B] | 32 | | |
-| Majeurs [M] | 16 | | |
+| Majeurs [M] | 17 | | |
 | Mineurs [m] | 4 | | |
 
 Décision et remarques :
