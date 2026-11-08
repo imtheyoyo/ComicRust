@@ -503,3 +503,31 @@ fn fichier_libere_pendant_l_ecriture_puis_recharge() {
     l.fermer_livre(&v.jeton).unwrap();
     l.fermer_livre(&o.jeton).unwrap();
 }
+
+/// Revue étape 4 : une lecture commencée juste après la réservation du fichier (préchargement
+/// ou page demandée entre `reserver` et l'envoi de `Liberer`) ne doit pas faire attendre
+/// l'écriture jusqu'à `DELAI_LIBERATION` : le fil accuse réception pendant qu'il attend.
+#[test]
+fn lecture_en_attente_n_interbloque_pas_la_liberation() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("Course.cbz");
+    cbz_tailles(&f, 4);
+    let l = Lecteur::nouveau(d.path().join("data"), Biblio::nouvelle(d.path().join("data")));
+    let o = l.ouvrir_fichier(&f.to_string_lossy()).unwrap();
+    // Réservation seule (comme au tout début de `liberer`), puis une page demandée : le fil
+    // se met à attendre la fin de l'écriture.
+    let reservation = crate::liberation::reserver([f.as_path()]);
+    let (tx, rx) = mpsc::channel();
+    l.servir(&o.jeton, 2, Some(1000), move |r| tx.send(r).unwrap());
+    std::thread::sleep(Duration::from_millis(200));
+    let debut = Instant::now();
+    let garde = l.liberer(std::slice::from_ref(&f));
+    assert!(debut.elapsed() < Duration::from_secs(3), "libération bloquée {:?}", debut.elapsed());
+    assert!(rx.recv_timeout(Duration::from_millis(100)).is_err(), "lecture toujours suspendue");
+    drop(reservation);
+    assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "suspendue tant que la garde vit");
+    drop(garde);
+    let r = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+    assert_eq!(taille(&r), (120, 300));
+    l.fermer_livre(&o.jeton).unwrap();
+}

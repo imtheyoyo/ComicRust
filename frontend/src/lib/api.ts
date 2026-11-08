@@ -364,7 +364,7 @@ export interface PageLivre {
   rotation: number;
   /** 'Default' | 'Near' | 'Far'. */
   position: string;
-  favori?: string;
+  favori?: string | null;
   largeur?: number;
   hauteur?: number;
   urlVignette: string;

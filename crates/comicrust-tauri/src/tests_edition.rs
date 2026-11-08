@@ -836,6 +836,26 @@ fn onglet_pages_enregistre_base_puis_fichier_seulement_si_demande() {
     #[cfg(target_os = "linux")]
     crate::lecteur::tests::attendre_aucun_descripteur(&e.lecteur, &fichier);
 
+    // Revue étape 4 : favori retiré (Ctrl+Maj+D) puis la liste renvoyée telle quelle (JSON) :
+    // le favori doit disparaître de la base et du fichier (un champ absent voulait dire « gardé »).
+    let p3 = e.lire_pages(&t1, Some(&p2.jeton)).unwrap();
+    assert_eq!(p3.pages.iter().find(|x| x.image == 0).unwrap().favori.as_deref(), Some("Combat"));
+    let l3 = crate::pages_livre::transformer(
+        &p3.pages,
+        &crate::pages_livre::OperationPages::Favori { image: 0, texte: None },
+    )
+    .unwrap();
+    let r = e
+        .appliquer_modifications(
+            &DemandeModification { pages: Some(modifiees(&l3)), ecrire_dans_fichier: true, ..dm.clone() },
+            &|_| {},
+        )
+        .unwrap();
+    assert!(r.complet && r.livres[0].statut == Statut::Ok, "{}", r.rapport);
+    assert!(b.livre(&t1).unwrap().pages.page.iter().all(|x| x.bookmark.is_none()), "favori retiré de la base");
+    assert!(!comic_info(&fichier).0.contains("Bookmark="), "favori retiré du fichier");
+    e.fermer_pages(&p3.jeton);
+
     // Refus : liste incomplète, plusieurs livres ; rien d'écrit.
     let t2 = id_par_fichier(&b, "Thanos 02.cbz");
     let mut incomplete = modifiees(&l2);

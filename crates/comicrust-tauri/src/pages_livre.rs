@@ -47,7 +47,9 @@ pub struct PageLivre {
     pub rotation: u16,
     #[serde(default = "par_defaut")]
     pub position: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Toujours sérialisé (`null` : pas de favori) : un `PageLivre` renvoyé tel quel comme
+    /// `PageModifiee` doit dire « favori supprimé », pas « favori gardé » (champ absent).
+    #[serde(default)]
     pub favori: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub largeur: Option<u32>,
@@ -499,8 +501,10 @@ mod tests {
             assert!(p.get(k).is_some(), "{k} absent : {p}");
         }
         // Un PageLivre renvoyé tel quel sert de PageModifiee.
-        let m: PageModifiee = serde_json::from_value(p).unwrap();
-        assert_eq!((m.image, m.type_page.as_deref(), m.favori), (0, Some("FrontCover"), None));
+        let m: PageModifiee = serde_json::from_value(p.clone()).unwrap();
+        assert_eq!((m.image, m.type_page.as_deref(), m.favori), (0, Some("FrontCover"), Some(None)));
+        // Sans favori : `favori: null` sérialisé, donc « supprimé » une fois renvoyé.
+        assert!(p.get("favori").is_some_and(serde_json::Value::is_null), "{p}");
         let m: PageModifiee = serde_json::from_str(r#"{"image":1,"favori":null}"#).unwrap();
         assert_eq!(m.favori, Some(None));
     }

@@ -564,6 +564,39 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
         }
         Commande::Recharger => *recharger = true,
     };
+    // Fichier en cours d'écriture : le fournisseur est lâché et l'on attend ici la fin de
+    // l'écriture **en accusant réception des libérations** arrivées entre-temps. Sans cela, un
+    // préchargement commencé juste après la réservation (`Lecteur::liberer` réserve avant
+    // d'envoyer `Liberer`) bloquerait le fil dans `attendre_libre` et l'écriture attendrait
+    // l'accusé de réception jusqu'à `DELAI_LIBERATION`. `false` : livre fermé.
+    let attendre_ecriture = |urgentes: &mut VecDeque<(usize, Option<u32>, Arc<Reponse>)>,
+                             pre: &mut VecDeque<(usize, Option<u32>)>,
+                             liberations: &mut Vec<Sender<()>>,
+                             recharger: &mut bool,
+                             livre: &mut Option<Box<dyn PageProvider>>|
+     -> bool {
+        if !liberation::en_ecriture(&ctx.chemin) {
+            return true;
+        }
+        *livre = None;
+        let fin = Instant::now() + DELAI_PAGE;
+        loop {
+            loop {
+                match rx.try_recv() {
+                    Ok(c) => ranger(c, urgentes, pre, liberations, recharger),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return false,
+                }
+            }
+            for ack in liberations.drain(..) {
+                let _ = ack.send(());
+            }
+            if !liberation::en_ecriture(&ctx.chemin) || Instant::now() >= fin {
+                return true;
+            }
+            liberation::attendre_libre(&ctx.chemin, Duration::from_millis(50));
+        }
+    };
     loop {
         if urgentes.is_empty() && prechargements.is_empty() && !recharger {
             match rx.recv() {
@@ -587,6 +620,9 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
         }
         if recharger {
             recharger = false;
+            if !attendre_ecriture(&mut urgentes, &mut prechargements, &mut liberations, &mut recharger, &mut livre) {
+                return;
+            }
             // Erreur (fichier renommé, pages différentes…) : rendue à la page suivante.
             if livre.is_none() && rafraichir(&ctx.chemin, &mut empreinte, &mut livre, &noms).is_err() {
                 livre = None;
@@ -606,6 +642,11 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
         };
         let k = cle(index, largeur);
         let deja = cache().prendre(&k);
+        if deja.is_none()
+            && !attendre_ecriture(&mut urgentes, &mut prechargements, &mut liberations, &mut recharger, &mut livre)
+        {
+            return;
+        }
         let resultat = match deja {
             Some(p) => Ok(p),
             None => match images.get(index).copied() {

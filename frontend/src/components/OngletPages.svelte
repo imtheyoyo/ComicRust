@@ -23,8 +23,10 @@
     actif: boolean;
     /** La liste a changé depuis lire_pages (● devant « Pages », OK / Appliquer). */
     modifie?: boolean;
+    /** Opérations en file (pas encore rendues par transformer_pages) : Échap ne ferme pas. */
+    occupe?: boolean;
   }
-  let { id, fichier = '', actif, modifie = $bindable(false) }: Props = $props();
+  let { id, fichier = '', actif, modifie = $bindable(false), occupe = $bindable(false) }: Props = $props();
 
   const TAILLES = [{ h: 84, nom: 'Petites' }, { h: 124, nom: 'Moyennes' }, { h: 172, nom: 'Grandes' }];
   const CLE_PREFS = 'comicrust.ongletPages';
@@ -39,7 +41,6 @@
   let chargement = $state(true);
   let erreur = $state('');
   let message = $state('');
-  let occupe = $state(false);
   let selection = $state<Set<number>>(new Set());
   let ancre = $state<number | null>(null);
   /** Page qui a le « focus » clavier (image). */
@@ -106,8 +107,13 @@
   /** Liste à enregistrer (complète, nouvel ordre), ou undefined si rien n'a changé ; attend la fin
    *  des opérations en file. */
   export async function pagesModifiees(): Promise<PageLivre[] | undefined> {
-    await file;
-    return modifie ? ($state.snapshot(pages) as PageLivre[]) : undefined;
+    // Une opération encore en file (Suppr puis Ctrl+Entrée aussitôt) doit partir avec le reste.
+    // Comparaison faite ici : `modifie` n'est recalculé qu'au passage de l'$effect.
+    let attendue: Promise<unknown>;
+    do { attendue = file; await attendue; } while (attendue !== file);
+    if (!livre || signature(pages) === signature(original)) return undefined;
+    // `favori: null` explicite : un favori retiré doit être supprimé (champ absent = gardé).
+    return ($state.snapshot(pages) as PageLivre[]).map((p) => ({ ...p, favori: p.favori ?? null }));
   }
 
   const signature = (l: PageLivre[]) => l.map((p) => `${p.image}|${p.type}|${p.rotation}|${p.position}|${p.favori ?? ''}`).join('\n');
@@ -139,8 +145,13 @@
       if (!editable) return;
       const operation = typeof o === 'function' ? o() : o;
       if (!operation) return;
+      // Séance de départ : un résultat arrivé après un changement de livre (Précédent / Suivant)
+      // ou une relecture (Appliquer) est jeté, sinon l'ordre d'un livre partirait avec un autre.
+      const seance = livre ? `${livre.id}|${livre.jeton}` : '';
       try {
-        pages = await transformerPages($state.snapshot(pages) as PageLivre[], operation);
+        const r = await transformerPages($state.snapshot(pages) as PageLivre[], operation);
+        if (!livre || `${livre.id}|${livre.jeton}` !== seance || chargement) return;
+        pages = r;
         // Une case déplacée perd le focus : il revient à la liste (raccourcis enchaînés).
         if (avaitFocus) await tick().then(() => { if (!liste?.contains(document.activeElement)) liste?.focus({ preventScroll: true }); });
         apres?.();

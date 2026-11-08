@@ -40,7 +40,8 @@ interface PageLivre {
                         //   ou attribut DoublePage du ComicInfo.xml du fichier
   rotation: number;     // 0 | 90 | 180 | 270 (à appliquer à l'affichage : la vignette n'est pas tournée)
   position: string;     // position en double page : 'Default' | 'Near' | 'Far'
-  favori?: string;      // signet (Bookmark) ; absent = pas de favori
+  favori: string | null; // signet (Bookmark) ; null = pas de favori (toujours présent : renvoyé
+                        //   tel quel comme PageModifiee, null veut dire « supprimé »)
   largeur?: number;     // ImageWidth / ImageHeight de la fiche (taille d'origine, avant rotation) ;
   hauteur?: number;     //   absents si inconnus (la vraie taille arrive avec la vignette)
   urlVignette: string;  // `${urlBase}/${image}?l=${LARGEUR_VIGNETTE}` (protocole cr-page)

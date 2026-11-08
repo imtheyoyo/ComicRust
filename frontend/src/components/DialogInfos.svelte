@@ -10,7 +10,7 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import {
     ajouterValeurPerso, appliquerModifications, annulerOperation, ecouter, lireFiches, messageErreur, verifierChamps,
-    type BilanOperation, type ChampFiche, type ChampModifie, type FicheEdition, type ProgressionEdition,
+    type BilanOperation, type ChampFiche, type ChampModifie, type FicheEdition, type PageLivre, type ProgressionEdition,
   } from '../lib/api';
   import { modale } from '../lib/modale';
   import ChampSuggestions from './ChampSuggestions.svelte';
@@ -51,6 +51,7 @@
   let ongletPages = $state<ReturnType<typeof OngletPages>>();
   let pagesVues = $state(false);
   let pagesModifiees = $state(false);
+  let pagesOccupe = $state(false);
   let minuterieVerif: ReturnType<typeof setTimeout> | undefined;
   let sequenceVerif = 0;
   let desabonner: (() => void) | undefined;
@@ -161,14 +162,21 @@
 
   async function enregistrer(suite: 'fermer' | 'rester' | -1 | 1, confirme = false) {
     if (!fiche) return;
-    if (!sale) { await apres(suite); return; }
+    // Pages lues après la fin des opérations en file (Suppr puis Ctrl+Entrée aussitôt : `sale`
+    // n'en tient pas encore compte, la modification serait perdue à la fermeture).
+    let pages: PageLivre[] | undefined;
+    try {
+      pages = avecPages && pagesVues ? await ongletPages?.pagesModifiees() : undefined;
+    } catch {
+      pages = undefined;
+    }
+    if (modifications.length === 0 && !pages) { await apres(suite); return; }
     enregistrement = true;
     progression = null;
     message = null;
     bilan = null;
     confirmation = null;
     try {
-      const pages = avecPages && pagesModifiees ? await ongletPages?.pagesModifiees() : undefined;
       const b = await appliquerModifications({ ids, champs: modifications, pages, ecrireDansFichier: ecrireFichier, confirme });
       if (b.confirmationRequise) {
         confirmation = { message: b.confirmationRequise.message, suite };
@@ -216,7 +224,7 @@
   }
 
   /** Échap : ferme seulement si rien n'est modifié (sinon Annuler, explicitement), comme egui. */
-  const peutFermerParEchap = () => !sale && !enregistrement && !confirmation;
+  const peutFermerParEchap = () => !sale && !pagesOccupe && !enregistrement && !confirmation;
 
   function clavier(e: KeyboardEvent) {
     // Ctrl+Entrée : OK (comme le bouton par défaut d'une fenêtre Windows).
@@ -319,7 +327,7 @@
 
     {#if avecPages && pagesVues}
       <div class="panneau-pages" hidden={!surPages} role="tabpanel" id={surPages ? 'panneau-infos' : undefined} aria-labelledby="onglet-infos-{indicePages}">
-        <OngletPages bind:this={ongletPages} bind:modifie={pagesModifiees} id={ids[0]} fichier={livres[0]?.fichier}
+        <OngletPages bind:this={ongletPages} bind:modifie={pagesModifiees} bind:occupe={pagesOccupe} id={ids[0]} fichier={livres[0]?.fichier}
           actif={!enregistrement && !confirmation && !chargement} />
       </div>
     {/if}
