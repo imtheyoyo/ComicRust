@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.5.0 (pré-release de la version Tauri 2 : étape 4, **pages**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.5.0-windows-x64.zip` |
-| SHA-256 | à reporter |
+| SHA-256 | `ef6cc270ed3ef3dbc3bda169c2182644cbc12ea0b4ad2ec50dc625d6462cee94` |
 | Contenu | onglet **« Pages »** de la fenêtre « Infos du livre » (vignettes ou détails, sélection multiple, glisser-déposer, ◀ ▶ / Alt+flèches, Au début / À la fin, types de page, rotation, position en double page, ⧉ page double en lecture seule, Supprimer / Restaurer, favori, aperçu agrandi, Ctrl+C, Réinitialiser ▾) ; pages enregistrées avec les champs par **OK / Appliquer** (base de ComicRust, base MySQL de ComicRack en « Lecture et écriture », `<Pages>` du `ComicInfo.xml` si « Écrire aussi les infos dans le fichier ») ; **fichier libéré avant toute écriture** puis rechargé (os error 5) ; correctif **I-03** (Échap) |
 | Origine | étape 4 de [`docs/tauri/PLAN.md`](../docs/tauri/PLAN.md), contrat [`docs/tauri/ipc-pages.md`](../docs/tauri/ipc-pages.md) ; tauri-v0.4.0 **GO** le 08/11/2026 ([rapport](rapports/tauri-v0.4.0-2026-11-08.txt) : I-03 en échec, repris ici). Tests repris des recettes egui [v0.10.6](v0.10.6.md) (P-01 à P-05) et [v0.10.7](v0.10.7.md) (P-01 / P-02 : « Appliquer » sans os error 5 sur le NAS) |
 
