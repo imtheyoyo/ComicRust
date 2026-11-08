@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.6.0 (pré-release de la version Tauri 2 : étape 5, **listes ComicRack**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.6.0-windows-x64.zip` |
-| SHA-256 | *à reporter (calculé par la CI à la publication)* |
+| SHA-256 | `7222ec35bc8130ebfcdfdbe1c1ccaf7df8e472c17f78b39628104454895a9e44` |
 | Contenu | **panneau des listes** (arbre identique à ComicRack, compteurs ComicRust / ComicRack, infobulle, « 📋 Copier le bilan des listes », clavier) ; **vue d'une liste** (tri « # Ordre de la liste », colonne « # ») ; **listes de lecture** (ajout par glisser-déposer et par menu, retrait par Suppr, Monter / Descendre, réordonnancement au glisser, séries entières) ; **gestion de l'arbre** (nouvelle liste / dossier / liste intelligente, Renommer F2, Modifier, Dupliquer, Supprimer, Convertir, Déplacer) ; **éditeur de listes intelligentes** ; **écriture de `ComicDb.xml`** (ComicRack fermé, sauvegardes) ; **import / export `.cbl`** ; correctif **D-01** (Échap dans « Renommer / déplacer » modifiée) |
 | Origine | étape 5 de [`docs/tauri/PLAN.md`](../docs/tauri/PLAN.md), contrat [`docs/tauri/ipc-listes.md`](../docs/tauri/ipc-listes.md) ; tauri-v0.5.0 **GO** le 08/11/2026 ([rapport](rapports/tauri-v0.5.0-2026-11-08.txt) : remarque D-01 reprise ici). Tests repris des recettes egui [v0.5.0](v0.5.0.md), [v0.5.1](v0.5.1.md), [v0.5.2](v0.5.2.md) (bilan des listes : **46/47** identiques à ComicRack), [v0.9.0](v0.9.0.md), [v0.9.1](v0.9.1.md) (gestion, écriture, glisser-déposer), [v0.10.1](v0.10.1.md) (clavier de l'arbre) et [v0.10.2](v0.10.2.md) (série entière dans une liste triée par ordre) |
 
