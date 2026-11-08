@@ -1,7 +1,7 @@
 {
   "name": "comicrust-frontend",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Interface Svelte de ComicRust (Tauri 2) : affichage uniquement, la logique métier est dans comicrust-core.",
   "scripts": {

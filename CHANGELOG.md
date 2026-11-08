@@ -5,6 +5,43 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.5.0] — 2026-11-08
+
+Étape 4 de la version **Tauri 2** (branche `tauri2-web`) : les **pages**. Voir
+[`docs/tauri/PLAN.md`](docs/tauri/PLAN.md) et le contrat
+[`docs/tauri/ipc-pages.md`](docs/tauri/ipc-pages.md).
+
+> ⚠ Cette version réécrit l'ordre et le type des pages (base, et sur demande fichier CBZ et base
+> de ComicRack) : faire une sauvegarde de la base ComicRack avant les essais en « Lecture et écriture ».
+
+### Nouveautés
+- Onglet **« Pages »** dans la fenêtre « Infos du livre » (un seul livre), repris de la version egui
+  et de ComicRack : **vignettes** (trois tailles, Ctrl+molette) ou liste **détaillée** ; sélection
+  multiple (clic, Ctrl, Maj, flèches, Ctrl+A) ; **glisser-déposer** avec trait d'insertion ;
+  ◀ ▶ (Alt+← / Alt+→), **Au début / À la fin** (Ctrl+Alt+T / B).
+- **Types de page** (liste, menu, Alt+Maj+A…K), **rotation** (Alt+Maj+6…9), **position en double
+  page** (Proche / Éloignée), **Supprimer / Restaurer** (Suppr), **favori** (Ctrl+Maj+B / D),
+  **aperçu agrandi** (Entrée, double-clic), **copie** de la page (Ctrl+C), **Réinitialiser ▾**
+  (ordre d'origine, tri par nom, types, tout). Page double **⧉** affichée en lecture seule,
+  calculée comme ComicRack.
+- Les pages s'enregistrent **avec les champs** (OK / Appliquer, Précédent / Suivant) : base de
+  ComicRust ; base MySQL de ComicRack en « Lecture et écriture » (sans écraser une modification
+  faite dans ComicRack) ; élément `<Pages>` du `ComicInfo.xml` si « Écrire aussi les infos dans le
+  fichier » est cochée (sinon : « infos pas encore écrites dans le fichier »). Le lecteur suit
+  l'ordre, les suppressions et la rotation.
+- Consultation seule de l'onglet en lecture seule (ComicRack sans écriture, `ComicDb.xml`).
+
+### Corrections
+- Recette tauri-v0.4.0 I-03 : Échap appuyé plusieurs fois ne ferme plus de force la fenêtre
+  « Infos » (qui ne se rouvrait plus) ; même correctif pour Renommer, Convertir / Écrire les infos,
+  Réglages, Dossiers surveillés et « Ouvrir un fichier ».
+- Fichier **libéré avant toute écriture** (infos, pages, rangement de l'original, renommage) puis
+  rechargé : lecteur, vignettes et couvertures ne gardent plus le fichier ouvert pendant son
+  remplacement (« Accès refusé (os error 5) » sur le NAS, recette egui v0.10.6).
+
+### Recette
+[recette/tauri-v0.5.0.md](recette/tauri-v0.5.0.md)
+
 ## [tauri-v0.4.0] — 2026-11-07
 
 Étape 3 de la version **Tauri 2** (branche `tauri2-web`) : **infos et édition**. Voir
