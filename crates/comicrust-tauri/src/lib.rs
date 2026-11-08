@@ -10,6 +10,8 @@
 //! - l'onglet Pages ([`pages_livre`] : pages d'un livre, opérations, vignettes) et la libération
 //!   des fichiers avant écriture ([`liberation`]),
 //! - l'édition ([`edition`] : infos des livres, ComicInfo.xml, conversion en CBZ, renommage),
+//! - les listes ComicRack ([`listes`] : arbre, gestion, livres des listes de lecture ;
+//!   [`listes_criteres`] : éditeur de listes intelligentes ; [`listes_cbl`] : import / export `.cbl`),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
 //! Le code sans dépendance à Tauri est compilé et testé partout (Linux compris) ; la fenêtre
@@ -21,6 +23,9 @@ pub mod couvertures;
 pub mod edition;
 pub mod lecteur;
 pub mod liberation;
+pub mod listes;
+pub mod listes_cbl;
+pub mod listes_criteres;
 pub mod pages_livre;
 pub mod portable;
 pub mod reglages;
@@ -29,6 +34,8 @@ pub mod tri;
 
 #[cfg(test)]
 mod tests_biblio;
+#[cfg(test)]
+mod tests_listes;
 
 use serde::Serialize;
 use std::path::Path;

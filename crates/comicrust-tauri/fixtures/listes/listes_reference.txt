@@ -1,0 +1,47 @@
+0|bibliotheque|Bibliothèque|5319|4f632566-25d0-4f05-94c9-d1da14015030
+0|dossier|___1|323|d3834683-f43f-4010-b469-48ff0ba128b2
+1|lecture|Test liste ComicRust|9|1b7b2b42-df47-46b8-bc55-1a75decd23fe
+1|intelligente|Séries complétes (Chemin)|0|36e9430d-e7bd-4660-90bb-611380d042b5
+1|lecture|Thanos - Guide complet Crushing Krisis|321|726e57e4-d518-4b58-bac3-f5ef852dc600
+0|lecture|THANOS - Lecture dans l'ordre|0|89796778-c1f7-47cb-8c6a-cc3ad516ea06
+0|lecture|Warlock et Cie|0|3d6219aa-5f32-4cd2-8564-e812278eb83f
+0|lecture|Séries complètes|0|6dbe9e30-b00c-4f45-b62c-a2dc64a389df
+0|lecture|Séries en cours|0|1fcb73d6-06d2-4bb6-9ef7-dbb9fbff537a
+0|lecture|Test S6|0|93bf8bdc-5369-4fc1-a725-cd83e2dd485b
+0|intelligente|COSMIC COLLECTION (Chemin)|345|03f10c02-7b9f-4b2f-b9d7-8edcf154e46b
+0|lecture|BD_X|0|2faf13af-3ca1-40bc-bbea-ea162303e1d2
+0|lecture|Tablette|0|4887a791-c14c-4403-876a-c8277ec71dcf
+0|intelligente|Séries Temporaires (Chemin)|5|1cf943f7-bd9e-44cd-a816-0aed745840ea
+0|intelligente|Séries en cours|0|a2215f7d-b795-48bc-9085-c1bf3e35dd05
+0|dossier|Listes intelligentes|5318|856ed100-bd86-439a-8db4-6f8a1e313ec7
+1|intelligente|Thanos - Guide complet Crushing Krisis|1|228a0999-26e2-4c75-b98b-80297e9954da
+1|intelligente|Pull List (Étiquette)|0|67639de4-5f51-4235-872c-58c75218ba48
+1|intelligente|Doublons|154|044097b6-e82c-4c8e-a395-ec8d16f4be06
+1|intelligente|Nouvelle Liste intelligente|0|0357aed3-fdf9-4bf8-b3a8-4800d5f800be
+1|intelligente|BD_X|488|33e77fe6-d1da-4c65-9962-07871a172402
+1|intelligente|Récemment ajouté|1|fa2907ea-4d1f-4bc6-9360-0823e842c331
+1|intelligente|Fichiers à mettre à jour|20|b30e9e7f-4d4d-405c-8903-a6bf42ba483c
+1|dossier|Complet|3151|91304eeb-0d9a-4e2f-bcc5-e22cc822c59d
+2|intelligente|Séries complétes|14|40d8641b-b22f-4c08-8c16-b36d200113bc
+2|intelligente|Séries complétes (Chemin)|3151|af1687d3-4652-4902-b9cc-b8252335ddb0
+2|intelligente|Séries complétes - Manque Tomes (Chemin)|289|6658433e-cce9-48ab-b71e-6a70a6f71211
+2|intelligente|Séries complétes (A scrapper)|3137|b5f34735-5633-4946-a48b-7d742b68b48e
+2|intelligente|Séries complétes (Non Lues)|3151|fb95f9a8-c856-477f-aff9-05e7444ab413
+2|intelligente|Séries complétes (Lues)|0|3835c1ba-7cdf-4e32-95cf-b2be0f8ae02c
+1|dossier|En cours|510|601801e5-5eb0-4130-b1fe-186d10dbac50
+2|intelligente|Séries en cours|0|eeaf74f8-3b4e-479a-a531-c682d728fa0a
+2|intelligente|Séries en cours (Chemin)|510|2fc1f2a6-aace-4591-8fac-892e69bb471a
+2|intelligente|Séries en Cours (A scrapper)|510|f051cd9b-9c49-4237-9ab2-e659010b9b4b
+2|intelligente|Séries en Cours (Non Lues)|510|e82da3ce-27e3-4d26-b034-ec4b0048bbb1
+2|intelligente|Séries en Cours (Lues)|0|dd231272-0b5e-403a-8109-fc9f460de1b4
+1|dossier|A définir|5298|505c80d5-941a-433b-acff-abbe30ddbdda
+2|intelligente|Séries à définir (Série complète = inconnue)|5298|f633301a-06cd-4cda-a326-7a02239fcae1
+2|intelligente|Séries A_DEFINIR (Chemin)|437|aefe2f84-f4e3-4bb0-b4bd-d7fa8817699d
+1|dossier|Divers|5318|42d95661-72ed-4188-9e55-0d07daa2a102
+2|intelligente|Récemment lu|2|fb183a92-af78-4238-aba0-4e77020fa9b4
+2|intelligente|Non-lu|5318|5bf9e6e0-6326-438e-b576-619a042fee7e
+2|intelligente|Lecture en cours|1|7798a02b-d057-403a-a460-992b9fb17ec8
+2|intelligente|Lu|0|fc060eb1-3272-403d-9fce-ca37879e1065
+0|intelligente|Séries complétes (Chemin)|11|ae72c2cb-5816-45b4-b441-09bf4d273ff3
+0|dossier|Listes temporaires|0|f612eb74-e8cd-4ec5-a44e-831e67e29d61
+0|dossier|[BCR Users]|0|1eecf23e-867f-4bf2-aaff-a650cebee06a

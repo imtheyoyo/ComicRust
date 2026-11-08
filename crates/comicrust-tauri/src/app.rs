@@ -8,6 +8,12 @@ use crate::edition::{
     EvenementEdition, FicheEdition, ModeleNom, Proposition, ResultatRenommage,
 };
 use crate::lecteur::{self, Lecteur, LivreOuvert, ReponsePage};
+use crate::listes::{
+    ArbreListes, Combinaison, DemandeCreation, Destination, EtatListes, GroupeVue, InfosConversion, InfosSuppression,
+    PlaceDepot, ResultatListes,
+};
+use crate::listes_cbl::{ExportCbl, ImportCbl, RapportCbl};
+use crate::listes_criteres::{self, Apercu, CatalogueCriteres, Critere, CriteresListe, EditeurListe};
 use crate::pages_livre::{OperationPages, PageLivre, PagesLivre};
 use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
 use crate::{infos_application, portable, themes, InfosApplication};
@@ -112,6 +118,247 @@ fn lancer_scan(app: tauri::AppHandle, biblio: tauri::State<'_, Biblio>) -> Resul
         let (nom, charge) = evenement.pour_le_front();
         let _ = app.emit(nom, charge);
     }))
+}
+
+// ───────────────────────────── Listes ComicRack ─────────────────────────────
+// Contrat : docs/tauri/ipc-listes.md. Une commande = un appel à `listes.rs` (logique dupliquée
+// de la version egui) ; les modifications passent par `comicrust_core::lists_edit`.
+
+/// État des listes (source, lecture seule, ComicRack lancé, version).
+#[tauri::command(async)]
+fn etat_listes(biblio: tauri::State<'_, Biblio>) -> EtatListes {
+    biblio.etat_listes()
+}
+
+/// Arbre des listes avec leurs comptes.
+#[tauri::command(async)]
+fn arbre_listes(biblio: tauri::State<'_, Biblio>) -> Result<ArbreListes, String> {
+    biblio.arbre_listes()
+}
+
+/// Bilan texte ComicRust / ComicRack de chaque liste.
+#[tauri::command(async)]
+fn bilan_listes(biblio: tauri::State<'_, Biblio>) -> Result<String, String> {
+    biblio.bilan_listes()
+}
+
+#[tauri::command(async)]
+fn creer_liste(biblio: tauri::State<'_, Biblio>, demande: DemandeCreation) -> Result<ResultatListes, String> {
+    biblio.creer_liste(&demande)
+}
+
+#[tauri::command(async)]
+fn renommer_liste(biblio: tauri::State<'_, Biblio>, id: String, nom: String) -> Result<ResultatListes, String> {
+    biblio.renommer_liste(&id, &nom)
+}
+
+#[tauri::command(async)]
+fn modifier_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    nom: Option<String>,
+    description: Option<String>,
+    combinaison: Option<Combinaison>,
+) -> Result<ResultatListes, String> {
+    biblio.modifier_liste(&id, nom, description, combinaison)
+}
+
+#[tauri::command(async)]
+fn dupliquer_liste(biblio: tauri::State<'_, Biblio>, id: String) -> Result<ResultatListes, String> {
+    biblio.dupliquer_liste(&id)
+}
+
+#[tauri::command(async)]
+fn infos_suppression(biblio: tauri::State<'_, Biblio>, id: String) -> Result<InfosSuppression, String> {
+    biblio.infos_suppression(&id)
+}
+
+#[tauri::command(async)]
+fn supprimer_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    liste_affichee: Option<String>,
+) -> Result<ResultatListes, String> {
+    biblio.supprimer_liste(&id, liste_affichee.as_deref())
+}
+
+#[tauri::command(async)]
+fn destinations_liste(biblio: tauri::State<'_, Biblio>, id: String) -> Result<Vec<Destination>, String> {
+    biblio.destinations_liste(&id)
+}
+
+#[tauri::command(async)]
+fn deplacer_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    parent: Option<String>,
+    position: Option<usize>,
+) -> Result<ResultatListes, String> {
+    biblio.deplacer_liste(&id, parent, position)
+}
+
+#[tauri::command(async)]
+fn decaler_liste(biblio: tauri::State<'_, Biblio>, id: String, haut: bool) -> Result<ResultatListes, String> {
+    biblio.decaler_liste(&id, haut)
+}
+
+#[tauri::command(async)]
+fn place_depot_liste(biblio: tauri::State<'_, Biblio>, glissee: String, cible: String, place: PlaceDepot) -> bool {
+    biblio.place_depot_liste(&glissee, &cible, place)
+}
+
+#[tauri::command(async)]
+fn deposer_liste(
+    biblio: tauri::State<'_, Biblio>,
+    glissee: String,
+    cible: String,
+    place: PlaceDepot,
+) -> Result<ResultatListes, String> {
+    biblio.deposer_liste(&glissee, &cible, place)
+}
+
+#[tauri::command(async)]
+fn infos_conversion(biblio: tauri::State<'_, Biblio>, id: String) -> Result<InfosConversion, String> {
+    biblio.infos_conversion(&id)
+}
+
+#[tauri::command(async)]
+fn convertir_en_lecture(biblio: tauri::State<'_, Biblio>, id: String) -> Result<ResultatListes, String> {
+    biblio.convertir_en_lecture(&id)
+}
+
+#[tauri::command(async)]
+fn ajouter_livres_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    livres: Vec<String>,
+    position: Option<usize>,
+) -> Result<ResultatListes, String> {
+    biblio.ajouter_livres_liste(&id, livres, position)
+}
+
+#[tauri::command(async)]
+fn depot_livres_possible(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    liste_affichee: Option<String>,
+) -> Result<Option<String>, String> {
+    biblio.depot_livres_possible(&id, liste_affichee.as_deref())
+}
+
+#[tauri::command(async)]
+fn retirer_livres_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    livres: Vec<String>,
+) -> Result<ResultatListes, String> {
+    biblio.retirer_livres_liste(&id, livres)
+}
+
+#[tauri::command(async)]
+fn decaler_livres_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    livres: Vec<String>,
+    haut: bool,
+) -> Result<ResultatListes, String> {
+    biblio.decaler_livres_liste(&id, livres, haut)
+}
+
+#[tauri::command(async)]
+fn deplacer_livres_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    livres: Vec<String>,
+    requete: RequeteLivres,
+    insertion: usize,
+) -> Result<ResultatListes, String> {
+    biblio.deplacer_livres_liste(&id, livres, &requete, insertion)
+}
+
+#[tauri::command(async)]
+fn deplacer_groupes_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    requete: RequeteLivres,
+    groupes: Vec<String>,
+    insertion: usize,
+) -> Result<ResultatListes, String> {
+    biblio.deplacer_groupes_liste(&id, &requete, &groupes, insertion)
+}
+
+#[tauri::command(async)]
+fn decaler_groupe_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    requete: RequeteLivres,
+    groupe: String,
+    haut: bool,
+) -> Result<ResultatListes, String> {
+    biblio.decaler_groupe_liste(&id, &requete, &groupe, haut)
+}
+
+#[tauri::command(async)]
+fn groupes_vue(biblio: tauri::State<'_, Biblio>, requete: RequeteLivres) -> Result<Vec<GroupeVue>, String> {
+    biblio.groupes_vue(&requete)
+}
+
+#[tauri::command(async)]
+fn catalogue_criteres() -> CatalogueCriteres {
+    listes_criteres::catalogue_criteres()
+}
+
+#[tauri::command(async)]
+fn nouveau_critere(type_critere: String, ancien: Option<Critere>) -> Result<Critere, String> {
+    listes_criteres::nouveau_critere(&type_critere, ancien)
+}
+
+#[tauri::command(async)]
+fn lire_criteres(biblio: tauri::State<'_, Biblio>, id: Option<String>) -> Result<EditeurListe, String> {
+    biblio.lire_criteres(id.as_deref())
+}
+
+#[tauri::command(async)]
+fn apercu_criteres(
+    biblio: tauri::State<'_, Biblio>,
+    id: Option<String>,
+    criteres: CriteresListe,
+) -> Result<Apercu, String> {
+    biblio.apercu_criteres(id.as_deref(), &criteres)
+}
+
+#[tauri::command(async)]
+fn enregistrer_criteres(
+    biblio: tauri::State<'_, Biblio>,
+    id: Option<String>,
+    criteres: CriteresListe,
+    parent: Option<String>,
+    position: Option<usize>,
+    apres_liste: Option<String>,
+) -> Result<ResultatListes, String> {
+    biblio.enregistrer_criteres(id.as_deref(), &criteres, parent, position, apres_liste.as_deref())
+}
+
+#[tauri::command(async)]
+fn analyser_cbl(biblio: tauri::State<'_, Biblio>, chemin: String) -> Result<RapportCbl, String> {
+    biblio.analyser_cbl(&chemin)
+}
+
+#[tauri::command(async)]
+fn importer_cbl(
+    biblio: tauri::State<'_, Biblio>,
+    chemin: String,
+    nom: Option<String>,
+    parent: Option<String>,
+    position: Option<usize>,
+    apres_liste: Option<String>,
+) -> Result<ImportCbl, String> {
+    biblio.importer_cbl(&chemin, nom, parent, position, apres_liste.as_deref())
+}
+
+#[tauri::command(async)]
+fn exporter_cbl(biblio: tauri::State<'_, Biblio>, id: String, chemin: String) -> Result<ExportCbl, String> {
+    biblio.exporter_cbl(&id, &chemin)
 }
 
 // ───────────────────────────── Lecteur ─────────────────────────────
@@ -403,7 +650,39 @@ pub fn run() {
             modeles_de_nom,
             renommer_deplacer,
             annuler_operation,
-            ouvrir_dossier_fichier
+            ouvrir_dossier_fichier,
+            etat_listes,
+            arbre_listes,
+            bilan_listes,
+            creer_liste,
+            renommer_liste,
+            modifier_liste,
+            dupliquer_liste,
+            infos_suppression,
+            supprimer_liste,
+            destinations_liste,
+            deplacer_liste,
+            decaler_liste,
+            place_depot_liste,
+            deposer_liste,
+            infos_conversion,
+            convertir_en_lecture,
+            ajouter_livres_liste,
+            depot_livres_possible,
+            retirer_livres_liste,
+            decaler_livres_liste,
+            deplacer_livres_liste,
+            deplacer_groupes_liste,
+            decaler_groupe_liste,
+            groupes_vue,
+            catalogue_criteres,
+            nouveau_critere,
+            lire_criteres,
+            apercu_criteres,
+            enregistrer_criteres,
+            analyser_cbl,
+            importer_cbl,
+            exporter_cbl
         ])
         .setup(|app| {
             // Thèmes livrés disponibles dès le premier lancement.

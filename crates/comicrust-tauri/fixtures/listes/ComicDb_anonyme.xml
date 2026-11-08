@@ -1,0 +1,749 @@
+<?xml version="1.0"?>
+<ComicDatabase xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Id="f30a051f-ef53-4ea8-bd9a-0f44a852cab3">
+  <Books />
+  <ComicLists>
+    <Item xsi:type="ComicLibraryListItem" Id="4f632566-25d0-4f05-94c9-d1da14015030" Name="Bibliothèque">
+      <BookCount>5319</BookCount>
+      <NewBookCount>2</NewBookCount>
+      <NewBookCountDate>2026-10-21T20:53:19.9589731Z</NewBookCountDate>
+      <UnreadBookCount>5317</UnreadBookCount>
+    </Item>
+    <Item xsi:type="ComicListItemFolder" Id="d3834683-f43f-4010-b469-48ff0ba128b2" Name="___1">
+      <BookCount>323</BookCount>
+      <NewBookCount>1</NewBookCount>
+      <NewBookCountDate>2026-10-21T20:53:20.1714959Z</NewBookCountDate>
+      <UnreadBookCount>322</UnreadBookCount>
+      <Items>
+        <Item xsi:type="ComicIdListItem" Id="1b7b2b42-df47-46b8-bc55-1a75decd23fe" Name="Test liste ComicRust">
+          <BookCount>9</BookCount>
+          <NewBookCount>1</NewBookCount>
+          <NewBookCountDate>2026-10-21T20:53:16.4635313Z</NewBookCountDate>
+          <UnreadBookCount>8</UnreadBookCount>
+          <BookIds>
+            <guid>a1436126-b669-41b6-9d9e-fdcf93ee5ebd</guid>
+            <guid>95f13372-d467-4a8e-abcc-027461592f68</guid>
+            <guid>c56b26f1-20dc-4af0-9c09-670bd80f3ab6</guid>
+            <guid>f964b5a9-8d13-4d08-994d-cb131069b5e3</guid>
+            <guid>be608d68-c1a1-476b-942b-684065ea6865</guid>
+            <guid>3109df20-8c66-4c29-bf5d-a7b6d4a35da6</guid>
+            <guid>b56b011b-7437-4cb0-9e72-87bfea3baf98</guid>
+            <guid>c07c3415-dd53-4d27-ac54-7d829768eb39</guid>
+            <guid>1350c717-20d0-4a63-a436-8d971ea19364</guid>
+          </BookIds>
+        </Item>
+        <Item xsi:type="ComicSmartListItem" Id="36e9430d-e7bd-4660-90bb-611380d042b5" Name="Séries complétes (Chemin)">
+          <NewBookCountDate>2026-10-21T20:53:20.1704936Z</NewBookCountDate>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+              <MatchValue>.\_BD\</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicIdListItem" Id="726e57e4-d518-4b58-bac3-f5ef852dc600" Name="Thanos - Guide complet Crushing Krisis">
+          <BookCount>321</BookCount>
+          <NewBookCountDate>2026-10-21T20:53:19.9589731Z</NewBookCountDate>
+          <UnreadBookCount>321</UnreadBookCount>
+          <BookIds>
+            <guid>44ee8b08-5959-4613-9a46-10f158ce9946</guid>
+            <guid>ee363c4f-a304-4f81-ab95-f17748763454</guid>
+            <guid>949fb0cb-2982-4035-aeab-91242b1b56db</guid>
+            <guid>149beb95-8050-4d9e-8ba6-54229362e785</guid>
+            <guid>94393a20-d531-4945-93e5-bb2312e7d74b</guid>
+            <guid>ef372885-29df-4834-9069-e6f67cee56bd</guid>
+            <guid>28896584-16a2-4045-834a-a907edd54bac</guid>
+            <guid>d7502696-fe37-489e-9a43-6f1c2dc7a786</guid>
+            <guid>f378a34a-d50f-4ef1-b6bd-0c5642fcbebe</guid>
+            <guid>ee8e2feb-3aca-4f21-a3a1-11403fb1c11d</guid>
+            <guid>4edd1f3f-54f3-4aae-9891-c02952208ab3</guid>
+            <guid>4e1c7324-a938-4409-8cf2-d155857e9232</guid>
+            <guid>10b9b7ce-fc37-4212-beb9-dd92b7fde85c</guid>
+            <guid>a12157ba-ac37-49e9-9999-764834e91574</guid>
+            <guid>022ed93d-5676-43a2-bd1b-76bb9c611aa2</guid>
+            <guid>f562eeb7-4938-456e-9bde-40dc6dc46377</guid>
+            <guid>c5c8b98b-ab8c-467d-b074-106007b9dff5</guid>
+            <guid>75c9352e-4a8e-400a-b297-92dffb965f7b</guid>
+            <guid>5c77fcbf-cbaa-47f0-9f60-5f574be0a016</guid>
+            <guid>95f13372-d467-4a8e-abcc-027461592f68</guid>
+            <guid>d7b51e8b-956a-4ead-908c-1ef2f7bfc4d5</guid>
+            <guid>0d10525e-6acb-4fc5-8845-8afd10c154db</guid>
+            <guid>d17a12f3-e960-4fcb-ac2f-514a361313e2</guid>
+            <guid>a9241d17-2d6a-481d-813e-f2b596dd128f</guid>
+            <guid>c88af047-008f-4e74-b62f-c6aabbdf17de</guid>
+            <guid>d975ed0d-9a3c-4a44-ad8a-1b3704952d8a</guid>
+            <guid>24c302fc-acd9-4ef8-b957-58829d4968c6</guid>
+            <guid>88dd0855-2a32-41e0-b371-0362dcf76506</guid>
+            <guid>423d8428-d945-4e97-ad7a-79f50e9de332</guid>
+            <guid>0757dc80-2e15-4ac5-acb6-dd62da737cbe</guid>
+            <guid>6e7ffd90-fc2c-43b4-8f2a-137e49af0db8</guid>
+            <guid>811b98c3-e255-4174-aa12-655246945a9f</guid>
+            <guid>d405dd88-b642-497b-930d-55455094687d</guid>
+            <guid>19835fb6-5b0c-41e0-876e-87729ce78e50</guid>
+            <guid>c56b26f1-20dc-4af0-9c09-670bd80f3ab6</guid>
+            <guid>f964b5a9-8d13-4d08-994d-cb131069b5e3</guid>
+            <guid>be608d68-c1a1-476b-942b-684065ea6865</guid>
+            <guid>3109df20-8c66-4c29-bf5d-a7b6d4a35da6</guid>
+            <guid>6e6318bd-083a-4170-89db-eac647fb4b96</guid>
+            <guid>19097043-2045-4c1b-8903-72ce98608667</guid>
+            <guid>b56b011b-7437-4cb0-9e72-87bfea3baf98</guid>
+            <guid>fe8af8d5-046a-44da-ac9f-3f64e52a0714</guid>
+            <guid>7931a17c-e065-4d01-8648-edd192530999</guid>
+            <guid>da41115d-7130-476a-b8bb-5cef75acd072</guid>
+            <guid>18305b75-84ec-4eeb-8331-2216f8cda911</guid>
+            <guid>c07c3415-dd53-4d27-ac54-7d829768eb39</guid>
+            <guid>1320e0b7-14a1-47d7-9e0a-20eb1fca0161</guid>
+            <guid>15672e7c-4d42-4453-808e-75b1360ad18b</guid>
+            <guid>5c469aed-1ee5-4ff8-b8e7-9847346bfc27</guid>
+            <guid>f1ebb251-1da6-4882-8e36-18b1c78ab8df</guid>
+            <guid>c9a9f4cf-5650-4d09-8b3a-5dfd5d55d0c6</guid>
+            <guid>7d139422-284d-429a-8dc8-e686141b6925</guid>
+            <guid>b91888e2-b38c-4550-b026-96732e0c5516</guid>
+            <guid>47a96464-a588-429b-911b-083d188d3cf7</guid>
+            <guid>249fde76-cccf-467f-b9ef-7bfae3b2bcb6</guid>
+            <guid>f8501f0b-b0a5-484d-9bf8-1e09712101a4</guid>
+            <guid>588f222a-2fe3-4807-bfb3-af292700f47f</guid>
+            <guid>3f450bb8-37ac-41b0-a8f2-d330e9c0ac0f</guid>
+            <guid>e6d3571f-9d31-4bf1-8b71-2215cfe2a6e2</guid>
+            <guid>aa66ccad-0901-405d-b610-821fd804fb2c</guid>
+            <guid>49fce97e-516a-409d-bb4d-f0d8f19b81d2</guid>
+            <guid>dc01c91e-20bf-47cd-ab16-feb3bab187ff</guid>
+            <guid>46383d5c-8625-4609-a271-59eba9dbb9f1</guid>
+            <guid>270860e9-fb42-4b0a-8194-ae69f0efd6de</guid>
+            <guid>9bebee2a-a998-4b07-82eb-96a25efd3eb0</guid>
+            <guid>e19f49a7-dec4-4ea2-8bdc-67d76ee5674d</guid>
+            <guid>4a49f560-1c54-4d99-a800-1d46b3b7206a</guid>
+            <guid>db6d62e9-2abd-4cda-ab3d-3b26b269a9e1</guid>
+            <guid>a2e1ef89-15a1-4378-94dc-eaa886e48e73</guid>
+            <guid>0d11ef48-fa6b-4272-8ca7-66f583fb8d4e</guid>
+            <guid>cbf072f8-3071-4de4-8d8c-8364379e5238</guid>
+            <guid>eb6083e7-6462-4a0b-bb1d-398b420fe112</guid>
+            <guid>a7ea241c-ad5e-44de-8046-c2e36d840e47</guid>
+            <guid>a06954bb-d088-48cc-9f2c-ede6d126fcbf</guid>
+            <guid>4ab1d135-f7db-4dfc-b308-1f2e24b79d8c</guid>
+            <guid>802d3235-10da-4b7a-96c6-2b9b92807c8e</guid>
+            <guid>607dc8e1-bce8-4554-8732-44af7534142a</guid>
+            <guid>0dbc05fe-446c-4fde-9ec3-6f021fefffc1</guid>
+            <guid>cf99f72f-ef66-4eb5-ba82-e02a09f0e7a8</guid>
+            <guid>9c9a5074-68fd-4ccc-a798-281c973efa56</guid>
+            <guid>615e9982-0c5d-4ff8-81ab-f854122e355f</guid>
+            <guid>c4d7e5b3-3a3d-4874-815f-10c6df1b72d1</guid>
+            <guid>1c451ba9-6e76-417c-b145-41058431f18d</guid>
+            <guid>49dd53e8-72e7-4d47-895b-47c51287e5a0</guid>
+            <guid>cab1a75c-0577-4323-9d86-4173027c71cd</guid>
+            <guid>bd82b810-05fb-4e9a-b085-a16f83cc9b9e</guid>
+            <guid>917a0827-7908-43c7-ae16-e66d5ac8eefa</guid>
+            <guid>3ab0c085-c109-4be3-b38a-3a9b15b53bfd</guid>
+            <guid>c4bb35c2-3f3c-43ca-8b8e-49d5261edd29</guid>
+            <guid>cf10565e-7de0-4743-a815-6aa0066a987b</guid>
+            <guid>ba4dce11-e719-43d7-9fec-fda405746e41</guid>
+            <guid>efbcff82-e517-4276-b2d2-1cc2f23566d4</guid>
+            <guid>bc9a0d95-bf7b-4c18-a844-d8ae954103e0</guid>
+            <guid>51bb9468-6f6f-4a10-944e-87779e72ce85</guid>
+            <guid>2d8ce87d-88ab-47b3-9cd6-d8d01bf5fd8c</guid>
+            <guid>f4a717ca-42bd-4d3f-b8c3-44af1dec00e1</guid>
+            <guid>884dad06-b49d-4d3a-88d8-ed4956718070</guid>
+            <guid>5d6b5159-073c-4b33-9fb5-54bd79533e73</guid>
+            <guid>fdc75aaf-ba4a-44cf-90d0-6df7db6632cf</guid>
+            <guid>cf5bfbbd-26c7-4589-8fd0-69e1defdbacb</guid>
+            <guid>4f50b0f2-a38c-4ee5-9d22-ab42b4138de3</guid>
+            <guid>d9063917-8c2f-4a79-b6d2-5055bafaa3e9</guid>
+            <guid>93914390-e0a9-4386-a5a7-0d88d87d9e7b</guid>
+            <guid>377e7596-ce37-44aa-8aaa-3473edfc5b6f</guid>
+            <guid>1a941926-747b-47e6-a444-8b021b066b0a</guid>
+            <guid>15aeddbf-8389-452e-ad64-6769ebd4c4a2</guid>
+            <guid>becfdfb3-4144-4d7c-b986-8146651c4e8c</guid>
+            <guid>2c019781-60b8-4f41-8478-cd98ca6d0d87</guid>
+            <guid>3125c5ad-557d-4701-9388-636d627af57f</guid>
+            <guid>d8e4248e-e5b3-45d5-bf20-9bc65544d6db</guid>
+            <guid>a7c7bb37-e667-4570-ade7-6d438d0e24f0</guid>
+            <guid>30865cf8-cbcb-4df1-8eaf-2792dc249e67</guid>
+            <guid>b5347b07-48af-4c45-9558-c6d7ad229586</guid>
+            <guid>cfb6fb17-0b87-4db8-8751-8c59a5348b9e</guid>
+            <guid>51511cec-c7e5-429c-ab56-203c2190bf80</guid>
+            <guid>00ed7308-8586-4e4f-a9c4-9488c09f4326</guid>
+            <guid>3395d299-5f4b-41b8-9858-c126c456a81b</guid>
+            <guid>3daff0bd-558b-43d3-bd17-02dd411d38bd</guid>
+            <guid>2008f163-5733-4e80-8cfb-0cc361c5a9e6</guid>
+            <guid>4c5ca144-6573-4231-8b51-38e9b4f81203</guid>
+            <guid>25d6bd7f-6e65-4014-b378-abe615e23581</guid>
+            <guid>31cf2dc1-b880-4628-8150-4050903dafa3</guid>
+            <guid>97a6c149-4d14-4778-ad77-6546096266d8</guid>
+            <guid>062af3d1-3906-4588-bed3-639cb29851cd</guid>
+            <guid>dcece48b-469c-430f-8481-8b999c22f3c5</guid>
+            <guid>95ac7509-1f88-42d9-a24a-a7415b93782e</guid>
+            <guid>47177da3-20e7-4aaf-b911-858f9bc74e62</guid>
+            <guid>18d29f17-2639-4fe0-bff7-7d6aa2f8ed86</guid>
+            <guid>f357b6ca-1a85-44ba-a03f-07f93290e45a</guid>
+            <guid>a3c729e1-dacb-4a84-8225-973416581d34</guid>
+            <guid>ad1b9cfe-a07b-414b-b766-3cf12500f5ec</guid>
+            <guid>e23277ae-b291-4e38-9c93-bf6c7916596a</guid>
+            <guid>13524a13-a17a-4b4c-a850-df1784388e42</guid>
+            <guid>81351a95-6a2f-43da-814f-77d3fe53bfa6</guid>
+            <guid>54dd46e6-0935-4ac7-a9b6-4f026a7a7ad2</guid>
+            <guid>bc0fae2e-2d35-423c-8c13-3540e0c4aab1</guid>
+            <guid>bae1e1f7-bd22-47d1-950f-09940a9b248c</guid>
+            <guid>cf91137a-e386-40be-86f0-c38a42e31748</guid>
+            <guid>d113a6b8-8704-4c0a-abaa-0a4274f6ff61</guid>
+            <guid>54d2807a-1013-4845-b828-f0afee5be625</guid>
+            <guid>c35ce007-26d9-4e5b-b6e5-db3722ef958c</guid>
+            <guid>fd9ae54f-402d-413f-ab0b-f7bd29b662fb</guid>
+            <guid>3983254c-433d-410c-9541-a60b17ab783c</guid>
+            <guid>c97975bf-8bee-4056-b6b2-473371329a92</guid>
+            <guid>332fbdc6-6a00-48bd-afd5-715445ad4b37</guid>
+            <guid>80f3ad41-09e6-41d9-905a-2e6bb8504c14</guid>
+            <guid>746edc2f-08bf-44fb-86b0-cac1b2428784</guid>
+            <guid>8793f2ee-adf2-489c-b5f6-2e9df8b5cd39</guid>
+            <guid>c05b6887-4c58-4a53-b35b-2f169dd79e5b</guid>
+            <guid>b2885ae0-30fa-47ab-99e8-e456fc7cd3e7</guid>
+            <guid>fb2c0e66-f837-4d60-b929-fb74906c930e</guid>
+            <guid>c23c4609-c735-4cf2-8773-708f10e17b80</guid>
+            <guid>edf08862-b979-4884-9a16-b367a5709b3c</guid>
+            <guid>8283a233-cb84-42a1-b59e-5ab86de49baf</guid>
+            <guid>e94dac57-a1b8-48c9-a45a-d98c7e0b31fb</guid>
+            <guid>20ebfc7a-a800-4f73-86ea-b65abb1bcc8c</guid>
+            <guid>27f0c40f-dd5c-4116-82ba-d09c99454a45</guid>
+            <guid>985a19f7-6178-4631-ab9d-b736801d3269</guid>
+            <guid>3828017f-1634-4342-8b5e-226ea81bc1fd</guid>
+            <guid>023fd87b-e866-403b-8b6d-0d340d0fb669</guid>
+            <guid>c613cfcb-35c7-42a5-b2a1-b9184651748f</guid>
+            <guid>90d49f6c-3393-4a8b-94b2-3dbc853c98fa</guid>
+            <guid>62ea28d3-0cce-4378-a148-e4991e81689f</guid>
+            <guid>03a3c99c-52f2-4962-9326-50ba2bebfe87</guid>
+            <guid>1416cdd8-1f84-4dc0-aa43-f99de34be080</guid>
+            <guid>2e14ce88-31a2-47ef-a0e9-df9b53c4ab2c</guid>
+            <guid>4b1f8285-ae1c-4f54-9401-5cb6dd43084a</guid>
+            <guid>3aafd877-b6d2-44a6-b265-1a509d0d11f5</guid>
+            <guid>33de9d6a-0036-405d-8ac7-76bae1d1fd8c</guid>
+            <guid>7e3ad838-60f2-4a57-bf77-ebf6eaef0f37</guid>
+            <guid>84bf1c85-31f1-46d2-89a7-67aaf2850ba1</guid>
+            <guid>70c0c82b-1cad-49ab-aa67-7cb7f03874df</guid>
+            <guid>72f1af65-238d-4fee-9765-aac05d9e8773</guid>
+            <guid>31b7d837-70f0-4304-8d80-c48262903a7e</guid>
+            <guid>548047dd-aedc-4508-9b28-a23e96c567c8</guid>
+            <guid>a4c3e1ae-0f30-4853-af4e-e53d78021c1b</guid>
+            <guid>d3b33100-9617-4cab-916d-7f242488869a</guid>
+            <guid>20cdbada-d1b3-4ebb-8540-e17c9c723ce9</guid>
+            <guid>e34a3ca2-386d-44b7-9a35-75b0302f0e7a</guid>
+            <guid>7b10d773-7370-4cd2-b7f2-c85d77d010f3</guid>
+            <guid>e69c49e8-27d2-4c71-92bb-811f0b38c4a1</guid>
+            <guid>cb2249e7-d7ea-43be-a7fc-b9e0bc52e90b</guid>
+            <guid>8c226880-b4cb-415a-b32d-84c1c689b1e1</guid>
+            <guid>26229d53-e351-4fad-b553-6f08abd8a631</guid>
+            <guid>8f514ad8-d0cc-4808-b09d-6ce31529b852</guid>
+            <guid>5c5a1e59-a6c8-46eb-a4b9-98a4385cd64c</guid>
+            <guid>c3e79551-9355-4a3e-a1ce-19ba60e3b450</guid>
+            <guid>cf3a2d66-bcfa-408d-bf8f-b12766d2bd92</guid>
+            <guid>b3c97a72-7f8e-41f8-8dd2-e931439d8da6</guid>
+            <guid>8e08c126-eb17-43de-9fcf-b02356e69f55</guid>
+            <guid>52ded22c-91f4-4cf3-a44a-2529af39cc7b</guid>
+            <guid>de397b0f-6fc0-4846-9fe4-de089c8f312d</guid>
+            <guid>301d8856-d735-40d3-b49d-bb515b012636</guid>
+            <guid>2e9acfaf-14d8-46da-84d2-43889c33b517</guid>
+            <guid>e9ca412b-b80e-4653-9b15-9664886194b0</guid>
+            <guid>05813b06-21ac-4572-a8c4-156fca351894</guid>
+            <guid>f9d9dc77-4c21-43a1-a0a9-ab7e4d71aee2</guid>
+            <guid>a385327f-788a-4b91-9f28-89ec0e11111f</guid>
+            <guid>f479f620-b235-4156-8639-7abac92b3945</guid>
+            <guid>e5f789c9-257b-4fd5-bae4-3ed11ab9500b</guid>
+            <guid>0f5d3d27-979e-4350-8656-aa4974e94878</guid>
+            <guid>3fe6727f-a66a-4dee-a86e-4c9ef80cc7d6</guid>
+            <guid>bdcae467-a419-47c3-8ad4-5d4fa8da3c32</guid>
+            <guid>f69803f3-3301-40d8-9ce8-3f8ee26912ac</guid>
+            <guid>b04312b7-6b30-4b77-8c90-482460ba39d1</guid>
+            <guid>6c09a091-226f-494d-a4b9-f3ba6b732be3</guid>
+            <guid>3875e516-93ed-4a8d-bfeb-3176ae8abeab</guid>
+            <guid>df27290c-efb0-47e9-bc4e-f3e943b865d7</guid>
+            <guid>cb5bbeb3-40b6-4219-bed2-196d184524bf</guid>
+            <guid>4d5a7369-95c2-44d8-b0a5-fd1a11d1f678</guid>
+            <guid>4240c00b-3b98-4729-ac05-56b76db57747</guid>
+            <guid>b8793384-98ed-4320-b2f2-3edabfd42fca</guid>
+            <guid>4c84572d-86aa-4bab-9f2b-3c6e7359730f</guid>
+            <guid>a86028f5-220e-4cf9-b61a-e30848a56e94</guid>
+            <guid>b5779ec7-41a9-4d55-ad1f-0f2acbd11d06</guid>
+            <guid>76c847de-e8fd-49e7-a663-cb8898e5685b</guid>
+            <guid>780f691e-2f09-4da4-992a-fd7d87931728</guid>
+            <guid>68e88411-bfd8-4310-8216-0a0866880b84</guid>
+            <guid>e0ee0fbc-a85b-4907-a85b-977179d778f4</guid>
+            <guid>f68761ea-c82f-4b1d-bc35-905074c16900</guid>
+            <guid>828b3cba-4357-4c2a-a1a8-32aea11511ae</guid>
+            <guid>06852936-f6e7-4cc2-bdb8-add4e14555f2</guid>
+            <guid>7fa75b20-123b-4318-9274-fc0a79d49496</guid>
+            <guid>151fb69b-3534-4b84-b953-2e11d4b739f0</guid>
+            <guid>b79d8ea3-5adc-4569-9558-f0a432ac606d</guid>
+            <guid>8d4c8bc3-caba-467f-8ed9-cb31f5baa398</guid>
+            <guid>9e09549d-d3fb-4cb6-8795-fdbf40419526</guid>
+            <guid>513f6342-0aa8-46f6-aae0-fa23b8112a8e</guid>
+            <guid>0f568962-d8a3-4c2f-a3e4-02ae5e2c16aa</guid>
+            <guid>19d5fafd-9821-4475-884e-c3447237df17</guid>
+            <guid>a1d6489b-4d6b-4523-9477-81c3944c07b0</guid>
+            <guid>1f970fcc-d597-4335-b52f-59e18c09bf63</guid>
+            <guid>7eda47c9-2ec9-4327-a85c-dce6ac8b8620</guid>
+            <guid>1c66b568-adbe-44fc-95fd-e5e2ab3045b3</guid>
+            <guid>cdd06715-78cb-4557-8bc2-efb7a91d9f64</guid>
+            <guid>0b2b60e0-5fd6-4304-86dd-bd38ced1cd2c</guid>
+            <guid>e6fe73ab-69c9-4f01-a22a-09f394b20128</guid>
+            <guid>3f0e01b6-07fc-4ba4-aab4-631a9826c3fc</guid>
+            <guid>b090472d-7969-4c9b-914e-33f10000e033</guid>
+            <guid>a3491140-6a81-476b-ab53-59a5c9f14aea</guid>
+            <guid>ebb1c910-f1b9-47c2-ba69-9f124b2dc6e8</guid>
+            <guid>6f80bcf6-ae3f-4995-af62-1d6968df70d8</guid>
+            <guid>fae0028f-9e99-402c-a7b8-f644f96ae853</guid>
+            <guid>94db4f40-b15e-442f-a433-99dd34705592</guid>
+            <guid>7947d990-bdfe-4795-8bcd-cd391dd75283</guid>
+            <guid>ac187d8f-fabf-4133-8eb6-2200208da5c8</guid>
+            <guid>97370b17-f2be-4f24-ac53-c3d448f79a35</guid>
+            <guid>bb3a6e73-b298-4439-aff0-e0c8e9bbfd77</guid>
+            <guid>dfeb2887-c3b4-4fd7-9952-ab457c70b28a</guid>
+            <guid>89069828-ce3f-4a02-8f4f-41a161b65624</guid>
+            <guid>a4e36bd8-e4ac-4cc5-8db8-96a6a58a7fef</guid>
+            <guid>83071f52-0c02-4a3b-b1cd-88131020a21e</guid>
+            <guid>539d7bd6-2cd7-47cc-8e9c-3071aea3ae6e</guid>
+            <guid>39958c3a-2960-4d76-abf1-70527740a994</guid>
+            <guid>62c619c1-cca7-4ffa-930b-1415fdbca2da</guid>
+            <guid>06c7facd-a960-442c-bc78-649806057c0f</guid>
+            <guid>af8b1112-111c-4577-862b-48fca812242f</guid>
+            <guid>50ba364e-93e2-4c01-975d-82ee9c3dd77a</guid>
+            <guid>5966ce18-3296-4d63-a33c-d2731486642d</guid>
+            <guid>5053e56c-4f0d-4406-9a9e-c9a74f8097a9</guid>
+            <guid>12cbafcf-b314-4e07-9e16-aa42934e9a8e</guid>
+            <guid>c7f6f255-db4a-414d-835c-1f826d0d5e54</guid>
+            <guid>ecc36586-7ac7-4056-95d3-6622c0c284f4</guid>
+            <guid>92d07f65-92a3-407e-b17c-18bcc350892f</guid>
+            <guid>e55e38ed-d50e-4240-8a24-1ada64fbf071</guid>
+            <guid>7e4afcf0-3515-4ebb-9977-68e3e6318819</guid>
+            <guid>c454c893-794c-4e43-bbbb-4eb909954d63</guid>
+            <guid>98d5b892-0abb-48b0-a3d2-86543a0e2a85</guid>
+            <guid>a170e5ad-d046-4cdd-8cd2-abdd2cc49058</guid>
+            <guid>dbab15e5-1099-4230-a5f6-787b3a5410d8</guid>
+            <guid>66768d46-8b63-45c7-9213-a0bed4d2de2a</guid>
+            <guid>741aab9c-b985-438a-ae54-d72fe0dfd62b</guid>
+            <guid>b5e09aec-0a61-402c-a8f6-f86230025039</guid>
+            <guid>d0160945-eb5d-4d23-ab7a-ea335b43530f</guid>
+            <guid>00308b42-b19d-468e-856c-7c08b79ce99c</guid>
+            <guid>81b1b563-24ef-4815-bbaa-5f22bfb38e73</guid>
+            <guid>7fc302e0-abc5-45fc-9825-ab8daa7c49c8</guid>
+            <guid>cf1e6662-eefc-4143-ae94-f143fab4f268</guid>
+            <guid>3b4be076-934f-4b9c-ae3d-4ed3c2af71d2</guid>
+            <guid>1acc224e-d799-4f1b-bb71-2c976d05410e</guid>
+            <guid>55de701a-3741-4e74-8ce8-05fec1f00ce9</guid>
+            <guid>0ed16e4e-beb8-4e29-9cce-5afdab36d607</guid>
+            <guid>c33a6c67-0368-42ed-86c2-cde8ee26f23e</guid>
+            <guid>56e02651-2e7c-4757-b927-11ab4612d3b8</guid>
+            <guid>5003a134-4761-4ef3-b720-d5418bd3b461</guid>
+            <guid>7be6af36-feb2-4b19-ae2c-e61cb47b0099</guid>
+            <guid>99908bb6-dbf5-43cf-bf2f-852f6b060232</guid>
+            <guid>e640e030-59ac-4d61-89ac-d7906e143b95</guid>
+            <guid>e4898246-cb28-4437-8e4e-f91911b0698d</guid>
+            <guid>39843895-f463-4421-a47f-62ae66a79754</guid>
+            <guid>1952285a-fbfe-4c48-9c63-fab4a8ddb1a8</guid>
+            <guid>dbe5ee94-5156-47e5-beca-43e00dfa9df1</guid>
+            <guid>a7480093-f128-4a90-9590-d0fa5c19f97b</guid>
+            <guid>55ce2aaa-2829-4633-8bf6-58c65d87352d</guid>
+            <guid>d0022c12-7264-4b87-888a-f322be7e64b9</guid>
+            <guid>cc27ac9b-d663-4c4f-8f95-6bd979f54c5a</guid>
+            <guid>1c825a47-f0ec-409e-ae1b-4fa8f057c18e</guid>
+            <guid>4fe0a711-b51f-4c98-9527-121007da71f3</guid>
+            <guid>c2ef8f18-eb8e-4ac9-9c1e-880856d58f03</guid>
+            <guid>3ccdf7f4-4b2d-41bc-adba-109eebade39a</guid>
+            <guid>5472be77-e462-4329-be6e-e79cca5b67fe</guid>
+            <guid>e5733cb7-ed46-40c5-9202-d8f3c39237c8</guid>
+            <guid>a44e1997-600b-4dc2-9b0c-2144119367de</guid>
+            <guid>380771c0-ca4b-4ec7-b9a5-ba425399f51c</guid>
+            <guid>873897a1-ee6c-44ae-aea8-fddae9b8f0d8</guid>
+            <guid>3f6d37c6-45e9-4b0a-89e6-cfa4908997d6</guid>
+            <guid>682bb149-c08f-4ee0-8af7-6166600cd7b4</guid>
+            <guid>1610b114-22fb-4432-b689-666f5888982d</guid>
+            <guid>30b739e3-a464-45ee-8b84-b1efd5b43913</guid>
+            <guid>45d88ce2-4c64-463e-ae4b-5f5bde193909</guid>
+            <guid>ecda4417-c740-40e3-9afa-d249869425ea</guid>
+            <guid>be2a2181-1cfd-4c82-8d6e-3ba9f88783dc</guid>
+            <guid>f3fbebbd-ab37-4e41-b683-7e47870ba257</guid>
+            <guid>a0c0ab46-e1a8-486d-8e3d-9a73e246b6e0</guid>
+            <guid>10a1e877-9105-4a62-890c-dbef5bb1eeab</guid>
+            <guid>00268c35-0191-470b-929b-a89b7c49823f</guid>
+            <guid>0be412b3-2cf0-4543-9a4b-be4edc4d4ee0</guid>
+            <guid>4b630d57-2ff2-433b-944a-6c0f42088e67</guid>
+            <guid>9d7626ee-c43a-418b-b607-fb24610f0716</guid>
+            <guid>2e7fdd91-629d-4d4f-b115-72058c43dcc2</guid>
+            <guid>7b8d6db1-8160-44e9-a597-80e6e64247a5</guid>
+          </BookIds>
+        </Item>
+      </Items>
+    </Item>
+    <Item xsi:type="ComicIdListItem" Id="89796778-c1f7-47cb-8c6a-cc3ad516ea06" Name="THANOS - Lecture dans l'ordre">
+      <NewBookCountDate>2026-10-21T20:53:19.9569695Z</NewBookCountDate>
+      <BookIds />
+    </Item>
+    <Item xsi:type="ComicIdListItem" Id="3d6219aa-5f32-4cd2-8564-e812278eb83f" Name="Warlock et Cie">
+      <NewBookCountDate>2026-10-21T20:53:19.9569695Z</NewBookCountDate>
+      <BookIds />
+    </Item>
+    <Item xsi:type="ComicIdListItem" Id="6dbe9e30-b00c-4f45-b62c-a2dc64a389df" Name="Séries complètes">
+      <NewBookCountDate>2026-10-21T20:53:19.9569695Z</NewBookCountDate>
+      <BookIds />
+    </Item>
+    <Item xsi:type="ComicIdListItem" Id="1fcb73d6-06d2-4bb6-9ef7-dbb9fbff537a" Name="Séries en cours">
+      <NewBookCountDate>2026-10-21T20:53:19.9579703Z</NewBookCountDate>
+      <BookIds />
+    </Item>
+    <Item xsi:type="ComicIdListItem" Id="93bf8bdc-5369-4fc1-a725-cd83e2dd485b" Name="Test S6">
+      <NewBookCountDate>2026-10-21T20:53:19.9579703Z</NewBookCountDate>
+      <BookIds />
+    </Item>
+    <Item xsi:type="ComicSmartListItem" Id="03f10c02-7b9f-4b2f-b9d7-8edcf154e46b" Name="COSMIC COLLECTION (Chemin)">
+      <BookCount>345</BookCount>
+      <NewBookCount>1</NewBookCount>
+      <NewBookCountDate>2026-10-21T20:53:19.99097Z</NewBookCountDate>
+      <UnreadBookCount>344</UnreadBookCount>
+      <Matchers>
+        <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+          <MatchValue>COSMIC_COLLECTION</MatchValue>
+        </ComicBookMatcher>
+      </Matchers>
+    </Item>
+    <Item xsi:type="ComicIdListItem" Id="2faf13af-3ca1-40bc-bbea-ea162303e1d2" Name="BD_X">
+      <NewBookCountDate>2026-10-21T20:53:19.9579703Z</NewBookCountDate>
+      <BookIds />
+    </Item>
+    <Item xsi:type="ComicIdListItem" Id="4887a791-c14c-4403-876a-c8277ec71dcf" Name="Tablette">
+      <NewBookCountDate>2026-10-21T20:53:19.9579703Z</NewBookCountDate>
+      <BookIds />
+    </Item>
+    <Item xsi:type="ComicSmartListItem" Id="1cf943f7-bd9e-44cd-a816-0aed745840ea" Name="Séries Temporaires (Chemin)">
+      <BookCount>5</BookCount>
+      <NewBookCountDate>2026-10-21T20:58:45.8720716Z</NewBookCountDate>
+      <UnreadBookCount>5</UnreadBookCount>
+      <Matchers>
+        <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+          <MatchValue>Séries_Temp</MatchValue>
+        </ComicBookMatcher>
+      </Matchers>
+    </Item>
+    <Item xsi:type="ComicSmartListItem" Id="a2215f7d-b795-48bc-9085-c1bf3e35dd05" Name="Séries en cours">
+      <NewBookCountDate>2026-10-21T21:01:04.3640846Z</NewBookCountDate>
+      <Matchers>
+        <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+          <MatchValue>Séries En cours</MatchValue>
+        </ComicBookMatcher>
+        <ComicBookMatcher xsi:type="SmartListSeriesAllCompleteMatcher" MatchOperator="1">
+          <MatchValue />
+        </ComicBookMatcher>
+      </Matchers>
+    </Item>
+    <Item xsi:type="ComicListItemFolder" Id="856ed100-bd86-439a-8db4-6f8a1e313ec7" Name="Listes intelligentes">
+      <BookCount>5318</BookCount>
+      <NewBookCount>1</NewBookCount>
+      <NewBookCountDate>2026-10-21T21:01:04.4142376Z</NewBookCountDate>
+      <UnreadBookCount>5317</UnreadBookCount>
+      <Items>
+        <Item xsi:type="ComicSmartListItem" Id="228a0999-26e2-4c75-b98b-80297e9954da" Name="Thanos - Guide complet Crushing Krisis">
+          <BookCount>1</BookCount>
+          <NewBookCountDate>2026-10-21T20:53:19.9899691Z</NewBookCountDate>
+          <UnreadBookCount>1</UnreadBookCount>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+              <MatchValue>Thanos - Guide complet Crushing Krisis</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicSmartListItem" Id="67639de4-5f51-4235-872c-58c75218ba48" Name="Pull List (Étiquette)">
+          <NewBookCountDate>2026-10-21T20:53:19.9899691Z</NewBookCountDate>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookTagsMatcher" MatchOperator="1">
+              <MatchValue>pull</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicSmartListItem" Id="044097b6-e82c-4c8e-a395-ec8d16f4be06" Name="Doublons">
+          <BookCount>154</BookCount>
+          <NewBookCountDate>2026-10-21T21:01:04.4062378Z</NewBookCountDate>
+          <UnreadBookCount>154</UnreadBookCount>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookDuplicateMatcher">
+              <MatchValue />
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicSmartListItem" Id="0357aed3-fdf9-4bf8-b3a8-4800d5f800be" Name="Nouvelle Liste intelligente">
+          <NewBookCountDate>2026-10-21T20:53:19.9859698Z</NewBookCountDate>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+              <MatchValue>E:\_SAUVEGARDE\BD\Nouveau dossier\</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicSmartListItem" Id="33e77fe6-d1da-4c65-9962-07871a172402" Name="BD_X">
+          <BookCount>488</BookCount>
+          <NewBookCountDate>2026-10-21T20:53:19.9829699Z</NewBookCountDate>
+          <UnreadBookCount>488</UnreadBookCount>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+              <MatchValue>BD_X</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicSmartListItem" Id="fa2907ea-4d1f-4bc6-9360-0823e842c331" Name="Récemment ajouté">
+          <BookCount>1</BookCount>
+          <NewBookCount>1</NewBookCount>
+          <NewBookCountDate>2026-10-21T20:53:19.9819702Z</NewBookCountDate>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookAddedMatcher" MatchOperator="3">
+              <MatchValue>1</MatchValue>
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicSmartListItem" Id="b30e9e7f-4d4d-405c-8903-a6bf42ba483c" Name="Fichiers à mettre à jour">
+          <BookCount>20</BookCount>
+          <NewBookCountDate>2026-10-21T20:53:19.9899691Z</NewBookCountDate>
+          <UnreadBookCount>20</UnreadBookCount>
+          <Matchers>
+            <ComicBookMatcher xsi:type="ComicBookModifiedInfoMatcher">
+              <MatchValue />
+            </ComicBookMatcher>
+          </Matchers>
+        </Item>
+        <Item xsi:type="ComicListItemFolder" Id="91304eeb-0d9a-4e2f-bcc5-e22cc822c59d" Name="Complet">
+          <BookCount>3151</BookCount>
+          <NewBookCountDate>2026-10-21T21:01:04.390625Z</NewBookCountDate>
+          <UnreadBookCount>3151</UnreadBookCount>
+          <Items>
+            <Item xsi:type="ComicSmartListItem" Id="40d8641b-b22f-4c08-8c16-b36d200113bc" Name="Séries complétes">
+              <BookCount>14</BookCount>
+              <NewBookCountDate>2026-10-21T21:01:04.3730929Z</NewBookCountDate>
+              <UnreadBookCount>14</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries Terminées</MatchValue>
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="SmartListSeriesAllCompleteMatcher">
+                  <MatchValue />
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="af1687d3-4652-4902-b9cc-b8252335ddb0" Name="Séries complétes (Chemin)">
+              <BookCount>3151</BookCount>
+              <NewBookCountDate>2026-10-21T20:53:19.9919698Z</NewBookCountDate>
+              <UnreadBookCount>3151</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries Terminées</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="6658433e-cce9-48ab-b71e-6a70a6f71211" Name="Séries complétes - Manque Tomes (Chemin)">
+              <BookCount>289</BookCount>
+              <NewBookCountDate>2026-10-21T20:53:19.9839699Z</NewBookCountDate>
+              <UnreadBookCount>289</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries Terminées - Tomes Manquants</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="b5f34735-5633-4946-a48b-7d742b68b48e" Name="Séries complétes (A scrapper)">
+              <BookCount>3137</BookCount>
+              <NewBookCountDate>2026-10-21T21:01:04.3730929Z</NewBookCountDate>
+              <UnreadBookCount>3137</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="SmartListSeriesAllCompleteMatcher" MatchOperator="2">
+                  <MatchValue />
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries Terminées</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="fb95f9a8-c856-477f-aff9-05e7444ab413" Name="Séries complétes (Non Lues)">
+              <BookCount>3151</BookCount>
+              <NewBookCountDate>2026-10-21T20:53:20.1824939Z</NewBookCountDate>
+              <UnreadBookCount>3151</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries Terminées</MatchValue>
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="ComicBookReadPercentageMatcher" MatchOperator="2">
+                  <MatchValue>95</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="3835c1ba-7cdf-4e32-95cf-b2be0f8ae02c" Name="Séries complétes (Lues)">
+              <NewBookCountDate>2026-10-21T20:53:20.1754961Z</NewBookCountDate>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries Terminées</MatchValue>
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="ComicBookReadPercentageMatcher" MatchOperator="1">
+                  <MatchValue>95</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+          </Items>
+        </Item>
+        <Item xsi:type="ComicListItemFolder" Id="601801e5-5eb0-4130-b1fe-186d10dbac50" Name="En cours">
+          <BookCount>510</BookCount>
+          <NewBookCountDate>2026-10-21T21:01:04.3740903Z</NewBookCountDate>
+          <UnreadBookCount>510</UnreadBookCount>
+          <Items>
+            <Item xsi:type="ComicSmartListItem" Id="eeaf74f8-3b4e-479a-a531-c682d728fa0a" Name="Séries en cours">
+              <NewBookCountDate>2026-10-21T21:01:04.3721204Z</NewBookCountDate>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries En cours</MatchValue>
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="SmartListSeriesAllCompleteMatcher" MatchOperator="1">
+                  <MatchValue />
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="2fc1f2a6-aace-4591-8fac-892e69bb471a" Name="Séries en cours (Chemin)">
+              <BookCount>510</BookCount>
+              <NewBookCountDate>2026-10-21T20:53:20.1754961Z</NewBookCountDate>
+              <UnreadBookCount>510</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries En cours</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="f051cd9b-9c49-4237-9ab2-e659010b9b4b" Name="Séries en Cours (A scrapper)">
+              <BookCount>510</BookCount>
+              <NewBookCountDate>2026-10-21T21:01:04.3650853Z</NewBookCountDate>
+              <UnreadBookCount>510</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries En cours</MatchValue>
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="SmartListSeriesAllCompleteMatcher" MatchOperator="2">
+                  <MatchValue />
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="e82da3ce-27e3-4d26-b034-ec4b0048bbb1" Name="Séries en Cours (Non Lues)">
+              <BookCount>510</BookCount>
+              <NewBookCountDate>2026-10-21T20:53:20.176495Z</NewBookCountDate>
+              <UnreadBookCount>510</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries En cours</MatchValue>
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="ComicBookReadPercentageMatcher" MatchOperator="2">
+                  <MatchValue>95</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="dd231272-0b5e-403a-8109-fc9f460de1b4" Name="Séries en Cours (Lues)">
+              <NewBookCountDate>2026-10-21T20:53:20.1754961Z</NewBookCountDate>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries En cours</MatchValue>
+                </ComicBookMatcher>
+                <ComicBookMatcher xsi:type="ComicBookReadPercentageMatcher" MatchOperator="1">
+                  <MatchValue>95</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+          </Items>
+        </Item>
+        <Item xsi:type="ComicListItemFolder" Id="505c80d5-941a-433b-acff-abbe30ddbdda" Name="A définir">
+          <BookCount>5298</BookCount>
+          <NewBookCount>1</NewBookCount>
+          <NewBookCountDate>2026-10-21T21:01:04.3836247Z</NewBookCountDate>
+          <UnreadBookCount>5297</UnreadBookCount>
+          <Items>
+            <Item xsi:type="ComicSmartListItem" Id="f633301a-06cd-4cda-a326-7a02239fcae1" Name="Séries à définir (Série complète = inconnue)">
+              <BookCount>5298</BookCount>
+              <NewBookCount>1</NewBookCount>
+              <NewBookCountDate>2026-10-21T21:01:04.3780955Z</NewBookCountDate>
+              <UnreadBookCount>5297</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="SmartListSeriesAllCompleteMatcher" MatchOperator="2">
+                  <MatchValue />
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="aefe2f84-f4e3-4bb0-b4bd-d7fa8817699d" Name="Séries A_DEFINIR (Chemin)">
+              <BookCount>437</BookCount>
+              <NewBookCountDate>2026-10-21T20:53:20.1704936Z</NewBookCountDate>
+              <UnreadBookCount>437</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+                  <MatchValue>Séries A_DEFINIR</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+          </Items>
+        </Item>
+        <Item xsi:type="ComicListItemFolder" Id="42d95661-72ed-4188-9e55-0d07daa2a102" Name="Divers" Collapsed="true">
+          <BookCount>5318</BookCount>
+          <NewBookCount>1</NewBookCount>
+          <NewBookCountDate>2026-10-21T20:55:46.289247Z</NewBookCountDate>
+          <UnreadBookCount>5317</UnreadBookCount>
+          <Items>
+            <Item xsi:type="ComicSmartListItem" Id="fb183a92-af78-4238-aba0-4e77020fa9b4" Name="Récemment lu">
+              <BookCount>2</BookCount>
+              <NewBookCount>1</NewBookCount>
+              <NewBookCountDate>2026-10-21T20:53:20.1824939Z</NewBookCountDate>
+              <UnreadBookCount>1</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookOpenedMatcher" MatchOperator="3">
+                  <MatchValue>14</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="5bf9e6e0-6326-438e-b576-619a042fee7e" Name="Non-lu">
+              <BookCount>5318</BookCount>
+              <NewBookCount>2</NewBookCount>
+              <NewBookCountDate>2026-10-21T20:53:20.1744943Z</NewBookCountDate>
+              <UnreadBookCount>5316</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookReadPercentageMatcher" MatchOperator="2">
+                  <MatchValue>10</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="7798a02b-d057-403a-a460-992b9fb17ec8" Name="Lecture en cours">
+              <BookCount>1</BookCount>
+              <NewBookCountDate>2026-10-21T20:53:20.176495Z</NewBookCountDate>
+              <UnreadBookCount>1</UnreadBookCount>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookReadPercentageMatcher" MatchOperator="3">
+                  <MatchValue>10</MatchValue>
+                  <MatchValue2>95</MatchValue2>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+            <Item xsi:type="ComicSmartListItem" Id="fc060eb1-3272-403d-9fce-ca37879e1065" Name="Lu">
+              <NewBookCountDate>2026-10-21T20:55:56.8834377Z</NewBookCountDate>
+              <Matchers>
+                <ComicBookMatcher xsi:type="ComicBookReadPercentageMatcher" MatchOperator="1">
+                  <MatchValue>95</MatchValue>
+                </ComicBookMatcher>
+              </Matchers>
+            </Item>
+          </Items>
+        </Item>
+      </Items>
+    </Item>
+    <Item xsi:type="ComicSmartListItem" Id="ae72c2cb-5816-45b4-b441-09bf4d273ff3" Name="Séries complétes (Chemin)">
+      <BookCount>11</BookCount>
+      <NewBookCountDate>2026-10-21T20:55:56.8844374Z</NewBookCountDate>
+      <UnreadBookCount>11</UnreadBookCount>
+      <Matchers>
+        <ComicBookMatcher xsi:type="ComicBookFullPathMatcher" MatchOperator="1">
+          <MatchValue>Compil Thanos</MatchValue>
+        </ComicBookMatcher>
+      </Matchers>
+    </Item>
+    <Item xsi:type="ComicListItemFolder" Id="f612eb74-e8cd-4ec5-a44e-831e67e29d61" Name="Listes temporaires" Temporary="true">
+      <NewBookCountDate>2026-10-21T20:55:56.8824394Z</NewBookCountDate>
+      <Items />
+    </Item>
+    <Item xsi:type="ComicListItemFolder" Id="1eecf23e-867f-4bf2-aaff-a650cebee06a" Name="[BCR Users]">
+      <NewBookCountDate>2026-10-21T20:56:01.0700671Z</NewBookCountDate>
+      <Items />
+    </Item>
+  </ComicLists>
+  <WatchFolders>
+    <WatchFolder Folder="\\NAS\BD" Watch="true" />
+  </WatchFolders>
+  <BlackList />
+</ComicDatabase>

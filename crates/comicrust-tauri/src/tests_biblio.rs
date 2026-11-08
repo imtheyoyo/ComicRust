@@ -35,6 +35,7 @@ fn requete(tri: &str, sens: SensTri, groupe: Option<Groupe>, recherche: Option<&
         groupe,
         debut: 0,
         nombre: 100,
+        liste: None,
     }
 }
 

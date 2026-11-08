@@ -68,6 +68,9 @@ pub struct RequeteLivres {
     pub groupe: Option<Groupe>,
     pub debut: usize,
     pub nombre: usize,
+    /// Liste affichée (`docs/tauri/ipc-listes.md`) ; absente : toute la bibliothèque.
+    #[serde(default)]
+    pub liste: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -86,6 +89,9 @@ pub struct LivreResume {
     pub pages: u32,
     pub lu: bool,
     pub url_couverture: String,
+    /// Avec une liste : rang du livre dans la liste (1 = premier), colonne « # ».
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rang: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -212,8 +218,24 @@ impl EvenementScan {
 
 // ───────────────────────────── État ─────────────────────────────
 
-/// Clé du cache de vue : recherche normalisée, tri, sens, groupe, génération de la base.
-type CleVue = (String, ClefTri, bool, Regroupement, u64);
+/// Clé du cache de vue : recherche normalisée, tri, sens, groupe, génération de la base, liste
+/// affichée et version des listes.
+type CleVue = (String, ClefTri, bool, Regroupement, u64, Option<String>, u64);
+
+/// Vue calculée : livres affichés (indices dans la base) et rang de chaque livre dans la liste
+/// affichée (`u32::MAX` : hors de la liste).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Vue {
+    pub indices: Vec<usize>,
+    pub rangs: Vec<u32>,
+}
+
+impl Vue {
+    /// Rang d'un livre (indice dans la base) dans la liste affichée.
+    pub fn rang(&self, i: usize) -> Option<usize> {
+        self.rangs.get(i).copied().filter(|r| *r != u32::MAX).map(|r| r as usize)
+    }
+}
 
 #[derive(Default)]
 struct Interne {
@@ -223,7 +245,10 @@ struct Interne {
     store: Option<StoreConfig>,
     /// Augmente à chaque remplacement de la base (invalide la vue).
     generation: u64,
-    vue: Option<(CleVue, Arc<Vec<usize>>)>,
+    /// Augmente à chaque changement du contenu des fiches (base remplacée, fiches modifiées,
+    /// lecture notée) : invalide le contenu calculé des listes intelligentes.
+    contenu: u64,
+    vue: Option<(CleVue, Arc<Vue>)>,
     scan_en_cours: bool,
     /// Une opération d'édition (fiches, fichiers, renommage) est en cours : l'analyse et le
     /// changement de bibliothèque attendent sa fin (sinon un fichier renommé pendant l'analyse
@@ -258,6 +283,8 @@ pub struct Biblio {
     /// Révision de la couverture des livres modifiés (ajoutée à `urlCouverture` : la WebView
     /// garde une heure l'image d'une même URL).
     revisions: Arc<Mutex<HashMap<String, u32>>>,
+    /// Listes ComicRack (`listes.rs`) : listes lues, contenu calculé, opération en cours.
+    pub(crate) listes: Arc<Mutex<crate::listes::CacheListes>>,
 }
 
 /// Durée pendant laquelle un échec de couverture n'est pas retenté.
@@ -293,6 +320,7 @@ impl Biblio {
             pool: Arc::new(couvertures::Pool::nouveau(couvertures::FILS)),
             negatif: Arc::default(),
             revisions: Arc::default(),
+            listes: Arc::default(),
         }
     }
 
@@ -394,9 +422,17 @@ impl Biblio {
         g.store = store;
         g.comicrack = None;
         g.generation += 1;
+        g.contenu += 1;
         g.vue = None;
         drop(g);
         self.negatif.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    /// Base ouverte et état de son contenu (génération, révision des fiches), pour le cache du
+    /// contenu des listes.
+    pub(crate) fn base_et_contenu(&self) -> Option<(Arc<ComicDatabase>, (u64, u64))> {
+        let g = self.verrou();
+        Some((g.base.clone()?, (g.generation, g.contenu)))
     }
 
     pub(crate) fn base(&self) -> Result<Arc<ComicDatabase>, String> {
@@ -407,54 +443,85 @@ impl Biblio {
 
     /// Une fenêtre de la liste filtrée, triée et regroupée.
     pub fn lister(&self, req: &RequeteLivres) -> Result<PageLivres, String> {
-        let clef = ClefTri::depuis_texte(&req.tri)?;
-        let desc = req.sens_tri == SensTri::Desc;
-        let groupe = match req.groupe.unwrap_or_default() {
-            Groupe::Aucun => Regroupement::Aucun,
-            Groupe::Serie => Regroupement::Serie,
-            Groupe::Editeur => Regroupement::Editeur,
-        };
-        let recherche = req.recherche.as_deref().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
-        let recherche = recherche.to_lowercase();
-        let (base, vue) = {
-            let g = self.verrou();
-            let base = g.base.clone().ok_or("aucune bibliothèque ouverte")?;
-            let cle: CleVue = (recherche.clone(), clef, desc, groupe, g.generation);
-            let vue = match &g.vue {
-                Some((c, v)) if *c == cle => Some(v.clone()),
-                _ => None,
-            };
-            (base, vue)
-        };
-        let vue = match vue {
-            Some(v) => v,
-            None => {
-                // Calcul hors du verrou : un tri de 5 000 livres ne bloque pas les couvertures.
-                let mut v = tri::filtrer(&base.books, &recherche);
-                tri::trier(&mut v, &base.books, clef, desc, groupe);
-                let v = Arc::new(v);
-                let mut g = self.verrou();
-                // Enregistré seulement si la base n'a pas été remplacée entre-temps.
-                if Arc::ptr_eq(g.base.as_ref().unwrap_or(&base), &base) {
-                    let generation = g.generation;
-                    g.vue = Some(((recherche, clef, desc, groupe, generation), v.clone()));
-                }
-                v
-            }
-        };
-        let total = vue.len();
+        let (base, vue) = self.vue(req)?;
+        let total = vue.indices.len();
         let debut = req.debut.min(total);
         let fin = debut.saturating_add(req.nombre.min(NOMBRE_MAX)).min(total);
         let revs = self.revisions.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let livres = vue[debut..fin]
+        let avec_rang = req.liste.is_some();
+        let livres = vue.indices[debut..fin]
             .iter()
             .map(|&i| {
                 let mut r = resume(&base.books[i]);
                 r.url_couverture = avec_revision(r.url_couverture, revs.get(&r.id.to_ascii_lowercase()));
+                if avec_rang {
+                    r.rang = vue.rang(i).map(|n| n + 1);
+                }
                 r
             })
             .collect();
         Ok(PageLivres { total, livres })
+    }
+
+    /// Vue complète décrite par la requête (liste, recherche, tri, groupe), en cache.
+    pub(crate) fn vue(&self, req: &RequeteLivres) -> Result<(Arc<ComicDatabase>, Arc<Vue>), String> {
+        let clef = ClefTri::depuis_texte(&req.tri)?;
+        let desc = req.sens_tri == SensTri::Desc;
+        let groupe = regroupement(req.groupe);
+        let recherche = req.recherche.as_deref().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+        let recherche = recherche.to_lowercase();
+        let liste = req.liste.as_deref().map(str::trim).filter(|l| !l.is_empty()).map(str::to_ascii_lowercase);
+        // Livres de la liste (dans l'ordre de la liste) et version des listes, avant le verrou de
+        // la bibliothèque (le calcul des listes intelligentes le prend lui-même).
+        let (membres, version) = match &liste {
+            Some(id) => {
+                let (m, v) = self.membres_liste(id)?;
+                (Some(m), v)
+            }
+            None => (None, 0),
+        };
+        let (base, vue, generation) = {
+            let g = self.verrou();
+            let base = g.base.clone().ok_or("aucune bibliothèque ouverte")?;
+            let cle: CleVue = (recherche.clone(), clef, desc, groupe, g.generation, liste.clone(), version);
+            let vue = match &g.vue {
+                Some((c, v)) if *c == cle => Some(v.clone()),
+                _ => None,
+            };
+            (base, vue, g.generation)
+        };
+        if let Some(v) = vue {
+            return Ok((base, v));
+        }
+        // Calcul hors du verrou : un tri de 5 000 livres ne bloque pas les couvertures.
+        let n = base.books.len();
+        let ordre: Vec<usize> = match &membres {
+            None | Some(comicrust_core::comic_lists::Members::All) => (0..n).collect(),
+            Some(comicrust_core::comic_lists::Members::Ids(ids)) => {
+                ids.iter().filter_map(|id| base.index_of(id)).collect()
+            }
+            Some(comicrust_core::comic_lists::Members::Unknown(_)) => Vec::new(),
+        };
+        let mut rangs = vec![u32::MAX; n];
+        for (r, &i) in ordre.iter().enumerate() {
+            if rangs[i] == u32::MAX {
+                rangs[i] = r as u32;
+            }
+        }
+        let mut dans = vec![false; n];
+        for &i in &ordre {
+            dans[i] = true;
+        }
+        let mut indices: Vec<usize> = tri::filtrer(&base.books, &recherche).into_iter().filter(|&i| dans[i]).collect();
+        let rang = |i: usize| rangs.get(i).copied().filter(|r| *r != u32::MAX).map(|r| r as usize);
+        tri::trier(&mut indices, &base.books, clef, desc, groupe, &rang);
+        let vue = Arc::new(Vue { indices, rangs });
+        let mut g = self.verrou();
+        // Enregistrée seulement si la base n'a pas été remplacée entre-temps.
+        if g.generation == generation && Arc::ptr_eq(g.base.as_ref().unwrap_or(&base), &base) {
+            g.vue = Some(((recherche, clef, desc, groupe, generation, liste, version), vue.clone()));
+        }
+        Ok((base, vue))
     }
 
     /// Fiche complète d'un livre.
@@ -674,6 +741,7 @@ impl Biblio {
             if g.generation == generation && g.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, base)) {
                 g.base = Some(Arc::new(neuve));
                 g.generation += 1;
+                g.contenu += 1;
                 g.vue = None;
             }
         }
@@ -757,6 +825,7 @@ impl Biblio {
                 }
             }
             if !faits.is_empty() {
+                g.contenu += 1;
                 g.vue = None;
             }
         }
@@ -818,12 +887,22 @@ impl Biblio {
             b.last_page_read = Some(derniere);
             b.opened = Some(ouvert.to_string());
             // Les tris « lecture » / « avancement » changent : vue recalculée.
+            g.contenu += 1;
             g.vue = None;
         }
     }
 }
 
 // ───────────────────────────── Fonctions utilitaires ─────────────────────────────
+
+/// Groupe de l'IPC → regroupement du tri.
+pub(crate) fn regroupement(g: Option<Groupe>) -> Regroupement {
+    match g.unwrap_or_default() {
+        Groupe::Aucun => Regroupement::Aucun,
+        Groupe::Serie => Regroupement::Serie,
+        Groupe::Editeur => Regroupement::Editeur,
+    }
+}
 
 fn config_autonome(data: &Path) -> StoreConfig {
     // Chemin explicite (et non `PortableSqlite`, calculé d'après l'exécutable) : même fichier
@@ -968,6 +1047,7 @@ fn resume(b: &LibraryBook) -> LivreResume {
         pages: b.page_count.unwrap_or(0),
         lu: b.read_percent() == Some(100),
         url_couverture: url_couverture(&b.id),
+        rang: None,
     }
 }
 
