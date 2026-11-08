@@ -7,7 +7,7 @@
   import { enregistrerPreference, preferences } from '../lib/prefs';
   import { Selection } from '../lib/selection.svelte';
   import DialogInfos from './DialogInfos.svelte';
-  import { modale } from '../lib/modale';
+  import { fermerModale, modale } from '../lib/modale';
   import DialogOperation from './DialogOperation.svelte';
   import DialogRenommer from './DialogRenommer.svelte';
   import GrilleCouvertures from './GrilleCouvertures.svelte';
@@ -135,7 +135,7 @@
   function ouvrirFichier() {
     const chemin = cheminFichier.trim();
     if (!chemin) return;
-    dialogueFichier?.close();
+    fermerModale(dialogueFichier);
     livreLu = { chemin };
   }
 
@@ -399,13 +399,13 @@
   </footer>
 </div>
 
-<dialog bind:this={dialogueFichier} use:modale aria-labelledby="titre-ouvrir-fichier" data-testid="dialogue-fichier">
+<dialog bind:this={dialogueFichier} use:modale={{ peutFermer: () => !cheminFichier.trim() }} aria-labelledby="titre-ouvrir-fichier" data-testid="dialogue-fichier">
   <h2 id="titre-ouvrir-fichier">Ouvrir un fichier</h2>
   <form class="ouvrir-fichier" onsubmit={(e) => { e.preventDefault(); ouvrirFichier(); }}>
     <label for="chemin-fichier">Chemin d'une BD (CBZ, CBR, CB7, PDF…), d'un dossier d'images ou d'une image :</label>
     <input id="chemin-fichier" type="text" bind:value={cheminFichier} placeholder="D:\BD\Thanos 01.cbz" spellcheck="false" autocomplete="off" data-testid="chemin-fichier" />
     <div class="pied">
-      <button type="button" onclick={() => dialogueFichier?.close()}>Annuler</button>
+      <button type="button" onclick={() => fermerModale(dialogueFichier)}>Annuler</button>
       <button type="submit" disabled={!cheminFichier.trim()}>Ouvrir</button>
     </div>
   </form>

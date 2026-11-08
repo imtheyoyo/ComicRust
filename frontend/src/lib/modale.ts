@@ -24,6 +24,17 @@ export interface OptionsModale {
   ouvrirAuMontage?: boolean;
 }
 
+/** Fenêtres dont la fermeture a été demandée par le code (bouton Annuler, Fermer, Ouvrir…) :
+ *  le filet de sécurité ne doit pas les rouvrir, même avec une saisie en cours. */
+const fermeturesVoulues = new WeakSet<HTMLDialogElement>();
+
+/** Ferme une fenêtre `use:modale` à la demande de l'utilisateur (bouton), modifications ou non. */
+export function fermerModale(node: HTMLDialogElement | undefined): void {
+  if (!node?.open) return;
+  fermeturesVoulues.add(node);
+  node.close();
+}
+
 /** Action Svelte : `<dialog use:modale={{ peutFermer, fermer }}>`. */
 export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
   let opts = options;
@@ -49,6 +60,10 @@ export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
   }
 
   function close() {
+    if (fermeturesVoulues.delete(node)) {
+      opts.fermer?.();
+      return;
+    }
     // Le navigateur a fermé la fenêtre de lui-même (cancel non annulable), ou un formulaire
     // method="dialog" l'a fermée. Si on ne pouvait pas fermer : on la rouvre (rien n'est perdu).
     if (!peut()) {

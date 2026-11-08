@@ -29,6 +29,8 @@
   let progression = $state<ProgressionEdition | null>(null);
   let bilan = $state<BilanOperation | null>(null);
   let pret = $state(false);
+  /** Modèle et dossier tels qu'à l'ouverture (réglages enregistrés) : référence des « modifications ». */
+  let initial = $state('');
   let minuterie: ReturnType<typeof setTimeout> | undefined;
   let sequence = 0;
   let desabonner: (() => void) | undefined;
@@ -46,6 +48,7 @@
       } catch (e) {
         erreur = messageErreur(e);
       }
+      initial = JSON.stringify([modele, dossierCible.trim()]);
       pret = true;
     })();
   });
@@ -109,8 +112,12 @@
     onfermer();
   }
 
-  /** Échap : pas pendant l'opération (le bilan doit arriver). */
-  const peutFermer = () => etape !== 'cours';
+  /** Modèle de nom ou dossier cible changé depuis l'ouverture (recette tauri-v0.5.0 D-01). */
+  const modifie = $derived(pret && cle !== initial);
+
+  /** Échap, comme « Infos du livre » : pas pendant l'opération (le bilan doit arriver), ni quand
+   *  le modèle ou le dossier a été modifié (Annuler pour fermer) ; le bilan affiché se ferme. */
+  const peutFermer = () => etape === 'bilan' || (etape !== 'cours' && !modifie);
 
   const modeleChoisi = $derived(modeles.find((m) => m.modele === modele)?.modele ?? '');
 </script>
