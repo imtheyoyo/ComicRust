@@ -155,6 +155,7 @@ fn modifier_ecrit_la_base_et_le_comicinfo_des_champs_touches_seulement() {
     let dm = DemandeModification {
         ids: vec![t1.clone(), t2.clone()],
         champs: vec![modif("writer", "Jim Starlin, Ron Lim"), modif("Rating", "4,5")],
+        pages: None,
         ecrire_dans_fichier: true,
         confirme: false,
     };
@@ -205,6 +206,7 @@ fn modifier_ecrit_la_base_et_le_comicinfo_des_champs_touches_seulement() {
     let dm = DemandeModification {
         ids: vec![t1.clone()],
         champs: vec![modif("Rating", "")],
+        pages: None,
         ecrire_dans_fichier: false,
         confirme: false,
     };
@@ -235,6 +237,7 @@ fn valeurs_refusees_et_valeurs_perso() {
     let dm = DemandeModification {
         ids: vec![t1.clone()],
         champs: vec![modif("Series", "Autre"), modif("Year", "deux mille")],
+        pages: None,
         ecrire_dans_fichier: false,
         confirme: false,
     };
@@ -251,6 +254,7 @@ fn valeurs_refusees_et_valeurs_perso() {
     let dm = DemandeModification {
         ids: vec![t1.clone()],
         champs: vec![modif(&c.nom, "2025"), modif("Released", "17/05/2024")],
+        pages: None,
         ecrire_dans_fichier: false,
         confirme: false,
     };
@@ -270,6 +274,7 @@ fn suggestions_depuis_la_bibliotheque() {
     let dm = DemandeModification {
         ids: vec![t2],
         champs: vec![modif("Writer", "Jim Starlin, Ron Lim")],
+        pages: None,
         ecrire_dans_fichier: false,
         confirme: false,
     };
@@ -312,6 +317,7 @@ fn garde_fou_au_dela_du_seuil() {
     let dm = DemandeModification {
         ids: ids.clone(),
         champs: vec![modif("Series", "Autre")],
+        pages: None,
         ecrire_dans_fichier: false,
         confirme: false,
     };
@@ -434,6 +440,7 @@ fn conversion_cbr_et_cb7_en_cbz() {
     let dm = DemandeModification {
         ids: vec![ss.clone()],
         champs: vec![modif("Series", "Silver Surfer"), modif("Number", "4")],
+        pages: None,
         ecrire_dans_fichier: true,
         confirme: false,
     };
@@ -495,6 +502,7 @@ fn comicdb_xml_lecture_seule_pour_les_fiches() {
     let dm = DemandeModification {
         ids: vec![id.clone()],
         champs: vec![modif("Series", "X")],
+        pages: None,
         ecrire_dans_fichier: false,
         confirme: false,
     };
@@ -548,6 +556,7 @@ fn valeurs_multiples_jamais_ecrites_litteralement() {
     let dm = DemandeModification {
         ids: ids.clone(),
         champs: vec![modif("Series", VALEURS_MULTIPLES)],
+        pages: None,
         ecrire_dans_fichier: true,
         confirme: false,
     };
@@ -619,6 +628,7 @@ fn arret_du_lot_entre_deux_livres() {
     let dm = DemandeModification {
         ids: ids.clone(),
         champs: vec![modif("Genre", "Cosmique")],
+        pages: None,
         ecrire_dans_fichier: true,
         confirme: false,
     };
@@ -690,6 +700,185 @@ fn ouvrir_le_dossier_du_fichier() {
     assert!(e.commande_dossier_fichier(&id).unwrap_err().contains("dossier introuvable"));
 }
 
+/// Pages renvoyées par le front (liste complète, nouvel ordre) à partir d'une liste lue.
+fn modifiees(l: &[pages_livre::PageLivre]) -> Vec<PageModifiee> {
+    l.iter().map(|p| serde_json::from_value(serde_json::to_value(p).unwrap()).unwrap()).collect()
+}
+
+/// Pages d'un CBZ de test réordonnées, supprimée, typée et tournée par les opérations de l'onglet.
+fn pages_modifiees(e: &Edition, id: &str) -> (pages_livre::PagesLivre, Vec<pages_livre::PageLivre>) {
+    use crate::pages_livre::{transformer, OperationPages as Op};
+    let p = e.lire_pages(id, None).unwrap();
+    let l = transformer(&p.pages, &Op::Deplacer { images: vec![2], position: 0 }).unwrap();
+    let l = transformer(&l, &Op::BasculerSupprimee { images: vec![1] }).unwrap();
+    let l = transformer(&l, &Op::Type { images: vec![0], valeur: "Advertisement".into() }).unwrap();
+    let l = transformer(&l, &Op::Rotation { images: vec![2], valeur: 90 }).unwrap();
+    (p, l)
+}
+
+#[test]
+fn onglet_pages_lecture_et_vignettes() {
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let (b, e) = autonome(&d.path().join("data"), &racine);
+    let t1 = id_par_fichier(&b, "Thanos 01.cbz");
+    let p = e.lire_pages(&t1, None).unwrap();
+    assert_eq!(p.nb_images, 3);
+    assert!(p.modifiable && p.lecture_seule.is_none() && p.ecrire_dans_fichier_possible);
+    assert_eq!(
+        p.pages.iter().map(|x| (x.index, x.image, x.nom.as_str())).collect::<Vec<_>>(),
+        [(0, 0, "01.png"), (1, 1, "02.png"), (2, 2, "03.png")]
+    );
+    assert_eq!(p.pages[0].type_page, "FrontCover");
+    assert_eq!((p.types.len(), p.rotations.len(), p.positions.len()), (11, 4, 3));
+    assert_eq!(p.types[10].valeur, "Deleted");
+    assert_eq!(p.pages[2].url_vignette, format!("{}/2?l=192", p.url_base));
+    // Vignette servie par cr-page (index = image du fichier), réduite à 192 px.
+    let (tx, rx) = mpsc::channel();
+    e.lecteur.servir(&p.jeton, 2, Some(192), move |r| tx.send(r).unwrap());
+    let r = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+    assert_eq!(r.statut, 200);
+    assert_eq!(image::load_from_memory(&r.octets).unwrap().width(), 192);
+    // Contrat JSON.
+    let j = serde_json::to_value(&p).unwrap();
+    for k in ["jeton", "urlBase", "largeurVignette", "nbImages", "pages", "modifiable", "ecrireDansFichierPossible"] {
+        assert!(j.get(k).is_some(), "{k}");
+    }
+    // Nouvelle séance (après « Appliquer ») : l'ancienne est fermée.
+    let p2 = e.lire_pages(&t1, Some(&p.jeton)).unwrap();
+    assert!(e.lecteur.url_page_base(&p.jeton).is_err() && e.lecteur.url_page_base(&p2.jeton).is_ok());
+    e.fermer_pages(&p2.jeton);
+    assert!(e.lecteur.url_page_base(&p2.jeton).is_err());
+    assert!(e.lire_pages("inconnu", None).is_err());
+}
+
+#[test]
+fn onglet_pages_enregistre_base_puis_fichier_seulement_si_demande() {
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let (b, e) = autonome(&d.path().join("data"), &racine);
+    let t1 = id_par_fichier(&b, "Thanos 01.cbz");
+    let fichier = racine.join("Thanos 01.cbz");
+    let avant = std::fs::read(&fichier).unwrap();
+    let (p, l) = pages_modifiees(&e, &t1);
+    assert_eq!(l.iter().map(|x| x.image).collect::<Vec<_>>(), [2, 0, 1]);
+
+    // 1. Sans « écrire dans le fichier » : base seulement, fichier intact, fiche « à écrire ».
+    let ev = Evenements::default();
+    let dm = DemandeModification {
+        ids: vec![t1.clone()],
+        champs: vec![],
+        pages: Some(modifiees(&l)),
+        ecrire_dans_fichier: false,
+        confirme: false,
+    };
+    let r = e.appliquer_modifications(&dm, &ev.sortie()).unwrap();
+    assert!(r.complet && r.livres[0].statut == Statut::Ok, "{}", r.rapport);
+    assert_eq!(std::fs::read(&fichier).unwrap(), avant, "fichier non écrit sans la case");
+    let f = b.livre(&t1).unwrap();
+    let ordre: Vec<(i32, Option<&str>, Option<&str>)> =
+        f.pages.page.iter().map(|x| (x.image, x.kind.as_deref(), x.rotation.as_deref())).collect();
+    assert_eq!(ordre, [(2, None, Some("Rotate90")), (0, Some("Advertisement"), None), (1, Some("Deleted"), None)]);
+    assert_eq!(f.comic_info_is_dirty, Some(true), "infos pas encore écrites dans le fichier");
+    assert!(ev.modifies().contains(&t1));
+    // Relue depuis la base (autonome : colonne JSON des pages).
+    let cfg = b.store_autonome().unwrap();
+    let relue = Store::open_existing(&cfg).unwrap().get(std::slice::from_ref(&t1)).unwrap();
+    assert_eq!(relue[0].pages.page, f.pages.page);
+    // Le lecteur lit dans le nouvel ordre, page supprimée masquée.
+    let o = e.lecteur.ouvrir_livre(&t1).unwrap();
+    assert_eq!(
+        o.pages.iter().map(|x| (x.image, x.supprimee, x.rotation)).collect::<Vec<_>>(),
+        [(2, false, 90), (0, false, 0), (1, true, 0)]
+    );
+    e.lecteur.fermer_livre(&o.jeton).unwrap();
+    // Liste renvoyée identique : rien à écrire.
+    let p2 = e.lire_pages(&t1, Some(&p.jeton)).unwrap();
+    let dm_meme = DemandeModification { pages: Some(modifiees(&p2.pages)), ..dm.clone() };
+    let r = e.appliquer_modifications(&dm_meme, &|_| {}).unwrap();
+    assert!(r.livres.iter().all(|x| x.statut != Statut::Ok), "{}", r.rapport);
+
+    // 2. Avec la case : ComicInfo.xml <Pages> écrit (séance de vignettes ouverte, servie pendant).
+    let (tx, rx) = mpsc::channel();
+    e.lecteur.servir(&p2.jeton, 0, Some(192), move |r| tx.send(r).unwrap());
+    assert_eq!(rx.recv_timeout(Duration::from_secs(20)).unwrap().statut, 200);
+    let l2 = crate::pages_livre::transformer(
+        &p2.pages,
+        &crate::pages_livre::OperationPages::Favori { image: 0, texte: Some("Combat".into()) },
+    )
+    .unwrap();
+    let dm2 = DemandeModification {
+        champs: vec![modif("Series", "Thanos Quest")],
+        pages: Some(modifiees(&l2)),
+        ecrire_dans_fichier: true,
+        ..dm.clone()
+    };
+    let r = e.appliquer_modifications(&dm2, &|_| {}).unwrap();
+    assert!(r.complet, "{}", r.rapport);
+    let (ci, noms) = comic_info(&fichier);
+    assert!(ci.contains("<Series>Thanos Quest</Series>"), "{ci}");
+    let i2 = ci.find("Image=\"2\"").expect("page 2");
+    let i0 = ci.find("Image=\"0\"").expect("page 0");
+    let i1 = ci.find("Image=\"1\"").expect("page 1");
+    assert!(i2 < i0 && i0 < i1, "ordre de lecture dans <Pages> : {ci}");
+    assert!(
+        ci.contains("Type=\"Deleted\"") && ci.contains("Rotation=\"Rotate90\"") && ci.contains("Bookmark=\"Combat\""),
+        "{ci}"
+    );
+    assert_eq!(noms.iter().filter(|n| n.ends_with(".png")).count(), 3, "images recopiées");
+    assert_ne!(b.livre(&t1).unwrap().comic_info_is_dirty, Some(true), "infos écrites");
+    // Après l'écriture, la séance de vignettes relit le fichier réécrit ; aucun descripteur ouvert.
+    let (tx, rx) = mpsc::channel();
+    e.lecteur.servir(&p2.jeton, 1, Some(192), move |r| tx.send(r).unwrap());
+    assert_eq!(rx.recv_timeout(Duration::from_secs(20)).unwrap().statut, 200);
+    #[cfg(target_os = "linux")]
+    crate::lecteur::tests::attendre_aucun_descripteur(&e.lecteur, &fichier);
+
+    // Refus : liste incomplète, plusieurs livres ; rien d'écrit.
+    let t2 = id_par_fichier(&b, "Thanos 02.cbz");
+    let mut incomplete = modifiees(&l2);
+    incomplete.pop();
+    assert!(e
+        .appliquer_modifications(&DemandeModification { pages: Some(incomplete), ..dm.clone() }, &|_| {})
+        .is_err());
+    let plusieurs = DemandeModification { ids: vec![t1.clone(), t2], pages: Some(modifiees(&l2)), ..dm.clone() };
+    assert!(e.appliquer_modifications(&plusieurs, &|_| {}).unwrap_err().contains("un seul livre"));
+}
+
+#[test]
+fn onglet_pages_lecture_seule_comicdb() {
+    let d = tempfile::tempdir().unwrap();
+    let racine = d.path().join("BD");
+    bd(&racine);
+    let fichier = racine.join("Thanos 01.cbz");
+    let xml = d.path().join("ComicDb.xml");
+    std::fs::write(
+        &xml,
+        format!(
+            "<ComicDatabase><Books><Book Id=\"ro\" File=\"{}\"><Series>Thanos</Series></Book></Books></ComicDatabase>",
+            fichier.display()
+        ),
+    )
+    .unwrap();
+    let data = d.path().join("data");
+    let b = Biblio::nouvelle(data.clone());
+    b.configurer(&ChoixPremierDemarrage { mode: Mode::Comicrack, chemin_ini: Some(xml.to_string_lossy().into()) })
+        .unwrap();
+    let e = Edition::nouvelle(b.clone(), Lecteur::nouveau(data, b.clone()));
+    let p = e.lire_pages("ro", None).unwrap();
+    assert!(!p.modifiable && p.lecture_seule.is_some());
+    let dm = DemandeModification {
+        ids: vec!["ro".into()],
+        champs: vec![],
+        pages: Some(modifiees(&p.pages)),
+        ecrire_dans_fichier: true,
+        confirme: false,
+    };
+    assert!(e.appliquer_modifications(&dm, &|_| {}).is_err());
+}
+
 fn fiche_ce(id: &str, fichier: &Path) -> String {
     format!(
         "<ComicBook Id=\"{id}\" File=\"{}\"><Series>Thanos</Series><Number>1</Number><Year>1990</Year>\
@@ -754,6 +943,7 @@ fn mysql_comicrack_lecture_et_ecriture() {
     let dm = DemandeModification {
         ids: vec![id.to_string()],
         champs: vec![modif("Series", "Thanos Quest"), modif("Writer", "Jim Starlin")],
+        pages: None,
         ecrire_dans_fichier: true,
         confirme: false,
     };
@@ -808,6 +998,26 @@ fn mysql_comicrack_lecture_et_ecriture() {
     assert!(xml.contains("<CurrentPage>2</CurrentPage>") && xml.contains("<LastPageRead>2</LastPageRead>"), "{xml}");
     assert!(xml.contains("<OpenCount>3</OpenCount>") && xml.contains("<Opened>"), "{xml}");
     assert_eq!(b.livre(id).unwrap().current_page, Some(2));
+
+    // Onglet « Pages » en écriture : élément <Pages> de la fiche ComicRack (Value::Pages), puis
+    // ComicInfo.xml du fichier.
+    let (p, l) = pages_modifiees(&e, id);
+    let dmp =
+        DemandeModification { champs: vec![], pages: Some(modifiees(&l)), ecrire_dans_fichier: false, ..dm.clone() };
+    let r = e.appliquer_modifications(&dmp, &|_| {}).unwrap();
+    assert!(r.complet && r.livres[0].statut == Statut::Ok, "{}", r.rapport);
+    let (xml, _) = data_de(&mut conn);
+    let pages_xml = &xml[xml.find("<Pages>").expect("<Pages> écrit")..];
+    assert!(pages_xml.find("Image=\"2\"").unwrap() < pages_xml.find("Image=\"0\"").unwrap(), "{xml}");
+    assert!(pages_xml.contains("Deleted") && pages_xml.contains("Rotate90"), "{xml}");
+    assert!(xml.contains("<ComicInfoIsDirty>true"), "pages pas encore dans le fichier : {xml}");
+    assert!(!comic_info(&fichier).0.contains("Deleted"), "fichier non écrit sans la case");
+    let dmf = DemandeModification { pages: None, ecrire_dans_fichier: true, ..dmp.clone() };
+    assert!(e.appliquer_modifications(&dmf, &|_| {}).unwrap().complet);
+    let (ci, _) = comic_info(&fichier);
+    assert!(ci.contains("Type=\"Deleted\"") && ci.contains("Rotation=\"Rotate90\""), "{ci}");
+    assert!(!data_de(&mut conn).0.contains("<ComicInfoIsDirty>true"));
+    e.fermer_pages(&p.jeton);
 
     // Renommage : la fiche ComicRack suit le fichier.
     let rn = DemandeRenommage {

@@ -29,6 +29,25 @@ fn servir(l: &Lecteur, jeton: &str, index: usize, largeur: Option<u32>) -> Repon
     rx.recv_timeout(Duration::from_secs(30)).expect("réponse attendue")
 }
 
+/// Linux : attend la fin des lectures en cours (préchargement) puis vérifie qu'aucun descripteur
+/// ne reste ouvert sur `f` (`/proc/self/fd`). Un fournisseur qui garderait le fichier ouvert ne
+/// redescendrait jamais à zéro. Le cache doit aussi être stable (plus de préchargement).
+#[cfg(target_os = "linux")]
+pub(crate) fn attendre_aucun_descripteur(l: &Lecteur, f: &Path) {
+    use comicrust_core::providers::on_demand::open_descriptors;
+    let debut = Instant::now();
+    let mut stable = 0;
+    let mut avant = l.etat_cache();
+    while stable < 5 {
+        assert!(debut.elapsed() < Duration::from_secs(10), "descripteur resté ouvert sur {}", f.display());
+        std::thread::sleep(Duration::from_millis(40));
+        let maintenant = l.etat_cache();
+        stable = if open_descriptors(f) == 0 && maintenant == avant { stable + 1 } else { 0 };
+        avant = maintenant;
+    }
+    assert_eq!(open_descriptors(f), 0);
+}
+
 fn taille(r: &ReponsePage) -> (u32, u32) {
     assert_eq!(r.statut, 200, "{}", String::from_utf8_lossy(&r.octets));
     let img = image::load_from_memory(&r.octets).unwrap();
@@ -109,9 +128,9 @@ fn cbz_hors_bibliotheque_pages_brutes_et_reduites() {
     assert_eq!(taille(&r), (60, 150));
     // Plus large que l'image : servie telle quelle.
     assert_eq!(servir(&l, &o.jeton, 0, Some(500)).mime, "image/png");
-    // Le fichier n'est pas gardé ouvert entre deux lectures.
+    // Le fichier n'est pas gardé ouvert entre deux lectures (préchargement fini).
     #[cfg(target_os = "linux")]
-    assert_eq!(comicrust_core::providers::on_demand::open_descriptors(&f), 0);
+    attendre_aucun_descripteur(&l, &f);
     // Index hors du livre, puis jeton inconnu après fermeture : 404.
     assert_eq!(servir(&l, &o.jeton, 3, None).statut, 404);
     assert!(l.url_page_base(&o.jeton).is_ok());
@@ -435,4 +454,52 @@ fn etat_tauri_partageable() {
     fn partageable<T: Send + Sync + Clone + 'static>() {}
     partageable::<Lecteur>();
     partageable::<Biblio>();
+}
+
+/// Recette tauri-v0.4.0 (os error 5 sous Windows) : livre affiché dans le lecteur **et** dans
+/// l'onglet Pages ; avant l'écriture, le fichier est libéré (aucun descripteur, lectures
+/// suspendues), écrit, puis les séances le rechargent.
+#[test]
+fn fichier_libere_pendant_l_ecriture_puis_recharge() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("Libere.cbz");
+    cbz_tailles(&f, 4);
+    let l = Lecteur::nouveau(d.path().join("data"), Biblio::nouvelle(d.path().join("data")));
+    let o = l.ouvrir_fichier(&f.to_string_lossy()).unwrap();
+    let v = l.ouvrir_vignettes(&f).unwrap();
+    assert_eq!(v.noms.len(), 4);
+    assert_eq!(v.url_base, url_base(&v.jeton));
+    for i in 0..4 {
+        assert_eq!(servir(&l, &v.jeton, i, Some(192)).statut, 200, "vignette {i}");
+    }
+    assert_eq!(servir(&l, &o.jeton, 1, Some(1000)).statut, 200);
+    #[cfg(target_os = "linux")]
+    attendre_aucun_descripteur(&l, &f);
+
+    let garde = l.liberer(std::slice::from_ref(&f));
+    assert!(crate::liberation::en_ecriture(&f));
+    assert_eq!(l.etat_cache().1, 0, "pages du fichier oubliées");
+    #[cfg(target_os = "linux")]
+    assert_eq!(comicrust_core::providers::on_demand::open_descriptors(&f), 0);
+    // Une page demandée pendant l'écriture attend (le fichier n'est pas ouvert).
+    let (tx, rx) = mpsc::channel();
+    l.servir(&o.jeton, 3, Some(1000), move |r| tx.send(r).unwrap());
+    assert!(rx.recv_timeout(Duration::from_millis(300)).is_err(), "lecture suspendue pendant l'écriture");
+    #[cfg(target_os = "linux")]
+    assert_eq!(comicrust_core::providers::on_demand::open_descriptors(&f), 0);
+    let ecrit =
+        comicrust_core::writer::write_comic_info(&f, r#"<ComicBook Id="x"><Series>Libéré</Series></ComicBook>"#)
+            .unwrap();
+    assert_eq!(ecrit, comicrust_core::writer::Outcome::Written);
+    drop(garde);
+    // Écriture finie : la page attendue arrive, lue dans le fichier réécrit.
+    let r = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+    assert_eq!(taille(&r), (130, 300));
+    assert_eq!(taille(&servir(&l, &v.jeton, 2, Some(192))).0, 120, "plus étroite que 192 : taille d'origine");
+    assert!(!crate::liberation::en_ecriture(&f));
+    #[cfg(target_os = "linux")]
+    attendre_aucun_descripteur(&l, &f);
+    // La séance de vignettes n'écrit aucun avancement.
+    l.fermer_livre(&v.jeton).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
 }

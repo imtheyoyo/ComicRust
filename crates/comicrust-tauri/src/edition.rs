@@ -17,6 +17,7 @@
 
 use crate::biblio::{Biblio, GardeEdition, SourceBiblio};
 use crate::lecteur::Lecteur;
+use crate::pages_livre::{self, PageModifiee, PagesLivre};
 use crate::reglages::{self, ReglagesEdition};
 use comicrust_core::db::{self, BookEdit, ComicDatabase, DbConfig, FileState, Record, WriteReport};
 use comicrust_core::edit::CUSTOM_VALUE_PREFIX;
@@ -237,7 +238,12 @@ pub struct Proposition {
 #[serde(rename_all = "camelCase")]
 pub struct DemandeModification {
     pub ids: Vec<String>,
+    #[serde(default)]
     pub champs: Vec<ChampModifie>,
+    /// Onglet « Pages » modifié (un seul livre) : liste complète dans le nouvel ordre de lecture
+    /// (`docs/tauri/ipc-pages.md`).
+    #[serde(default)]
+    pub pages: Option<Vec<PageModifiee>>,
     #[serde(default)]
     pub ecrire_dans_fichier: bool,
     #[serde(default)]
@@ -1105,6 +1111,12 @@ impl Edition {
         if livres.len() > SEUIL_CONFIRMATION && !d.confirme {
             return Ok(confirmation(Operation::Modification, livres.len()));
         }
+        // Onglet « Pages » : nouvelle liste vérifiée avant toute écriture (rien d'écrit si refusée).
+        let pages_a_ecrire = match &d.pages {
+            None => None,
+            Some(_) if livres.len() != 1 => return Err("les pages ne se modifient que pour un seul livre".into()),
+            Some(m) => pages_livre::fusionner(&livres[0].pages.page, self.nombre_images(&livres[0])?, m)?,
+        };
         self.memoriser(ReglagesEdition { ecrire_dans_fichier: Some(d.ecrire_dans_fichier), ..Default::default() });
         // Un champ envoyé deux fois : la dernière valeur l'emporte.
         let mut champs: Vec<(String, String)> = Vec::new();
@@ -1116,10 +1128,13 @@ impl Edition {
         let mut res = Resultats::default();
         let mut modifies: Vec<String> = Vec::new();
         let mut avance = Avance { sortie, operation: Operation::Modification, total: livres.len(), derniere: None };
-        if !champs.is_empty() {
+        if !champs.is_empty() || pages_a_ecrire.is_some() {
             avance.noter(0, &livres[0].caption());
-            let edits: Vec<FieldEdit> =
+            let mut edits: Vec<FieldEdit> =
                 livres.iter().flat_map(|b| champs.iter().map(|(n, v)| modification(&b.id, n, v))).collect();
+            if let Some(p) = &pages_a_ecrire {
+                edits.push(FieldEdit::pages(&livres[0].id, p.clone()));
+            }
             let rapport = match &cible {
                 Cible::Store(cfg) => Store::open_existing(cfg)
                     .and_then(|mut st| edit::apply_edits(EditTarget::Store(&mut st), &edits))
@@ -1129,7 +1144,8 @@ impl Edition {
                 Cible::LectureSeule(m) => return Err(m.clone()),
             };
             avance.noter(livres.len(), "");
-            let couv = champs.iter().any(|(n, _)| n == "PreferredFrontCover");
+            // Pages changées : la couverture avant a pu changer.
+            let couv = pages_a_ecrire.is_some() || champs.iter().any(|(n, _)| n == "PreferredFrontCover");
             modifies.extend(self.biblio.remplacer_fiches(&rapport.changed, couv));
             noter_rapport_fiches(&mut res, &livres, &rapport);
         }
@@ -1160,6 +1176,56 @@ impl Edition {
         if !ids.is_empty() {
             sortie(EvenementEdition::BibliothequeModifiee { ids });
         }
+    }
+
+    // ───────────── Onglet « Pages » ─────────────
+
+    /// Nombre d'images du fichier du livre (lu dans le fichier, sinon `PageCount` de la fiche).
+    fn nombre_images(&self, b: &LibraryBook) -> Result<usize, String> {
+        let fichier = b.file.as_deref().map(str::trim).filter(|f| !f.is_empty()).ok_or("livre sans fichier")?;
+        let chemin = Path::new(fichier);
+        crate::liberation::attendre_libre(chemin, Duration::from_secs(25));
+        match comicrust_core::open_book_patiently(chemin, Duration::from_secs(20)) {
+            Ok(l) => Ok(l.pages().len()),
+            Err(e) => match b.page_count.filter(|n| *n > 0) {
+                Some(n) => Ok(n as usize),
+                None => Err(format!("fichier illisible : {e}")),
+            },
+        }
+    }
+
+    /// Pages du livre `id` pour l'onglet « Pages » : séance de vignettes ouverte (index des URL
+    /// = image du fichier), liste complète d'après la fiche. `remplace` : séance précédente à fermer.
+    pub fn lire_pages(&self, id: &str, remplace: Option<&str>) -> Result<PagesLivre, String> {
+        if let Some(j) = remplace {
+            let _ = self.lecteur.fermer_livre(j);
+        }
+        let base = self.biblio.base()?;
+        let b = base.get(id).cloned().ok_or_else(|| format!("livre introuvable : {id}"))?;
+        let fichier = b.file.as_deref().map(str::trim).filter(|f| !f.is_empty()).ok_or("livre sans fichier")?;
+        let chemin = PathBuf::from(fichier);
+        let s = self.lecteur.ouvrir_vignettes(&chemin)?;
+        let liste = comicrust_core::pages::full_list(&b.pages.page, s.noms.len());
+        let lecture_seule = self.cible().lecture_seule().map(str::to_string);
+        Ok(PagesLivre {
+            id: b.id.clone(),
+            pages: pages_livre::vers_pages_livre(&liste, &s.noms, &s.doubles, &s.url_base),
+            jeton: s.jeton,
+            url_base: s.url_base,
+            largeur_vignette: pages_livre::LARGEUR_VIGNETTE,
+            nb_images: s.noms.len(),
+            modifiable: lecture_seule.is_none(),
+            lecture_seule,
+            ecrire_dans_fichier_possible: accepte_infos(&chemin),
+            types: pages_livre::choix_types(),
+            rotations: pages_livre::choix_rotations(),
+            positions: pages_livre::choix_positions(),
+        })
+    }
+
+    /// Ferme une séance de vignettes (jeton inconnu : sans effet).
+    pub fn fermer_pages(&self, jeton: &str) {
+        let _ = self.lecteur.fermer_livre(jeton);
     }
 
     // ───────────── Fichiers ─────────────
@@ -1260,7 +1326,12 @@ impl Edition {
                 out.push(resultat(b, Statut::Erreur, Some("livre absent de la bibliothèque".into())));
                 continue;
             };
-            match writer::write_comic_info(&chemin, &fiche.data) {
+            // Fichier libéré (lecteur, vignettes, couvertures) le temps de l'écriture, rechargé après.
+            let ecriture = {
+                let _libere = self.lecteur.liberer(std::slice::from_ref(&chemin));
+                writer::write_comic_info(&chemin, &fiche.data)
+            };
+            match ecriture {
                 Ok(o) => {
                     let ecrit = o == Outcome::Written;
                     if ecrit {
@@ -1456,7 +1527,11 @@ impl Edition {
                 continue;
             }
             let mut r = resultat(b, Statut::Ok, None);
-            match ranger_original(original) {
+            let range = {
+                let _libere = self.lecteur.liberer(std::slice::from_ref(original));
+                ranger_original(original)
+            };
+            match range {
                 Ok(p) => r.message = Some(format!("{pages} pages, original rangé dans {}", p.display())),
                 Err(e) => {
                     r.statut = Statut::Erreur;
@@ -1614,7 +1689,11 @@ impl Edition {
                 (None, Cible::Comicrack(cfg)) => EditTarget::ComicRack(cfg),
                 _ => EditTarget::ReadOnly,
             };
-            match edit::rename_or_move(cible_ecriture, b, Path::new(&l.vers)) {
+            let deplacement = {
+                let _libere = self.lecteur.liberer(&[PathBuf::from(&l.de)]);
+                edit::rename_or_move(cible_ecriture, b, Path::new(&l.vers))
+            };
+            match deplacement {
                 Ok(m) => {
                     self.lecteur.oublier_fichier(Path::new(&l.de));
                     let mut r = resultat(b, Statut::Ok, None);

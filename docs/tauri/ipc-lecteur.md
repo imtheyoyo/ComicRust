@@ -96,6 +96,12 @@ Le front construit l'URL avec `${urlBase}/${index}?l=${largeurMax}` (pas de reco
   lecture (`providers/on_demand.rs`) ; un livre affiché peut être réécrit, renommé ou déplacé sous
   Windows. Fichier réécrit (infos écrites par ComicRack…) : le livre est rouvert avant la lecture
   suivante (pages différentes : erreur 500, rouvrir le livre).
+- **Écriture par ComicRust** (infos, pages, rangement de l'original converti, renommage) : le
+  fichier est d'abord **libéré** (séances qui l'affichent arrêtées après leur lecture en cours,
+  pages en cache oubliées, nouvelles lectures de ce fichier — pages, vignettes, couvertures —
+  suspendues jusqu'à la fin de l'écriture, 25 s au plus), puis les séances le **rechargent**
+  (`liberation.rs`, `Lecteur::liberer` ; voir `ipc-pages.md`). Corrige l'« os error 5 » possible sous
+  Windows quand une lecture (préchargement, bandeau de miniatures) tombait pendant le remplacement.
 - La CSP (`tauri.conf.json`) autorise ces origines dans `img-src` et `connect-src`.
 
 ## Avancement

@@ -123,6 +123,7 @@ version egui) : un champ vide **vide** la fiche.
 interface DemandeModification {
   ids: string[];
   champs: ChampModifie[];       // SEULEMENT les champs modifiés par l'utilisateur
+  pages?: PageModifiee[];       // onglet Pages modifié (un seul livre) : voir ipc-pages.md
   ecrireDansFichier: boolean;   // écrire aussi ComicInfo.xml dans les CBZ (mémorisé dans les réglages)
   confirme?: boolean;           // garde-fou : true après la confirmation de l'utilisateur
 }
@@ -155,8 +156,8 @@ Rien n'est écrit pour un champ non envoyé ; un champ envoyé égal à la valeu
 Écriture d'un CBZ (`comicrust_core::writer`) : archive réécrite dans un fichier temporaire du même
 dossier (pages recopiées sans recompression), vérifiée, puis **remplacement atomique** de l'original
 (nouvelles tentatives pendant ~3 s si le fichier est momentanément refusé : antivirus, partage SMB,
-ComicRack). Aucun fichier n'est gardé ouvert ; les livres ouverts dans le lecteur relisent le fichier
-à la page suivante. Couvertures en cache et pages en cache du livre sont oubliées après l'écriture :
+ComicRack). Aucun fichier n'est gardé ouvert ; avant l'écriture, le fichier est **libéré** (lecteur,
+vignettes et couvertures suspendus pour ce fichier, voir `ipc-pages.md`) puis rechargé après. Couvertures en cache et pages en cache du livre sont oubliées après l'écriture :
 l'`urlCouverture` d'un livre dont la couverture a pu changer reçoit un suffixe `?v=<n>` (la WebView
 garde une heure l'image d'une même URL) ; le front l'utilise toujours telle quelle.
 
@@ -271,4 +272,4 @@ le bilan en `ignore` avec le message « non fait : arrêt demandé ».
 - Écritures « Fichiers » non reportées dans ComicRack (base injoignable, conflit) : la version egui les
   garde dans ses réglages et les refait au lancement suivant ; ici elles sont signalées en erreur dans le
   bilan (le fichier, lui, est bien écrit ; relancer « Écrire les infos » refait le report).
-- Onglet « Pages » et scripts `Editor` : étapes 4 et 7.
+- Onglet « Pages » : étape 4, contrat [`ipc-pages.md`](ipc-pages.md). Scripts `Editor` : étape 7.

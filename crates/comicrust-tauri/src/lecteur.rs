@@ -27,6 +27,7 @@
 
 use crate::avancement::Memoire;
 use crate::biblio::Biblio;
+use crate::liberation;
 use comicrust_core::db::{BookEdit, Value};
 use comicrust_core::library::{LibraryBook, PageInfo as PageFiche};
 use comicrust_core::pages::{self, ReadingPage};
@@ -59,6 +60,8 @@ pub const CACHE_ENTREES: usize = 48;
 pub const DELAI_OUVERTURE: Duration = Duration::from_secs(40);
 /// Attente maximale d'une page (comme les couvertures).
 pub const DELAI_PAGE: Duration = Duration::from_secs(25);
+/// Attente maximale de la lecture en cours d'une séance avant l'écriture de son fichier.
+pub const DELAI_LIBERATION: Duration = Duration::from_secs(10);
 /// Bornes du paramètre `l=` (largeur maximale demandée, en pixels).
 pub const LARGEUR: (u32, u32) = (16, 16384);
 /// Largeur demandée en dessous de laquelle une page est une **miniature** (bandeau du lecteur,
@@ -399,6 +402,11 @@ enum Commande {
     Page { index: usize, largeur: Option<u32>, reponse: Arc<Reponse> },
     /// Page servie depuis le cache : préchargement autour d'elle.
     Voisines { index: usize, largeur: Option<u32> },
+    /// Écriture du fichier imminente : lâcher le fournisseur (après la lecture en cours),
+    /// oublier les préchargements, puis accuser réception.
+    Liberer(Sender<()>),
+    /// Écriture finie : rouvrir le fichier tout de suite (pas d'attente à la page suivante).
+    Recharger,
 }
 
 /// Ce que le fil renvoie après l'ouverture.
@@ -423,28 +431,30 @@ fn ouvrir_fournisseur(chemin: &Path) -> Result<Box<dyn PageProvider>, String> {
     open_book_patiently(chemin, Duration::from_secs(20)).map_err(|e| e.to_string())
 }
 
-/// Rouvre le livre si le fichier a changé depuis la dernière ouverture (copie de
-/// `loader.rs::refresh` de la version egui).
-fn rafraichir(
+/// Fournisseur prêt à lire : attend la fin d'une écriture en cours de ce fichier
+/// ([`liberation`]), rouvre le livre s'il a été libéré ou si le fichier a changé depuis la
+/// dernière ouverture (copie de `loader.rs::refresh` de la version egui ; images différentes :
+/// erreur, il faut rouvrir le livre).
+fn rafraichir<'a>(
     chemin: &Path,
     empreinte: &mut Option<(u64, Option<SystemTime>)>,
-    livre: &mut Box<dyn PageProvider>,
+    livre: &'a mut Option<Box<dyn PageProvider>>,
     noms: &[String],
-) -> Result<(), String> {
-    if chemin.is_dir() {
-        return Ok(());
+) -> Result<&'a mut Box<dyn PageProvider>, String> {
+    if !liberation::attendre_libre(chemin, DELAI_PAGE) {
+        return Err("fichier en cours d'écriture : réessayer".into());
     }
-    let maintenant = file_stamp(chemin);
-    if maintenant == *empreinte {
-        return Ok(());
+    let maintenant = if chemin.is_dir() { None } else { file_stamp(chemin) };
+    if livre.is_none() || (!chemin.is_dir() && maintenant != *empreinte) {
+        *livre = None;
+        let neuf = ouvrir_fournisseur(chemin)?;
+        if neuf.pages() != noms {
+            return Err("le fichier a changé (pages différentes) : rouvrir le livre".into());
+        }
+        *livre = Some(neuf);
+        *empreinte = if maintenant.is_some() || chemin.is_dir() { maintenant } else { file_stamp(chemin) };
     }
-    let neuf = ouvrir_fournisseur(chemin)?;
-    if neuf.pages() != noms {
-        return Err("le fichier a changé (pages différentes) : rouvrir le livre".into());
-    }
-    *livre = neuf;
-    *empreinte = if maintenant.is_some() { maintenant } else { file_stamp(chemin) };
-    Ok(())
+    Ok(livre.as_mut().expect("fournisseur ouvert"))
 }
 
 struct ContexteFil {
@@ -471,6 +481,11 @@ fn lancer_fil(ctx: ContexteFil) -> Result<(Sender<Commande>, Ouverture), String>
 }
 
 fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<Ouverture, String>>) {
+    // Fichier en cours d'écriture (infos, pages…) : l'ouverture attend la fin.
+    if !liberation::attendre_libre(&ctx.chemin, DELAI_PAGE) {
+        let _ = tx_ouv.send(Err("fichier en cours d'écriture : réessayer".into()));
+        return;
+    }
     let mut empreinte = file_stamp(&ctx.chemin);
     let mut livre = match ouvrir_fournisseur(&ctx.chemin) {
         Ok(l) => l,
@@ -484,16 +499,14 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
     let info = livre.comic_info().ok().flatten();
     // Ordre de lecture : fiche de la bibliothèque, sinon ComicInfo.xml du fichier (`loader.rs::plan`).
     // Pages « double page » du ComicInfo.xml (attribut `DoublePage`, absent des fiches).
-    let mut doubles = HashSet::new();
+    let pages_ci = info.as_ref().and_then(|i| i.pages.as_ref()).map(|p| p.page.as_slice()).unwrap_or(&[]);
+    let doubles: HashSet<usize> = pages_ci.iter().filter(|p| p.double_page).map(|p| p.image as usize).collect();
     let source = match &ctx.ordre {
         Some(l) => l.clone(),
         None => {
             let mut l = info.as_ref().map(pages::from_comic_info).unwrap_or_default();
             // Tailles du ComicInfo.xml (non reprises par `from_comic_info`).
-            for ci in info.as_ref().and_then(|i| i.pages.as_ref()).map(|p| p.page.as_slice()).unwrap_or(&[]) {
-                if ci.double_page {
-                    doubles.insert(ci.image as usize);
-                }
+            for ci in pages_ci {
                 if let Some(p) = l.iter_mut().find(|p| p.image == ci.image as i32) {
                     p.image_width = ci.image_width.map(|w| w.to_string());
                     p.image_height = ci.image_height.map(|h| h.to_string());
@@ -511,6 +524,10 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
     if tx_ouv.send(Ok(ouverture)).is_err() {
         return; // ouverture abandonnée (délai dépassé)
     }
+    // `None` : fournisseur lâché (écriture du fichier) ; rouvert à la lecture suivante.
+    let mut livre: Option<Box<dyn PageProvider>> = Some(livre);
+    let mut liberations: Vec<Sender<()>> = Vec::new();
+    let mut recharger = false;
     let mut urgentes: VecDeque<(usize, Option<u32>, Arc<Reponse>)> = VecDeque::new();
     let mut prechargements: VecDeque<(usize, Option<u32>)> = VecDeque::new();
     let cle = |i: usize, l: Option<u32>| (ctx.jeton.clone(), i, l);
@@ -534,23 +551,45 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
     };
     let ranger = |c: Commande,
                   urgentes: &mut VecDeque<(usize, Option<u32>, Arc<Reponse>)>,
-                  pre: &mut VecDeque<(usize, Option<u32>)>| match c {
+                  pre: &mut VecDeque<(usize, Option<u32>)>,
+                  liberations: &mut Vec<Sender<()>>,
+                  recharger: &mut bool| match c {
         // La dernière demande est la plus urgente (page affichée).
         Commande::Page { index, largeur, reponse } => urgentes.push_front((index, largeur, reponse)),
         Commande::Voisines { index, largeur } => voisines(index, largeur, pre),
+        Commande::Liberer(ack) => {
+            pre.clear();
+            *recharger = false;
+            liberations.push(ack);
+        }
+        Commande::Recharger => *recharger = true,
     };
     loop {
-        if urgentes.is_empty() && prechargements.is_empty() {
+        if urgentes.is_empty() && prechargements.is_empty() && !recharger {
             match rx.recv() {
-                Ok(c) => ranger(c, &mut urgentes, &mut prechargements),
+                Ok(c) => ranger(c, &mut urgentes, &mut prechargements, &mut liberations, &mut recharger),
                 Err(_) => return, // livre fermé
             }
         }
         loop {
             match rx.try_recv() {
-                Ok(c) => ranger(c, &mut urgentes, &mut prechargements),
+                Ok(c) => ranger(c, &mut urgentes, &mut prechargements, &mut liberations, &mut recharger),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
+            }
+        }
+        // Libération : entre deux lectures seulement (aucune lecture en cours ici).
+        if !liberations.is_empty() {
+            livre = None;
+            for ack in liberations.drain(..) {
+                let _ = ack.send(());
+            }
+        }
+        if recharger {
+            recharger = false;
+            // Erreur (fichier renommé, pages différentes…) : rendue à la page suivante.
+            if livre.is_none() && rafraichir(&ctx.chemin, &mut empreinte, &mut livre, &noms).is_err() {
+                livre = None;
             }
         }
         let (index, largeur, reponse) = match urgentes.pop_front() {
@@ -573,7 +612,7 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
                 None => Err((404, "page hors du livre".to_string())),
                 // Image servie non tournée : la rotation est appliquée par le front.
                 Some(image) => rafraichir(&ctx.chemin, &mut empreinte, &mut livre, &noms)
-                    .and_then(|()| produire_page(livre.as_mut(), image, 0, largeur))
+                    .and_then(|l| produire_page(l.as_mut(), image, 0, largeur))
                     .map(|p| {
                         let p = Arc::new(p);
                         cache().inserer(k, p.clone());
@@ -595,6 +634,17 @@ fn corps_du_fil(ctx: ContexteFil, rx: Receiver<Commande>, tx_ouv: Sender<Result<
 }
 
 // ───────────────────────────── Séances ─────────────────────────────
+
+/// Séance de vignettes ouverte par [`Lecteur::ouvrir_vignettes`].
+#[derive(Debug, Clone)]
+pub struct SeanceVignettes {
+    pub jeton: String,
+    pub url_base: String,
+    /// Noms des images du fichier (ordre naturel) : leur nombre est celui des images.
+    pub noms: Vec<String>,
+    /// Images marquées `DoublePage` dans le ComicInfo.xml du fichier.
+    pub doubles: HashSet<usize>,
+}
 
 struct Session {
     id: Option<String>,
@@ -843,7 +893,41 @@ impl Lecteur {
             enregistree: false,
             touchee: Instant::now(),
         };
-        // Trop de livres ouverts : le moins récemment utilisé est fermé (lecture enregistrée).
+        self.inserer_session(jeton, session);
+        Ok(ouvert)
+    }
+
+    /// Ouvre une **séance de vignettes** sur `chemin` (onglet Pages) : index des URL `cr-page`
+    /// = rang de l'image dans le fichier (ordre brut), aucun avancement enregistré.
+    pub fn ouvrir_vignettes(&self, chemin: &Path) -> Result<SeanceVignettes, String> {
+        let jeton = comicrust_core::store::new_book_id().replace('-', "");
+        let (tx, o) = lancer_fil(ContexteFil {
+            chemin: chemin.to_path_buf(),
+            ordre: Some(Vec::new()),
+            jeton: jeton.clone(),
+            cache: self.cache.clone(),
+        })?;
+        let session = Session {
+            id: None,
+            chemin: chemin.to_path_buf(),
+            tx,
+            nb: o.total,
+            visibles: (0..o.total).collect(),
+            total: o.total,
+            courante: 0,
+            plus_loin: 0,
+            store: None,
+            ouvert_a: comicrust_core::db::write::now(),
+            enregistree: true,
+            touchee: Instant::now(),
+        };
+        self.inserer_session(jeton.clone(), session);
+        Ok(SeanceVignettes { url_base: url_base(&jeton), jeton, noms: o.noms, doubles: o.doubles })
+    }
+
+    /// Ajoute une séance ; trop de livres ouverts : le moins récemment utilisé est fermé
+    /// (lecture enregistrée).
+    fn inserer_session(&self, jeton: String, session: Session) {
         let evinces: Vec<(String, Session)> = {
             let mut g = self.verrou();
             g.insert(jeton.clone(), session);
@@ -866,7 +950,6 @@ impl Lecteur {
             }
             self.cache.lock().unwrap_or_else(|e| e.into_inner()).purger(&j);
         }
-        Ok(ouvert)
     }
 
     /// Préfixe des URL de pages d'une séance ouverte.
@@ -964,6 +1047,38 @@ impl Lecteur {
         }
     }
 
+    /// **Libère** les fichiers `chemins` avant de les écrire (infos, pages, conversion,
+    /// renommage) : nouvelles lectures de ces fichiers suspendues (pages, vignettes, couvertures :
+    /// [`liberation`]), séances qui les affichent arrêtées après leur lecture en cours (fournisseur
+    /// lâché), pages en cache oubliées. Quand la garde rendue disparaît (écriture finie), les
+    /// séances rechargent le fichier. Comme `PagesTab::release` / `reload` de la version egui.
+    pub fn liberer(&self, chemins: &[PathBuf]) -> GardeLiberation {
+        let reservation = liberation::reserver(chemins.iter().map(PathBuf::as_path));
+        let txs: Vec<Sender<Commande>> = self
+            .verrou()
+            .values()
+            .filter(|s| chemins.iter().any(|c| meme_chemin(&s.chemin, c)))
+            .map(|s| s.tx.clone())
+            .collect();
+        let acks: Vec<Receiver<()>> = txs
+            .iter()
+            .filter_map(|tx| {
+                let (a, r) = mpsc::channel();
+                tx.send(Commande::Liberer(a)).ok().map(|()| r)
+            })
+            .collect();
+        // Lecture en cours sur un NAS lent : on ne l'attend pas indéfiniment (l'écriture refait
+        // elle-même quelques tentatives si le fichier est encore tenu).
+        let fin = Instant::now() + DELAI_LIBERATION;
+        for r in acks {
+            let _ = r.recv_timeout(fin.saturating_duration_since(Instant::now()));
+        }
+        for c in chemins {
+            self.oublier_fichier(c);
+        }
+        GardeLiberation { reservation: Some(reservation), lecteur: self.clone(), chemins: chemins.to_vec() }
+    }
+
     /// Oublie les pages en cache des livres ouverts sur `chemin` (fichier réécrit) ; le fil du
     /// livre relit le fichier à la page suivante (empreinte changée).
     pub fn oublier_fichier(&self, chemin: &Path) {
@@ -1014,6 +1129,34 @@ impl Lecteur {
     }
 }
 
+/// Écriture en cours de fichiers libérés par [`Lecteur::liberer`] ; à sa disparition, les
+/// lectures reprennent et les séances concernées rechargent le fichier.
+#[must_use = "la libération prend fin dès que la garde est abandonnée"]
+pub struct GardeLiberation {
+    reservation: Option<liberation::Reservation>,
+    lecteur: Lecteur,
+    chemins: Vec<PathBuf>,
+}
+
+impl Drop for GardeLiberation {
+    fn drop(&mut self) {
+        drop(self.reservation.take());
+        for c in &self.chemins {
+            self.lecteur.oublier_fichier(c);
+        }
+        let txs: Vec<Sender<Commande>> = self
+            .lecteur
+            .verrou()
+            .values()
+            .filter(|s| self.chemins.iter().any(|c| meme_chemin(&s.chemin, c)))
+            .map(|s| s.tx.clone())
+            .collect();
+        for tx in txs {
+            let _ = tx.send(Commande::Recharger);
+        }
+    }
+}
+
 /// Même fichier ? (casse ignorée, comme les chemins Windows de la bibliothèque)
 fn meme_chemin(a: &Path, b: &Path) -> bool {
     a == b || a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
@@ -1021,4 +1164,4 @@ fn meme_chemin(a: &Path, b: &Path) -> bool {
 
 #[cfg(test)]
 #[path = "tests_lecteur.rs"]
-mod tests;
+pub(crate) mod tests;

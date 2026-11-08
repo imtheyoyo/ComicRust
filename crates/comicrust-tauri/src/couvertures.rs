@@ -47,6 +47,11 @@ pub fn couverture_jpeg(cache: &Path, id: &str, fichier: Option<&Path>, image: us
         }
     }
     let fichier = fichier.ok_or("livre sans fichier")?;
+    // Fichier en cours d'écriture (infos, pages, renommage) : attendre la fin plutôt que de
+    // l'ouvrir pendant son remplacement (Windows : os error 5 côté écriture).
+    if !crate::liberation::attendre_libre(fichier, DELAI_PRODUCTION) {
+        return Err("fichier en cours d'écriture".into());
+    }
     let mut livre = open_book_patiently(fichier, std::time::Duration::from_secs(20)).map_err(|e| e.to_string())?;
     let n = livre.pages().len();
     if n == 0 {

@@ -87,8 +87,8 @@ type OperationPages =
   | { op: 'rotation'; images: number[]; valeur: number }    // Alt+Maj+6…9 : 0 | 90 | 180 | 270
   | { op: 'position'; images: number[]; valeur: string }    // Default | Near | Far
   | { op: 'favori'; image: number; texte?: string }         // Ctrl+Maj+B ; texte vide/absent = supprimer (Ctrl+Maj+D)
-  | { op: 'ordreOrigine'; images?: number[] }               // « Réinitialiser » / « Remettre dans l'ordre d'origine »
-                                                            //   (images absentes : toutes) : ordre du fichier
+  | { op: 'ordreOrigine' }                                  // « Réinitialiser » / « Remettre dans l'ordre d'origine » :
+                                                            //   ordre du fichier pour toute la liste (types gardés)
   | { op: 'trierParNom'; numerique: boolean }               // « Trier par nom » (ordinal) / « (numérique) »
   | { op: 'reinitialiserTypes' }                            // 1re page « Couverture avant », les autres « Histoire »
   | { op: 'toutReinitialiser' };                            // ordre, types, rotation, position, favoris

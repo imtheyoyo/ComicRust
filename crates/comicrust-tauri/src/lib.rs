@@ -7,6 +7,8 @@
 //!   [`tri`] ; [`reglages`]),
 //! - le lecteur ([`lecteur`] : livres ouverts, pages du protocole `cr-page`, avancement ;
 //!   [`avancement`] : mémoire locale de lecture),
+//! - l'onglet Pages ([`pages_livre`] : pages d'un livre, opérations, vignettes) et la libération
+//!   des fichiers avant écriture ([`liberation`]),
 //! - l'édition ([`edition`] : infos des livres, ComicInfo.xml, conversion en CBZ, renommage),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
@@ -18,6 +20,8 @@ pub mod biblio;
 pub mod couvertures;
 pub mod edition;
 pub mod lecteur;
+pub mod liberation;
+pub mod pages_livre;
 pub mod portable;
 pub mod reglages;
 pub mod themes;

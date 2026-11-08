@@ -8,6 +8,7 @@ use crate::edition::{
     EvenementEdition, FicheEdition, ModeleNom, Proposition, ResultatRenommage,
 };
 use crate::lecteur::{self, Lecteur, LivreOuvert, ReponsePage};
+use crate::pages_livre::{OperationPages, PageLivre, PagesLivre};
 use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
 use crate::{infos_application, portable, themes, InfosApplication};
 use std::path::PathBuf;
@@ -218,6 +219,24 @@ fn appliquer_modifications(
     edition.appliquer_modifications(&demande, &sortie_edition(app))
 }
 
+/// Onglet « Pages » : pages du livre et séance de vignettes (`docs/tauri/ipc-pages.md`).
+#[tauri::command(async)]
+fn lire_pages(edition: tauri::State<'_, Edition>, id: String, remplace: Option<String>) -> Result<PagesLivre, String> {
+    edition.lire_pages(&id, remplace.as_deref())
+}
+
+/// Ferme une séance de vignettes de l'onglet « Pages ».
+#[tauri::command(async)]
+fn fermer_pages(edition: tauri::State<'_, Edition>, jeton: String) {
+    edition.fermer_pages(&jeton)
+}
+
+/// Opération de l'onglet « Pages » (rien n'est enregistré) : nouvelle liste.
+#[tauri::command(async)]
+fn transformer_pages(pages: Vec<PageLivre>, operation: OperationPages) -> Result<Vec<PageLivre>, String> {
+    crate::pages_livre::transformer(&pages, &operation)
+}
+
 /// Écrit les infos dans le ComicInfo.xml des CBZ.
 #[tauri::command(async)]
 fn ecrire_infos_fichiers(
@@ -376,6 +395,9 @@ pub fn run() {
             verifier_champs,
             ajouter_valeur_perso,
             appliquer_modifications,
+            lire_pages,
+            fermer_pages,
+            transformer_pages,
             ecrire_infos_fichiers,
             convertir_cbr_cbz,
             modeles_de_nom,
