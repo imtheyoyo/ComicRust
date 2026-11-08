@@ -1,0 +1,12 @@
+Rapport de recette ComicRust tauri-v0.5.0 — 08/11/2026 15:02
+Résultat : 53 OK, 0 échec(s), 0 non testé(s) sur 53.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- PR-04 : 10140ko
+- D-01 : Tout est ok, sauf :  / Lorsque je sélectionne plusieurs fichiers, puis menu, Renommer / déplacer, Modèle de nom modifié, bouton « Renommer N fichier(s) » en bleu : Echap ferme la fenêtre.
+- W-03 : version egui
+- N-01 : 484

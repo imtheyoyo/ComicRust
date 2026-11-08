@@ -181,8 +181,9 @@ Copie autonome, plusieurs livres du dossier d'essai à la suite dans la vue.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| Bloquants [B] | 32 | | |
-| Majeurs [M] | 17 | | |
-| Mineurs [m] | 4 | | |
+| Bloquants [B] | 32 | 32 | 0 |
+| Majeurs [M] | 17 | 17 | 0 |
+| Mineurs [m] | 4 | 4 | 0 |
 
 Décision et remarques :
+GO — recette validée le 08/11/2026 : 53 OK sur 53 (rapport : `recette/rapports/tauri-v0.5.0-2026-11-08.txt`). Remarque D-01 : dans Renommer / déplacer, Échap ferme la fenêtre même quand le modèle de nom a été modifié → Échap ne fermera plus si le modèle ou le dossier a été modifié (tauri-v0.6.0).
