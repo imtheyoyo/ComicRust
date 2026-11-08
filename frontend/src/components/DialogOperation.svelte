@@ -2,6 +2,7 @@
   // Opérations sur les fichiers de la sélection (menu contextuel) : « Écrire les infos dans le
   // fichier » et « Convertir en CBZ » (convertir_cbr_cbz). Étapes : confirmation, garde-fou des
   // opérations en masse (confirmationRequise), progression (edition-progression, Arrêter), bilan.
+  import { modale } from '../lib/modale';
   import { onDestroy, onMount } from 'svelte';
   import {
     annulerOperation, convertirCbrCbz, ecouter, ecrireInfosFichiers, enregistrerReglagesEdition, lireReglagesEdition,
@@ -16,7 +17,6 @@
   }
   let { operation, ids, onfermer }: Props = $props();
 
-  let dialogue = $state<HTMLDialogElement>();
   let etape = $state<'choix' | 'confirmation' | 'cours' | 'bilan'>('choix');
   let rangerOriginal = $state(false);
   let messageGardeFou = $state('');
@@ -34,7 +34,6 @@
   );
 
   onMount(() => {
-    dialogue?.showModal();
     void ecouter<ProgressionEdition>('edition-progression', (p) => {
       if (etape === 'cours' && p.operation === operation) progression = p;
     }).then((f) => (desabonner = f));
@@ -64,18 +63,16 @@
     }
   }
 
+  /** Le parent retire la fenêtre ({#if}) : pas de dialog.close() ici (voir lib/modale.ts). */
   function fermer() {
-    dialogue?.close();
     onfermer();
   }
 
-  function surCancel(e: Event) {
-    e.preventDefault();
-    if (etape !== 'cours') fermer();
-  }
+  /** Échap : pas pendant l'opération (le bilan doit arriver). */
+  const peutFermer = () => etape !== 'cours';
 </script>
 
-<dialog bind:this={dialogue} aria-labelledby="titre-operation" oncancel={surCancel} data-testid="dialogue-operation">
+<dialog aria-labelledby="titre-operation" use:modale={{ peutFermer, fermer, ouvrirAuMontage: true }} data-testid="dialogue-operation">
   <h2 id="titre-operation">{titre}</h2>
 
   {#if etape === 'choix'}

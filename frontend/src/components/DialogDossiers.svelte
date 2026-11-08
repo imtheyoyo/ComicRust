@@ -1,5 +1,6 @@
 <script lang="ts">
   // Dossiers surveillés : liste, ajout, retrait, lancement du scan avec barre de progression.
+  import { modale } from '../lib/modale';
   import { ajouterDossier, lancerScan, listerDossiers, retirerDossier, messageErreur } from '../lib/api';
   import type { SuiviScan } from '../lib/bibliotheque.svelte';
 
@@ -60,7 +61,7 @@
   const pourcent = $derived(scan.total > 0 ? Math.round((scan.fait / scan.total) * 100) : 0);
 </script>
 
-<dialog bind:this={dialogue} aria-labelledby="titre-dossiers" data-testid="dialogue-dossiers">
+<dialog bind:this={dialogue} use:modale aria-labelledby="titre-dossiers" data-testid="dialogue-dossiers">
   <h2 id="titre-dossiers">Dossiers surveillés</h2>
 
   {#if dossiers.length === 0}

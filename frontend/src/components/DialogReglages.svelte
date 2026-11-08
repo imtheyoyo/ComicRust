@@ -1,6 +1,7 @@
 <script lang="ts">
   // Réglages : choix du thème (fichiers CSS de data\themes), dossiers du mode portable et, en mode
   // lié à ComicRack, l'option « Lecture et écriture » (section `edition` de data\comicrust-tauri.json).
+  import { modale } from '../lib/modale';
   import {
     enregistrerReglagesEdition, infos, lireReglagesEdition, listerThemes, messageErreur, type InfosApplication,
     type ModeBiblio, type Theme,
@@ -66,7 +67,7 @@
   }
 </script>
 
-<dialog bind:this={dialogue} aria-labelledby="titre-reglages">
+<dialog bind:this={dialogue} use:modale aria-labelledby="titre-reglages">
   <h2 id="titre-reglages">Réglages</h2>
   <div class="ligne">
     <label for="theme">Apparence</label>

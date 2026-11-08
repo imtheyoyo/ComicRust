@@ -2,6 +2,7 @@
   // « Renommer / déplacer » les fichiers de la sélection d'après un modèle de nom (format d'export
   // de ComicRack) : APERÇU calculé par le backend (renommer_deplacer apercu:true) à chaque
   // changement, puis application des seules lignes sans problème (jamais d'écrasement).
+  import { modale } from '../lib/modale';
   import { onDestroy, onMount } from 'svelte';
   import {
     annulerOperation, ecouter, lireReglagesEdition, messageErreur, modelesDeNom, renommerDeplacer,
@@ -15,7 +16,6 @@
   }
   let { ids, onfermer }: Props = $props();
 
-  let dialogue = $state<HTMLDialogElement>();
   let modeles = $state<ModeleNom[]>([]);
   let modele = $state('');
   let dossierCible = $state('');
@@ -34,7 +34,6 @@
   let desabonner: (() => void) | undefined;
 
   onMount(() => {
-    dialogue?.showModal();
     void ecouter<ProgressionEdition>('edition-progression', (p) => {
       if (etape === 'cours' && p.operation === 'renommage') progression = p;
     }).then((f) => (desabonner = f));
@@ -105,20 +104,18 @@
     }
   }
 
+  /** Le parent retire la fenêtre ({#if}) : pas de dialog.close() ici (voir lib/modale.ts). */
   function fermer() {
-    dialogue?.close();
     onfermer();
   }
 
-  function surCancel(e: Event) {
-    e.preventDefault();
-    if (etape !== 'cours') fermer();
-  }
+  /** Échap : pas pendant l'opération (le bilan doit arriver). */
+  const peutFermer = () => etape !== 'cours';
 
   const modeleChoisi = $derived(modeles.find((m) => m.modele === modele)?.modele ?? '');
 </script>
 
-<dialog bind:this={dialogue} class="renommer" aria-labelledby="titre-renommer" oncancel={surCancel} data-testid="dialogue-renommer">
+<dialog class="renommer" aria-labelledby="titre-renommer" use:modale={{ peutFermer, fermer, ouvrirAuMontage: true }} data-testid="dialogue-renommer">
   <h2 id="titre-renommer">Renommer / déplacer {ids.length > 1 ? `${ids.length.toLocaleString('fr-FR')} fichiers` : 'le fichier'}</h2>
 
   {#if etape === 'apercu' || etape === 'confirmation'}

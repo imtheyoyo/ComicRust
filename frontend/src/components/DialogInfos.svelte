@@ -12,6 +12,7 @@
     ajouterValeurPerso, appliquerModifications, annulerOperation, ecouter, lireFiches, messageErreur, verifierChamps,
     type BilanOperation, type ChampFiche, type ChampModifie, type FicheEdition, type ProgressionEdition,
   } from '../lib/api';
+  import { modale } from '../lib/modale';
   import ChampSuggestions from './ChampSuggestions.svelte';
   import ResultatsLot, { pourcent } from './ResultatsLot.svelte';
 
@@ -28,7 +29,6 @@
   const MULTIPLE = '(valeurs multiples)';
   const CHOIX_MULTIPLE = '\u0000multiple';
 
-  let dialogue = $state<HTMLDialogElement>();
   let ids = $state<string[]>([]);
   let fiche = $state<FicheEdition | null>(null);
   /** Texte courant de chaque champ. */
@@ -51,7 +51,6 @@
   let desabonner: (() => void) | undefined;
 
   onMount(() => {
-    dialogue?.showModal();
     void charger(idsInitiaux);
     void ecouter<ProgressionEdition>('edition-progression', (p) => {
       if (enregistrement && p.operation === 'modification') progression = p;
@@ -193,8 +192,8 @@
     }
   }
 
+  /** Le parent retire la fenêtre ({#if}) : pas de dialog.close() ici (voir lib/modale.ts). */
   function fermer() {
-    dialogue?.close();
     onfermer();
   }
 
@@ -204,10 +203,7 @@
   }
 
   /** Échap : ferme seulement si rien n'est modifié (sinon Annuler, explicitement), comme egui. */
-  function surCancel(e: Event) {
-    e.preventDefault();
-    if (!sale && !enregistrement && !confirmation) fermer();
-  }
+  const peutFermerParEchap = () => !sale && !enregistrement && !confirmation;
 
   function clavier(e: KeyboardEvent) {
     // Ctrl+Entrée : OK (comme le bouton par défaut d'une fenêtre Windows).
@@ -263,7 +259,7 @@
   const estPerso = $derived(!!fiche && fiche.onglets[onglet]?.nom === 'Personnalisé');
 </script>
 
-<dialog bind:this={dialogue} class="infos" aria-labelledby="titre-infos" oncancel={surCancel} onkeydown={clavier} data-testid="dialogue-infos">
+<dialog class="infos" aria-labelledby="titre-infos" use:modale={{ peutFermer: peutFermerParEchap, fermer, ouvrirAuMontage: true }} onkeydown={clavier} data-testid="dialogue-infos">
   <h2 id="titre-infos">{titreFenetre}</h2>
 
   {#if fiche}
