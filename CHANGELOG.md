@@ -5,6 +5,27 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.6.1] — 2026-11-10
+
+Version corrective de l'étape 5 (**listes ComicRack**), issue d'essais pilotés par l'IA sur la
+tauri-v0.6.0.
+
+### Corrections
+- **Éditeur de listes intelligentes** : changer le champ d'un critère ne provoque plus l'erreur
+  « Aperçu impossible : missing field `genre` » (aperçu et enregistrement fonctionnent).
+- **Série, numéro et volume déduits du nom de fichier** quand la fiche n'en a pas, comme ComicRack :
+  affichage, tri et regroupement par série, rattachement des livres d'un `.cbl` (`Silver Surfer
+  #3 ok.pdf`…) et export `.cbl`. La fiche reste prioritaire et rien de déduit n'est écrit dans les
+  fichiers.
+- **Focus clavier** : après un menu contextuel ou la fermeture d'une fenêtre (Échap), Suppr et F2
+  répondent sans qu'il faille recliquer.
+- « Ajouter à une liste… » propose la dernière liste utilisée ; la liste native de « Déplacer
+  dans… » est lisible en thème sombre.
+
+### Recette
+[`recette/tauri-v0.6.1.md`](recette/tauri-v0.6.1.md) : correctifs, non-régression et tests de la
+tauri-v0.6.0 à reprendre.
+
 ## [tauri-v0.6.0] — 2026-11-09
 
 Étape 5 de la version **Tauri 2** (branche `tauri2-web`) : les **listes ComicRack**. Voir
