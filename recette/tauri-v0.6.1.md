@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.6.1 (pré-release corrective de l'étape 5 : **listes ComicRack**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.6.1-windows-x64.zip` |
-| SHA-256 | *(à renseigner après la construction du paquet)* |
+| SHA-256 | `ba79933a09cf369706f893ea96c1314ccab2617ef52c23efb757800e3a10a7d1` |
 | Contenu | **éditeur de listes intelligentes** : plus d'erreur « missing field `genre` » après un changement de champ ; **série, numéro et volume déduits du nom de fichier** quand la fiche n'en a pas (affichage, tri, regroupement, correspondance et export `.cbl`) ; **focus clavier** rendu après un menu contextuel ou une fenêtre ; « Ajouter à une liste… » propose la dernière liste utilisée ; liste native de « Déplacer dans… » lisible en thème sombre |
 | Origine | essais de la tauri-v0.6.0 menés par l'IA avec le pilotage MCP (10/11/2026, copie autonome) ; la tauri-v0.6.0 est toujours en attente de ton rapport : **reprendre ici ses tests non validés** |
 
