@@ -1,1 +1,1 @@
-tauri-v0.6.0
+tauri-v0.6.1
