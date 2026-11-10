@@ -28,7 +28,8 @@
   async function changerChamp(k: number, c: Critere, type: string) {
     try {
       const n = await nouveauCritere(type, $state.snapshot(c) as Critere);
-      if (noeuds[k] === c) noeuds[k] = n;
+      // Le backend renvoie un critère « nu » : on remet le marqueur de genre attendu par les commandes.
+      if (noeuds[k] === c) noeuds[k] = { ...n, genre: 'critere' };
     } catch (e) {
       onerreur?.(messageErreur(e));
     }
