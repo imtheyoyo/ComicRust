@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/comicrust-core", "crates/comicrust", "crates/comicrust-cli"]
+members = ["crates/comicrust-core", "crates/comicrust", "crates/comicrust-cli", "crates/egui-mcp"]
 
 [workspace.package]
 version = "0.10.8"

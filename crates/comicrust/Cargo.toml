@@ -6,7 +6,12 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Serveur MCP : pilotage par une IA pour les tests de débogage (ComicRust-mcp.exe, voir docs/MCP.md).
+mcp = ["dep:egui-mcp"]
+
 [dependencies]
+egui-mcp = { path = "../egui-mcp", optional = true }
 comicrust-core = { version = "0.10.8", path = "../comicrust-core" }
 eframe = { version = "0.37", features = ["persistence"] }
 egui_extras = { version = "0.37", default-features = false }

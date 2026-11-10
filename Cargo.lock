@@ -957,6 +957,7 @@ dependencies = [
  "comicrust-core",
  "eframe",
  "egui",
+ "egui-mcp",
  "egui_extras",
  "image",
  "mysql",
@@ -1532,6 +1533,15 @@ dependencies = [
  "smallvec",
  "unicode-segmentation",
  "web-sys",
+]
+
+[[package]]
+name = "egui-mcp"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "png 0.18.1",
+ "serde_json",
 ]
 
 [[package]]

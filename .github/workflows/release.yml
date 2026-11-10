@@ -69,6 +69,11 @@ jobs:
       - name: Compilation release
         run: cargo build --release --locked --target $env:TARGET -p comicrust -p comicrust-cli
 
+      # Variante pilotable par une IA pour les tests (serveur MCP, docs/MCP.md). Dossier de
+      # compilation séparé : l'exe normal n'en contient rien.
+      - name: Compilation ComicRust-mcp.exe
+        run: cargo build --release --locked --target $env:TARGET -p comicrust --features mcp --target-dir target-mcp
+
       - name: Empaquetage
         id: pkg
         shell: pwsh
@@ -78,7 +83,9 @@ jobs:
           $out = "target/$env:TARGET/release"
           New-Item -ItemType Directory -Force "$name/licences" | Out-Null
           Copy-Item "$out/ComicRust.exe", "$out/comicrust-cli.exe", "pdfium/bin/pdfium.dll" $name
-          Copy-Item README.md, docs/INVENTAIRE_REA.md, docs/scripts.md $name
+          # Même paquet : la mise à jour intégrée (qui cherche ComicRust.exe) la met aussi à jour.
+          Copy-Item "target-mcp/$env:TARGET/release/ComicRust.exe" "$name/ComicRust-mcp.exe"
+          Copy-Item README.md, docs/INVENTAIRE_REA.md, docs/scripts.md, docs/MCP.md $name
           Copy-Item "recette/$tag.md" "$name/RECETTE.md"
           Compress-Archive -Path "recette/echantillons/*" -DestinationPath "ComicRust-echantillons.zip" -Force
           Copy-Item pdfium/LICENSE "$name/licences/PDFium-LICENSE.txt"
