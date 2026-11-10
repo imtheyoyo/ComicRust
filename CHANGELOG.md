@@ -5,6 +5,14 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## Non publié (Tauri)
+
+- **Pilotage par une IA pour les tests** : variante `ComicRust-Tauri-mcp.exe` (fonction Cargo
+  `mcp`), qui embarque un serveur MCP activé par `--mcp` (port 47802). Captures, éléments de la
+  page, clics, clavier, console JavaScript et commandes du backend en lecture seule, par le
+  protocole DevTools de WebView2. `ComicRust-Tauri.exe` ne change pas. Voir
+  [`docs/MCP-tauri.md`](docs/MCP-tauri.md).
+
 ## [tauri-v0.6.0] — 2026-11-09
 
 Étape 5 de la version **Tauri 2** (branche `tauri2-web`) : les **listes ComicRack**. Voir

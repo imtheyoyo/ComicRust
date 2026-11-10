@@ -40,6 +40,16 @@
         erreur = messageErreur(e);
       }
     })();
+    // État lisible par le pilotage MCP des tests (get_state, variante -mcp) : lecture seule.
+    (window as unknown as { __comicrust_etat?: () => unknown }).__comicrust_etat = () => ({
+      section,
+      mode: etat?.mode ?? null,
+      premierDemarrage: etat?.premierDemarrage ?? null,
+      nbLivres,
+      listeCourante: listes.courante,
+      theme: themeActif,
+      erreur: erreur || null,
+    });
     // Le backend choisit parfois la liste à afficher (liste créée, liste affichée supprimée).
     listes.surSelection = choisirListe;
     return () => {

@@ -1201,6 +1201,8 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tempfile",
+ "webview2-com",
+ "windows",
  "zip",
 ]
 

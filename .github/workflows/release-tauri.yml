@@ -95,6 +95,11 @@ jobs:
         # custom-protocol : le front compilé (frontend/dist) est embarqué dans l'exécutable.
         run: cargo build --release --locked --target $env:TARGET -p comicrust-tauri --features app,custom-protocol
 
+      # Variante pilotable par une IA pour les tests (docs/MCP-tauri.md), compilée à part pour
+      # que ComicRust-Tauri.exe reste inchangé.
+      - name: Compilation release (variante MCP)
+        run: cargo build --release --locked --target $env:TARGET -p comicrust-tauri --features app,custom-protocol,mcp --target-dir target-mcp
+
       - name: Empaquetage (zip portable, sans installateur)
         id: pkg
         shell: pwsh
@@ -104,6 +109,8 @@ jobs:
           $out = "target/$env:TARGET/release"
           New-Item -ItemType Directory -Force "$name/licences" | Out-Null
           Copy-Item "$out/ComicRust-Tauri.exe", "pdfium/bin/pdfium.dll" $name
+          Copy-Item "target-mcp/$env:TARGET/release/ComicRust-Tauri.exe" "$name/ComicRust-Tauri-mcp.exe"
+          Copy-Item docs/MCP-tauri.md $name
           Copy-Item README.md $name
           Copy-Item "recette/$tag.md" "$name/RECETTE.md"
           Copy-Item pdfium/LICENSE "$name/licences/PDFium-LICENSE.txt"

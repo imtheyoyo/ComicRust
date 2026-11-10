@@ -4,7 +4,8 @@ name: CI Tauri
 # default-members dans Cargo.toml). La CI principale (ci.yml) teste le reste.
 on:
   push:
-    branches: [tauri2-web]
+    # feature/** : branches de travail (compilées et testées, jamais publiées).
+    branches: [tauri2-web, 'feature/**']
   pull_request:
     paths:
       - "crates/comicrust-tauri/**"
@@ -50,5 +51,24 @@ jobs:
         run: cargo clippy --locked -p comicrust-tauri --features app,custom-protocol --all-targets -- -D warnings
       - name: Tests
         run: cargo test --locked -p comicrust-tauri --features app,custom-protocol
+      - name: Clippy et tests (pilotage MCP)
+        run: |
+          cargo clippy --locked -p comicrust-tauri --features app,custom-protocol,mcp --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw "clippy (mcp) en échec" }
+          cargo test --locked -p comicrust-tauri --features app,custom-protocol,mcp
+          if ($LASTEXITCODE -ne 0) { throw "tests (mcp) en échec" }
       - name: Compilation de l'exécutable
         run: cargo build --locked -p comicrust-tauri --features app,custom-protocol
+      # Variante pilotable par une IA (docs/MCP-tauri.md), dans un dossier de compilation séparé.
+      - name: Compilation de la variante MCP
+        shell: pwsh
+        run: |
+          cargo build --locked --release -p comicrust-tauri --features app,custom-protocol,mcp --target-dir target-mcp
+          if ($LASTEXITCODE -ne 0) { throw "compilation (mcp) en échec" }
+          New-Item -ItemType Directory -Force mcp | Out-Null
+          Copy-Item target-mcp/release/ComicRust-Tauri.exe mcp/ComicRust-Tauri-mcp.exe
+          Copy-Item docs/MCP-tauri.md mcp/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ComicRust-Tauri-mcp-windows-x64
+          path: mcp/
