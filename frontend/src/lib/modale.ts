@@ -35,9 +35,34 @@ export function fermerModale(node: HTMLDialogElement | undefined): void {
   node.close();
 }
 
+/** Dernier élément focalisé hors fenêtre modale et hors menu : c'est lui qu'on rend à la fermeture. */
+let dernierFocus: HTMLElement | null = null;
+if (typeof document !== 'undefined') {
+  document.addEventListener('focusin', (e) => {
+    const t = e.target;
+    if (t instanceof HTMLElement && !t.closest('dialog, [role="menu"]') && t !== document.body) dernierFocus = t;
+  });
+}
+
+/** Rend le focus à `el` une fois le DOM à jour, sauf si quelqu'un d'autre l'a pris entre-temps
+ *  (champ ouvert par l'action choisie, autre fenêtre…) : seul un focus « perdu » (corps de page) est rétabli. */
+export function restaurerFocus(el: HTMLElement | null): void {
+  if (!el) return;
+  queueMicrotask(() => setTimeout(() => {
+    const a = document.activeElement;
+    if ((a === null || a === document.body || a === document.documentElement) && el.isConnected) el.focus({ preventScroll: true });
+  }, 0));
+}
+
 /** Action Svelte : `<dialog use:modale={{ peutFermer, fermer }}>`. */
 export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
   let opts = options;
+  // Élément focalisé avant l'ouverture : rendu à la fermeture (sinon le focus reste sur <body>).
+  let origine: HTMLElement | null = null;
+  const memoriser = () => { if (!node.open) origine = dernierFocus; };
+  // Ouverture par showModal() depuis n'importe où : on retient l'élément focalisé juste avant.
+  const proto = node.showModal.bind(node);
+  node.showModal = () => { memoriser(); proto(); };
   const peut = () => opts.peutFermer?.() ?? true;
   const fermer = () => {
     if (opts.fermer) opts.fermer();
@@ -62,6 +87,7 @@ export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
   function close() {
     if (fermeturesVoulues.delete(node)) {
       opts.fermer?.();
+      restaurerFocus(origine);
       return;
     }
     // Le navigateur a fermé la fenêtre de lui-même (cancel non annulable), ou un formulaire
@@ -71,12 +97,13 @@ export function modale(node: HTMLDialogElement, options: OptionsModale = {}) {
       return;
     }
     opts.fermer?.();
+    restaurerFocus(origine);
   }
 
   window.addEventListener('keydown', clavier);
   node.addEventListener('cancel', cancel);
   node.addEventListener('close', close);
-  if (opts.ouvrirAuMontage && !node.open) node.showModal();
+  if (opts.ouvrirAuMontage && !node.open) { memoriser(); node.showModal(); }
 
   return {
     update(o: OptionsModale) { opts = o; },

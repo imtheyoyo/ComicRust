@@ -364,7 +364,7 @@
     if (id === 'ajouter') {
       ajoutDe = ids;
       const l = listes.listesDeLecture();
-      choixAjout = l.find((x) => x.id === listes.courante)?.id ?? l[0]?.id ?? '+';
+      choixAjout = l.find((x) => x.id === derniereListeAjout)?.id ?? l.find((x) => x.id === listes.courante)?.id ?? l[0]?.id ?? '+';
       nomNouvelle = 'Nouvelle liste de lecture';
       return;
     }
@@ -526,6 +526,8 @@
   // Fenêtre « Ajouter à une liste ».
   let ajoutDe = $state<string[] | null>(null);
   let choixAjout = $state('');
+  /** Dernière liste choisie dans « Ajouter à une liste… » (reproposée à l'ouverture suivante). */
+  let derniereListeAjout = '';
   let nomNouvelle = $state('');
   async function validerAjout() {
     const ids = ajoutDe;
@@ -537,6 +539,7 @@
       await listes.executer('Création de la liste', () => creerListe({ type: 'lecture', nom, livres: ids }));
     } else if (choixAjout) {
       const idl = choixAjout;
+      derniereListeAjout = idl;
       await listes.executer('Ajout à la liste', () => ajouterLivresListe(idl, ids));
     }
   }

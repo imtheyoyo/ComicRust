@@ -21,6 +21,8 @@ button, select, input[type='search'], input[type='text'] {
 button { cursor: pointer; }
 button:hover:not(:disabled) { background: var(--cr-fond-survol); }
 button:disabled { opacity: 0.5; cursor: default; }
+select option { color: var(--cr-texte); background: var(--cr-fond-panneau); }
+select[size], select[multiple] { color-scheme: inherit; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 1px; }
 dialog {
   color: var(--cr-texte);
