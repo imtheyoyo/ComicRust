@@ -71,7 +71,7 @@ impl Regroupement {
         };
         match self {
             Regroupement::Aucun => String::new(),
-            Regroupement::Serie => texte(&b.series, "(sans série)"),
+            Regroupement::Serie => texte(&Some(b.shadow_series()), "(sans série)"),
             Regroupement::Editeur => texte(&b.publisher, "(sans éditeur)"),
         }
     }
@@ -131,10 +131,12 @@ fn cmp_opt<T: PartialOrd>(a: Option<T>, b: Option<T>, desc: bool) -> Ordering {
 }
 
 fn cmp_serie(a: &LibraryBook, b: &LibraryBook) -> Ordering {
-    minuscules(&a.series)
-        .cmp(&minuscules(&b.series))
-        .then(a.volume.unwrap_or(-1).cmp(&b.volume.unwrap_or(-1)))
-        .then_with(|| natord::compare(a.number.as_deref().unwrap_or(""), b.number.as_deref().unwrap_or("")))
+    // Valeurs « fantômes » : à défaut de fiche, celles déduites du nom de fichier (comme ComicRack).
+    a.shadow_series()
+        .to_lowercase()
+        .cmp(&b.shadow_series().to_lowercase())
+        .then(a.shadow_volume().cmp(&b.shadow_volume()))
+        .then_with(|| natord::compare(&a.shadow_number(), &b.shadow_number()))
         .then_with(|| minuscules(&a.title).cmp(&minuscules(&b.title)))
 }
 

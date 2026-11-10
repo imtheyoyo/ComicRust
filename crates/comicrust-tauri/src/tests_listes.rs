@@ -980,3 +980,48 @@ fn mode_mysql_listes_dans_comicdb() {
     assert!(a.listes.is_empty() && a.etat.erreur.as_deref().is_some_and(|e| e.contains("introuvable")), "{:?}", a.etat);
     assert_eq!(a.etat.source, SourceListes::Aucune);
 }
+
+// ───────── Série / numéro déduits du nom de fichier (ShadowSeries) ─────────
+
+/// Livre sans série ni numéro en fiche : seul le nom de fichier les porte.
+fn livre_sans_fiche(id: &str, fichier: &str) -> LibraryBook {
+    LibraryBook { id: id.into(), file: Some(fichier.into()), ..Default::default() }
+}
+
+#[test]
+fn cbl_rattache_par_serie_deduite_du_nom_de_fichier() {
+    use comicrust_core::cbl::{CblBook, CblBooks, ReadingList};
+    let mut db = ComicDatabase::default();
+    db.books.push(livre_sans_fiche("a0000000-0000-0000-0000-000000000001", r"Z:\BD\Silver Surfer #3 ok.pdf"));
+    db.books.push(livre_sans_fiche("a0000000-0000-0000-0000-000000000002", r"Z:\BD\Warlock #9.cbz"));
+    let entree = |s: &str, n: &str| CblBook {
+        series: s.into(),
+        number: n.into(),
+        volume: None,
+        year: None,
+        format: None,
+        id: None,
+    };
+    let liste = ReadingList {
+        name: "T".into(),
+        books: CblBooks { book: vec![entree("Silver Surfer", "3"), entree("Warlock", "9"), entree("Inconnu", "1")] },
+    };
+    let (ids, rapport) = crate::listes_cbl::rattacher(&liste, "T", &db);
+    assert_eq!(rapport.trouves, 2, "{}", rapport.texte);
+    assert_eq!(ids.len(), 2);
+    assert_eq!(rapport.manquants.len(), 1);
+}
+
+#[test]
+fn affichage_et_regroupement_utilisent_la_serie_deduite() {
+    let b = livre_sans_fiche(
+        "a0000000-0000-0000-0000-000000000003",
+        r"Z:\BD\COSMIC COLLECTION #009 2012_05 - Thanos (X)(2013).cbz",
+    );
+    assert_eq!(b.shadow_series(), "COSMIC COLLECTION");
+    assert_eq!(crate::tri::Regroupement::Serie.titre(&b), "COSMIC COLLECTION");
+    // Une série en fiche reste prioritaire.
+    let mut c = b.clone();
+    c.series = Some("Ma série".into());
+    assert_eq!(crate::tri::Regroupement::Serie.titre(&c), "Ma série");
+}

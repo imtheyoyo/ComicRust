@@ -104,8 +104,9 @@ pub fn rattacher(liste: &ReadingList, nom: &str, db: &ComicDatabase) -> (Vec<Str
     // Index série + numéro normalisés → livres (dans l'ordre de la base).
     let mut index: HashMap<(String, String), Vec<usize>> = HashMap::new();
     for (i, b) in db.books.iter().enumerate() {
-        if let (Some(s), Some(n)) = (b.series.as_deref(), b.number.as_deref()) {
-            index.entry((normalize_series(s), normalize_number(n))).or_default().push(i);
+        let (s, n) = (b.shadow_series(), b.shadow_number());
+        if !s.is_empty() && !n.is_empty() && n != "-" {
+            index.entry((normalize_series(&s), normalize_number(&n))).or_default().push(i);
         }
     }
     let mut ids = Vec::new();
@@ -124,7 +125,7 @@ pub fn rattacher(liste: &ReadingList, nom: &str, db: &ComicDatabase) -> (Vec<Str
                 let v = volume_connu(e.volume);
                 let trouve = index.get(&cle).and_then(|c| {
                     c.iter().map(|&i| &db.books[i]).find(|b| {
-                        let bv = volume_connu(b.volume);
+                        let bv = volume_connu(Some(b.shadow_volume()));
                         v.is_none() || bv.is_none() || v == bv
                     })
                 });
@@ -274,12 +275,11 @@ impl Biblio {
             .filter(|&i| vus.insert(i))
             .map(|i| {
                 let b = &base.books[i];
-                let texte = |v: &Option<String>| v.as_deref().map(str::trim).unwrap_or("").to_string();
                 CblBook {
-                    series: texte(&b.series),
-                    number: texte(&b.number),
-                    volume: volume_connu(b.volume),
-                    year: b.year.filter(|y| *y > 0),
+                    series: b.shadow_series().trim().to_string(),
+                    number: Some(b.shadow_number()).filter(|n| n != "-").unwrap_or_default().trim().to_string(),
+                    volume: volume_connu(Some(b.shadow_volume())),
+                    year: Some(b.shadow_year()).filter(|y| *y > 0),
                     format: b.format.clone().filter(|f| !f.trim().is_empty()),
                     id: Some(b.id.clone()),
                 }

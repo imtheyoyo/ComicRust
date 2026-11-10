@@ -141,8 +141,9 @@ fn scan_liste_detail_couverture_et_manquants() {
     assert_eq!(
         numeros,
         [
-            (None, None),
             (Some("Astérix".into()), Some("1".into())),
+            // Sans fiche : série déduite du nom de fichier (ShadowSeries de ComicRack).
+            (Some("Hors-serie".into()), None),
             (Some("Thanos".into()), Some("2".into())),
             (Some("Thanos".into()), Some("10".into())),
         ]
@@ -152,7 +153,7 @@ fn scan_liste_detail_couverture_et_manquants() {
     assert_eq!(p.livres[2].annee, Some(2020));
     assert!(!p.livres[2].lu);
     assert!(p.livres[2].url_couverture.contains(&p.livres[2].id), "{}", p.livres[2].url_couverture);
-    assert_eq!(p.livres[0].titre, "Hors-serie.cbz", "sans titre ni série : nom du fichier");
+    assert_eq!(p.livres[1].titre, "Hors-serie.cbz", "sans titre ni série : nom du fichier");
 
     // Sens inverse, recherche, groupe par éditeur, pagination.
     let desc = b.lister(&requete("serie", SensTri::Desc, None, None)).unwrap();

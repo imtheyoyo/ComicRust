@@ -1036,12 +1036,17 @@ pub fn id_depuis_uri(chemin: &str, hote: Option<&str>) -> String {
     String::from_utf8_lossy(&sortie).into_owned()
 }
 
+fn non_vide_txt(s: &str) -> Option<String> {
+    Some(s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
 fn resume(b: &LibraryBook) -> LivreResume {
     LivreResume {
         id: b.id.clone(),
         titre: non_vide(&b.title).unwrap_or_else(|| b.caption()),
-        serie: non_vide(&b.series),
-        numero: non_vide(&b.number),
+        // Valeurs affichées : fiche, sinon déduites du nom de fichier (ShadowSeries / ShadowNumber).
+        serie: non_vide_txt(&b.shadow_series()),
+        numero: non_vide_txt(&b.shadow_number()).filter(|n| n != "-"),
         editeur: non_vide(&b.publisher),
         annee: b.year.filter(|y| *y > 0),
         pages: b.page_count.unwrap_or(0),
