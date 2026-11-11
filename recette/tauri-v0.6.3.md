@@ -106,14 +106,23 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | N° test | Gravité | Description | Capture / fichier | Statut |
 |---|---|---|---|---|
-| | | | | |
+| S-02 | — | Attendu faux : 5 / 7 est correct (deux échantillons ont une fiche « Thanos Quest #1 », prioritaire sur le nom de fichier) | rapport | Clos (vérifié par l'IA) |
+| L-08 | [M] | Ctrl+clic sur deux étiquettes de série puis glisser : une seule série bouge (constaté par l'IA en événements simulés ; validé par Yoyo à la souris) | rapport | À revérifier |
+| W-01 | [m] | « ⬆ Monter » / « ⬇ Descendre » non grisés en lecture seule (refus du backend, rien d'écrit) | rapport | Prochaine version |
+| W-01 | [m] | Message de lecture seule : « réglages de l'édition » au lieu de Réglages ▸ Bibliothèque ComicRack | rapport | Prochaine version |
+| K-04 | [m] | Option sélectionnée blanc sur gris clair dans « Déplacer dans… » | rapport | Prochaine version |
+| V-04 | [m] | « # Ordre » proposé aussi pour une liste intelligente | rapport | Prochaine version |
 
 ## Bilan
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| Bloquants [B] | 21 | | |
-| Majeurs [M] | 10 | | |
-| Mineurs [m] | 4 | | |
+| Bloquants [B] | 21 | 21 (dont S-02 vérifié par l'IA, attendu corrigé) | 0 |
+| Majeurs [M] | 10 | 10 | 0 |
+| Mineurs [m] | 4 | 4 | 0 |
 
 Décision et remarques :
+Rapport de Yoyo du 11/11/2026 22:39 : 34 OK, 0 échec, S-02 non testé
+([rapport](rapports/tauri-v0.6.3-2026-11-11.txt)). S-02 vérifié par l'IA par le pilotage MCP :
+comportement conforme, attendu de la recette corrigé (5 / 7). Tous les bloquants sont OK :
+**GO proposé, en attente de la confirmation de Yoyo.** Anomalies mineures reportées à la version suivante.

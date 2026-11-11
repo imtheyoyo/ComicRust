@@ -1,0 +1,46 @@
+Rapport de recette ComicRust tauri-v0.6.3 — 11/11/2026 22:39
+Résultat : 34 OK, 0 échec(s), 1 non testé(s) sur 35.
+Décision proposée : incomplète (1 bloquant(s) non testé(s)).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.6.3 / 0.6.3
+
+NON TESTÉS (1) : S-02*   (* = bloquant)
+
+---------------------------------------------------------------------------
+Essais complémentaires de l'IA par le pilotage MCP (11/11/2026, 21:35–22:20)
+Copies autonome (port 47802) et liée (port 47803), version 0.6.3 vérifiée par `infos`.
+Sauvegarde préalable de ComicDb.xml : _recette_IA\ComicDb\ComicDb-20261111-214110.xml.
+
+- S-02 : analyse de Echantillons TESTS\Thanos.cbl dans la copie autonome : 5 / 7 trouvés
+  (par série et numéro : 5). Manquants : Silver Surfer #4 (1987), Warlock #9 (1976).
+  Cause : dans les échantillons, « Silver Surfer 04 (1987).cbz/.cbr » et « Warlock 09 (1976).*»
+  ont une fiche ComicInfo « Thanos Quest #1 (1990) » ; la fiche est prioritaire sur le nom de
+  fichier (comme ComicRack). « Silver Surfer 03.pdf » / « Silver Surfer #3 ok.pdf » (sans fiche)
+  sont bien rattachés par le nom de fichier, et « Web Comic #1 » est trouvé. Comportement
+  conforme ; l'attendu de la recette (6 / 7, seul Web Comic manquant) était faux.
+- Vérifiés OK aussi par l'IA : V-01 à V-06, E-01 à E-03 (3,5 ; AAAA-MM-JJ ; « dans les
+  derniers … jours » ; Année « abc » signalée, OK grisé ; nom vide grisé ; groupe imbriqué),
+  S-01, S-03, S-04, S-05, K-01, K-02 (Ouvrir un fichier, Infos, Renommer ; D-01), K-03 (premier
+  usage = dernière liste de lecture ouverte ; après glisser sur l'arbre = cette liste), L-09,
+  V-03 après relance, W-01, W-02 (détection de ComicRack en ~3 s), N-01 (thanos : 484),
+  N-02 (compteurs enregistrés par ComicRack : Lu 0 / Non-lu 5321 / En cours 4 = 5325).
+- Anomalies relevées par l'IA (non bloquantes, à corriger dans une prochaine version) :
+  [M] L-08 : deux séries sélectionnées par Ctrl+clic sur leurs étiquettes puis glissées : seule
+      la série saisie se déplace (la sélection est remplacée au début du glisser). Constaté deux
+      fois avec des événements souris simulés ; Yoyo a validé L-08 à la souris : à revérifier.
+  [m] Lecture seule (W-01/W-02) : « ⬆ Monter » / « ⬇ Descendre » du menu de l'arbre ne sont pas
+      grisés (le backend refuse : « rien n'a été enregistré »).
+  [m] Message de lecture seule des listes : « … dans les réglages de l'édition » alors que la case
+      est dans Réglages ▸ Bibliothèque ComicRack.
+  [m] K-04 : dans « Déplacer dans… », l'option sélectionnée (liste sans focus) est blanc sur gris
+      clair, peu contrastée.
+  [m] V-04 : « # Ordre de la liste » est proposé aussi pour une liste intelligente (la recette
+      l'annonçait réservé aux listes de lecture).
+  [m] La vue d'une liste supprimée par une autre voie que le panneau reste dans
+      comicrust-tauri.json (sans effet).
+  [m] Pilotage MCP : la passerelle stdio ne relance l'application qu'une fois ; un port déjà
+      occupé fait échouer le serveur sans message visible.
