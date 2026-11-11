@@ -12,6 +12,8 @@ mod book;
 mod events;
 mod input;
 mod library;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod paths;
 mod reading_list;
 mod scripts;
@@ -47,7 +49,16 @@ fn main() -> eframe::Result {
     if std::env::var_os("RUST_MIN_STACK").is_none() {
         std::env::set_var("RUST_MIN_STACK", (16 * 1024 * 1024).to_string());
     }
-    let initial = std::env::args_os().nth(1).filter(|a| !a.is_empty()).map(PathBuf::from);
+    // Passerelle MCP pour Claude Desktop : relaie stdin/stdout puis s'arrête.
+    #[cfg(feature = "mcp")]
+    if mcp::run_stdio_if_requested() {
+        return Ok(());
+    }
+    // Premier argument qui n'est pas une option du serveur MCP (`--mcp…`).
+    let initial = std::env::args_os()
+        .skip(1)
+        .find(|a| !a.is_empty() && !a.to_string_lossy().starts_with("--mcp"))
+        .map(PathBuf::from);
 
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).ok();
     let mut viewport = eframe::egui::ViewportBuilder::default()

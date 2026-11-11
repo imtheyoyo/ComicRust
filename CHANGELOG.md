@@ -5,6 +5,22 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [v0.10.9] — 2026-11-11
+
+### Nouveautés
+- **Pilotage par une IA pour les tests de débogage (serveur MCP)** : une variante
+  `ComicRust-mcp.exe`, lancée avec `--mcp`, ouvre un serveur [MCP](docs/MCP.md) en boucle
+  locale (port 47801). Une IA (Claude Code, Claude Desktop…) peut alors voir la fenêtre
+  (capture), lister les widgets, cliquer, saisir du texte, appuyer sur des touches, lire le
+  dernier rapport de plantage, et utiliser des outils propres à ComicRust (état, livres,
+  ouverture d'un livre, changement de page, listes, recherche). L'exécutable normal
+  `ComicRust.exe` n'en contient rien. Aucune action destructive n'est exposée.
+  `ComicRust-mcp.exe` est livrée dans le zip (même code que `ComicRust.exe`) ; la variante
+  Tauri a la sienne (`ComicRust-Tauri-mcp.exe`, port 47802), les deux peuvent tourner ensemble.
+
+### Recette
+[`recette/v0.10.9.md`](recette/v0.10.9.md) : variante MCP et non-régression courte.
+
 ## [v0.10.8] — 2026-11-03
 
 ### Corrections
