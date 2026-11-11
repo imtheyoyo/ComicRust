@@ -927,6 +927,7 @@ fn mysql_comicrack_lecture_et_ecriture() {
         eprintln!("MySQL de test injoignable : test ignoré");
         return;
     };
+    let _verrou = crate::tests_transfert::verrou_mysql();
     let d = tempfile::tempdir().unwrap();
     let racine = d.path().join("BD");
     bd(&racine);

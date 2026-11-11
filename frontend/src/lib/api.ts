@@ -618,6 +618,58 @@ export async function ecouter<T>(nom: string, rappel: (charge: T) => void): Prom
   return ecouterSimule(nom, rappel as (c: unknown) => void);
 }
 
+// ───────────────────────────── Transfert ComicRack → ComicRust (étape 6) ─────────────────────────────
+// Contrat : docs/tauri/ipc-transfert.md. Le mot de passe MySQL n'est jamais renvoyé par le backend.
+
+export type SourceTransfert = 'mysql' | 'comicdb';
+
+export interface ApercuTransfert {
+  /** Base MySQL de ComicRack trouvée (`utilisateur@hôte:port/base`, sans mot de passe). */
+  mysql?: string;
+  sourceParDefaut: SourceTransfert;
+  /** `ComicDb.xml` proposé ('' : introuvable). */
+  comicdb: string;
+  comicdbPresent: boolean;
+  destination: string;
+  destinationExiste: boolean;
+  nbLivresDestination?: number;
+  mode: ModeBiblio;
+  /** Présent : le transfert ne peut pas démarrer maintenant. */
+  bloque?: string;
+}
+
+export interface DemandeTransfert {
+  source: SourceTransfert;
+  comicdb?: string;
+  listes: boolean;
+  dossiers: boolean;
+  basculer: boolean;
+}
+
+export interface ResumeTransfert {
+  livresSource: number;
+  ajoutes: number;
+  remplaces: number;
+  misAJour: number;
+  ecartes: number;
+  doublonsEvites: number;
+  listes: number;
+  dossiers: number;
+  cheminsRamenes: number;
+  fichiersGardes: number;
+  interrompu: boolean;
+  avertissements: string[];
+  nbLivresDestination?: number;
+  doublonsRestants?: number;
+  /** Phrase de bilan prête à afficher. */
+  resume: string;
+  bascule: boolean;
+  /** Présent : la bibliothèque a été rouverte (le front met à jour son état). */
+  etat?: EtatBiblio;
+}
+
+export interface ProgressionTransfert { phase: string; fait: number; total: number }
+
 // ───────────────────────────── Commandes ─────────────────────────────
 
 export const infos = () => appeler<InfosApplication>('infos');
@@ -673,6 +725,11 @@ export const modelesDeNom = () => appeler<ModeleNom[]>('modeles_de_nom');
 export const renommerDeplacer = (demande: DemandeRenommage) =>
   appeler<ResultatRenommage>('renommer_deplacer', { demande });
 export const annulerOperation = () => appeler<void>('annuler_operation');
+
+// Transfert de la bibliothèque ComicRack (étape 6, docs/tauri/ipc-transfert.md).
+export const apercuTransfert = () => appeler<ApercuTransfert>('apercu_transfert');
+export const lancerTransfert = (demande: DemandeTransfert) => appeler<ResumeTransfert>('lancer_transfert', { demande });
+export const annulerTransfert = () => appeler<void>('annuler_transfert');
 export const lirePages = (id: string, remplace?: string) => appeler<PagesLivre>('lire_pages', { id, remplace });
 export const fermerPages = (jeton: string) => appeler<void>('fermer_pages', { jeton });
 export const transformerPages = (pages: PageLivre[], operation: OperationPages) =>

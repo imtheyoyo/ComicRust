@@ -16,6 +16,7 @@ use crate::listes_cbl::{ExportCbl, ImportCbl, RapportCbl};
 use crate::listes_criteres::{self, Apercu, CatalogueCriteres, Critere, CriteresListe, EditeurListe};
 use crate::pages_livre::{OperationPages, PageLivre, PagesLivre};
 use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
+use crate::transfert::{ApercuTransfert, DemandeTransfert, ResumeTransfert, Transfert};
 use crate::{infos_application, portable, themes, InfosApplication};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -535,6 +536,35 @@ fn annuler_operation(edition: tauri::State<'_, Edition>) {
     edition.annuler();
 }
 
+// ───────────────────────────── Transfert ComicRack → ComicRust ─────────────────────────────
+// Contrat : docs/tauri/ipc-transfert.md (module `transfert`). Le mot de passe MySQL ne passe jamais ici.
+
+/// Ce que le transfert propose (source MySQL sans mot de passe, ComicDb.xml, destination).
+#[tauri::command(async)]
+fn apercu_transfert(transfert: tauri::State<'_, Transfert>) -> ApercuTransfert {
+    transfert.apercu()
+}
+
+/// Lance le transfert et rend le bilan à la fin ; progression par l'événement
+/// `transfert-progression`.
+#[tauri::command(async)]
+fn lancer_transfert(
+    app: tauri::AppHandle,
+    transfert: tauri::State<'_, Transfert>,
+    demande: DemandeTransfert,
+) -> Result<ResumeTransfert, String> {
+    transfert.lancer(&demande, &move |e| {
+        let (nom, charge) = e.pour_le_front();
+        let _ = app.emit(nom, charge);
+    })
+}
+
+/// Arrête le transfert en cours (entre deux lots de livres).
+#[tauri::command]
+fn annuler_transfert(transfert: tauri::State<'_, Transfert>) {
+    transfert.annuler();
+}
+
 /// Réponse HTTP du protocole `cr-page`.
 fn reponse_page(p: ReponsePage) -> tauri::http::Response<Vec<u8>> {
     // Une URL de page ne vaut que pour une séance (jeton) : gardée par la WebView tant que
@@ -588,6 +618,7 @@ pub fn run() {
     let lecteur = Lecteur::nouveau(data.clone(), bibliotheque.clone());
     tauri::Builder::default()
         .manage(Edition::nouvelle(bibliotheque.clone(), lecteur.clone()))
+        .manage(Transfert::nouveau(bibliotheque.clone()))
         .manage(lecteur)
         .manage(bibliotheque)
         .manage(DossierData(data))
@@ -687,7 +718,10 @@ pub fn run() {
             enregistrer_criteres,
             analyser_cbl,
             importer_cbl,
-            exporter_cbl
+            exporter_cbl,
+            apercu_transfert,
+            lancer_transfert,
+            annuler_transfert
         ])
         .setup(|app| {
             // Thèmes livrés disponibles dès le premier lancement.

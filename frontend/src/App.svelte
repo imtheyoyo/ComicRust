@@ -3,6 +3,7 @@
   import BarreLaterale, { type Section } from './components/BarreLaterale.svelte';
   import DialogDossiers from './components/DialogDossiers.svelte';
   import DialogReglages from './components/DialogReglages.svelte';
+  import DialogTransfert from './components/DialogTransfert.svelte';
   import PremierDemarrage from './components/PremierDemarrage.svelte';
   import VueBibliotheque from './components/VueBibliotheque.svelte';
   import { dansTauri, ouvrirBibliotheque, type EtatBiblio, messageErreur } from './lib/api';
@@ -22,6 +23,7 @@
   const listes = new EtatListes();
   let dossiers = $state<DialogDossiers>();
   let reglages = $state<DialogReglages>();
+  let transfert = $state<DialogTransfert>();
 
   onMount(() => {
     void (async () => {
@@ -63,6 +65,16 @@
     nbLivres = e.nbLivres;
     void listes.charger();
     listes.demarrer();
+  }
+
+  /** Le backend a rouvert la bibliothèque (transfert terminé : bascule en autonome ou rechargement). */
+  function bibliothequeRouverte(e: EtatBiblio) {
+    etat = e;
+    nbLivres = e.nbLivres;
+    section = 'bibliotheque';
+    listes.courante = null;
+    void listes.charger();
+    rafraichir++;
   }
 
   function choisirSection(s: Section) {
@@ -111,7 +123,8 @@
     {/if}
   </div>
   <DialogDossiers bind:this={dossiers} {scan} />
-  <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} />
+  <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} />
+  <DialogTransfert bind:this={transfert} onbibliotheque={bibliothequeRouverte} />
 {/if}
 
 <style>
