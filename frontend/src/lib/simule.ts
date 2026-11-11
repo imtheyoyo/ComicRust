@@ -6,6 +6,7 @@ import type {
   ReponseLivres, Theme,
 } from './api';
 import { creerEditionSimulee } from './simuleEdition';
+import { creerBaseSimulee } from './simuleBase';
 import { creerListesSimulees } from './simuleListes';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
@@ -269,10 +270,14 @@ const THEMES = import.meta.glob('../../../crates/comicrust-tauri/themes/*.css', 
 }) as Record<string, () => Promise<string>>;
 const idTheme = (chemin: string) => chemin.split('/').pop()!.replace(/\.css$/, '');
 
+// Surveillance de la base et hors ligne (étape 6) : voir simuleBase.ts.
+const base = creerBaseSimulee(emettre, () => etat.mode);
+
 // Édition (étape 3) : voir simuleEdition.ts.
 const edition = creerEditionSimulee({
   livres: LIVRES,
   mode: () => etat.mode,
+  horsLigne: base.motif,
   emettre,
   invalider: () => { ordreCle = ''; },
   pause,
@@ -282,6 +287,8 @@ const edition = creerEditionSimulee({
 const listes = creerListesSimulees({
   livres: LIVRES,
   lectureSeule: () => {
+    const h = base.motif();
+    if (h) return h;
     if (etat.mode !== 'comicrack') return undefined;
     const r = edition('lire_reglages_edition', {}) as { ecritureComicrack: boolean };
     return r.ecritureComicrack ? undefined : 'lecture seule';
@@ -410,6 +417,9 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'lancer_scan':
       void simulerScan();
       return null;
+    case 'etat_base':
+    case 'reessayer_base':
+      return base.appeler(commande);
     default: {
       simuleTests.edition.push({ commande, args: JSON.parse(JSON.stringify(args)) as Record<string, unknown> });
       const rl = listes.appeler(commande, args);

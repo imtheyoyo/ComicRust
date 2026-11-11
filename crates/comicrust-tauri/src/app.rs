@@ -16,6 +16,7 @@ use crate::listes_cbl::{ExportCbl, ImportCbl, RapportCbl};
 use crate::listes_criteres::{self, Apercu, CatalogueCriteres, Critere, CriteresListe, EditeurListe};
 use crate::pages_livre::{OperationPages, PageLivre, PagesLivre};
 use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
+use crate::surveillance::{self, EtatBase, Surveillance};
 use crate::{infos_application, portable, themes, InfosApplication};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -118,6 +119,21 @@ fn lancer_scan(app: tauri::AppHandle, biblio: tauri::State<'_, Biblio>) -> Resul
         let (nom, charge) = evenement.pour_le_front();
         let _ = app.emit(nom, charge);
     }))
+}
+
+// ───────────────────────────── Surveillance de la base ─────────────────────────────
+// Contrat : docs/tauri/ipc-surveillance.md. Le fil de sondage est démarré dans `setup`.
+
+/// État de la connexion à la base (en ligne / hors ligne), pour l'affichage initial.
+#[tauri::command]
+fn etat_base(biblio: tauri::State<'_, Biblio>) -> EtatBase {
+    biblio.etat_base()
+}
+
+/// Bouton « Réessayer » : sondage immédiat de la base ; renvoie l'état à jour.
+#[tauri::command(async)]
+fn reessayer_base(surveillance: tauri::State<'_, Surveillance>) -> EtatBase {
+    surveillance.reessayer()
 }
 
 // ───────────────────────────── Listes ComicRack ─────────────────────────────
@@ -629,6 +645,8 @@ pub fn run() {
             enregistrer_preferences_vue,
             ouvrir_bibliotheque,
             configurer_premier_demarrage,
+            etat_base,
+            reessayer_base,
             lister_livres,
             detail_livre,
             lister_dossiers,
@@ -706,6 +724,16 @@ pub fn run() {
             #[cfg(feature = "mcp")]
             let fenetre = if crate::mcp::actif() { fenetre.initialization_script(crate::mcp::SCRIPT) } else { fenetre };
             fenetre.build()?;
+            // Surveillance de la base : modifications extérieures et état en ligne / hors ligne.
+            let emetteur = app.handle().clone();
+            app.manage(Surveillance::demarrer(
+                app.state::<Biblio>().inner().clone(),
+                surveillance::PERIODE_SONDAGE,
+                Arc::new(move |evenement| {
+                    let (nom, charge) = evenement.pour_le_front();
+                    let _ = emetteur.emit(nom, charge);
+                }),
+            ));
             #[cfg(feature = "mcp")]
             crate::mcp::demarrer(app.handle());
             Ok(())

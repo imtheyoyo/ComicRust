@@ -325,7 +325,28 @@ export interface BilanOperation {
 }
 
 export interface ProgressionEdition { operation: Operation; fait: number; total: number; livre: string }
-export interface BibliothequeModifiee { ids: string[] }
+/** `origine: 'externe'` : modification faite hors de ComicRust (ComicRack, autre poste), voir
+ *  docs/tauri/ipc-surveillance.md ; absent : opération d'édition de ComicRust. */
+export interface BibliothequeModifiee {
+  ids: string[];
+  origine?: 'externe';
+  ajoutes?: number;
+  modifies?: number;
+  supprimes?: number;
+}
+
+// Surveillance de la base et état hors ligne (étape 6, docs/tauri/ipc-surveillance.md).
+export type SourceBase = 'comicrack-mysql' | 'comicrust' | 'comicrack-xml' | 'aucune';
+export interface EtatBase {
+  source: SourceBase;
+  /** La base est interrogée régulièrement (MySQL ComicRack, base de ComicRust). */
+  surveillee: boolean;
+  enLigne: boolean;
+  /** Cause de l'échec (sans mot de passe), quand `enLigne` est faux. */
+  message?: string;
+  /** Échecs consécutifs depuis la perte de la connexion (0 : en ligne). */
+  essais: number;
+}
 
 export interface ModeleNom { nom: string; modele: string }
 
@@ -630,6 +651,10 @@ export const enregistrerPreferencesVue = (preferences: PreferencesVue) =>
   appeler<PreferencesVue>('enregistrer_preferences_vue', { preferences });
 
 export const ouvrirBibliotheque = () => appeler<EtatBiblio>('ouvrir_bibliotheque');
+/** État de la connexion à la base ; les changements arrivent par l'événement `base-etat`. */
+export const etatBase = () => appeler<EtatBase>('etat_base');
+/** Bouton « Réessayer » : sondage immédiat, renvoie l'état à jour. */
+export const reessayerBase = () => appeler<EtatBase>('reessayer_base');
 export const configurerPremierDemarrage = (choix: ChoixPremierDemarrage) =>
   appeler<EtatBiblio>('configurer_premier_demarrage', { choix });
 

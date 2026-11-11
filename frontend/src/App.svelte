@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import BarreLaterale, { type Section } from './components/BarreLaterale.svelte';
+  import BandeauBase from './components/BandeauBase.svelte';
   import DialogDossiers from './components/DialogDossiers.svelte';
   import DialogReglages from './components/DialogReglages.svelte';
   import PremierDemarrage from './components/PremierDemarrage.svelte';
   import VueBibliotheque from './components/VueBibliotheque.svelte';
-  import { dansTauri, ouvrirBibliotheque, type EtatBiblio, messageErreur } from './lib/api';
+  import { dansTauri, ecouter, ouvrirBibliotheque, type BibliothequeModifiee, type EtatBiblio, messageErreur } from './lib/api';
   import { SuiviScan } from './lib/bibliotheque.svelte';
+  import { connexion } from './lib/connexion.svelte';
   import { EtatListes } from './lib/listes.svelte';
   import { chargerPreferences } from './lib/prefs';
   import { appliquerTheme, themeMemorise } from './lib/theme';
@@ -30,6 +32,7 @@
         await chargerPreferences();
         themeActif = await appliquerTheme(themeMemorise());
         await scan.demarrer(() => rafraichir++);
+        await connexion.demarrer();
         etat = await ouvrirBibliotheque();
         nbLivres = etat.nbLivres;
         if (!etat.premierDemarrage) {
@@ -48,12 +51,20 @@
       nbLivres,
       listeCourante: listes.courante,
       theme: themeActif,
+      baseEnLigne: connexion.enLigne,
       erreur: erreur || null,
     });
     // Le backend choisit parfois la liste à afficher (liste créée, liste affichée supprimée).
     listes.surSelection = choisirListe;
+    // Modification faite hors de ComicRust (ComicRack, autre poste) : les comptes des listes changent.
+    let desabonnerBase: (() => void) | undefined;
+    void ecouter<BibliothequeModifiee>('bibliotheque-modifiee', (m) => {
+      if (m.origine === 'externe') void listes.charger();
+    }).then((f) => (desabonnerBase = f));
     return () => {
+      desabonnerBase?.();
       scan.arreter();
+      connexion.arreter();
       listes.arreter();
     };
   });
@@ -85,6 +96,8 @@
 {:else if etat.premierDemarrage}
   <PremierDemarrage onpret={pret} />
 {:else}
+  <div class="cadre">
+  <BandeauBase />
   <div class="appli">
     <BarreLaterale
       {section}
@@ -110,12 +123,14 @@
       </main>
     {/if}
   </div>
+  </div>
   <DialogDossiers bind:this={dossiers} {scan} />
   <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} />
 {/if}
 
 <style>
-  .appli { height: 100vh; display: flex; }
+  .cadre { height: 100vh; display: flex; flex-direction: column; }
+  .appli { flex: 1; min-height: 0; display: flex; }
   .message { padding: 40px; text-align: center; color: var(--cr-texte-discret); }
   .erreur { color: var(--cr-erreur); }
   .bientot { flex: 1; display: grid; place-content: center; text-align: center; color: var(--cr-texte-discret); }

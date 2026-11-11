@@ -22,6 +22,8 @@ export interface ContexteSimule {
   emettre: (nom: string, charge: unknown) => void;
   /** Les fiches ont changé : l'ordre en cache de lister_livres est à recalculer. */
   invalider: () => void;
+  /** Étape 6 : raison d'impossibilité d'écrire quand la base est injoignable (`undefined` : en ligne). */
+  horsLigne: () => string | undefined;
   pause: (ms: number) => Promise<unknown>;
 }
 
@@ -103,9 +105,10 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
 
   const cbz = (l: LivreSimule) => /\.(cbz|zip)$/i.test(l.fichier);
   const lectureSeule = () =>
-    ctx.mode() === 'comicrack' && !reglages.ecritureComicrack
+    ctx.horsLigne() ??
+    (ctx.mode() === 'comicrack' && !reglages.ecritureComicrack
       ? "Bibliothèque ComicRack en lecture seule : les fiches ne sont pas modifiées. Pour les modifier, cochez « Lecture et écriture » dans Réglages (de préférence ComicRack fermé)."
-      : undefined;
+      : undefined);
   /** Onglet Pages (étape 4) : simulePages.ts. */
   const pagesSim = creerPagesSimulees({ livres, lectureSeule, cbz, pause: ctx.pause });
 

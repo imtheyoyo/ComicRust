@@ -12,6 +12,7 @@
     ajouterValeurPerso, appliquerModifications, annulerOperation, ecouter, lireFiches, messageErreur, verifierChamps,
     type BilanOperation, type ChampFiche, type ChampModifie, type FicheEdition, type PageLivre, type ProgressionEdition,
   } from '../lib/api';
+  import { connexion } from '../lib/connexion.svelte';
   import { modale } from '../lib/modale';
   import ChampSuggestions from './ChampSuggestions.svelte';
   import OngletPages from './OngletPages.svelte';
@@ -104,7 +105,8 @@
   const surPages = $derived(avecPages && onglet === indicePages);
   $effect(() => { if (surPages) pagesVues = true; });
   const sale = $derived(modifications.length > 0 || (avecPages && pagesModifiees));
-  const lectureSeule = $derived(fiche?.lectureSeule);
+  // Base injoignable : saisies gardées, enregistrement désactivé jusqu'au retour de la base.
+  const lectureSeule = $derived(fiche?.lectureSeule ?? connexion.motifEcriture);
   const modifiable = $derived(!!fiche && !lectureSeule && !enregistrement && !confirmation);
   const nbErreurs = $derived(Object.keys(erreurs).length);
 
@@ -308,7 +310,7 @@
 
     {#if lectureSeule}
       <div class="lecture-seule" role="note">
-        <strong>🔒 Consultation seulement : cette bibliothèque est en lecture seule.</strong>
+        <strong>{connexion.enLigne ? '🔒 Consultation seulement : cette bibliothèque est en lecture seule.' : '⚠ Base injoignable : consultation seulement pour le moment (tes saisies sont gardées).'}</strong>
         <span>{lectureSeule}</span>
       </div>
     {/if}
