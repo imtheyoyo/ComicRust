@@ -86,8 +86,8 @@ pub fn demarrer(app: &AppHandle) {
             eval_js : JavaScript dans la page ; invoke : commandes du backend en lecture seule."
             .into(),
     };
-    let app = app.clone();
-    let handler: protocol::Handler = Arc::new(move |nom, args| outils::traiter(&app, nom, args));
+    let app_outils = app.clone();
+    let handler: protocol::Handler = Arc::new(move |nom, args| outils::traiter(&app_outils, nom, args));
     match http::serve(protocol::Server::new(options, outils::liste(), handler)) {
         Ok(addr) => eprintln!("serveur MCP actif sur http://{addr}/mcp"),
         Err(e) => {
