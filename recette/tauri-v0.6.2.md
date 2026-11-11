@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.6.2 (pré-release corrective de l'étape 5 : **listes ComicRack**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.6.2-windows-x64.zip` |
-| SHA-256 | *(à renseigner après la construction du paquet)* |
+| SHA-256 | `f7df767f857cdd68ac125b113aab757e7095965399245edd53b474bc9a235e4c` |
 | Contenu | **tri, sens, groupement et vue mémorisés pour chaque liste** (remarque du 11/11) ; éditeur de listes intelligentes : critère sans marqueur `genre` accepté par le backend (E-01) ; **focus** rendu à la grille, au tableau ou à l'arbre après « Ouvrir un fichier », les fenêtres et les menus (K-02) ; « Ajouter à une liste… » propose la **dernière liste utilisée** même depuis la Bibliothèque (K-03) ; reprise des correctifs de la tauri-v0.6.1 (série du nom de fichier, focus, genre) |
 | Origine | rapports du 11/11/2026 : [tauri-v0.6.0](rapports/tauri-v0.6.0-2026-11-11.txt) **NO-GO** (E-01, E-02 ; 10 non testés) et [tauri-v0.6.1](rapports/tauri-v0.6.1-2026-11-11.txt) **NO-GO** — **passée avec l'exe 0.6.0** (les deux copies contenaient encore `ComicRust-Tauri.exe` 0.6.0, vu par le MCP) : ses tests sont repris ici |
 
