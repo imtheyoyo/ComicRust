@@ -505,6 +505,10 @@ impl Biblio {
         };
         match src {
             Source::Store(_) => {
+                // Base injoignable (surveillance) : listes en consultation, rien n'est écrit.
+                if let Some(m) = self.motif_hors_ligne() {
+                    return (Some(m), false);
+                }
                 if let Some(e) = erreur {
                     return (Some(format!("Listes illisibles : {e}")), false);
                 }
@@ -664,6 +668,9 @@ impl Biblio {
             if !self.ecriture_comicrack() {
                 return Err(LECTURE_SEULE.into());
             }
+        }
+        if let (Source::Store(_), Some(m)) = (&src, self.motif_hors_ligne()) {
+            return Err(m);
         }
         let garde = {
             let mut c = self.cache();

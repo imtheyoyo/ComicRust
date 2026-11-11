@@ -1140,9 +1140,10 @@ impl Lecteur {
         };
         let derniere = self.biblio.livre(&e.id).and_then(|f| f.last_page_read).unwrap_or(0).max(e.vue);
         let ouvert = comicrust_core::scanner::now_iso();
-        Store::open_existing(&cfg)
+        let compteur = Store::open_existing(&cfg)
             .and_then(|mut st| st.set_progress(&e.id, e.courante, derniere, &ouvert))
             .map_err(|err| format!("lecture non enregistrée dans la base ComicRust : {err}"))?;
+        self.biblio.signaler_ecriture_autonome([e.id.clone()], Some(compteur));
         self.biblio.noter_lecture(&e.id, e.courante, derniere, &ouvert);
         Ok(())
     }
@@ -1158,6 +1159,7 @@ impl Lecteur {
             comicrust_core::db::update_books(&cfg, &[edition_lecture_comicrack(&fiche, &l)]).map_err(|err| {
                 format!("lecture non enregistrée dans la base de ComicRack (gardée dans ComicRust) : {err}")
             })?;
+        self.biblio.signaler_rapport_comicrack(&rapport);
         let fraiches: Vec<LibraryBook> = rapport.written.iter().map(|w| w.book.clone()).collect();
         self.biblio.remplacer_fiches(&fraiches, false);
         if !rapport.is_complete() {

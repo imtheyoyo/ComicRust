@@ -285,6 +285,8 @@ pub struct Biblio {
     revisions: Arc<Mutex<HashMap<String, u32>>>,
     /// Listes ComicRack (`listes.rs`) : listes lues, contenu calculé, opération en cours.
     pub(crate) listes: Arc<Mutex<crate::listes::CacheListes>>,
+    /// État de la connexion à la base et écritures à signaler à la surveillance.
+    pub(crate) connexion: Arc<crate::surveillance::Connexion>,
 }
 
 /// Durée pendant laquelle un échec de couverture n'est pas retenté.
@@ -321,6 +323,7 @@ impl Biblio {
             negatif: Arc::default(),
             revisions: Arc::default(),
             listes: Arc::default(),
+            connexion: Arc::default(),
         }
     }
 
@@ -892,6 +895,9 @@ impl Biblio {
         }
     }
 }
+
+#[path = "biblio_surveillance.rs"]
+mod surveillance_biblio;
 
 // ───────────────────────────── Fonctions utilitaires ─────────────────────────────
 

@@ -2,6 +2,7 @@
   // « Renommer / déplacer » les fichiers de la sélection d'après un modèle de nom (format d'export
   // de ComicRack) : APERÇU calculé par le backend (renommer_deplacer apercu:true) à chaque
   // changement, puis application des seules lignes sans problème (jamais d'écrasement).
+  import { connexion } from '../lib/connexion.svelte';
   import { modale } from '../lib/modale';
   import { onDestroy, onMount } from 'svelte';
   import {
@@ -185,7 +186,7 @@
     {:else}
       <div class="pied">
         <button onclick={fermer}>Annuler</button>
-        <button class="principal" disabled={!aJour || !apercu?.aRenommer} onclick={() => void appliquer()} data-testid="renommer-appliquer"
+        <button class="principal" disabled={!aJour || !apercu?.aRenommer || !connexion.enLigne} title={connexion.motifEcriture} onclick={() => void appliquer()} data-testid="renommer-appliquer"
           >Renommer {apercu && aJour ? apercu.aRenommer : ''} fichier(s)</button>
       </div>
     {/if}

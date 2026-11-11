@@ -970,6 +970,39 @@ impl Edition {
         }
     }
 
+    /// Pourquoi les fiches ne sont pas modifiables maintenant : cible en lecture seule, base
+    /// injoignable ou configuration MySQL incomplète (`None` : modifiables).
+    fn raison_lecture_seule(&self, cible: &Cible) -> Option<String> {
+        match cible.lecture_seule() {
+            Some(m) => Some(m.to_string()),
+            None => self.refus_ecriture_base(cible).err(),
+        }
+    }
+
+    /// Écriture dans une base (ComicRust ou ComicRack) : refusée, avec un message lisible, quand la
+    /// base est injoignable (surveillance) ou que la configuration MySQL saisie à la main est
+    /// incomplète. Rien n'est tenté ni écrit : aucune perte (fichiers et fiches restent d'accord).
+    fn refus_ecriture_base(&self, cible: &Cible) -> Result<(), String> {
+        match cible {
+            Cible::Comicrack(cfg) if !cfg.is_complete() => {
+                return Err(crate::surveillance::CONFIG_MYSQL_INCOMPLETE.into())
+            }
+            Cible::Store(_) | Cible::Comicrack(_) => {}
+            Cible::LectureSeule(_) => return Ok(()),
+        }
+        self.biblio.motif_hors_ligne().map_or(Ok(()), Err)
+    }
+
+    /// Signale à la surveillance les fiches que cette opération vient d'écrire (base de ComicRust :
+    /// `compteur` ; base MySQL de ComicRack : bilan brut), pour qu'elles ne reviennent pas comme
+    /// modifications extérieures.
+    fn signaler_ecritures(&self, fiches: &[LibraryBook], compteur: Option<i64>, rapport: Option<&db::WriteReport>) {
+        self.biblio.signaler_ecriture_autonome(fiches.iter().map(|f| f.id.clone()), compteur);
+        if let Some(r) = rapport {
+            self.biblio.signaler_rapport_comicrack(r);
+        }
+    }
+
     /// Une opération à la fois, jamais pendant une analyse des dossiers (et l'analyse attend
     /// la fin de l'opération) : garde rendue tant que l'opération dure.
     fn occuper(&self) -> Result<GardeEdition, String> {
@@ -1046,7 +1079,7 @@ impl Edition {
             livres: livres_edites,
             onglets,
             champs,
-            lecture_seule: self.cible().lecture_seule().map(str::to_string),
+            lecture_seule: self.raison_lecture_seule(&self.cible()),
             ecrire_dans_fichier_possible: possible,
             ecrire_dans_fichier: self.reglages_edition().ecrire_dans_fichier.unwrap_or(false),
             seuil_confirmation: SEUIL_CONFIRMATION,
@@ -1089,8 +1122,8 @@ impl Edition {
     pub fn appliquer_modifications(&self, d: &DemandeModification, sortie: Sortie) -> Result<BilanOperation, String> {
         let _occupe = self.occuper()?;
         let cible = self.cible();
-        if let Some(m) = cible.lecture_seule() {
-            return Err(m.to_string());
+        if let Some(m) = self.raison_lecture_seule(&cible) {
+            return Err(m);
         }
         let erreurs = verifier_champs(&d.champs);
         if !erreurs.is_empty() {
@@ -1144,6 +1177,7 @@ impl Edition {
                 Cible::LectureSeule(m) => return Err(m.clone()),
             };
             avance.noter(livres.len(), "");
+            self.signaler_ecritures(&rapport.changed, rapport.store_counter, rapport.comicrack.as_ref());
             // Pages changées : la couverture avant a pu changer.
             let couv = pages_a_ecrire.is_some() || champs.iter().any(|(n, _)| n == "PreferredFrontCover");
             modifies.extend(self.biblio.remplacer_fiches(&rapport.changed, couv));
@@ -1206,7 +1240,7 @@ impl Edition {
         let chemin = PathBuf::from(fichier);
         let s = self.lecteur.ouvrir_vignettes(&chemin)?;
         let liste = comicrust_core::pages::full_list(&b.pages.page, s.noms.len());
-        let lecture_seule = self.cible().lecture_seule().map(str::to_string);
+        let lecture_seule = self.raison_lecture_seule(&self.cible());
         Ok(PagesLivre {
             id: b.id.clone(),
             pages: pages_livre::vers_pages_livre(&liste, &s.noms, &s.doubles, &s.url_base),
@@ -1261,6 +1295,8 @@ impl Edition {
         sortie: Sortie,
     ) -> Result<BilanOperation, String> {
         let _occupe = self.occuper()?;
+        // Base injoignable : rien n'est écrit (le fichier changerait sans que la fiche suive).
+        self.refus_ecriture_base(&self.cible())?;
         let base = self.biblio.base()?;
         let livres = self.livres(&base, ids);
         if livres.is_empty() {
@@ -1376,6 +1412,7 @@ impl Edition {
                 let ids: Vec<String> = faits.iter().map(|(b, ..)| b.id.clone()).collect();
                 match db::update_books(&cfg, &editions) {
                     Ok(rapport) => {
+                        self.biblio.signaler_rapport_comicrack(&rapport);
                         let fraiches: Vec<LibraryBook> = rapport.written.iter().map(|w| w.book.clone()).collect();
                         modifies.extend(self.biblio.remplacer_fiches(&fraiches, false));
                         for (id, m) in problemes_comicrack(&rapport) {
@@ -1405,6 +1442,7 @@ impl Edition {
         let _occupe = self.occuper()?;
         let ranger = ranger.unwrap_or_else(|| self.reglages_edition().ranger_original.unwrap_or(false));
         let cible = self.cible();
+        self.refus_ecriture_base(&cible)?;
         if ranger && cible.lecture_seule().is_some() {
             return Err("bibliothèque en lecture seule : l'original ne peut pas être rangé dans « _originaux » \
                         (la fiche continuerait de pointer sur lui). Décoche « ranger l'original », ou active \
@@ -1505,6 +1543,7 @@ impl Edition {
                 }
                 match db::update_books(cfg, &editions) {
                     Ok(rapport) => {
+                        self.biblio.signaler_rapport_comicrack(&rapport);
                         let fraiches: Vec<LibraryBook> = rapport.written.iter().map(|w| w.book.clone()).collect();
                         suivis.extend(fraiches.iter().map(|f| f.id.to_ascii_lowercase()));
                         modifies.extend(self.biblio.remplacer_fiches(&fraiches, true));
@@ -1624,8 +1663,8 @@ impl Edition {
     pub fn renommer_deplacer(&self, d: &DemandeRenommage, sortie: Sortie) -> Result<ResultatRenommage, String> {
         let _occupe = self.occuper()?;
         let cible = self.cible();
-        if let Some(m) = cible.lecture_seule() {
-            return Err(m.to_string());
+        if let Some(m) = self.raison_lecture_seule(&cible) {
+            return Err(m);
         }
         let modele = d.modele.trim();
         if modele.is_empty() {
@@ -1695,6 +1734,7 @@ impl Edition {
             };
             match deplacement {
                 Ok(m) => {
+                    self.signaler_ecritures(std::slice::from_ref(&m.book), m.store_counter, m.comicrack.as_ref());
                     self.lecteur.oublier_fichier(Path::new(&l.de));
                     let mut r = resultat(b, Statut::Ok, None);
                     r.fichier = m.book.file.clone();
