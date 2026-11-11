@@ -30,6 +30,8 @@ de la base et comportement hors ligne ; plus les anomalies mineures de la recett
 - Supprimer une liste ou un dossier efface aussi les vues mémorisées des sous-listes.
 - Glisser plusieurs séries sélectionnées au Ctrl+clic : la sélection n'est plus écrasée au début du
   glisser (L-08).
+- Pont MCP : la valeur d'un champ mot de passe n'est jamais renvoyée au client MCP ; « Lecture et écriture »
+  est retirée quand on change de base ComicRack.
 - Pont MCP : un port déjà pris est signalé (stderr du pont, erreur et titre de fenêtre) au lieu d'échouer
   en silence ; relance de l'application plus robuste.
 

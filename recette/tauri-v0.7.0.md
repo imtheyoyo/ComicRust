@@ -25,7 +25,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Vérification | Où | Résultat |
 |---|---|---|
-| **147 tests** du backend `comicrust-tauri` : réglages MySQL chiffrés et lecture tolérante des anciens fichiers, mot de passe masqué (Debug, erreurs, aperçus), choix SQLite/MySQL de la base autonome, transfert (**5 323 livres, 47 listes, 0 doublon** sur la fixture, second passage sans doublon, `ComicDb.xml` identique à l'octet), doublon évité, arrêt, une seule opération à la fois, surveillance (transitions en ligne / hors ligne, écritures propres non renotifiées), refus des écritures hors ligne, suppression d'un dossier de listes avec ses vues, pont MCP (port occupé, relances) | `cargo test -p comicrust-tauri` | ✅ 147/147 |
+| **148 tests** du backend `comicrust-tauri` : réglages MySQL chiffrés et lecture tolérante des anciens fichiers, mot de passe masqué (Debug, erreurs, aperçus), choix SQLite/MySQL de la base autonome, transfert (**5 323 livres, 47 listes, 0 doublon** sur la fixture, second passage sans doublon, `ComicDb.xml` identique à l'octet), doublon évité, arrêt, une seule opération à la fois, surveillance (transitions en ligne / hors ligne, écritures propres non renotifiées), refus des écritures hors ligne, suppression d'un dossier de listes avec ses vues, pont MCP (port occupé, relances) | `cargo test -p comicrust-tauri` | ✅ 148/148 |
 | Front : `svelte-check` (0 erreur), `vite build` ; parcours simulés des nouvelles boîtes (formulaire MySQL, transfert, bandeau hors ligne) | local | ✅ |
 | Rustfmt, Clippy `-D warnings` | local | ✅ |
 | Compilation de la fenêtre (`--features app`), variante `-mcp` | CI Windows (WebView2 absent ici) | à la publication |
@@ -98,11 +98,15 @@ Copie liée, base ComicRack MySQL.
 - Pas d'écran « Changer de connexion » dans les Réglages : une erreur d'ouverture au démarrage (MySQL injoignable, mot de passe perdu après changement de compte Windows) affiche seulement un message ; pour reconfigurer, supprimer la connexion dans `data\comicrust-tauri.json` ou repartir d'un dossier neuf. À faire en tauri-v0.7.1.
 - Lecture faite hors ligne en mode « Lecture et écriture » : conservée dans `avancement.json`, non reportée dans la fiche ComicRack au retour de la base.
 - « Tester » en mode autonome crée le schéma ComicRust dans la base cible.
+- Mot de passe MySQL chiffré par DPAPI : sur un autre PC ou compte Windows (clé USB portable), il est illisible et sera redemandé ; une écriture des réglages faite à cet endroit l'efface (comme dans la version egui). À améliorer plus tard (conserver le blob brut).
+- Le transfert ne propose pas une connexion ComicRack saisie à la main après la bascule en autonome (seulement `ComicRack.ini` ou la base ouverte) ; un changement fait par ComicRack pendant le démarrage d'une analyse ou d'une édition peut n'être vu qu'au rechargement suivant.
 
 ## Anomalies
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
+| (relecture) | [M] | Le pont MCP renvoyait la valeur d'un champ mot de passe | **Corrigé** dans cette version (`***`) |
+| (relecture) | [m] | « Lecture et écriture » survivait à un changement de base ComicRack | **Corrigé** (remis à faux) |
 | | | | |
 
 ## Bilan

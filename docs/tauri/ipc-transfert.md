@@ -9,7 +9,7 @@ asynchrones (`invoke`), promesse rejetée avec un **texte en français**, JSON e
 
 ## Ce que fait le transfert
 
-Copie dans la base autonome de ComicRust (SQLite `data\comicrust.db`) :
+Copie dans la base autonome de ComicRust (SQLite `data\comicrust.db`, ou la base MySQL de ComicRust si elle est choisie dans les réglages) :
 
 - les **livres** de ComicRack (fiche complète, lecture, notes, pages…) ;
 - les **listes** (dossiers de listes, listes de lecture, listes intelligentes), si demandé ;

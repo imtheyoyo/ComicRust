@@ -80,6 +80,8 @@
   };
   const valeur = (el) => {
     if (el.tagName === 'SELECT') return el.options[el.selectedIndex]?.text || '';
+    // Un champ mot de passe n'est jamais renvoyé au client MCP.
+    if (el.tagName === 'INPUT' && el.type === 'password') return el.value ? '***' : '';
     if ((el.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(el.type)) || el.tagName === 'TEXTAREA') return el.value;
     if (el.getAttribute('aria-valuenow')) return el.getAttribute('aria-valuenow');
     return '';

@@ -439,6 +439,14 @@ impl Biblio {
         }
         // Seul le choix de bibliothèque change : les préférences d'affichage sont conservées.
         reglages::modifier(&self.data, |actuels| {
+            // Changer de base ComicRack ne reporte jamais « Lecture et écriture » : le
+            // consentement donné pour une base ne vaut pas pour une autre.
+            if actuels.mode != r.mode
+                || actuels.chemin_ini != r.chemin_ini
+                || actuels.comicrack_mysql != r.comicrack_mysql
+            {
+                actuels.edition.ecriture_comicrack = None;
+            }
             actuels.mode = r.mode;
             actuels.chemin_ini = r.chemin_ini.clone();
             actuels.store_mysql = r.store_mysql.clone();

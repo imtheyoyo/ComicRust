@@ -81,6 +81,16 @@ fn configurer_conserve_les_preferences_de_vue() {
 }
 
 #[test]
+fn changer_de_base_retire_lecture_et_ecriture_comicrack() {
+    let d = tempfile::tempdir().unwrap();
+    reglages::modifier(d.path(), |r| r.edition.ecriture_comicrack = Some(true)).unwrap();
+    assert_eq!(reglages::lire(d.path()).unwrap().edition.ecriture_comicrack, Some(true));
+    // Le choix d'une base (ici le passage en autonome) ne reporte pas le consentement d'écriture.
+    autonome(d.path());
+    assert_eq!(reglages::lire(d.path()).unwrap().edition.ecriture_comicrack, None);
+}
+
+#[test]
 fn premier_demarrage_puis_choix_autonome_persistant() {
     let d = tempfile::tempdir().unwrap();
     let b = Biblio::nouvelle(d.path().to_path_buf());
