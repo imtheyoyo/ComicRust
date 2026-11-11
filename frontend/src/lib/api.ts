@@ -118,6 +118,17 @@ export interface PreferencesVue {
   theme?: string;
   /** Réglages du lecteur (sous-objet remplacé en entier à chaque enregistrement). */
   lecteur?: PreferencesLecteur;
+  /** Vue propre à chaque liste (clé : identifiant). À l'enregistrement, fusion liste par liste ;
+   *  `null` efface la vue d'une liste (liste supprimée). */
+  listes?: Record<string, VueListe | null>;
+}
+
+/** Vue mémorisée d'une liste (tri, sens, groupe, grille / tableau), comme dans ComicRack. */
+export interface VueListe {
+  tri?: ClefTri;
+  sensTri?: SensTri;
+  groupe?: Groupe;
+  vue?: 'grille' | 'tableau';
 }
 
 // ───────────────────────────── Lecteur (étape 2) ─────────────────────────────

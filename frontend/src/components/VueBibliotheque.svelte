@@ -5,13 +5,13 @@
   import {
     ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, deplacerGroupesListe, deplacerLivresListe, ecouter,
     groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
-    type BibliothequeModifiee, type ClefTri, type Groupe, type NoeudListe, type RequeteLivres, type SourceLecteur,
+    type BibliothequeModifiee, type ClefTri, type Groupe, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
   } from '../lib/api';
   import { GlisserLivres } from '../lib/glisserLivres.svelte';
   import { DEPOSER_SUR_LECTURE, TRIER_POUR_REORDONNER, glypheListe, type EtatListes } from '../lib/listes.svelte';
   import type { Modificateurs } from '../lib/selection.svelte';
   import { Bibliotheque, TAILLE_PAGE, type SuiviScan } from '../lib/bibliotheque.svelte';
-  import { enregistrerPreference, preferences } from '../lib/prefs';
+  import { enregistrerPreference, enregistrerVueListe, preferences, vueListe } from '../lib/prefs';
   import { Selection } from '../lib/selection.svelte';
   import DialogInfos from './DialogInfos.svelte';
   import { fermerModale, modale } from '../lib/modale';
@@ -39,16 +39,23 @@
   // Préférences mémorisées (data\comicrust-tauri.json), chargées par App avant ce composant :
   // le premier lister_livres part directement avec le tri et le groupe enregistrés.
   const prefs = preferences();
-  // Une liste de lecture s'affiche d'abord dans l'ordre de la liste (« # » croissant), comme dans
-  // ComicRack ; le tri de la bibliothèque est retrouvé en revenant à « Bibliothèque » (il n'est pas
-  // remplacé dans les préférences par celui d'une liste).
+  // Chaque liste a sa propre vue (tri, sens, groupe, grille / tableau), comme dans ComicRack,
+  // mémorisée dans data\comicrust-tauri.json (`vue.listes`, jamais dans ComicDb.xml) ; la
+  // bibliothèque garde la sienne (champs de premier niveau de `vue`). Une liste jamais réglée
+  // s'affiche : liste de lecture dans l'ordre de la liste (« # » croissant), sans groupe ; autre
+  // liste avec le tri et le groupe de la bibliothèque.
   const listeInitiale = untrack(() => liste);
-  let triBiblio: { tri: ClefTri; sensTri: 'asc' | 'desc' } = { tri: prefs.tri ?? 'serie', sensTri: prefs.sensTri ?? 'asc' };
-  const triDe = (l: NoeudListe) => (l.type === 'lecture' ? { tri: 'ordre' as ClefTri, sensTri: 'asc' as const } : triBiblio);
-  const bib = new Bibliotheque(listeInitiale
-    ? { ...triDe(listeInitiale), groupe: prefs.groupe, liste: listeInitiale.id }
-    : { tri: prefs.tri, sensTri: prefs.sensTri, groupe: prefs.groupe });
-  let vue = $state<'grille' | 'tableau'>(prefs.vue ?? 'grille');
+  let biblio: VueListeComplete = {
+    tri: prefs.tri ?? 'serie', sensTri: prefs.sensTri ?? 'asc', groupe: prefs.groupe ?? 'aucun', vue: prefs.vue ?? 'grille',
+  };
+  const vueDefaut = (l: NoeudListe): VueListeComplete =>
+    l.type === 'lecture' ? { tri: 'ordre', sensTri: 'asc', groupe: 'aucun', vue: biblio.vue } : { ...biblio };
+  const vueDe = (l: NoeudListe): VueListeComplete => ({ ...vueDefaut(l), ...(vueListe(l.id) ?? {}) });
+  const vueInitiale = listeInitiale ? vueDe(listeInitiale) : biblio;
+  const bib = new Bibliotheque({
+    tri: vueInitiale.tri, sensTri: vueInitiale.sensTri, groupe: vueInitiale.groupe, liste: listeInitiale?.id,
+  });
+  let vue = $state<'grille' | 'tableau'>(vueInitiale.vue);
   let zoom = $state(prefs.zoom ?? 150);
   let details = $state(prefs.details ?? true);
   const LARGEUR_MIN = 220;
@@ -106,12 +113,21 @@
     };
   });
 
-  // Toute modification d'un réglage d'affichage est enregistrée (avec délai, voir prefs.ts) ; le
-  // tri d'une liste (« # » le plus souvent) ne remplace pas celui de la bibliothèque.
+  // Toute modification d'un réglage d'affichage est enregistrée (avec délai, voir prefs.ts). Tri,
+  // groupe et grille / tableau d'une liste vont dans sa propre vue (seulement si elle a été réglée :
+  // une liste jamais touchée suit les valeurs par défaut) ; ceux de la bibliothèque, dans les siens.
   $effect(() => {
-    const p = { groupe: bib.params.groupe, vue, zoom, details, largeurDetails };
-    if (bib.params.liste) enregistrerPreference(p);
-    else enregistrerPreference({ ...p, tri: bib.params.tri, sensTri: bib.params.sensTri });
+    enregistrerPreference({ zoom, details, largeurDetails });
+    const v: VueListeComplete = { tri: bib.params.tri, sensTri: bib.params.sensTri, groupe: bib.params.groupe ?? 'aucun', vue };
+    const id = bib.params.liste;
+    untrack(() => {
+      if (!id) {
+        biblio = v;
+        enregistrerPreference(v);
+      } else if (liste?.id === id && (vueListe(id) || !memeVue(v, vueDefaut(liste)))) {
+        enregistrerVueListe(id, v);
+      }
+    });
   });
 
   // Liste choisie dans le panneau : la vue montre ses livres (ou revient à la bibliothèque).
@@ -119,8 +135,9 @@
     const id = liste?.id;
     untrack(() => {
       if (id === bib.params.liste) return;
-      if (id && !bib.params.liste) triBiblio = { tri: bib.params.tri, sensTri: bib.params.sensTri };
-      changer(liste ? { liste: liste.id, ...triDe(liste) } : { liste: undefined, ...triBiblio });
+      const v = liste ? vueDe(liste) : biblio;
+      vue = v.vue;
+      changer({ liste: liste?.id, tri: v.tri, sensTri: v.sensTri, groupe: v.groupe });
     });
   });
 
@@ -145,6 +162,12 @@
     if (bib.params.recherche === '' && !bib.params.liste) nbLivres = bib.total;
     sel.borner(bib.total);
   });
+
+  /** Vue complète d'une liste ou de la bibliothèque (tous les champs renseignés). */
+  type VueListeComplete = Required<VueListe>;
+  function memeVue(a: VueListeComplete, b: VueListeComplete) {
+    return a.tri === b.tri && a.sensTri === b.sensTri && a.groupe === b.groupe && a.vue === b.vue;
+  }
 
   function changer(patch: Partial<typeof bib.params>) {
     Object.assign(bib.params, patch);
@@ -363,8 +386,7 @@
     }
     if (id === 'ajouter') {
       ajoutDe = ids;
-      const l = listes.listesDeLecture();
-      choixAjout = l.find((x) => x.id === derniereListeAjout)?.id ?? l.find((x) => x.id === listes.courante)?.id ?? l[0]?.id ?? '+';
+      choixAjout = listes.listeProposee();
       nomNouvelle = 'Nouvelle liste de lecture';
       return;
     }
@@ -445,6 +467,7 @@
   async function ajouterA(idListe: string, indices: number[]) {
     try {
       const ids = (await bib.livresDe(indices)).map((l) => l.id);
+      listes.derniereAjout = idListe;
       await listes.executer('Ajout à la liste', () => ajouterLivresListe(idListe, ids));
     } catch (e) {
       erreurAction = messageErreur(e);
@@ -526,8 +549,11 @@
   // Fenêtre « Ajouter à une liste ».
   let ajoutDe = $state<string[] | null>(null);
   let choixAjout = $state('');
-  /** Dernière liste choisie dans « Ajouter à une liste… » (reproposée à l'ouverture suivante). */
-  let derniereListeAjout = '';
+  // Dernière liste de lecture affichée : proposée par « Ajouter à une liste… » depuis la Bibliothèque.
+  $effect(() => {
+    const c = listes.courante;
+    if (c && listes.noeud(c)?.type === 'lecture') listes.derniereOuverte = c;
+  });
   let nomNouvelle = $state('');
   async function validerAjout() {
     const ids = ajoutDe;
@@ -539,7 +565,7 @@
       await listes.executer('Création de la liste', () => creerListe({ type: 'lecture', nom, livres: ids }));
     } else if (choixAjout) {
       const idl = choixAjout;
-      derniereListeAjout = idl;
+      listes.derniereAjout = idl;
       await listes.executer('Ajout à la liste', () => ajouterLivresListe(idl, ids));
     }
   }

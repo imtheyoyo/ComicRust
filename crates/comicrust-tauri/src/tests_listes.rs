@@ -1044,7 +1044,8 @@ fn cbl_thanos_noms_reels_des_echantillons() {
     {
         db.books.push(livre_sans_fiche(&format!("b0000000-0000-0000-0000-00000000000{k}"), f));
     }
-    let texte = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../recette/echantillons/Thanos.cbl")).unwrap();
+    let texte =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../recette/echantillons/Thanos.cbl")).unwrap();
     let liste = ReadingList::from_xml(&texte).unwrap();
     let (_, rapport) = crate::listes_cbl::rattacher(&liste, "Thanos", &db);
     assert_eq!(rapport.trouves, 5, "{}", rapport.texte);

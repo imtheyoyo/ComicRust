@@ -13,6 +13,7 @@
   } from '../lib/api';
   import { glypheListe, infobulleListe, type EtatListes, type LigneArbre } from '../lib/listes.svelte';
   import { modale } from '../lib/modale';
+  import { enregistrerVueListe } from '../lib/prefs';
   import EditeurListeIntelligente from './EditeurListeIntelligente.svelte';
   import MenuContextuel, { type EntreeMenu } from './MenuContextuel.svelte';
 
@@ -184,7 +185,8 @@
     if (!suppression) return;
     const { id, nom } = suppression;
     suppression = null;
-    await listes.executer(`Suppression de « ${nom} »`, () => supprimerListe(id, listes.courante ?? undefined));
+    const r = await listes.executer(`Suppression de « ${nom} »`, () => supprimerListe(id, listes.courante ?? undefined));
+    if (r) enregistrerVueListe(id, null); // vue mémorisée de la liste oubliée (data\comicrust-tauri.json)
     arbreEl?.focus({ preventScroll: true });
   }
 

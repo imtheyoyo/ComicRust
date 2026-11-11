@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
@@ -176,6 +177,69 @@ pub struct PreferencesVue {
     /// Réglages du lecteur (sous-objet `lecteur`, remplacé en entier à chaque enregistrement).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lecteur: Option<PreferencesLecteur>,
+    /// Vue propre à chaque liste (tri, sens, groupe, grille / tableau), comme ComicRack : clé =
+    /// identifiant de la liste. **Fusion par liste** à l'enregistrement : une entrée `null` efface
+    /// la liste (liste supprimée), une entrée objet remplace celle de la liste ; les autres listes
+    /// sont gardées. Jamais écrit dans `ComicDb.xml` ni dans la base de ComicRack.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listes: Option<BTreeMap<String, Option<VueListe>>>,
+}
+
+/// Vue mémorisée d'une liste (section `vue.listes.<id>`). Lecture tolérante champ par champ.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VueListe {
+    /// Clé de tri ([`TRIS`] ou `ordre`, « # Ordre de la liste »).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sens_tri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groupe: Option<String>,
+    /// `grille` ou `tableau`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vue: Option<String>,
+}
+
+/// Nombre maximal de listes dont la vue est gardée (fichier modifié à la main, etc.).
+pub const MAX_VUES_LISTES: usize = 5000;
+
+impl VueListe {
+    /// Construit la vue d'une liste depuis du JSON ; `None` si ce n'est pas un objet ou si aucun
+    /// champ n'est valide.
+    pub fn depuis_json(v: &Value) -> Option<Self> {
+        let o = v.as_object()?;
+        let parmi = |clef: &str, permis: &[&str]| {
+            o.get(clef).and_then(Value::as_str).filter(|s| permis.contains(s)).map(str::to_string)
+        };
+        let tri =
+            o.get("tri").and_then(Value::as_str).filter(|s| *s == "ordre" || TRIS.contains(s)).map(str::to_string);
+        let r =
+            Self { tri, sens_tri: parmi("sensTri", SENS), groupe: parmi("groupe", GROUPES), vue: parmi("vue", VUES) };
+        (r != Self::default()).then_some(r)
+    }
+}
+
+/// Identifiant de liste plausible (GUID de ComicRack, identifiant de la base de ComicRust).
+fn id_liste_valide(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 100
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '{' | '}'))
+}
+
+/// Lit `vue.listes` : entrées `null` gardées (effacement demandé), entrées invalides ignorées.
+fn listes_depuis_json(v: &Value) -> Option<BTreeMap<String, Option<VueListe>>> {
+    let o = v.as_object()?;
+    let m: BTreeMap<_, _> = o
+        .iter()
+        .filter(|(id, _)| id_liste_valide(id))
+        .filter_map(|(id, v)| match v {
+            Value::Null => Some((id.clone(), None)),
+            v => VueListe::depuis_json(v).map(|l| (id.clone(), Some(l))),
+        })
+        .take(MAX_VUES_LISTES)
+        .collect();
+    (!m.is_empty()).then_some(m)
 }
 
 /// Réglages du lecteur (section `vue.lecteur`, `PreferencesLecteur` de `frontend/src/lib/api.ts`).
@@ -260,6 +324,7 @@ impl PreferencesVue {
             largeur_details: borne("largeurDetails", LARGEUR_DETAILS),
             theme: o.get("theme").and_then(Value::as_str).filter(|s| id_theme_valide(s)).map(str::to_string),
             lecteur: o.get("lecteur").and_then(PreferencesLecteur::depuis_json),
+            listes: o.get("listes").and_then(listes_depuis_json),
         }
     }
 
@@ -269,6 +334,24 @@ impl PreferencesVue {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
         prendre!(tri, sens_tri, groupe, vue, zoom, details, largeur_details, theme, lecteur);
+        // Vues des listes : fusion liste par liste (`null` efface), jamais d'entrée `null` gardée.
+        if let Some(patch) = m.listes {
+            let mut listes = self.listes.take().unwrap_or_default();
+            listes.retain(|_, v| v.is_some());
+            for (id, v) in patch {
+                match v {
+                    Some(v) => {
+                        if listes.len() < MAX_VUES_LISTES || listes.contains_key(&id) {
+                            listes.insert(id, Some(v));
+                        }
+                    }
+                    None => {
+                        listes.remove(&id);
+                    }
+                }
+            }
+            self.listes = (!listes.is_empty()).then_some(listes);
+        }
     }
 }
 
@@ -383,6 +466,59 @@ mod tests {
         assert!(lire(d.path()).is_err());
     }
 
+    /// Vue propre à chaque liste : fusion liste par liste, `null` efface, lecture tolérante,
+    /// valeurs relues après redémarrage, tri de la bibliothèque inchangé.
+    #[test]
+    fn vues_des_listes_memorisees_par_liste() {
+        let d = tempfile::tempdir().unwrap();
+        enregistrer_preferences_vue(d.path(), PreferencesVue { tri: Some("titre".into()), ..Default::default() })
+            .unwrap();
+        let patch = |j: serde_json::Value| PreferencesVue::depuis_json(&serde_json::json!({ "listes": j }));
+        enregistrer_preferences_vue(
+            d.path(),
+            patch(serde_json::json!({
+                "aaaa-1": { "tri": "ordre", "sensTri": "desc", "groupe": "serie", "vue": "tableau" },
+                "bbbb-2": { "tri": "pages" }
+            })),
+        )
+        .unwrap();
+        // Une seule liste modifiée : l'autre est gardée.
+        enregistrer_preferences_vue(d.path(), patch(serde_json::json!({ "bbbb-2": { "groupe": "editeur" } }))).unwrap();
+        let p = lire_preferences_vue(d.path()).unwrap();
+        assert_eq!(p.tri.as_deref(), Some("titre"));
+        let l = p.listes.clone().unwrap();
+        let a = l["aaaa-1"].clone().unwrap();
+        assert_eq!(
+            a,
+            VueListe {
+                tri: Some("ordre".into()),
+                sens_tri: Some("desc".into()),
+                groupe: Some("serie".into()),
+                vue: Some("tableau".into())
+            }
+        );
+        assert_eq!(l["bbbb-2"].clone().unwrap(), VueListe { groupe: Some("editeur".into()), ..Default::default() });
+        // Liste supprimée : entrée effacée, aucun `null` écrit dans le fichier.
+        enregistrer_preferences_vue(d.path(), patch(serde_json::json!({ "aaaa-1": null }))).unwrap();
+        let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
+        assert!(!texte.contains("aaaa-1") && texte.contains("bbbb-2"), "{texte}");
+        enregistrer_preferences_vue(d.path(), patch(serde_json::json!({ "bbbb-2": null }))).unwrap();
+        assert!(lire_preferences_vue(d.path()).unwrap().listes.is_none());
+        // Lecture tolérante : valeurs inconnues, identifiants douteux, mauvais types ignorés.
+        let p = patch(serde_json::json!({
+            "cccc-3": { "tri": "bidule", "groupe": "serie", "vue": 4 },
+            "../x": { "tri": "titre" },
+            "dddd-4": { "tri": "n_importe" },
+            "eeee-5": "grille"
+        }));
+        let l = p.listes.unwrap();
+        assert_eq!(l.len(), 1);
+        assert_eq!(l["cccc-3"].clone().unwrap(), VueListe { groupe: Some("serie".into()), ..Default::default() });
+        assert!(PreferencesVue::depuis_json(&serde_json::json!({ "listes": [1, 2] })).listes.is_none());
+        // `ordre` n'est accepté que pour une liste.
+        assert!(PreferencesVue::depuis_json(&serde_json::json!({ "tri": "ordre" })).tri.is_none());
+    }
+
     #[test]
     fn preferences_vue_aller_retour_et_fusion() {
         let d = tempfile::tempdir().unwrap();
@@ -397,6 +533,7 @@ mod tests {
             largeur_details: Some(400),
             theme: Some("moderne-sombre".into()),
             lecteur: None,
+            listes: None,
         };
         assert_eq!(enregistrer_preferences_vue(d.path(), p.clone()).unwrap(), p);
         assert_eq!(lire_preferences_vue(d.path()).unwrap(), p);

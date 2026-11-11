@@ -3,7 +3,7 @@
 // `vue`), jamais dans le localStorage de la WebView. Chargées une fois au démarrage (avant le premier
 // lister_livres), puis enregistrées avec un délai pour regrouper les changements rapides.
 import {
-  dansTauri, enregistrerPreferencesVue, lirePreferencesVue, type PreferencesLecteur, type PreferencesVue,
+  dansTauri, enregistrerPreferencesVue, lirePreferencesVue, type PreferencesLecteur, type PreferencesVue, type VueListe,
 } from './api';
 
 /** Délai d'enregistrement après le dernier changement (ms). */
@@ -89,6 +89,26 @@ export function enregistrerReglagesLecteur(patch: PreferencesLecteur): void {
   if (JSON.stringify(apres) === JSON.stringify(avant)) return;
   courantes.lecteur = apres;
   enAttente.lecteur = { ...apres };
+  clearTimeout(minuterie);
+  minuterie = setTimeout(vider, DELAI_ENREGISTREMENT);
+}
+
+/** Vue mémorisée d'une liste (tri, sens, groupe, grille / tableau), ou `undefined`. */
+export function vueListe(id: string): VueListe | undefined {
+  const v = courantes.listes?.[id];
+  return v ? { ...v } : undefined;
+}
+
+/** Mémorise la vue d'une liste (`null` : l'oublie, liste supprimée) et programme l'enregistrement.
+ *  Seule l'entrée de cette liste est envoyée : le backend fusionne liste par liste. */
+export function enregistrerVueListe(id: string, v: VueListe | null): void {
+  const avant = courantes.listes?.[id] ?? null;
+  if (JSON.stringify(avant) === JSON.stringify(v)) return;
+  const listes = { ...(courantes.listes ?? {}) };
+  if (v) listes[id] = { ...v };
+  else delete listes[id];
+  courantes.listes = listes;
+  enAttente.listes = { ...(enAttente.listes ?? {}), [id]: v ? { ...v } : null };
   clearTimeout(minuterie);
   minuterie = setTimeout(vider, DELAI_ENREGISTREMENT);
 }

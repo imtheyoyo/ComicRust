@@ -315,7 +315,16 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'lire_preferences_vue':
       return { ...simuleTests.prefs };
     case 'enregistrer_preferences_vue':
-      simuleTests.prefs = { ...simuleTests.prefs, ...(args.preferences as PreferencesVue) };
+    {
+      // Comme le backend : fusion champ par champ, et liste par liste pour `listes` (`null` efface).
+      const m = args.preferences as PreferencesVue;
+      const listes = { ...(simuleTests.prefs.listes ?? {}) };
+      for (const [id, v] of Object.entries(m.listes ?? {})) {
+        if (v) listes[id] = v;
+        else delete listes[id];
+      }
+      simuleTests.prefs = { ...simuleTests.prefs, ...m, listes: Object.keys(listes).length ? listes : undefined };
+    }
       return { ...simuleTests.prefs };
     case 'ouvrir_bibliotheque':
       return etat;

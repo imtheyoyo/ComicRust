@@ -53,6 +53,10 @@ export class EtatListes {
   survolDepot = $state<{ id: string; ok: boolean } | null>(null);
   /** Réponses de `depot_livres_possible` pendant un glisser (null : accepté, sinon la raison). */
   depots = new SvelteMap<string, string | null>();
+  /** Dernière liste de lecture qui a reçu des livres dans la session (menu ou glisser), et dernière
+   *  liste de lecture affichée : « Ajouter à une liste… » propose la première connue (recette K-03). */
+  derniereAjout: string | null = null;
+  derniereOuverte: string | null = null;
   /** La sélection doit changer (ResultatListes.selection) : branché par l'application. */
   surSelection: (id: string | null) => void = (id) => (this.courante = id);
 
@@ -196,6 +200,14 @@ export class EtatListes {
   }
 
   /** Listes de lecture qui acceptent des livres (« Ajouter à une liste… »), avec leurs dossiers. */
+  /** Liste proposée par « Ajouter à une liste… » : dernière utilisée, sinon liste affichée, sinon
+   *  dernière liste de lecture affichée, sinon la première ; « + » (nouvelle liste) s'il n'y en a aucune. */
+  listeProposee(): string {
+    const l = this.listesDeLecture();
+    const connue = (id: string | null) => (id ? l.find((x) => x.id === id)?.id : undefined);
+    return connue(this.derniereAjout) ?? connue(this.courante) ?? connue(this.derniereOuverte) ?? l[0]?.id ?? '+';
+  }
+
   listesDeLecture(liste = this.arbre?.listes ?? [], chemin = ''): Array<{ id: string; nom: string }> {
     return liste.flatMap((n) =>
       n.type === 'lecture' && n.accepteLivres
