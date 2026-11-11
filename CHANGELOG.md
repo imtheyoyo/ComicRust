@@ -5,6 +5,37 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.7.0] — 2026-11-12
+
+Étape 6 de la version Tauri : **MySQL**, base de ComicRust, transfert depuis ComicRack, surveillance
+de la base et comportement hors ligne ; plus les anomalies mineures de la recette tauri-v0.6.3.
+
+### Nouveautés
+- **Connexion MySQL** (serveur, port, utilisateur, mot de passe, base) avec bouton **Tester**, pour la
+  base de ComicRust (SQLite par défaut, ou MySQL) et pour une base ComicRack saisie à la main (sans
+  `ComicRack.ini`). Réglages dans `data\comicrust-tauri.json`, **mot de passe chiffré pour ton compte
+  Windows** (jamais en clair, jamais renvoyé à l'interface).
+- **Transfert de la bibliothèque ComicRack** (livres, lecture, listes, dossiers) vers la base de
+  ComicRust : source MySQL ou `ComicDb.xml` en **lecture seule**, progression, annulation, résumé,
+  sans doublon si on le relance.
+- **Surveillance de la base** toutes les 5 s (changements faits par ComicRack appliqués, vue rafraîchie)
+  et **mode hors ligne** : bandeau « Base injoignable, nouvel essai… », bouton Réessayer, écritures
+  refusées proprement tant que la base ne répond pas, reprise automatique.
+
+### Corrections
+- Monter / Descendre grisés dans les listes en lecture seule ; message de lecture seule renvoyant vers
+  Réglages ▸ Bibliothèque ComicRack.
+- « # Ordre de la liste » n'est plus proposé pour une liste intelligente.
+- Option sélectionnée de « Déplacer dans… » lisible en thème sombre.
+- Supprimer une liste ou un dossier efface aussi les vues mémorisées des sous-listes.
+- Glisser plusieurs séries sélectionnées au Ctrl+clic : la sélection n'est plus écrasée au début du
+  glisser (L-08).
+- Pont MCP : un port déjà pris est signalé (stderr du pont, erreur et titre de fenêtre) au lieu d'échouer
+  en silence ; relance de l'application plus robuste.
+
+### Recette
+[`recette/tauri-v0.7.0.md`](recette/tauri-v0.7.0.md).
+
 ## [tauri-v0.6.3] — 2026-11-11
 
 Même contenu que la tauri-v0.6.2, plus le **pilotage par une IA** intégré au paquet.
