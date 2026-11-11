@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.7.0 (pré-release de l'étape 6 : **MySQL, transfert, surveillance, hors ligne**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.7.0-windows-x64.zip` (contient aussi `ComicRust-Tauri-mcp.exe`) |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `1fa9e3fdb329201a0ddfd0b2110ea42902118ea876a105a56afb469dc6f4dd6a` |
 | Contenu | connexion MySQL avec bouton Tester (base de ComicRust SQLite ou MySQL, base ComicRack saisie à la main), mot de passe chiffré pour ton compte Windows ; transfert de la bibliothèque ComicRack vers la base de ComicRust ; surveillance de la base toutes les 5 s et mode hors ligne ; 7 anomalies mineures de la tauri-v0.6.3 (dont L-08) ; pont MCP signalant un port occupé |
 | Origine | [recette tauri-v0.6.3](tauri-v0.6.3.md) : **GO** de Yoyo le 11/11/2026 (34 OK sur 35, S-02 vérifié par le MCP) |
 
