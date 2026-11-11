@@ -7,6 +7,7 @@ import type {
 } from './api';
 import { creerEditionSimulee } from './simuleEdition';
 import { creerListesSimulees } from './simuleListes';
+import { creerTransfertSimule } from './simuleTransfert';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -291,6 +292,17 @@ const listes = creerListesSimulees({
   titreGroupe: (l, g) => (g === 'editeur' ? l.editeur ?? '(sans éditeur)' : l.serie ?? '(sans série)'),
 });
 
+// Transfert ComicRack → ComicRust (étape 6) : voir simuleTransfert.ts.
+const transfert = creerTransfertSimule({
+  emettre,
+  pause,
+  etat: () => etat,
+  basculer: () => {
+    etat = { ...etat, mode: 'autonome' };
+    return etat;
+  },
+});
+
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
   switch (commande) {
@@ -410,6 +422,10 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'lancer_scan':
       void simulerScan();
       return null;
+    case 'apercu_transfert':
+    case 'lancer_transfert':
+    case 'annuler_transfert':
+      return transfert.appeler(commande, args);
     default: {
       simuleTests.edition.push({ commande, args: JSON.parse(JSON.stringify(args)) as Record<string, unknown> });
       const rl = listes.appeler(commande, args);

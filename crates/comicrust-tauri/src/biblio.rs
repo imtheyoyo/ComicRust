@@ -977,7 +977,7 @@ fn charger_comicdb_xml(chemin: &Path) -> Result<ComicDatabase, String> {
 }
 
 /// Emplacements habituels de `ComicRack.ini` (à côté de `ComicRack.exe`).
-fn chercher_ini() -> Option<PathBuf> {
+pub(crate) fn chercher_ini() -> Option<PathBuf> {
     let mut dossiers: Vec<PathBuf> = Vec::new();
     for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
         if let Some(d) = std::env::var_os(var) {

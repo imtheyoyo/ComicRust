@@ -12,6 +12,7 @@
 //! - l'édition ([`edition`] : infos des livres, ComicInfo.xml, conversion en CBZ, renommage),
 //! - les listes ComicRack ([`listes`] : arbre, gestion, livres des listes de lecture ;
 //!   [`listes_criteres`] : éditeur de listes intelligentes ; [`listes_cbl`] : import / export `.cbl`),
+//! - le transfert de la bibliothèque ComicRack vers la base de ComicRust ([`transfert`]),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
 //! Le code sans dépendance à Tauri est compilé et testé partout (Linux compris) ; la fenêtre
@@ -30,12 +31,15 @@ pub mod pages_livre;
 pub mod portable;
 pub mod reglages;
 pub mod themes;
+pub mod transfert;
 pub mod tri;
 
 #[cfg(test)]
 mod tests_biblio;
 #[cfg(test)]
 mod tests_listes;
+#[cfg(test)]
+mod tests_transfert;
 
 use serde::Serialize;
 use std::path::Path;

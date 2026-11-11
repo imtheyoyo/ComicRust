@@ -1,7 +1,7 @@
 <script lang="ts">
   // Réglages : choix du thème (fichiers CSS de data\themes), dossiers du mode portable et, en mode
   // lié à ComicRack, l'option « Lecture et écriture » (section `edition` de data\comicrust-tauri.json).
-  import { modale } from '../lib/modale';
+  import { fermerModale, modale } from '../lib/modale';
   import {
     enregistrerReglagesEdition, infos, lireReglagesEdition, listerThemes, messageErreur, type InfosApplication,
     type ModeBiblio, type Theme,
@@ -15,8 +15,10 @@
     mode?: ModeBiblio;
     /** L'option « Lecture et écriture » a changé (les listes relisent leur état). */
     onecriture?: () => void;
+    /** « Transférer la bibliothèque ComicRack… » : ferme les réglages et ouvre la fenêtre du transfert. */
+    ontransfert?: () => void;
   }
-  let { themeActif, onTheme, mode = 'autonome', onecriture }: Props = $props();
+  let { themeActif, onTheme, mode = 'autonome', onecriture, ontransfert }: Props = $props();
   let ecritureComicrack = $state(false);
   let confirmerEcriture = $state(false);
   let enregistre = $state('');
@@ -109,6 +111,14 @@
       {#if enregistre}<p class="ok" role="status">{enregistre}</p>{/if}
     </fieldset>
   {/if}
+  {#if ontransfert}
+    <fieldset class="comicrack" data-testid="reglage-transfert">
+      <legend>Passer de ComicRack à ComicRust</legend>
+      <p class="discret petit transfert">Copie les livres, la lecture, les listes et les dossiers de ComicRack dans la base de ComicRust
+        (ComicRack n'est pas modifié ; le transfert peut être relancé sans doublon).</p>
+      <button onclick={() => { fermerModale(dialogue); ontransfert(); }} data-testid="ouvrir-transfert">Transférer la bibliothèque ComicRack…</button>
+    </fieldset>
+  {/if}
   {#if info}
     <p class="discret">
       Ajoutez un fichier <code>.css</code> dans <code>{info.dossier_themes}</code>, puis « Actualiser la liste » :
@@ -137,6 +147,7 @@
   .case { display: flex; gap: 8px; align-items: flex-start; }
   .case input { margin-top: 3px; accent-color: var(--cr-accent); }
   .petit { font-size: 12px; margin: 6px 0 0 24px; }
+  .petit.transfert { margin: 0 0 8px; }
   .avertissement { margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--cr-erreur); border-radius: var(--cr-rayon); }
   .avertissement p { margin: 0 0 6px; }
   .avertissement strong { color: var(--cr-erreur); }
