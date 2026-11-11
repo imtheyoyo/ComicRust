@@ -65,3 +65,5 @@ pub fn infos_application(data: &Path) -> InfosApplication {
 
 #[cfg(feature = "app")]
 pub mod app;
+#[cfg(feature = "mcp")]
+pub mod mcp;

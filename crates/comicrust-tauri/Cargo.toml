@@ -1,7 +1,7 @@
 [package]
 name = "comicrust-tauri"
 description = "ComicRust, interface Tauri 2 (WebView2) au-dessus de comicrust-core"
-version = "0.6.2"
+version = "0.6.3"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -24,6 +24,9 @@ app = ["dep:tauri", "dep:tauri-build"]
 # Sert le front compilé (frontend/dist) depuis le binaire au lieu du serveur Vite :
 # obligatoire pour la version livrée, absent en développement (`npm run dev`).
 custom-protocol = ["app", "tauri/custom-protocol"]
+# Pilotage par une IA pour les tests (serveur MCP, docs/MCP-tauri.md) : variante
+# ComicRust-Tauri-mcp.exe, activée au lancement par `--mcp`. Windows (WebView2) uniquement.
+mcp = ["app", "dep:webview2-com", "dep:windows"]
 
 [dependencies]
 comicrust-core = { path = "../comicrust-core" }
@@ -36,6 +39,11 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Dates de lecture écrites dans la base ComicRack (`Opened`), comme le cœur.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { version = "2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# Protocole DevTools de WebView2 (fonction `mcp`) : mêmes versions que celles de Tauri (wry).
+webview2-com = { version = "0.39", optional = true }
+windows = { version = "0.62", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }

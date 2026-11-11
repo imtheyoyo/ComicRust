@@ -564,6 +564,11 @@ fn reponse_couverture(statut: u16, jpeg: Vec<u8>) -> tauri::http::Response<Vec<u
 
 /// Lance l'application.
 pub fn run() {
+    // `--mcp-stdio` : passerelle pour les clients MCP qui lancent un programme (Claude Desktop).
+    #[cfg(feature = "mcp")]
+    if crate::mcp::passerelle_stdio() {
+        return;
+    }
     // Portable : `data\` à côté de l'exécutable. Sans dossier inscriptible, on s'arrête avec
     // un message (aucun repli sur AppData, comme la version egui).
     let data = match portable::data_dir() {
@@ -692,12 +697,17 @@ pub fn run() {
             // dans `data\webview2` (chemin absolu) : cache, cookies et stockage local restent
             // dans le dossier portable. Titre et tailles : celles de l'ancienne configuration.
             let profil = portable::dossier_webview(&data.0);
-            tauri::WebviewWindowBuilder::new(&*app, "main", tauri::WebviewUrl::default())
+            let fenetre = tauri::WebviewWindowBuilder::new(&*app, "main", tauri::WebviewUrl::default())
                 .title("ComicRust")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(800.0, 500.0)
-                .data_directory(profil)
-                .build()?;
+                .data_directory(profil);
+            // Pilotage MCP : script de la page (journal de la console dès le chargement).
+            #[cfg(feature = "mcp")]
+            let fenetre = if crate::mcp::actif() { fenetre.initialization_script(crate::mcp::SCRIPT) } else { fenetre };
+            fenetre.build()?;
+            #[cfg(feature = "mcp")]
+            crate::mcp::demarrer(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

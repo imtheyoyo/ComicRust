@@ -110,3 +110,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 | Mineurs [m] | 3 | | |
 
 Décision et remarques :
+Remplacée par la [tauri-v0.6.3](tauri-v0.6.3.md) (même contenu + variante MCP dans le zip), le 11/11/2026, avant d'être passée.
