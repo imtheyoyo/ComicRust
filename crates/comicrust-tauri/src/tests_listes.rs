@@ -1025,3 +1025,49 @@ fn affichage_et_regroupement_utilisent_la_serie_deduite() {
     c.series = Some("Ma série".into());
     assert_eq!(crate::tri::Regroupement::Serie.titre(&c), "Ma série");
 }
+
+/// Noms réels de l'échantillon `Thanos.cbl` (recette S-02) : numéro sur deux chiffres, année
+/// entre parenthèses, livres sans fiche.
+#[test]
+fn cbl_thanos_noms_reels_des_echantillons() {
+    use comicrust_core::cbl::ReadingList;
+    let mut db = ComicDatabase::default();
+    for (k, f) in [
+        r"Z:\E\Silver Surfer 03.pdf",
+        r"Z:\E\Silver Surfer 04 (1987).cbz",
+        r"Z:\E\Warlock 09 (1976).cbz",
+        r"Z:\E\Thanos Quest 01 (1990).cbz",
+        r"Z:\E\Infinity Gauntlet 02 (1991).cbt",
+    ]
+    .iter()
+    .enumerate()
+    {
+        db.books.push(livre_sans_fiche(&format!("b0000000-0000-0000-0000-00000000000{k}"), f));
+    }
+    let texte = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../recette/echantillons/Thanos.cbl")).unwrap();
+    let liste = ReadingList::from_xml(&texte).unwrap();
+    let (_, rapport) = crate::listes_cbl::rattacher(&liste, "Thanos", &db);
+    assert_eq!(rapport.trouves, 5, "{}", rapport.texte);
+}
+
+/// Recette E-01 : un critère sans marqueur `genre` (tel que renvoyé par `nouveau_critere`) est
+/// accepté ; un groupe sans marqueur est reconnu à ses `noeuds` ; le marqueur reste écrit en sortie.
+#[test]
+fn noeud_sans_genre_accepte() {
+    use crate::listes_criteres::{CriteresListe, NoeudCritere};
+    let c = crate::listes_criteres::nouveau_critere("ComicBookPageCountMatcher", None).unwrap();
+    let mut critere = serde_json::to_value(&c).unwrap();
+    assert!(critere.get("genre").is_none());
+    critere["valeur"] = "10".into();
+    let json = serde_json::json!({
+        "nom": "x", "mode": "tous",
+        "noeuds": [critere, { "mode": "auMoinsUn", "noeuds": [{ "genre": "critere", "type": "ComicBookSeriesMatcher", "op": 1, "valeur": "a" }] }]
+    });
+    let l: CriteresListe = serde_json::from_value(json).unwrap();
+    assert!(matches!(l.noeuds[0], NoeudCritere::Critere(_)));
+    assert!(matches!(l.noeuds[1], NoeudCritere::Groupe(_)));
+    let sortie = serde_json::to_value(&l).unwrap();
+    assert_eq!(sortie["noeuds"][0]["genre"], "critere");
+    assert_eq!(sortie["noeuds"][1]["genre"], "groupe");
+    assert!(serde_json::from_value::<NoeudCritere>(serde_json::json!({ "genre": "autre" })).is_err());
+}

@@ -167,13 +167,35 @@ pub struct GroupeCriteres {
     pub origine: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "genre")]
 pub enum NoeudCritere {
     #[serde(rename = "critere")]
     Critere(Critere),
     #[serde(rename = "groupe")]
     Groupe(GroupeCriteres),
+}
+
+/// Lecture tolérante d'un nœud : le marqueur `genre` est lu s'il est présent, sinon déduit
+/// (présence de `noeuds` ⇒ groupe, sinon critère). Un nœud sans marqueur (critère renvoyé tel quel
+/// par `nouveau_critere`) ne fait donc plus échouer l'aperçu ni l'enregistrement (recette E-01).
+impl<'de> Deserialize<'de> for NoeudCritere {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let mut v = serde_json::Value::deserialize(d)?;
+        let objet = v.as_object_mut().ok_or_else(|| D::Error::custom("nœud de critère invalide"))?;
+        let genre = match objet.remove("genre") {
+            Some(serde_json::Value::String(g)) => g,
+            Some(_) => return Err(D::Error::custom("champ `genre` invalide")),
+            None if objet.contains_key("noeuds") => "groupe".to_string(),
+            None => "critere".to_string(),
+        };
+        match genre.as_str() {
+            "critere" => serde_json::from_value(v).map(NoeudCritere::Critere).map_err(D::Error::custom),
+            "groupe" => serde_json::from_value(v).map(NoeudCritere::Groupe).map_err(D::Error::custom),
+            g => Err(D::Error::custom(format!("genre de nœud inconnu : {g}"))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

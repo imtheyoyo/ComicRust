@@ -1,0 +1,23 @@
+Rapport de recette ComicRust tauri-v0.6.1 — 11/11/2026 13:59
+Résultat : 6 OK, 3 échec(s), 7 non testé(s) sur 16.
+Décision proposée : NO-GO (2 bloquant(s) en échec).
+
+ÉCHECS (3)
+- E-01 [Bloquant] Nouvelle liste intelligente, premier critère : changer le champ (ex. « Série » → « Nombre de pages »), saisir une valeur : l'aperçu affiche un nombre de livres, sans message « missing field genre ». Répéter avec 3 champs différents, puis dans un groupe imbriqué.
+  Note : Aperçu impossible : invalid args `criteres` for command `apercu_criteres`: missing field `genre`
+- K-02 [Bloquant] Ouvrir « Infos du livre » (ou Renommer, Ouvrir un fichier) puis Échap : le focus revient sur la liste ou l'arbre (flèches, Suppr, F2 répondent) ; la fenêtre se rouvre normalement (I-03, D-01 : non-régression).
+  Note : 'Ouvrir un fichier', 'Echap', le focus ne revient pas sur la liste ou l'arbre
+- K-03 [Majeur] « Ajouter à une liste… » : la liste proposée est la dernière utilisée dans la session (sinon la liste courante).
+  Note : Si sélection d'un livre dans la bibliothèque, la liste proposée est la première de toutes les listes.
+         Si sélection d'un livre dans une liste, la liste proposée est la liste courante.
+
+VALEURS NOTÉES ET REMARQUES
+- S-02 : Liste « Thanos (démo) » : 4 / 7 numéros trouvés / Par identifiant : 0 ; par série et numéro : 4 ; en double : 0 /  / Manquants (3) : /    2. Silver Surfer #3 (1987) /    3. Silver Surfer #4 (1987) /    6. Warlock #9 (1976)
+
+NON TESTÉS (7) : E-02*, E-03, S-01*, S-03, S-04, S-05, K-01*   (* = bloquant)
+
+Remarque complémentaire (rapport tauri-v0.6.0 du même jour) : « Les listes ne gardent pas leur tri et leur groupement ».
+
+Constat de l'IA (MCP, 11/11/2026) : les deux copies de test (autonome et liée) contenaient encore l'exe 0.6.0
+(commande `infos` : version 0.6.0 ; même ComicRust-Tauri.exe daté du 08/11) : la recette tauri-v0.6.1 a été
+passée avec le programme de la tauri-v0.6.0, d'où E-01, S-02 et K-03 inchangés.
