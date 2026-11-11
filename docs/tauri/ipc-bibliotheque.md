@@ -14,6 +14,7 @@ interface EtatBiblio {
   mode: Mode;              // 'autonome' tant que rien n'est choisi
   nbLivres: number;
   premierDemarrage: boolean; // true : le front affiche l'assistant, rien n'est encore ouvert
+  source: 'sqlite' | 'mysql' | 'xml'; // d'où viennent les livres (étape 6) ; 'sqlite' au premier démarrage
 }
 
 interface ChoixPremierDemarrage {
@@ -131,12 +132,77 @@ La CSP (`tauri.conf.json`) autorise ces deux origines dans `img-src`.
   la couverture reste servie depuis le cache disque.
 - Tri : valeurs vides toujours en dernier ; avec un groupe, les groupes se suivent par ordre alphabétique
   (inversé si `desc`), « (sans série) » / « (sans éditeur) » pour les valeurs vides.
-- Mode `comicrack` : lecture seule, rien n'est copié ni écrit ; le mot de passe MySQL reste dans
-  `ComicRack.ini` (jamais dans `comicrust-tauri.json` ni dans les messages d'erreur).
-- Réglages : `data\comicrust-tauri.json` (`{mode, cheminIni, vue}`), distinct du `comicrust.ron` de la version egui ;
+- Mode `comicrack` : lecture seule, rien n'est copié ni écrit ; avec un `ComicRack.ini`, le mot de passe MySQL
+  y reste (jamais dans `comicrust-tauri.json` en clair, ni dans les messages d'erreur). Connexion saisie à la
+  main : voir « Connexion MySQL » ci-dessous.
+- Réglages : `data\comicrust-tauri.json` (`{mode, cheminIni, storeMysql, comicrackMysql, vue, …}`), distinct du `comicrust.ron` de la version egui ;
   la base autonome est le même fichier `data\comicrust.db` que la version egui.
 - `ouvrir_bibliotheque` et `configurer_premier_demarrage` répondent « analyse en cours… » (erreur) tant qu'un scan tourne.
 - `fichierPresent` : vérifié avec un délai de 2 s ; un partage réseau muet donne `false`.
 - Couvertures : cache disque lu tout de suite ; seules les absentes sont produites (tâches récentes d'abord,
   abandon au-delà de 30 s d'attente, 25 s max par lecture). 200 : `Cache-Control: private, max-age=3600` ;
   404 : `no-store`, mais l'échec est mémorisé 3 minutes côté Rust (rechargé après un scan).
+
+## Connexion MySQL (étape 6, `tauri-v0.7.0`, lot A)
+
+Formulaire (serveur, port, utilisateur, mot de passe masqué, base) + bouton « Tester », pour (i) la base
+MySQL de ComicRack saisie à la main (sans `ComicRack.ini`) et (ii) la base de ComicRust en mode autonome
+(SQLite par défaut, ou MySQL). Code : `crates/comicrust-tauri/src/connexion.rs`.
+
+```ts
+interface ParametresMysql {
+  serveur: string; port: number; utilisateur: string; base: string;
+  motDePasse?: string;     // absent = garder le mot de passe déjà enregistré ; '' = mot de passe vide
+}
+interface ParametresMysqlPublic {   // ce que le front relit : JAMAIS le mot de passe
+  serveur: string; port: number; utilisateur: string; base: string;
+  motDePasseDefini: boolean;
+}
+interface ConnexionsMysql {
+  store: 'sqlite' | 'mysql';        // base de ComicRust (autonome)
+  storeMysql?: ParametresMysqlPublic;
+  comicrackMysql?: ParametresMysqlPublic; // source ComicRack saisie
+}
+interface ResultatTestMysql { nbLivres: number; description: string } // « utilisateur@serveur:port/base »
+interface ChoixMysql {
+  mode: Mode;
+  store?: 'sqlite' | 'mysql';       // autonome ; défaut 'sqlite'
+  mysql?: ParametresMysql;          // autonome + store 'mysql' : base de ComicRust ; comicrack : base de ComicRack
+}
+```
+
+| Commande | Arguments | Résultat |
+|---|---|---|
+| `test_connexion_mysql` | `{cible: 'autonome' \| 'comicrack', parametres}` | `ResultatTestMysql`. `comicrack` : accès + table `comics` (`comicrust_core::db::test_connection`), rien n'est écrit. `autonome` : accès à la base de ComicRust (`Store::test`) ; **le schéma de ComicRust y est créé** s'il manque, comme à « Continuer » : à tester sur une base destinée à ComicRust. Erreur lisible (sans mot de passe) si injoignable ou refusé ; délai de connexion 8 s. |
+| `lire_connexions_mysql` | – | `ConnexionsMysql` (sans mot de passe). |
+| `configurer_mysql` | `{choix: ChoixMysql}` | `EtatBiblio` (`source: 'mysql'`, ou `'sqlite'` si `store` absent / `'sqlite'`). Même règle que `configurer_premier_demarrage` : le choix est ouvert d'abord, **un choix qui échoue n'est pas enregistré**. Erreur « paramètres MySQL manquants » si `mysql` manque quand il est requis. |
+
+`configurer_premier_demarrage` reste inchangée (autonome SQLite, ou `ComicRack.ini` / `ComicDb.xml`).
+Choisir un mode efface les connexions des autres choix (passer en SQLite supprime `storeMysql`).
+
+### Persistance et mot de passe
+
+`data\comicrust-tauri.json` gagne deux sections facultatives (anciens fichiers sans elles : lus sans
+changement) :
+
+```json
+{ "storeMysql":     { "host": "…", "port": 3306, "user": "…", "password": "dpapi:<hex>", "database": "…" },
+  "comicrackMysql": { "…": "même forme" } }
+```
+
+- `storeMysql` : base de ComicRust en MySQL (absente = SQLite `data\comicrust.db`). `comicrackMysql` :
+  source ComicRack saisie, utilisée quand `cheminIni` est absent.
+- Le mot de passe est chiffré par `comicrust_core::secret` (DPAPI, lié au compte Windows). **Jamais en clair**
+  dans le fichier, les journaux, les erreurs (remplacé par `***` si une couche basse le répétait) ni dans l'IPC.
+  Hors Windows, aucun coffre : il n'est pas gardé (à ressaisir). Fichier copié sur un autre PC / compte :
+  mot de passe vide, l'ouverture échoue avec l'indication « saisis-le à nouveau ».
+- Lecture tolérante : entrée qui n'est pas un objet ou sans serveur / utilisateur / base = ignorée ; port
+  hors bornes = 3306 ; mot de passe illisible = vide.
+- `ouvrir_bibliotheque` : autonome → `StoreConfig::MySql` si `storeMysql`, sinon SQLite ; comicrack sans
+  `cheminIni` → `comicrackMysql` (lecture seule, ou écriture si l'option « Lecture et écriture » est cochée).
+
+### Tests
+
+Unitaires sans serveur (port 1 de la boucle locale pour l'échec). Tests sur un vrai MySQL : variable
+d'environnement `COMICRUST_TEST_MYSQL` (chaîne de connexion d'une base de test, jamais `comickrack_demo`) ;
+ignorés si elle est absente ou si le serveur est injoignable.

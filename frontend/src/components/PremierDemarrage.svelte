@@ -1,6 +1,10 @@
 <script lang="ts">
-  // Écran de premier démarrage : bibliothèque autonome ou liée à une installation ComicRack.
-  import { configurerPremierDemarrage, type EtatBiblio, type ModeBiblio, messageErreur } from '../lib/api';
+  // Écran de premier démarrage : bibliothèque autonome (base SQLite ou MySQL) ou liée à une
+  // installation ComicRack (ComicRack.ini, ou paramètres MySQL saisis à la main).
+  import {
+    configurerMysql, configurerPremierDemarrage, type EtatBiblio, type ModeBiblio, type TypeStore, messageErreur,
+  } from '../lib/api';
+  import FormulaireMysql, { mysqlVide, versParametres } from './FormulaireMysql.svelte';
 
   interface Props {
     onpret: (etat: EtatBiblio) => void;
@@ -9,17 +13,32 @@
 
   let mode = $state<ModeBiblio>('autonome');
   let cheminIni = $state('');
+  /** Mode autonome : où vit la base de ComicRust. */
+  let store = $state<TypeStore>('sqlite');
+  /** Mode lié : `ComicRack.ini` ou paramètres MySQL saisis. */
+  let sourceCr = $state<'ini' | 'mysql'>('ini');
+  let mysqlStore = $state(mysqlVide());
+  let mysqlCr = $state(mysqlVide());
   let occupe = $state(false);
   let erreur = $state('');
 
-  const valide = $derived(mode === 'autonome' || cheminIni.trim().length > 0);
+  const valide = $derived(
+    mode === 'autonome' ? store === 'sqlite' || mysqlStore.serveur.trim().length > 0 : sourceCr === 'mysql' || cheminIni.trim().length > 0,
+  );
 
   async function valider() {
     if (!valide || occupe) return;
     occupe = true;
     erreur = '';
     try {
-      onpret(await configurerPremierDemarrage({ mode, cheminIni: mode === 'comicrack' ? cheminIni.trim() : undefined }));
+      const mysql = mode === 'autonome' ? (store === 'mysql' ? mysqlStore : null) : sourceCr === 'mysql' ? mysqlCr : null;
+      if (mysql) {
+        const p = versParametres(mysql);
+        if (typeof p === 'string') throw new Error(p);
+        onpret(await configurerMysql({ mode, store: mode === 'autonome' ? 'mysql' : undefined, mysql: p }));
+      } else {
+        onpret(await configurerPremierDemarrage({ mode, cheminIni: mode === 'comicrack' ? cheminIni.trim() : undefined }));
+      }
     } catch (e) {
       erreur = messageErreur(e);
     } finally {
@@ -51,11 +70,29 @@
       </label>
     </fieldset>
 
-    {#if mode === 'comicrack'}
-      <label class="champ">
-        <span>Fichier <code>ComicRack.ini</code> de l'installation</span>
-        <input type="text" bind:value={cheminIni} placeholder="C:\ComicRack\ComicRack.ini" autocomplete="off" spellcheck="false" />
-      </label>
+    {#if mode === 'autonome'}
+      <fieldset data-testid="choix-store">
+        <legend>Base de ComicRust</legend>
+        <label class="option"><input type="radio" name="store" value="sqlite" bind:group={store} /> Fichier SQLite local (<code>data\comicrust.db</code>)</label>
+        <label class="option"><input type="radio" name="store" value="mysql" bind:group={store} /> Serveur MySQL / MariaDB (base existante, les tables sont créées)</label>
+      </fieldset>
+      {#if store === 'mysql'}
+        <FormulaireMysql id="mysql-store" cible="autonome" bind:valeurs={mysqlStore} />
+      {/if}
+    {:else}
+      <fieldset data-testid="choix-source-cr">
+        <legend>Source ComicRack</legend>
+        <label class="option"><input type="radio" name="sourcecr" value="ini" bind:group={sourceCr} /> Fichier <code>ComicRack.ini</code> (ou <code>ComicDb.xml</code>)</label>
+        <label class="option"><input type="radio" name="sourcecr" value="mysql" bind:group={sourceCr} /> Saisir les paramètres MySQL de ComicRack</label>
+      </fieldset>
+      {#if sourceCr === 'ini'}
+        <label class="champ">
+          <span>Fichier <code>ComicRack.ini</code> de l'installation</span>
+          <input type="text" bind:value={cheminIni} placeholder="C:\ComicRack\ComicRack.ini" autocomplete="off" spellcheck="false" />
+        </label>
+      {:else}
+        <FormulaireMysql id="mysql-cr" cible="comicrack" bind:valeurs={mysqlCr} />
+      {/if}
     {/if}
 
     {#if erreur}<p class="erreur" role="alert">{erreur}</p>{/if}
@@ -83,6 +120,9 @@
   .choix span { display: grid; gap: 2px; }
   small { color: var(--cr-texte-discret); font-size: 13px; }
   .champ { display: grid; gap: 6px; }
+  legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+  .option { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .option input { accent-color: var(--cr-accent); }
   input[type='text'] {
     font: inherit; color: var(--cr-texte); background: var(--cr-fond); border: 1px solid var(--cr-bordure);
     border-radius: var(--cr-rayon); padding: 7px 10px;

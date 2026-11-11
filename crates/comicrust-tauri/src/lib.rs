@@ -3,6 +3,7 @@
 //! Règle : **aucune logique métier ici ni dans le front**. Ce crate ne contient que
 //! - l'emplacement portable des données ([`portable`]),
 //! - les thèmes CSS de l'utilisateur ([`themes`]),
+//! - la connexion MySQL ([`connexion`] : formulaire, test, base de ComicRust, source ComicRack saisie),
 //! - la bibliothèque ([`biblio`] : ouverture, liste, détail, dossiers, scan ; [`couvertures`] ;
 //!   [`tri`] ; [`reglages`]),
 //! - le lecteur ([`lecteur`] : livres ouverts, pages du protocole `cr-page`, avancement ;
@@ -19,6 +20,7 @@
 
 pub mod avancement;
 pub mod biblio;
+pub mod connexion;
 pub mod couvertures;
 pub mod edition;
 pub mod lecteur;
@@ -34,6 +36,8 @@ pub mod tri;
 
 #[cfg(test)]
 mod tests_biblio;
+#[cfg(test)]
+mod tests_connexion;
 #[cfg(test)]
 mod tests_listes;
 

@@ -1,12 +1,15 @@
 //! Réglages de la version Tauri : fichier JSON `data\comicrust-tauri.json`.
 //!
 //! Distinct du `comicrust.ron` de la version egui (formats et besoins différents ; les deux
-//! versions peuvent cohabiter dans le même dossier). Aucun mot de passe n'est écrit ici : en
-//! mode ComicRack, les paramètres MySQL sont relus à chaque ouverture dans `ComicRack.ini`.
+//! versions peuvent cohabiter dans le même dossier). Un mot de passe MySQL n'est **jamais écrit en
+//! clair** : en mode ComicRack avec `ComicRack.ini`, il reste dans ce fichier (relu à chaque
+//! ouverture) ; les connexions saisies dans ComicRust (`storeMysql`, `comicrackMysql`) passent par
+//! `comicrust_core::secret` (DPAPI sous Windows ; ailleurs, aucun coffre : mot de passe non gardé).
 //!
 //! La section `vue` mémorise l'affichage (tri, groupe, grille/tableau, taille des couvertures,
 //! panneau de détails, thème) : mode portable strict, rien dans le `localStorage` de la WebView.
 
+use comicrust_core::db::DbConfig;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -34,12 +37,37 @@ pub struct Reglages {
     pub mode: Option<Mode>,
     /// Mode ComicRack : `ComicRack.ini` (MySQL) ou `ComicDb.xml`.
     pub chemin_ini: Option<PathBuf>,
+    /// Mode autonome : la base de ComicRust est MySQL (absent = SQLite `data\comicrust.db`).
+    /// Mot de passe chiffré ; lecture tolérante (entrée invalide = ignorée).
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "connexion_tolerante")]
+    pub store_mysql: Option<DbConfig>,
+    /// Mode ComicRack saisi à la main (sans `ComicRack.ini`) : MySQL de ComicRack. Utilisé quand
+    /// `chemin_ini` est absent. Mot de passe chiffré.
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "connexion_tolerante")]
+    pub comicrack_mysql: Option<DbConfig>,
     /// Préférences d'affichage (absentes = valeurs par défaut du front).
     #[serde(skip_serializing_if = "PreferencesVue::est_vide")]
     pub vue: PreferencesVue,
     /// Réglages de l'édition (infos, fichiers, écriture dans ComicRack).
     #[serde(skip_serializing_if = "ReglagesEdition::est_vide")]
     pub edition: ReglagesEdition,
+}
+
+/// Lit une connexion MySQL enregistrée depuis du JSON quelconque (champs `host`, `port`, `user`,
+/// `password` chiffré, `database`) ; `None` si ce n'est pas un objet ou si elle est incomplète.
+/// Le mot de passe illisible (autre PC, autre compte Windows) devient vide : il sera redemandé.
+fn connexion_tolerante<'de, D: Deserializer<'de>>(d: D) -> Result<Option<DbConfig>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let Some(o) = v.as_object() else { return Ok(None) };
+    let texte = |c: &str| o.get(c).and_then(Value::as_str).filter(|s| s.len() <= 1024).unwrap_or("").to_string();
+    let cfg = DbConfig {
+        host: texte("host"),
+        port: o.get("port").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()).unwrap_or(3306),
+        user: texte("user"),
+        password: comicrust_core::secret::unprotect(&texte("password")),
+        database: texte("database"),
+    };
+    Ok(cfg.is_complete().then_some(cfg))
 }
 
 /// Réglages de l'édition (section `edition`, `ReglagesEdition` de `docs/tauri/ipc-edition.md`).
@@ -450,6 +478,8 @@ mod tests {
         let r = Reglages {
             mode: Some(Mode::Comicrack),
             chemin_ini: Some("C:/CR/ComicRack.ini".into()),
+            store_mysql: None,
+            comicrack_mysql: None,
             vue: PreferencesVue::default(),
             edition: ReglagesEdition::default(),
         };
