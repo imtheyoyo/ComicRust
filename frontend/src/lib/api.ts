@@ -386,9 +386,9 @@ export interface BibliothequeModifiee {
 }
 
 // Surveillance de la base et état hors ligne (étape 6, docs/tauri/ipc-surveillance.md).
-export type SourceBase = 'comicrack-mysql' | 'comicrust' | 'comicrack-xml' | 'aucune';
+export type SourceSurveillee = 'comicrack-mysql' | 'comicrust' | 'comicrack-xml' | 'aucune';
 export interface EtatBase {
-  source: SourceBase;
+  source: SourceSurveillee;
   /** La base est interrogée régulièrement (MySQL ComicRack, base de ComicRust). */
   surveillee: boolean;
   enLigne: boolean;
