@@ -467,8 +467,7 @@
   async function ajouterA(idListe: string, indices: number[]) {
     try {
       const ids = (await bib.livresDe(indices)).map((l) => l.id);
-      listes.derniereAjout = idListe;
-      await listes.executer('Ajout à la liste', () => ajouterLivresListe(idListe, ids));
+      if (await listes.executer('Ajout à la liste', () => ajouterLivresListe(idListe, ids))) listes.derniereAjout = idListe;
     } catch (e) {
       erreurAction = messageErreur(e);
     }

@@ -59,6 +59,8 @@ if (typeof document !== 'undefined') {
  *  - sinon (bouton de barre d'outils, couverture non focalisable, corps de page) la dernière zone de
  *    travail utilisée, à défaut la grille / le tableau des livres affiché. */
 export function cibleFocus(origine: Element | null): HTMLElement | null {
+  // Menu ouvert depuis une fenêtre (onglet Pages…) : le focus reste dans cette fenêtre.
+  if (origine instanceof HTMLElement && origine.isConnected && dansFenetreOuverte(origine)) return origine;
   const o = origine instanceof HTMLElement && origine !== document.body && origine.isConnected && horsCalque(origine) ? origine : null;
   if (o && (o.closest(ZONE_TRAVAIL) || o.matches('input, textarea, select, [contenteditable="true"]'))) return o;
   if (dernierFocusTravail?.isConnected) return dernierFocusTravail;
@@ -70,7 +72,13 @@ export function cibleFocus(origine: Element | null): HTMLElement | null {
  *  calque, sinon le dernier élément focalisé (ouverture depuis un clic sur une zone non focalisable). */
 export function origineFocus(): HTMLElement | null {
   const a = document.activeElement;
+  if (a instanceof HTMLElement && dansFenetreOuverte(a)) return a;
   return a instanceof HTMLElement && a !== document.body && horsCalque(a) ? a : dernierFocus;
+}
+
+/** Élément d'une fenêtre ouverte (hors menu contextuel). */
+function dansFenetreOuverte(el: HTMLElement): boolean {
+  return !!el.closest('dialog[open]') && !el.closest('[role="menu"]');
 }
 
 /** Rend le focus (voir `cibleFocus`) une fois le DOM à jour, sauf si quelqu'un d'autre l'a pris

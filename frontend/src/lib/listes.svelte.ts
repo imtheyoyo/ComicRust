@@ -199,7 +199,6 @@ export class EtatListes {
     this.depots.clear();
   }
 
-  /** Listes de lecture qui acceptent des livres (« Ajouter à une liste… »), avec leurs dossiers. */
   /** Liste proposée par « Ajouter à une liste… » : dernière utilisée, sinon liste affichée, sinon
    *  dernière liste de lecture affichée, sinon la première ; « + » (nouvelle liste) s'il n'y en a aucune. */
   listeProposee(): string {
@@ -208,6 +207,7 @@ export class EtatListes {
     return connue(this.derniereAjout) ?? connue(this.courante) ?? connue(this.derniereOuverte) ?? l[0]?.id ?? '+';
   }
 
+  /** Listes de lecture qui acceptent des livres (« Ajouter à une liste… »), avec leurs dossiers. */
   listesDeLecture(liste = this.arbre?.listes ?? [], chemin = ''): Array<{ id: string; nom: string }> {
     return liste.flatMap((n) =>
       n.type === 'lecture' && n.accepteLivres
