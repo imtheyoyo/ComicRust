@@ -58,6 +58,25 @@ Claude Desktop (`claude_desktop_config.json`, Réglages › Développeur › Mod
 
 La passerelle relaie les messages vers l'instance en cours et lance `--mcp` si besoin.
 
+### Relance et port occupé (passerelle `--mcp-stdio`)
+
+- **Relance** : dès qu'une requête trouve le port fermé (application fermée entre-temps, plantée…),
+  la passerelle relance l'application avec `--mcp` et attend jusqu'à 30 s qu'elle ouvre son port.
+  Ce n'est plus limité à une seule relance par session. Après un démarrage raté, elle attend 20 s
+  avant de réessayer (pas de relance en boucle) et rappelle la cause dans la réponse.
+- **Port occupé par un autre programme** (il accepte la connexion mais ne répond pas comme le
+  serveur MCP : erreur de lecture, HTTP 404…) : **aucune relance**, et l'échec n'est plus silencieux.
+  Un avertissement `pont MCP ComicRust-Tauri : le port 47802 est occupé…` est écrit sur la **sortie
+  d'erreur de la passerelle** (visible dans les journaux du client, p. ex. Claude Desktop ›
+  Réglages › Développeur › journaux) et renvoyé dans la **réponse d'erreur JSON-RPC** que le client
+  affiche. Remède : fermer l'autre programme, ou choisir un autre port des deux côtés
+  (`--mcp=47803` dans `args`, et la même adresse dans le client).
+- **Application lancée mais port non ouvert** (application arrêtée aussitôt, ou port refusé à son
+  serveur) : même avertissement, avec le statut de sortie si l'application s'est arrêtée.
+- **Côté application** (`--mcp=PORT` avec un port déjà pris) : le serveur ne démarre pas ; en plus de
+  la ligne sur la sortie d'erreur, le **titre de la fenêtre** affiche `⚠ serveur MCP : port … indisponible`
+  (sans console sous Windows, la sortie d'erreur n'est vue de personne).
+
 ## Outils
 
 | Outil | Rôle |

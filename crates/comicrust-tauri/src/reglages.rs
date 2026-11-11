@@ -439,9 +439,50 @@ pub fn enregistrer_preferences_vue(data: &Path, m: PreferencesVue) -> Result<Pre
     })
 }
 
+/// Oublie les vues mémorisées (`vue.listes`) des listes `ids` (liste supprimée, avec ses sous-listes
+/// si c'était un dossier). Les identifiants se comparent sans tenir compte de la casse (GUID de
+/// ComicRack). Renvoie le nombre d'entrées retirées ; le fichier n'est réécrit que s'il y en a.
+pub fn oublier_vues_listes(data: &Path, ids: &[String]) -> Result<usize, String> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let _v = verrou();
+    let mut r = lire(data)?;
+    let Some(listes) = r.vue.listes.as_mut() else { return Ok(0) };
+    let avant = listes.len();
+    listes.retain(|cle, _| !ids.iter().any(|i| i.eq_ignore_ascii_case(cle)));
+    let retirees = avant - listes.len();
+    if listes.is_empty() {
+        r.vue.listes = None;
+    }
+    if retirees > 0 {
+        ecrire(data, &r)?;
+    }
+    Ok(retirees)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oublier_les_vues_de_listes_supprimees() {
+        let d = tempfile::tempdir().unwrap();
+        let patch = serde_json::json!({ "listes": {
+            "AAAA-1": { "tri": "titre" }, "bbbb-2": { "groupe": "serie" }, "cccc-3": { "vue": "tableau" }
+        }});
+        enregistrer_preferences_vue(d.path(), PreferencesVue::depuis_json(&patch)).unwrap();
+        // Dossier + sous-liste supprimés (casse différente tolérée) ; une inconnue est sans effet.
+        let n = oublier_vues_listes(d.path(), &["aaaa-1".into(), "BBBB-2".into(), "zzzz".into()]).unwrap();
+        assert_eq!(n, 2);
+        let l = lire_preferences_vue(d.path()).unwrap().listes.unwrap();
+        assert_eq!(l.keys().collect::<Vec<_>>(), ["cccc-3"]);
+        // Plus rien à oublier : pas d'erreur ; la dernière entrée retirée supprime la section.
+        assert_eq!(oublier_vues_listes(d.path(), &["zzzz".into()]).unwrap(), 0);
+        assert_eq!(oublier_vues_listes(d.path(), &["cccc-3".into()]).unwrap(), 1);
+        assert!(lire_preferences_vue(d.path()).unwrap().listes.is_none());
+        assert_eq!(oublier_vues_listes(d.path(), &[]).unwrap(), 0);
+    }
 
     #[test]
     fn absent_puis_aller_retour() {

@@ -266,8 +266,8 @@
       { id: 'dupliquer', libelle: '⎘ Dupliquer', desactive: ro, aide },
       { id: 'supprimer', libelle: '🗑 Supprimer…', raccourci: 'Suppr', desactive: ro, aide },
       ...(smart ? [{ id: 'convertir', libelle: '📄 Convertir en liste de lecture…', separe: true, desactive: ro, aide }] : []),
-      { id: 'monter', libelle: '⬆ Monter', desactive: !n.peutMonter, aide, separe: true },
-      { id: 'descendre', libelle: '⬇ Descendre', desactive: !n.peutDescendre, aide },
+      { id: 'monter', libelle: '⬆ Monter', desactive: ro || !n.peutMonter, aide: ro ? aide : undefined, separe: true },
+      { id: 'descendre', libelle: '⬇ Descendre', desactive: ro || !n.peutDescendre, aide: ro ? aide : undefined },
       { id: 'deplacer', libelle: 'Déplacer dans…', desactive: ro, aide },
       ...(n.type !== 'dossier'
         ? [{ id: 'exporter', libelle: 'Exporter en .cbl…', separe: true, aide: 'Liste de lecture ComicRack (.cbl), possible en lecture seule' }]

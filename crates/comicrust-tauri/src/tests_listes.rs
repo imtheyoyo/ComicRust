@@ -207,6 +207,9 @@ fn arbre_identique_a_comicrack_sur_la_fixture() {
     // Lecture seule par défaut (option d'écriture absente) : rien n'est modifiable.
     assert!(!a.etat.modifiable);
     assert_eq!(a.etat.lecture_seule.as_deref(), Some(LECTURE_SEULE));
+    // Le message renvoie vers Réglages ▸ Bibliothèque ComicRack (et non vers les « réglages de l'édition »).
+    assert!(LECTURE_SEULE.contains("Réglages ▸ Bibliothèque ComicRack"), "{LECTURE_SEULE}");
+    assert!(!LECTURE_SEULE.contains("de l'édition"), "{LECTURE_SEULE}");
     assert!(tous(&a).iter().all(|(_, n)| !n.accepte_livres));
 }
 
@@ -572,7 +575,20 @@ fn autonome_toutes_les_operations() {
     // Suppression : sous-listes et dépendances annoncées ; liste affichée → sélection effacée.
     let info = b.infos_suppression(&dossier).unwrap();
     assert_eq!((info.sous_listes, info.dependantes.clone()), (2, vec!["Depuis Lecture".to_string()]));
+    // Vues par liste mémorisées : celles du dossier et de sa sous-liste doivent disparaître avec lui.
+    let vue_de = |ids: &[&String]| {
+        let m: serde_json::Map<String, serde_json::Value> =
+            ids.iter().map(|i| (i.to_string(), serde_json::json!({ "tri": "titre" }))).collect();
+        reglages::enregistrer_preferences_vue(
+            b.data(),
+            reglages::PreferencesVue::depuis_json(&serde_json::json!({ "listes": m })),
+        )
+        .unwrap();
+    };
+    vue_de(&[&dossier, &liste, &intel]);
     let r = b.supprimer_liste(&dossier, Some(&liste)).unwrap();
+    let restantes = reglages::lire_preferences_vue(b.data()).unwrap().listes.unwrap();
+    assert_eq!(restantes.keys().collect::<Vec<_>>(), [&intel], "vues du dossier et de sa sous-liste oubliées");
     assert_eq!(r.selection, Some(None));
     assert!(r.info.contains("avec 2 sous-listes") && r.info.contains("« Depuis Lecture »"), "{}", r.info);
 

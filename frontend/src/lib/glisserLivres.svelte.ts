@@ -21,6 +21,10 @@ export interface ContexteGlisser {
   indices: () => number[];
   /** Nombre de séries de la sélection (0 sans regroupement par série). */
   series: (indices: number[]) => number;
+  /** Sélection d'un en-tête de série terminée (elle se calcule de façon asynchrone : début et fin
+   *  du groupe sont lus au backend). Évite que le glisser ne remplace une sélection encore en cours
+   *  de construction (Ctrl+clic sur deux séries puis glisser). */
+  selectionPrete: () => Promise<void>;
   /** Glisser commencé (les réponses de dépôt précédentes ne valent plus). */
   debut: (groupes: boolean) => void;
   /** Livres glissés au-dessus d'une liste : null si accepté, sinon la raison, undefined si la
@@ -60,6 +64,8 @@ export class GlisserLivres {
   private groupes = false;
   private indices: number[] = [];
   private defilement: ReturnType<typeof setInterval> | undefined;
+  /** En attente de la sélection de la série saisie (glisser démarré avant qu'elle soit prête). */
+  private attenteSelection = false;
 
   constructor(private ctx: ContexteGlisser) {}
 
@@ -78,6 +84,16 @@ export class GlisserLivres {
     if (!this.depart) return;
     if (!this.actif) {
       if (Math.hypot(e.clientX - this.depart.x0, e.clientY - this.depart.y0) < SEUIL) return;
+      if (this.depart.groupes && !this.ctx.contient(this.depart.index)) {
+        // L'en-tête vient d'être saisi : sa série (ajoutée à la sélection avec Ctrl) n'est pas encore
+        // sélectionnée. Remplacer la sélection ici perdrait les autres séries (L-08) : on attend,
+        // le prochain mouvement du pointeur relance le démarrage.
+        if (!this.attenteSelection) {
+          this.attenteSelection = true;
+          void this.ctx.selectionPrete().finally(() => (this.attenteSelection = false));
+        }
+        return;
+      }
       if (!this.ctx.contient(this.depart.index)) this.ctx.choisir(this.depart.index);
       this.indices = this.ctx.indices();
       if (this.indices.length === 0) return;
@@ -204,6 +220,7 @@ export class GlisserLivres {
 
   private terminer() {
     this.depart = null;
+    this.attenteSelection = false;
     this.actif = false;
     this.indication = null;
     this.trait = null;

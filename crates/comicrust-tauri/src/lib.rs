@@ -67,3 +67,6 @@ pub fn infos_application(data: &Path) -> InfosApplication {
 pub mod app;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+// Logique de la passerelle MCP stdio (testable sans WebView2, donc aussi hors fonction `mcp`).
+#[cfg(any(test, feature = "mcp"))]
+mod pont_mcp;

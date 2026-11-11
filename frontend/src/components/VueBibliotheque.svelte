@@ -426,8 +426,10 @@
   /** Réordonner dans la vue : seulement une liste de lecture triée dans l'ordre de la liste, croissant. */
   function refusReordonner(): string | null {
     if (!liste || liste.type !== 'lecture') return DEPOSER_SUR_LECTURE;
+    // Lecture seule d'abord : inutile de proposer de trier quand rien ne peut s'écrire.
+    if (listes.raison) return listes.raison;
     if (bib.params.tri !== 'ordre' || bib.params.sensTri !== 'asc') return TRIER_POUR_REORDONNER;
-    return listes.raison ?? null;
+    return null;
   }
 
   /** Requête de la vue affichée : le backend refait la même vue pour traduire rangs et groupes. */
@@ -451,6 +453,12 @@
   async function selectionnerGroupes(titres: string[]) {
     const g = indexer(await groupesVue(requete())).filter((x) => titres.includes(x.titre));
     g.forEach((x, k) => sel.plage(x.debut, x.fin, k > 0));
+  }
+
+  /** Dernière sélection d'en-tête de série en cours : le glisser l'attend avant de démarrer (L-08). */
+  let selectionGroupeEnCours: Promise<void> = Promise.resolve();
+  function cliquerGroupe(i: number, m: Modificateurs) {
+    selectionGroupeEnCours = selectionnerGroupe(i, m);
   }
 
   /** Sélectionne tout le groupe (série) qui contient `i` (Ctrl ou Maj : ajouté à la sélection). */
@@ -524,6 +532,7 @@
     deplacerGroupes,
     contient: (i) => sel.contient(i),
     choisir: (i) => sel.unique(i),
+    selectionPrete: () => selectionGroupeEnCours,
     indices: () => sel.indices(),
     series: (ind) => {
       if (bib.params.groupe !== 'serie') return 0;
@@ -598,7 +607,7 @@
     />
     <label class="outil">Tri
       <select value={bib.params.tri} onchange={(e) => changer({ tri: e.currentTarget.value as ClefTri })} data-testid="tri">
-        {#if liste}<option value="ordre"># Ordre de la liste</option>{/if}
+        {#if liste?.type === 'lecture'}<option value="ordre"># Ordre de la liste</option>{/if}
         {#each tris as t (t.id)}<option value={t.id}>{t.titre}</option>{/each}
       </select>
     </label>
@@ -643,10 +652,10 @@
           : 'La bibliothèque est vide : ajoutez un dossier surveillé, puis lancez un scan.'}</p>
       {:else if vue === 'grille'}
         <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir}
-          onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={(i, m) => void selectionnerGroupe(i, m)} />
+          onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={cliquerGroupe} />
       {:else}
         <VueTableau {bib} {sel} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir} ontri={trier}
-          onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={(i, m) => void selectionnerGroupe(i, m)} />
+          onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={cliquerGroupe} />
       {/if}
     </div>
     {#if details}

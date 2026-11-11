@@ -34,7 +34,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 /// Listes de ComicRack non modifiables faute de l'option d'écriture.
-pub const LECTURE_SEULE: &str = "Lecture seule : active « Lecture et écriture » dans les réglages de l'édition pour \
+pub const LECTURE_SEULE: &str =
+    "Lecture seule : active « Lecture et écriture » dans Réglages ▸ Bibliothèque ComicRack pour \
                                  modifier les listes de ComicRack (ComicRack fermé).";
 /// Réordonnancement refusé : vue pas triée dans l'ordre de la liste.
 pub const TRIER_POUR_REORDONNER: &str = "Trie la vue dans l'ordre de la liste (« # » croissant) pour réordonner";
@@ -862,10 +863,13 @@ impl Biblio {
     }
 
     pub fn supprimer_liste(&self, id: &str, affichee: Option<&str>) -> Result<ResultatListes, String> {
-        let nom = self.nom_de(&self.items_frais(), id)?;
+        let items = self.items_frais();
+        let nom = self.nom_de(&items, id)?;
+        // La liste et, pour un dossier, toutes ses sous-listes : leurs vues mémorisées s'effacent aussi.
+        let supprimees = subtree(&items, id);
         let id = id.to_string();
         let affichee = affichee.map(str::to_ascii_lowercase);
-        self.executer(format!("Suppression de « {nom} »"), move |ed| {
+        let resultat = self.executer(format!("Suppression de « {nom} »"), move |ed| {
             let r = ed.delete(&id)?;
             let partie = affichee.as_deref().is_some_and(|s| r.removed.iter().any(|x| x == s));
             let mut info = format!("« {nom} » supprimée");
@@ -879,7 +883,13 @@ impl Biblio {
                 ));
             }
             Ok(Issue { selection: partie.then_some(None), info: Some(info), ..Default::default() })
-        })
+        })?;
+        // Vues par liste orphelines (`vue.listes` de comicrust-tauri.json) : nettoyage hors de la
+        // base de ComicRack ; un échec ici n'annule pas la suppression déjà faite.
+        if let Err(e) = crate::reglages::oublier_vues_listes(self.data(), &supprimees) {
+            eprintln!("vues des listes supprimées non nettoyées : {e}");
+        }
+        Ok(resultat)
     }
 
     pub fn destinations_liste(&self, id: &str) -> Result<Vec<Destination>, String> {

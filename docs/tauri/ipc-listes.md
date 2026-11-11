@@ -281,8 +281,8 @@ interface RapportCbl {
   10 minutes) et effacerait les modifications. »
 - « Impossible de vérifier si ComicRack est lancé (…) : par prudence, ses listes ne sont pas
   modifiées. »
-- « Lecture seule : active « Lecture et écriture » dans les réglages de l'édition pour modifier
-  les listes de ComicRack (ComicRack fermé). »
+- « Lecture seule : active « Lecture et écriture » dans Réglages ▸ Bibliothèque ComicRack pour
+  modifier les listes de ComicRack (ComicRack fermé). »
 - « … a été modifié depuis sa lecture (par ComicRack ?) : recharge les listes puis recommence »
 - « Les listes ont été modifiées ailleurs (autre poste ou transfert depuis ComicRack) … »
 - « un enregistrement des listes est déjà en cours »

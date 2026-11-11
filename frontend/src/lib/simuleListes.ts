@@ -32,7 +32,7 @@ export interface ContexteListes {
 export const COMICRACK_LANCE =
   'Ferme ComicRack pour modifier ses listes : il réécrit ComicDb.xml en se fermant (et toutes les 10 minutes) et effacerait les modifications.';
 export const LECTURE_SEULE =
-  'Lecture seule : active « Lecture et écriture » dans les réglages de l\'édition pour modifier les listes de ComicRack (ComicRack fermé).';
+  'Lecture seule : active « Lecture et écriture » dans Réglages ▸ Bibliothèque ComicRack pour modifier les listes de ComicRack (ComicRack fermé).';
 
 interface ListeInterne {
   id: string;

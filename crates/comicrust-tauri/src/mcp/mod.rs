@@ -16,7 +16,7 @@ mod stdio;
 
 use std::sync::Arc;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 pub use outils::SCRIPT;
 
@@ -66,7 +66,6 @@ pub fn passerelle_stdio() -> bool {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
-            .map(|_| ())
     };
     let _ = stdio::run_bridge(port, jeton.as_deref(), lancer);
     true
@@ -91,6 +90,14 @@ pub fn demarrer(app: &AppHandle) {
     let handler: protocol::Handler = Arc::new(move |nom, args| outils::traiter(&app, nom, args));
     match http::serve(protocol::Server::new(options, outils::liste(), handler)) {
         Ok(addr) => eprintln!("serveur MCP actif sur http://{addr}/mcp"),
-        Err(e) => eprintln!("serveur MCP : port {port} indisponible ({e})"),
+        Err(e) => {
+            let avertissement =
+                format!("serveur MCP : port {port} indisponible ({e}) ; relancer avec --mcp=AUTRE_PORT");
+            eprintln!("{avertissement}");
+            // Sans console (Windows), stderr n'est vu de personne : l'alerte va aussi dans le titre de la fenêtre.
+            if let Some(fenetre) = app.get_webview_window("main") {
+                let _ = fenetre.set_title(&format!("ComicRust — ⚠ {avertissement}"));
+            }
+        }
     }
 }

@@ -23,6 +23,13 @@ button:hover:not(:disabled) { background: var(--cr-fond-survol); }
 button:disabled { opacity: 0.5; cursor: default; }
 select option { color: var(--cr-texte); background: var(--cr-fond-panneau); }
 select[size], select[multiple] { color-scheme: inherit; }
+/* Option sélectionnée d'une liste (« Déplacer dans… ») : Chromium la peint en blanc sur gris clair
+   (surlignage système, illisible en thème sombre) ; on impose les couleurs du thème. Le dégradé
+   uniforme force le fond, que le moteur ignore parfois avec `background` seul. */
+select[size] option:checked, select[multiple] option:checked {
+  color: var(--cr-accent-texte, #fff);
+  background: var(--cr-accent) linear-gradient(0deg, var(--cr-accent), var(--cr-accent));
+}
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 1px; }
 dialog {
   color: var(--cr-texte);
