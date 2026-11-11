@@ -2,6 +2,7 @@
 //! ComicRack (ComicDb.xml), contrat JSON. Aucun MySQL réel (le mot de passe du test est fictif).
 
 use crate::biblio::*;
+use crate::connexion::SourceBase;
 use crate::couvertures::cbz_de_test;
 use crate::reglages::{self, Mode};
 use comicrust_core::db::ComicDatabase;
@@ -61,7 +62,10 @@ fn scanner(b: &Biblio) -> Vec<EvenementScan> {
 fn autonome(data: &Path) -> Biblio {
     let b = Biblio::nouvelle(data.to_path_buf());
     let etat = b.configurer(&ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None }).unwrap();
-    assert_eq!(etat, EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: false });
+    assert_eq!(
+        etat,
+        EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: false, source: SourceBase::Sqlite }
+    );
     b
 }
 
@@ -80,7 +84,10 @@ fn configurer_conserve_les_preferences_de_vue() {
 fn premier_demarrage_puis_choix_autonome_persistant() {
     let d = tempfile::tempdir().unwrap();
     let b = Biblio::nouvelle(d.path().to_path_buf());
-    assert_eq!(b.ouvrir().unwrap(), EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: true });
+    assert_eq!(
+        b.ouvrir().unwrap(),
+        EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: true, source: SourceBase::Sqlite }
+    );
     assert!(b.lister(&requete("serie", SensTri::Asc, None, None)).is_err(), "rien d'ouvert");
     assert!(!d.path().join("comicrust.db").exists(), "rien n'est créé avant le choix");
 
@@ -89,7 +96,10 @@ fn premier_demarrage_puis_choix_autonome_persistant() {
     assert_eq!(reglages::lire(d.path()).unwrap().mode, Some(Mode::Autonome));
     // Redémarrage : le choix est retenu.
     let b2 = Biblio::nouvelle(d.path().to_path_buf());
-    assert_eq!(b2.ouvrir().unwrap(), EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: false });
+    assert_eq!(
+        b2.ouvrir().unwrap(),
+        EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: false, source: SourceBase::Sqlite }
+    );
     // Base supprimée : erreur claire, pas de base vide recréée en silence.
     std::fs::remove_file(d.path().join("comicrust.db")).unwrap();
     let e = Biblio::nouvelle(d.path().to_path_buf()).ouvrir().unwrap_err();
@@ -236,7 +246,10 @@ fn mode_comicrack_avec_comicdb_xml_en_lecture_seule() {
     )
     .unwrap();
     let etat = b.configurer(&choix(Some(format!("\"{}\"", xml.display())))).unwrap();
-    assert_eq!(etat, EtatBiblio { mode: Mode::Comicrack, nb_livres: 2, premier_demarrage: false });
+    assert_eq!(
+        etat,
+        EtatBiblio { mode: Mode::Comicrack, nb_livres: 2, premier_demarrage: false, source: SourceBase::Xml }
+    );
     assert!(!d.path().join("data").join("comicrust.db").exists(), "aucune base ComicRust créée en mode lié");
     let p = b.lister(&requete("serie", SensTri::Asc, None, None)).unwrap();
     assert_eq!((p.total, p.livres[0].lu, p.livres[1].lu), (2, true, false));
@@ -314,8 +327,11 @@ fn cinq_mille_livres_restent_fluides() {
 
 #[test]
 fn contrat_json_en_camel_case() {
-    let etat = EtatBiblio { mode: Mode::Comicrack, nb_livres: 3, premier_demarrage: false };
-    assert_eq!(serde_json::to_string(&etat).unwrap(), r#"{"mode":"comicrack","nbLivres":3,"premierDemarrage":false}"#);
+    let etat = EtatBiblio { mode: Mode::Comicrack, nb_livres: 3, premier_demarrage: false, source: SourceBase::Xml };
+    assert_eq!(
+        serde_json::to_string(&etat).unwrap(),
+        r#"{"mode":"comicrack","nbLivres":3,"premierDemarrage":false,"source":"xml"}"#
+    );
     let choix: ChoixPremierDemarrage =
         serde_json::from_str(r#"{"mode":"comicrack","cheminIni":"C:/CR/ComicRack.ini"}"#).unwrap();
     assert_eq!((choix.mode, choix.chemin_ini.as_deref()), (Mode::Comicrack, Some("C:/CR/ComicRack.ini")));

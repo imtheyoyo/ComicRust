@@ -82,6 +82,31 @@ fn configurer_premier_demarrage(
     biblio.configurer(&choix)
 }
 
+/// Teste une connexion MySQL saisie (mot de passe jamais renvoyé ni inclus dans les erreurs).
+#[tauri::command(async)]
+fn test_connexion_mysql(
+    data: tauri::State<'_, DossierData>,
+    cible: crate::connexion::CibleTest,
+    parametres: crate::connexion::ParametresMysql,
+) -> Result<crate::connexion::ResultatTest, String> {
+    crate::connexion::tester(&data.0, cible, &parametres)
+}
+
+/// Connexions MySQL enregistrées, sans mot de passe (« défini oui / non » seulement).
+#[tauri::command(async)]
+fn lire_connexions_mysql(data: tauri::State<'_, DossierData>) -> Result<crate::connexion::ConnexionsMysql, String> {
+    crate::connexion::lire_connexions(&data.0)
+}
+
+/// Premier démarrage avec MySQL : base de ComicRust (SQLite ou MySQL) ou base ComicRack saisie.
+#[tauri::command(async)]
+fn configurer_mysql(
+    biblio: tauri::State<'_, Biblio>,
+    choix: crate::connexion::ChoixMysql,
+) -> Result<EtatBiblio, String> {
+    biblio.configurer_mysql(&choix)
+}
+
 /// Une fenêtre de la liste (recherche, tri et regroupement faits ici).
 #[tauri::command(async)]
 fn lister_livres(biblio: tauri::State<'_, Biblio>, requete: RequeteLivres) -> Result<PageLivres, String> {
@@ -678,6 +703,9 @@ pub fn run() {
             configurer_premier_demarrage,
             etat_base,
             reessayer_base,
+            test_connexion_mysql,
+            lire_connexions_mysql,
+            configurer_mysql,
             lister_livres,
             detail_livre,
             lister_dossiers,

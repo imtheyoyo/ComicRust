@@ -2,7 +2,7 @@
 // tester le front avec 5 000 livres factices. Il imite le contrat IPC de api.ts, y compris la
 // latence et les événements de scan. Rien de ceci n'est utilisé dans la fenêtre Tauri.
 import type {
-  PreferencesVue, ClefTri, EtatBiblio, LivreDetail, LivreOuvert, LivreResume, PageInfo, RequeteLivres,
+  PreferencesVue, ClefTri, ChoixMysql, ConnexionsMysql, EtatBiblio, ParametresMysql, LivreDetail, LivreOuvert, LivreResume, PageInfo, RequeteLivres,
   ReponseLivres, Theme,
 } from './api';
 import { creerEditionSimulee } from './simuleEdition';
@@ -206,7 +206,10 @@ let etat: EtatBiblio = {
   mode: new URLSearchParams(location.search).get('mode') === 'comicrack' ? 'comicrack' : 'autonome',
   nbLivres: LIVRES.length,
   premierDemarrage: new URLSearchParams(location.search).has('premier'),
+  source: 'sqlite',
 };
+// Connexions MySQL « enregistrées » (sans mot de passe : seulement `motDePasseDefini`).
+let connexionsSimulees: ConnexionsMysql = { store: 'sqlite' };
 // Préférences d'affichage : repli en mémoire (perdues au rechargement). `?prefs=<json>` simule un
 // redémarrage avec des préférences déjà enregistrées ; `window.__comicrustSimule` les expose aux tests.
 interface Avancement { jeton: string; page: number; termine: boolean }
@@ -349,7 +352,31 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       return etat;
     case 'configurer_premier_demarrage': {
       const choix = args.choix as { mode: EtatBiblio['mode'] };
-      etat = { mode: choix.mode, nbLivres: LIVRES.length, premierDemarrage: false };
+      etat = { mode: choix.mode, nbLivres: LIVRES.length, premierDemarrage: false, source: choix.mode === 'comicrack' ? 'xml' : 'sqlite' };
+      return etat;
+    }
+    // Étape 6 : connexion MySQL. Serveur simulé : « ok » accepte tout, « injoignable » (ou toute
+    // autre valeur de `serveur` vide) échoue ; le mot de passe n'est jamais gardé ni renvoyé.
+    case 'test_connexion_mysql': {
+      const p = args.parametres as ParametresMysql;
+      if (!p.serveur.trim() || !p.utilisateur.trim() || !p.base.trim()) throw new Error('serveur, utilisateur et base sont nécessaires');
+      if (p.serveur.trim() === 'injoignable') throw new Error(`connexion à ${p.utilisateur}@${p.serveur}:${p.port}/${p.base} impossible : délai dépassé`);
+      return { nbLivres: LIVRES.length, description: `${p.utilisateur}@${p.serveur}:${p.port}/${p.base}` };
+    }
+    case 'lire_connexions_mysql':
+      return { store: connexionsSimulees.store, ...(connexionsSimulees.storeMysql ? { storeMysql: connexionsSimulees.storeMysql } : {}), ...(connexionsSimulees.comicrackMysql ? { comicrackMysql: connexionsSimulees.comicrackMysql } : {}) };
+    case 'configurer_mysql': {
+      const choix = args.choix as ChoixMysql;
+      const p = choix.mysql;
+      if (choix.mode === 'comicrack' || choix.store === 'mysql') {
+        if (!p) throw new Error('paramètres MySQL manquants');
+        if (p.serveur.trim() === 'injoignable') throw new Error(`connexion à ${p.utilisateur}@${p.serveur}:${p.port}/${p.base} impossible : délai dépassé`);
+        const pub = { serveur: p.serveur.trim(), port: p.port, utilisateur: p.utilisateur.trim(), motDePasseDefini: !!p.motDePasse, base: p.base.trim() };
+        connexionsSimulees = choix.mode === 'comicrack' ? { store: 'sqlite', comicrackMysql: pub } : { store: 'mysql', storeMysql: pub };
+      } else {
+        connexionsSimulees = { store: 'sqlite' };
+      }
+      etat = { mode: choix.mode, nbLivres: LIVRES.length, premierDemarrage: false, source: choix.mode === 'autonome' && choix.store !== 'mysql' ? 'sqlite' : 'mysql' };
       return etat;
     }
     case 'lister_livres': {

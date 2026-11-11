@@ -23,10 +23,60 @@ export interface Theme {
 
 export type ModeBiblio = 'autonome' | 'comicrack';
 
+/** D'où viennent les livres : base SQLite, base MySQL (de ComicRust ou de ComicRack) ou ComicDb.xml. */
+export type SourceBase = 'sqlite' | 'mysql' | 'xml';
+
 export interface EtatBiblio {
   mode: ModeBiblio;
   nbLivres: number;
   premierDemarrage: boolean;
+  source: SourceBase;
+}
+
+/** Connexion MySQL saisie (formulaire). Le mot de passe ne revient jamais du backend. */
+export interface ParametresMysql {
+  serveur: string;
+  port: number;
+  utilisateur: string;
+  /** Absent : garder le mot de passe déjà enregistré pour cette connexion. */
+  motDePasse?: string;
+  base: string;
+}
+
+/** Connexion enregistrée, telle que relue : sans mot de passe, seulement « défini oui / non ». */
+export interface ParametresMysqlPublic {
+  serveur: string;
+  port: number;
+  utilisateur: string;
+  motDePasseDefini: boolean;
+  base: string;
+}
+
+export type TypeStore = 'sqlite' | 'mysql';
+
+export interface ConnexionsMysql {
+  /** Base de ComicRust choisie en mode autonome. */
+  store: TypeStore;
+  storeMysql?: ParametresMysqlPublic;
+  /** Base MySQL de ComicRack saisie à la main (sans ComicRack.ini). */
+  comicrackMysql?: ParametresMysqlPublic;
+}
+
+/** Ce que « Tester » vérifie : la base de ComicRust (autonome) ou celle de ComicRack. */
+export type CibleTestMysql = 'autonome' | 'comicrack';
+
+export interface ResultatTestMysql {
+  nbLivres: number;
+  /** « utilisateur@serveur:port/base », sans mot de passe. */
+  description: string;
+}
+
+export interface ChoixMysql {
+  mode: ModeBiblio;
+  /** Mode autonome : `sqlite` (défaut) ou `mysql` (alors `mysql` est obligatoire). */
+  store?: TypeStore;
+  /** Autonome + `store: 'mysql'` : base de ComicRust. Mode `comicrack` : base de ComicRack saisie. */
+  mysql?: ParametresMysql;
 }
 
 export interface ChoixPremierDemarrage {
@@ -709,6 +759,13 @@ export const etatBase = () => appeler<EtatBase>('etat_base');
 export const reessayerBase = () => appeler<EtatBase>('reessayer_base');
 export const configurerPremierDemarrage = (choix: ChoixPremierDemarrage) =>
   appeler<EtatBiblio>('configurer_premier_demarrage', { choix });
+
+/** Teste une connexion MySQL saisie ; rejette avec un message lisible (sans mot de passe). */
+export const testerConnexionMysql = (cible: CibleTestMysql, parametres: ParametresMysql) =>
+  appeler<ResultatTestMysql>('test_connexion_mysql', { cible, parametres });
+export const lireConnexionsMysql = () => appeler<ConnexionsMysql>('lire_connexions_mysql');
+/** Premier démarrage avec MySQL (base de ComicRust ou base ComicRack saisie) ; rien n'est enregistré si l'ouverture échoue. */
+export const configurerMysql = (choix: ChoixMysql) => appeler<EtatBiblio>('configurer_mysql', { choix });
 
 export const listerLivres = (requete: RequeteLivres) => appeler<ReponseLivres>('lister_livres', { requete });
 export const detailLivre = (id: string) => appeler<LivreDetail>('detail_livre', { id });

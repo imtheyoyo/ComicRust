@@ -6,6 +6,7 @@
 //! egui (`library/mod.rs`, `library/scan.rs`, assistant `setup_window.rs`), dupliquée (voir le
 //! plan : on ne touche pas à `crates/comicrust`).
 
+use crate::connexion::{self, ChoixMysql, SourceBase, TypeStore};
 use crate::couvertures;
 use crate::reglages::{self, Mode, Reglages};
 use crate::tri::{self, ClefTri, Regroupement};
@@ -33,6 +34,8 @@ pub struct EtatBiblio {
     pub mode: Mode,
     pub nb_livres: usize,
     pub premier_demarrage: bool,
+    /// D'où viennent les livres : SQLite, MySQL (base de ComicRust ou de ComicRack) ou `ComicDb.xml`.
+    pub source: SourceBase,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -354,13 +357,19 @@ impl Biblio {
         self.refuser_pendant_analyse()?;
         let r = reglages::lire(&self.data)?;
         let Some(mode) = r.mode else {
-            return Ok(EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: true });
+            return Ok(EtatBiblio {
+                mode: Mode::Autonome,
+                nb_livres: 0,
+                premier_demarrage: true,
+                source: SourceBase::Sqlite,
+            });
         };
         let (base, store, cr) = charger(&self.data, &r)?;
         let nb = base.len();
+        let source = source_de(&store, &cr);
         self.installer(mode, base, store);
         self.verrou().comicrack = cr;
-        Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false })
+        Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false, source })
     }
 
     /// Enregistre le choix du premier démarrage et ouvre la bibliothèque. Rien n'est écrit dans
@@ -368,12 +377,7 @@ impl Biblio {
     pub fn configurer(&self, choix: &ChoixPremierDemarrage) -> Result<EtatBiblio, String> {
         self.refuser_pendant_analyse()?;
         let r = match choix.mode {
-            Mode::Autonome => {
-                // Crée la base (schéma) : seul endroit où un fichier absent est créé.
-                let cfg = config_autonome(&self.data);
-                Store::open(&cfg).map_err(|e| e.to_string())?;
-                Reglages { mode: Some(Mode::Autonome), ..Default::default() }
-            }
+            Mode::Autonome => Reglages { mode: Some(Mode::Autonome), ..Default::default() },
             Mode::Comicrack => {
                 let saisi = choix.chemin_ini.as_deref().map(nettoyer_chemin).filter(|s| !s.is_empty());
                 let chemin = match saisi {
@@ -389,22 +393,62 @@ impl Biblio {
                 Reglages { mode: Some(Mode::Comicrack), chemin_ini: Some(chemin), ..Default::default() }
             }
         };
+        self.appliquer_choix(r)
+    }
+
+    /// Premier démarrage avec MySQL : base de ComicRust en MySQL (mode autonome) ou base MySQL de
+    /// ComicRack saisie à la main (mode lié, sans `ComicRack.ini`). Le mot de passe saisi est
+    /// enregistré chiffré ; un choix qui échoue (serveur injoignable…) n'est pas enregistré.
+    pub fn configurer_mysql(&self, choix: &ChoixMysql) -> Result<EtatBiblio, String> {
+        self.refuser_pendant_analyse()?;
+        let actuels = reglages::lire(&self.data)?;
+        let r = match choix.mode {
+            Mode::Autonome => match choix.store.unwrap_or(TypeStore::Sqlite) {
+                TypeStore::Sqlite => Reglages { mode: Some(Mode::Autonome), ..Default::default() },
+                TypeStore::Mysql => {
+                    let p = choix.mysql.as_ref().ok_or("paramètres MySQL manquants")?;
+                    let cfg = p.resoudre(actuels.store_mysql.as_ref())?;
+                    Reglages { mode: Some(Mode::Autonome), store_mysql: Some(cfg), ..Default::default() }
+                }
+            },
+            Mode::Comicrack => {
+                let p = choix.mysql.as_ref().ok_or("paramètres MySQL manquants")?;
+                let cfg = p.resoudre(actuels.comicrack_mysql.as_ref())?;
+                Reglages { mode: Some(Mode::Comicrack), comicrack_mysql: Some(cfg), ..Default::default() }
+            }
+        };
+        self.appliquer_choix(r)
+    }
+
+    /// Ouvre la bibliothèque décrite par `r` puis, seulement si elle s'ouvre, enregistre le choix
+    /// (mode, chemin, connexions MySQL) en gardant les préférences d'affichage.
+    fn appliquer_choix(&self, r: Reglages) -> Result<EtatBiblio, String> {
+        let mode = r.mode.ok_or("aucun mode choisi")?;
+        if mode == Mode::Autonome {
+            // Crée la base (schéma) : seul endroit où un fichier absent est créé.
+            let cfg = config_autonome(&self.data, &r);
+            Store::open(&cfg).map_err(|e| erreur_store(&cfg, e.to_string()))?;
+        }
         // Charge d'abord : un choix qui échoue (MySQL injoignable…) n'est pas enregistré.
         let (base, store, cr) = charger(&self.data, &r)?;
-        if r.mode == Some(Mode::Comicrack) && base.is_empty() {
+        if mode == Mode::Comicrack && base.is_empty() {
             return Err("cette bibliothèque ComicRack ne contient aucun livre \
-                        (ComicRack utilise sans doute une base MySQL : indique son ComicRack.ini)"
+                        (ComicRack utilise sans doute une base MySQL : indique son ComicRack.ini \
+                        ou les paramètres de sa base)"
                 .into());
         }
-        // Seuls le mode et le chemin changent : les préférences d'affichage sont conservées.
+        // Seul le choix de bibliothèque change : les préférences d'affichage sont conservées.
         reglages::modifier(&self.data, |actuels| {
             actuels.mode = r.mode;
             actuels.chemin_ini = r.chemin_ini.clone();
+            actuels.store_mysql = r.store_mysql.clone();
+            actuels.comicrack_mysql = r.comicrack_mysql.clone();
         })?;
         let nb = base.len();
-        self.installer(choix.mode, base, store);
+        let source = source_de(&store, &cr);
+        self.installer(mode, base, store);
         self.verrou().comicrack = cr;
-        Ok(EtatBiblio { mode: choix.mode, nb_livres: nb, premier_demarrage: false })
+        Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false, source })
     }
 
     fn refuser_pendant_analyse(&self) -> Result<(), String> {
@@ -910,10 +954,32 @@ pub(crate) fn regroupement(g: Option<Groupe>) -> Regroupement {
     }
 }
 
-fn config_autonome(data: &Path) -> StoreConfig {
+/// Base de ComicRust choisie : MySQL si une connexion est enregistrée (`storeMysql`), sinon SQLite.
+fn config_autonome(data: &Path, r: &Reglages) -> StoreConfig {
+    if let Some(c) = &r.store_mysql {
+        return StoreConfig::MySql(c.clone());
+    }
     // Chemin explicite (et non `PortableSqlite`, calculé d'après l'exécutable) : même fichier
     // en production (`data\comicrust.db`), mais testable dans un dossier temporaire.
     StoreConfig::Sqlite(data.join(SQLITE_FILE_NAME))
+}
+
+/// Message d'échec d'ouverture de la base de ComicRust : sans mot de passe, avec un indice s'il
+/// manque.
+fn erreur_store(cfg: &StoreConfig, message: String) -> String {
+    match cfg {
+        StoreConfig::MySql(c) => connexion::avec_indice_mot_de_passe(message, c),
+        _ => message,
+    }
+}
+
+/// D'où viennent les livres, d'après ce que `charger` a ouvert.
+fn source_de(store: &Option<StoreConfig>, cr: &Option<DbConfig>) -> SourceBase {
+    match (store, cr) {
+        (Some(StoreConfig::MySql(_)), _) | (_, Some(_)) => SourceBase::Mysql,
+        (Some(_), None) => SourceBase::Sqlite,
+        (None, None) => SourceBase::Xml,
+    }
 }
 
 /// `is_file` avec délai maximal (thread détaché si le disque ne répond pas).
@@ -951,12 +1017,20 @@ fn charger(data: &Path, r: &Reglages) -> Result<Chargee, String> {
     match r.mode {
         None => Err("aucun mode choisi".into()),
         Some(Mode::Autonome) => {
-            let cfg = config_autonome(data);
-            let base = Store::open_existing(&cfg).and_then(|mut s| s.load(None)).map_err(|e| e.to_string())?;
+            let cfg = config_autonome(data, r);
+            let base = Store::open_existing(&cfg)
+                .and_then(|mut s| s.load(None))
+                .map_err(|e| erreur_store(&cfg, e.to_string()))?;
             Ok((base, Some(cfg), None))
         }
         Some(Mode::Comicrack) => {
-            let chemin = r.chemin_ini.as_deref().ok_or("ComicRack.ini non indiqué")?;
+            let Some(chemin) = r.chemin_ini.as_deref() else {
+                // Saisie à la main (sans ComicRack.ini) : connexion enregistrée dans les réglages.
+                let cfg = r.comicrack_mysql.clone().ok_or("ComicRack.ini non indiqué")?;
+                let base = ComicDatabase::load(&cfg, None)
+                    .map_err(|e| connexion::avec_indice_mot_de_passe(e.to_string(), &cfg))?;
+                return Ok((base, None, Some(cfg)));
+            };
             let xml = chemin.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("xml"));
             if xml {
                 return Ok((charger_comicdb_xml(chemin)?, None, None));
