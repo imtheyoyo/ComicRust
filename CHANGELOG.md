@@ -5,6 +5,30 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.6.2] — 2026-11-11
+
+Version corrective de l'étape 5 (**listes ComicRack**), suite aux recettes tauri-v0.6.0 et
+tauri-v0.6.1 du 11/11/2026 (la seconde passée avec l'ancien programme : ses tests sont repris).
+
+### Nouveautés
+- **Chaque liste garde son tri, son sens, son groupement et sa vue** (Grille / Tableau), comme dans
+  ComicRack ; la Bibliothèque garde les siens. Mémorisé dans `data\comicrust-tauri.json`, jamais
+  dans ComicRack. Une liste de lecture jamais réglée s'ouvre triée par « # Ordre de la liste ».
+
+### Corrections
+- **Éditeur de listes intelligentes** : un critère sans marqueur `genre` est désormais accepté par
+  le backend (plus d'« Aperçu impossible : missing field `genre` »).
+- **Focus clavier** rendu à la grille, au tableau ou à l'arbre après « Ouvrir un fichier… », les
+  fenêtres (même fermées sans événement) et les menus contextuels.
+- « Ajouter à une liste… » propose la **dernière liste utilisée** dans la session, y compris depuis
+  la Bibliothèque et après un glisser-déposer sur l'arbre.
+- Reprend les corrections de la tauri-v0.6.1 (série, numéro et volume déduits du nom de fichier ;
+  focus ; listes déroulantes lisibles en thème sombre).
+
+### Recette
+[`recette/tauri-v0.6.2.md`](recette/tauri-v0.6.2.md) : installation vérifiée dans les deux copies,
+vues par liste, tests repris des tauri-v0.6.0 et v0.6.1, écriture de `ComicDb.xml`.
+
 ## [tauri-v0.6.1] — 2026-11-10
 
 Version corrective de l'étape 5 (**listes ComicRack**), issue d'essais pilotés par l'IA sur la
