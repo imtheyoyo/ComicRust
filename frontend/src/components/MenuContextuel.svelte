@@ -14,7 +14,7 @@
 <script lang="ts">
   // Menu contextuel (clic droit, touche Menu ou Maj+F10) : flèches, Entrée, Échap, clic ailleurs.
   import { onDestroy, onMount, tick } from 'svelte';
-  import { restaurerFocus } from '../lib/modale';
+  import { origineFocus, restaurerFocus } from '../lib/modale';
 
   interface Props {
     x: number;
@@ -26,7 +26,7 @@
   let { x, y, entrees, onchoix, onfermer }: Props = $props();
 
   // Élément qui avait le focus avant l'ouverture : on le lui rend à la fermeture (Suppr, F2… continuent de marcher).
-  const origine = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const origine = origineFocus();
   onDestroy(() => restaurerFocus(origine));
 
   let menu = $state<HTMLDivElement>();
