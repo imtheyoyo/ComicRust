@@ -125,4 +125,4 @@ Décision et remarques :
 Rapport de Yoyo du 11/11/2026 22:39 : 34 OK, 0 échec, S-02 non testé
 ([rapport](rapports/tauri-v0.6.3-2026-11-11.txt)). S-02 vérifié par l'IA par le pilotage MCP :
 comportement conforme, attendu de la recette corrigé (5 / 7). Tous les bloquants sont OK :
-**GO proposé, en attente de la confirmation de Yoyo.** Anomalies mineures reportées à la version suivante.
+**GO confirmé par Yoyo le 11/11/2026 (22:55).** Anomalies mineures reportées à la version suivante.
