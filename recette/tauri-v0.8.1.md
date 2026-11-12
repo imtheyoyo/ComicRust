@@ -65,4 +65,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Rapport de Yoyo du 12/11/2026 21:25 ([rapport](rapports/tauri-v0.8.1-2026-11-12.txt)) : 10 OK sur 10 ; première vraie mise à jour 0.8.0 → 0.8.1 réussie ; C-05 corrigé.
 
-**Décision :** GO proposé (tous les tests OK) — en attente de la confirmation de Yoyo.
+**Décision : GO** confirmé par Yoyo le 12/11/2026 (21:26).

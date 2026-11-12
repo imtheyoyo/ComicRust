@@ -96,4 +96,4 @@ Rapport de Yoyo du 12/11/2026 21:14 ([rapport](rapports/tauri-v0.8.0-2026-11-12.
 
 Second rapport du 12/11/2026 21:21 ([rapport](rapports/tauri-v0.8.0-2026-11-12-b.txt)) : 16 OK, 1 échec (C-01 [m], attendu) ; section « Mise à jour » faite avec `MAJ.cmd` (copie « ComicRust-Tauri MAJ »).
 
-**Décision :** GO proposé (seul un mineur en échec, corrigé en tauri-v0.8.1) — en attente de la confirmation de Yoyo.
+**Décision : GO** confirmé par Yoyo le 12/11/2026 (21:26) ; C-01 [m] corrigé en tauri-v0.8.1.
