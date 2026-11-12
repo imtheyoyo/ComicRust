@@ -5,6 +5,29 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.7.1] — 2026-11-12
+
+Version corrective de l'étape 6, suite à la recette tauri-v0.7.0 (GO du 12/11/2026) : remarques de
+Yoyo et écart de parité avec la version egui.
+
+### Nouveautés
+- **Vue empilée par série** (« 📚 Empiler par série », grille de la Bibliothèque) : une pile de
+  couvertures par série, nombre de livres et barre de lecture (infobulle « N livres, M lus »).
+  Un clic sélectionne la pile, un double-clic ou Entrée l'ouvre, « ← Piles » ou Échap revient ;
+  glisser une pile vers une liste y ajoute tous ses livres. Réglage mémorisé pour la Bibliothèque
+  et pour chaque liste.
+- **Panneau Détail** : progression de lecture (« Lu : x % (page n / total) », barre ; la lecture faite
+  dans ComicRust prime si elle est plus avancée) et **note en étoiles** jaunes et grises.
+- **Colonne des listes redimensionnable** (souris, clavier, double-clic pour la largeur par défaut),
+  largeur mémorisée.
+
+### Corrections
+- Clic droit dans une sélection de plusieurs livres : le menu s'applique à toute la sélection
+  (vérifié en simulation ; à confirmer dans la vraie fenêtre).
+
+### Recette
+[`recette/tauri-v0.7.1.md`](recette/tauri-v0.7.1.md).
+
 ## [tauri-v0.7.0] — 2026-11-12
 
 Étape 6 de la version Tauri : **MySQL**, base de ComicRust, transfert depuis ComicRack, surveillance
