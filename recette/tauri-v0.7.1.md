@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.7.1 (pré-release corrective de l'étape 6 : **piles par série, Détail, colonne des listes**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.7.1-windows-x64.zip` (contient aussi `ComicRust-Tauri-mcp.exe`) |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `0ee431110c9b4b3c8939b90f9d4368861c539388d0fbcffe326f6f0c7b931a82` |
 | Contenu | **vue empilée par série** (écart de parité N-01 de la tauri-v0.7.0) ; **progression de lecture** et **note en étoiles** dans le panneau Détail (N-02) ; **colonne des listes redimensionnable** ; clic droit dans une sélection multiple |
 | Origine | [recette tauri-v0.7.0](tauri-v0.7.0.md) : **GO** de Yoyo le 12/11/2026 ; rapports [1](rapports/tauri-v0.7.0-2026-11-12.txt) et [2](rapports/tauri-v0.7.0-2026-11-12-b.txt) (N-01 : « le regroupement n'empile pas les livres » → piles) |
 
