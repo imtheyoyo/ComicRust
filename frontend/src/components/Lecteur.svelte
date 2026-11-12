@@ -259,6 +259,13 @@
    *  ne dépend pas de la relecture des valeurs dérivées d'un composant en cours de destruction. */
   let dernierEtat: { page: number; termine: boolean } | null = null;
   let termineVu = false;
+  /** Page de reprise (numéro de page du livre) tant que le lecteur n'en a pas bougé ; `null` une
+   *  fois quittée, ou si le livre a été ouvert au début. Tant qu'on y est, rien n'est envoyé : la
+   *  reprise n'est pas une lecture. Sans cela, un livre **lu** rouvert à sa dernière page (page
+   *  mémorisée à la fin de la séance précédente) envoyait aussitôt « terminé » : fin « revue »,
+   *  relecture jamais notée, lecture écrite dès l'ouverture, et le Détail restait sur « Lu » quelle
+   *  que soit la page où l'on s'arrêtait (recettes tauri-v0.7.3 / v0.8.0, C-05). */
+  let pageDepart: number | null = null;
   /** Envois d'avancement enchaînés (un seul à la fois, dans l'ordre). La promesse renvoyée se
    *  résout quand **le dernier envoi** est fini, y compris celui lancé plus tôt par la minuterie :
    *  avant la tauri-v0.7.3, un envoi déjà parti (même page) faisait revenir tout de suite
@@ -270,6 +277,10 @@
     const a = etatAvancement ?? dernierEtat;
     const l = livre;
     if (!l || !a || questionReprise) return envois;
+    if (pageDepart !== null) {
+      if (a.page === pageDepart) return envois; // toujours à la page de reprise
+      pageDepart = null;
+    }
     termineVu ||= a.termine; // une fois la fin vue, le livre reste « lu » pour cette session
     const termine = termineVu;
     const clef = `${a.page}/${termine}`;
@@ -564,7 +575,11 @@
     const vis = pagesVisibles(livre.pages, livre.nbPages);
     dernierEnvoi = `${vis[positionDe(vis, index)]}/false`;
     await tick();
-    void aller(mode === 'defilement' ? positionDe(vis, index) : debutPlanche(ctx, positionDe(vis, index)));
+    const depart = mode === 'defilement' ? positionDe(vis, index) : debutPlanche(ctx, positionDe(vis, index));
+    // Reprise en cours de livre : rien n'est noté avant d'avoir quitté cette page (voir `pageDepart`).
+    // Ouverture au début : comportement inchangé (un livre d'une seule planche peut être « terminé »).
+    pageDepart = index > 0 ? (vis[depart] ?? null) : null;
+    void aller(depart);
     racine?.focus();
   }
 

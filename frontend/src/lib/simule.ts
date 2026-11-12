@@ -45,6 +45,8 @@ interface LivreInterne extends LivreResume {
   resume: string; fichier: string; fichierPresent: boolean; pageCourante: number; note: number;
   /** Relecture en cours d'un livre lu (`pageCourante` = position de la relecture). */
   enRelecture?: boolean;
+  /** Page la plus loin vue dans ComicRust (comme `Avancement::page_max`) : le Détail l'affiche. */
+  pageMax?: number;
 }
 
 const couvertureCache = new Map<string, string>();
@@ -430,7 +432,9 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'detail_livre': {
       const l = LIVRES[Number(args.id) - 1];
       if (!l) throw new Error('Livre introuvable.');
-      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : Math.round((l.pageCourante / Math.max(1, l.pages - 1)) * 100), pageCourante: l.pageCourante, pageLue: l.pageCourante > 0 ? l.pageCourante + 1 : undefined, sourceLecture: l.lu || l.pageCourante > 0 ? (Number(l.id) % 5 === 0 ? 'comicrust' : 'comicrack') : undefined };
+      // Comme `fusionner_lecture` : la page affichée est la plus loin vue, pas la page courante.
+      const loin = Math.max(l.pageMax ?? 0, l.pageCourante);
+      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : Math.round((loin / Math.max(1, l.pages - 1)) * 100), pageCourante: loin, pageLue: loin > 0 ? loin + 1 : undefined, sourceLecture: l.lu || loin > 0 ? (Number(l.id) % 5 === 0 ? 'comicrust' : 'comicrack') : undefined };
       if (l.lu) d.pageLue = l.pages;
       if (l.lu && l.enRelecture && l.pageCourante + 1 < l.pages) {
         const page = l.pageCourante + 1;
@@ -446,7 +450,9 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       sessions.set(jeton, l);
       simuleTests.ouverts.push(String(args.id));
       relectures.set(jeton, { dejaLu: l.lu, finVue: false });
-      const reprise = l.lu && !l.enRelecture ? 0 : Math.min(l.pageCourante, l.pages - 1);
+      // Comme `Lecteur::ouvrir_chemin` : reprise à la page mémorisée, même pour un livre lu (sa
+      // dernière page s'il a été fini : cas de la recette C-05).
+      const reprise = Math.min(l.pageCourante, l.pages - 1);
       const ouvert: LivreOuvert = {
         jeton, id: l.id, titre: l.serie ? `${l.serie} #${l.numero} — ${l.titre}` : l.titre,
         fichier: l.fichier, format: 'eComic (ZIP)', nbPages: l.pages,
@@ -481,6 +487,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       if (LATENCE_AVANCEMENT) await new Promise((r) => setTimeout(r, LATENCE_AVANCEMENT));
       simuleTests.avancements.push(a);
       l.pageCourante = a.page;
+      l.pageMax = Math.max(l.pageMax ?? 0, a.page, a.termine ? l.pages - 1 : 0);
       if (a.termine) l.lu = true;
       // Relecture (comme `Lecteur::enregistrer_avancement`) : séance ouverte sur un livre lu, fin
       // pas encore revue.

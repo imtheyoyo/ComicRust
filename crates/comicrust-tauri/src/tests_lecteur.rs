@@ -585,3 +585,103 @@ fn lecture_en_attente_n_interbloque_pas_la_liberation() {
     assert_eq!(taille(&r), (120, 300));
     l.fermer_livre(&o.jeton).unwrap();
 }
+
+/// C-05 (recettes tauri-v0.7.3 / v0.8.0) : A ouvert, page 5, fermé ; puis B ouvert, page 3,
+/// fermé ; le Détail de A (resélectionné) doit montrer la page 5.
+fn scenario_c05(b: &Biblio, l: &Lecteur, a: &str, bb: &str) -> crate::biblio::LivreDetail {
+    let o = l.ouvrir_livre(a).unwrap();
+    l.enregistrer_avancement(&o.jeton, 4, false).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    let mut det = b.detail(a).unwrap();
+    l.completer_detail(&mut det);
+    assert_eq!(det.page_lue, Some(5), "Détail de A juste après sa fermeture (C-06)");
+    let o = l.ouvrir_livre(bb).unwrap();
+    l.enregistrer_avancement(&o.jeton, 2, false).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    let mut det_b = b.detail(bb).unwrap();
+    l.completer_detail(&mut det_b);
+    assert_eq!(det_b.page_lue, Some(3), "Détail de B");
+    let mut det = b.detail(a).unwrap();
+    l.completer_detail(&mut det);
+    det
+}
+
+fn fiche_simple(id: &str, fichier: &Path, pages: u32) -> LibraryBook {
+    LibraryBook {
+        id: id.into(),
+        file: Some(fichier.to_string_lossy().into()),
+        series: Some("Thanos".into()),
+        number: Some(id.into()),
+        page_count: Some(pages),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn c05_detail_du_premier_livre_apres_un_second_autonome() {
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("data");
+    let (fa, fb) = (d.path().join("A.cbz"), d.path().join("B.cbz"));
+    cbz_tailles(&fa, 10);
+    cbz_tailles(&fb, 10);
+    let b = Biblio::nouvelle(data.clone());
+    b.configurer(&ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None }).unwrap();
+    let cfg = b.store_autonome().unwrap();
+    Store::open_existing(&cfg).unwrap().upsert(&[fiche_simple("a", &fa, 10), fiche_simple("b", &fb, 10)]).unwrap();
+    b.ouvrir().unwrap();
+    let l = Lecteur::nouveau(data.clone(), b.clone());
+    let det = scenario_c05(&b, &l, "a", "b");
+    assert_eq!((det.page_lue, det.progression), (Some(5), Some(50)));
+}
+
+/// C-05, cas réel : A lu jusqu'au bout se rouvre à sa **dernière page** (page mémorisée) ; le
+/// lecteur n'envoie rien tant qu'il n'a pas quitté cette page (correctif du front) ; relu jusqu'à
+/// la page 5 puis fermé, B lu, A resélectionné : « lu », relecture en cours page 5.
+#[test]
+fn c05_livre_lu_rouvert_a_sa_derniere_page_puis_relu() {
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("data");
+    let (fa, fb) = (d.path().join("A.cbz"), d.path().join("B.cbz"));
+    cbz_tailles(&fa, 10);
+    cbz_tailles(&fb, 10);
+    let b = Biblio::nouvelle(data.clone());
+    b.configurer(&ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None }).unwrap();
+    let cfg = b.store_autonome().unwrap();
+    Store::open_existing(&cfg).unwrap().upsert(&[fiche_simple("a", &fa, 10), fiche_simple("b", &fb, 10)]).unwrap();
+    b.ouvrir().unwrap();
+    let l = Lecteur::nouveau(data.clone(), b.clone());
+    let o = l.ouvrir_livre("a").unwrap();
+    l.enregistrer_avancement(&o.jeton, 9, true).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    // Réouverture : reprise à la dernière page (comme la version egui).
+    let o = l.ouvrir_livre("a").unwrap();
+    assert_eq!(o.page_reprise, 9);
+    l.enregistrer_avancement(&o.jeton, 0, false).unwrap();
+    l.enregistrer_avancement(&o.jeton, 4, false).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    let o = l.ouvrir_livre("b").unwrap();
+    l.enregistrer_avancement(&o.jeton, 2, false).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    let mut det = b.detail("a").unwrap();
+    l.completer_detail(&mut det);
+    assert!(det.lu);
+    assert_eq!(det.relecture.map(|r| (r.page, r.total)), Some((5, 10)));
+}
+
+#[test]
+fn c05_detail_du_premier_livre_apres_un_second_comicrack() {
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("data");
+    let (fa, fb) = (d.path().join("A.cbz"), d.path().join("B.cbz"));
+    cbz_tailles(&fa, 10);
+    cbz_tailles(&fb, 10);
+    let b = Biblio::nouvelle(data.clone());
+    b.installer(
+        Mode::Comicrack,
+        ComicDatabase::from_books(vec![fiche_simple("a", &fa, 10), fiche_simple("b", &fb, 10)]),
+        None,
+    );
+    let l = Lecteur::nouveau(data.clone(), b.clone());
+    let det = scenario_c05(&b, &l, "a", "b");
+    assert_eq!((det.page_lue, det.progression), (Some(5), Some(50)));
+}
