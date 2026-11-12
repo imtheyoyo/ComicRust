@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.7.3 (pré-release corrective) |
 | Paquet | `ComicRust-Tauri-tauri-v0.7.3-windows-x64.zip` (contient aussi `ComicRust-Tauri-mcp.exe`) |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `4833f8e4951daa2740260874fb9105292505de472e88aed9258dacbb8d8ce9be` |
 | Contenu | C-06 : Détail rafraîchi quelle que soit la façon de fermer le lecteur (Échap compris) ; relecture d'un livre déjà lu affichée dans le Détail |
 | Origine | [recette tauri-v0.7.2](tauri-v0.7.2.md) : 12 OK sur 13, C-06 [M] en échec ([rapport](rapports/tauri-v0.7.2-2026-11-12.txt)) |
 
