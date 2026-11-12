@@ -67,11 +67,25 @@
   let details = $state(prefs.details ?? true);
   const LARGEUR_MIN = 220;
   const LARGEUR_MAX = 800;
-  let largeurDetails = $state(prefs.largeurDetails ?? 320);
+  const LARGEUR_DEFAUT = 320;
+  let largeurDetails = $state(prefs.largeurDetails ?? LARGEUR_DEFAUT);
   /** Sélection multiple (Ctrl+clic, Maj+clic, Ctrl+A, Maj+flèches) ; `sel.curseur` : livre courant. */
   const sel = new Selection();
-  /** Menu contextuel ouvert (position). */
+  /** Menu contextuel ouvert (position ; `pile` : menu d'une pile plutôt que des livres). */
   let menu = $state<{ x: number; y: number; pile?: string } | null>(null);
+  /** Pile visée par le menu ouvert, retenue hors de l'état réactif : le menu se ferme
+   *  (`menu = null`) AVANT d'appeler l'action choisie. Lire `menu.pile` à ce moment-là levait une
+   *  erreur (menu nul) et aucune entrée du menu des livres ou des piles n'agissait (« Modifier les
+   *  infos » sans effet alors que Ctrl+I marchait). */
+  let pileMenu: string | undefined;
+  function ouvrirMenu(x: number, y: number, pile?: string) {
+    pileMenu = pile;
+    menu = { x, y, pile };
+  }
+  function choixMenu(id: string) {
+    const pile = pileMenu;
+    void (pile !== undefined ? actionPile(pile, id) : action(id));
+  }
   /** Fenêtres de l'édition (étape 3), sur les identifiants de la sélection au moment de l'ouverture. */
   let infosDe = $state<string[] | null>(null);
   let operation = $state<{ type: 'conversion' | 'ecritureInfos'; ids: string[] } | null>(null);
@@ -196,10 +210,11 @@
     return a.tri === b.tri && a.sensTri === b.sensTri && a.groupe === b.groupe && a.vue === b.vue && a.empiler === b.empiler;
   }
 
-  function changer(patch: Partial<typeof bib.params>) {
+  /** Change la requête : sélection vidée, première page rechargée (promesse : chargement fini). */
+  function changer(patch: Partial<typeof bib.params>): Promise<void> {
     Object.assign(bib.params, patch);
     sel.vider();
-    void bib.reinitialiser();
+    return bib.reinitialiser();
   }
 
   function recherche(v: string) {
@@ -220,16 +235,34 @@
     livreLu = { id: l.id };
   }
 
-  /** Ouvre la pile d'une série : ses livres s'affichent en grille (Échap ou « Piles » pour revenir). */
-  function ouvrirPile(serie: string) {
-    pileSel = serie;
-    changer({ serie });
+  /** Le focus peut-il être déplacé vers la zone affichée ? Oui s'il est perdu (la grille des piles
+   *  ou des livres vient d'être démontée) ou déjà dans la liste ; pas si l'utilisateur est parti
+   *  ailleurs (recherche, fenêtre…) pendant le chargement. */
+  function focusLibre(): boolean {
+    const a = document.activeElement;
+    return !a || a === document.body || a === document.documentElement || !!a.closest('.liste');
   }
 
-  async function fermerPile() {
-    changer({ serie: undefined });
+  /** Ouvre la pile d'une série : ses livres s'affichent en grille (Échap ou « Piles » pour revenir).
+   *  Comme la version egui, le premier livre devient le livre courant et la grille prend le focus :
+   *  les flèches marchent tout de suite (sans cela, la grille des piles démontée laissait le focus
+   *  sur <body> et il fallait cliquer un livre avant de naviguer). */
+  async function ouvrirPile(serie: string) {
+    pileSel = serie;
+    await changer({ serie });
+    if (bib.params.serie !== serie || bib.erreur) return; // autre requête entre-temps
+    if (bib.total > 0 && sel.curseur < 0) sel.unique(0);
     await tick();
-    document.querySelector<HTMLElement>('[data-testid="grille-piles"]')?.focus();
+    if (focusLibre()) document.querySelector<HTMLElement>('[data-testid="grille"]')?.focus();
+  }
+
+  /** Retour aux piles : la pile qui était ouverte reste sélectionnée, visible (GrillePiles la fait
+   *  défiler) et la grille des piles reprend le focus. */
+  async function fermerPile() {
+    await changer({ serie: undefined });
+    if (bib.params.serie !== undefined) return;
+    await tick();
+    if (focusLibre()) document.querySelector<HTMLElement>('[data-testid="grille-piles"]')?.focus();
   }
 
   function ouvrirFichier() {
@@ -257,7 +290,11 @@
     Math.round(Math.min(Math.max(l, LARGEUR_MIN), Math.min(LARGEUR_MAX, Math.max(LARGEUR_MIN, window.innerWidth * 0.6))));
 
   function debutRedimension(e: PointerEvent) {
+    if (e.button !== 0) return;
     const poignee = e.currentTarget as HTMLElement;
+    // preventDefault() (plus bas) annule la prise de focus du clic : on la fait nous-mêmes, sinon
+    // le clavier de la poignée ne marche qu'après un Tab (recette tauri-v0.7.1 R-02).
+    poignee.focus({ preventScroll: true });
     poignee.setPointerCapture(e.pointerId);
     const x0 = e.clientX;
     const l0 = largeurDetails;
@@ -276,18 +313,26 @@
   /** Écouteurs posés par attachement : un séparateur focalisable est un composant interactif
    *  (ARIA), ce que la règle a11y de Svelte ne reconnaît pas sur une `<div>`. */
   function ecouteursPoignee(el: HTMLElement) {
+    const defaut = () => (largeurDetails = borner(LARGEUR_DEFAUT));
     el.addEventListener('pointerdown', debutRedimension);
     el.addEventListener('keydown', clavierPoignee);
+    el.addEventListener('dblclick', defaut);
     return () => {
       el.removeEventListener('pointerdown', debutRedimension);
       el.removeEventListener('keydown', clavierPoignee);
+      el.removeEventListener('dblclick', defaut);
     };
   }
 
+  /** Clavier de la poignée (même comportement que celle de la colonne des listes, dans App) :
+   *  flèches (Maj : grand pas), Début / Fin : largeur minimale / maximale. Le panneau est à droite :
+   *  la flèche gauche l'élargit. */
   function clavierPoignee(e: KeyboardEvent) {
     const pas = e.shiftKey ? 64 : 16;
     if (e.key === 'ArrowLeft') largeurDetails = borner(largeurDetails + pas);
     else if (e.key === 'ArrowRight') largeurDetails = borner(largeurDetails - pas);
+    else if (e.key === 'Home') largeurDetails = borner(LARGEUR_MIN);
+    else if (e.key === 'End') largeurDetails = borner(LARGEUR_MAX);
     else return;
     e.preventDefault();
   }
@@ -407,7 +452,7 @@
     erreurAction = '';
     const p = bib.piles.find((x) => x.serie === serie);
     if (!p) return;
-    if (id === 'ouvrir') ouvrirPile(serie);
+    if (id === 'ouvrir') void ouvrirPile(serie);
     else await agirSurIds(id, p.ids);
   }
 
@@ -779,13 +824,13 @@
       {:else if enPiles && !pileOuverte}
         <GrillePiles piles={bib.piles} selection={pileSelectionnee} version={bib.version} {zoom}
           onselection={(serie) => (pileSel = serie)} onouvrir={ouvrirPile}
-          onmenu={(serie, x, y) => (menu = { x, y, pile: serie })}
+          onmenu={(serie, x, y) => ouvrirMenu(x, y, serie)}
           onappui={(e, i) => glisserPile.appui(e, i)} />
       {:else if vue === 'grille'}
-        <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir}
+        <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => ouvrirMenu(x, y)} onouvrir={ouvrir}
           onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={cliquerGroupe} />
       {:else}
-        <VueTableau {bib} {sel} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir} ontri={trier}
+        <VueTableau {bib} {sel} onmenu={(_, x, y) => ouvrirMenu(x, y)} onouvrir={ouvrir} ontri={trier}
           onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={cliquerGroupe} />
       {/if}
     </div>
@@ -800,7 +845,7 @@
         aria-valuemax={LARGEUR_MAX}
         aria-valuenow={largeurDetails}
         tabindex="0"
-        title="Tirer pour élargir ou réduire le panneau de détails"
+        title="Tirer pour élargir ou réduire le panneau de détails (double-clic : largeur par défaut)"
         {@attach ecouteursPoignee}
         data-testid="poignee-details"
       ></div>
@@ -879,9 +924,8 @@
 {/if}
 
 {#if menu}
-  {@const pile = menu.pile}
-  <MenuContextuel x={menu.x} y={menu.y} entrees={pile !== undefined ? entreesPile(pile) : entreesMenu}
-    onchoix={(id) => void (pile !== undefined ? actionPile(pile, id) : action(id))} onfermer={() => (menu = null)} />
+  <MenuContextuel x={menu.x} y={menu.y} entrees={menu.pile !== undefined ? entreesPile(menu.pile) : entreesMenu}
+    onchoix={choixMenu} onfermer={() => (menu = null)} />
 {/if}
 {#if infosDe}
   <DialogInfos ids={infosDe} onvoisin={voisin} {avoisin} onfermer={fenetreFermee} />

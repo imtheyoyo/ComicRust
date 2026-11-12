@@ -87,7 +87,12 @@
   }
 
   function debutRedimensionListes(e: PointerEvent) {
+    if (e.button !== 0) return;
     const poignee = e.currentTarget as HTMLElement;
+    // Le preventDefault() plus bas (pas de sélection de texte pendant le tirage) annule aussi la
+    // prise de focus du clic : sans ce focus explicite, les flèches, Début et Fin allaient à
+    // l'élément qui avait le focus avant (grille, arbre…) et la poignée ne réagissait pas (R-02).
+    poignee.focus({ preventScroll: true });
     poignee.setPointerCapture(e.pointerId);
     const x0 = e.clientX;
     const l0 = largeurListes;
@@ -117,10 +122,12 @@
   function ecouteursPoigneeListes(el: HTMLElement) {
     el.addEventListener('pointerdown', debutRedimensionListes);
     el.addEventListener('keydown', clavierPoigneeListes);
-    el.addEventListener('dblclick', () => fixerLargeurListes(LISTES_DEFAUT));
+    const defaut = () => fixerLargeurListes(LISTES_DEFAUT);
+    el.addEventListener('dblclick', defaut);
     return () => {
       el.removeEventListener('pointerdown', debutRedimensionListes);
       el.removeEventListener('keydown', clavierPoigneeListes);
+      el.removeEventListener('dblclick', defaut);
     };
   }
 

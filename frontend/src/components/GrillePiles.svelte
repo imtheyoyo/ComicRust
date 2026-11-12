@@ -3,6 +3,7 @@
   // nombre de livres et barre de lecture. Un clic sélectionne la pile sans l'ouvrir ; double-clic ou
   // Entrée l'ouvre ; glisser une pile vers une liste ajoute tous ses livres. Grille virtualisée
   // comme GrilleCouvertures ; les piles viennent de lister_piles (une seule réponse).
+  import { untrack } from 'svelte';
   import type { Pile } from '../lib/api';
   import { cibleClavier } from '../lib/navigation';
 
@@ -53,10 +54,17 @@
 
   const courant = $derived(selection === null ? -1 : piles.findIndex((p) => p.serie === selection));
 
-  // Nouvelle requête : retour en haut.
+  // Nouvelle requête : retour en haut, puis la pile sélectionnée est rendue visible (retour d'une
+  // pile ouverte par Échap ou « ← Piles » : on retrouve la pile qu'on vient de quitter).
   $effect(() => {
     void version;
-    if (zone) zone.scrollTop = 0;
+    const z = zone;
+    if (!z) return;
+    // Seule la version déclenche : ni la sélection ni la taille de la zone (lues par `afficher`).
+    untrack(() => {
+      z.scrollTop = 0;
+      if (courant >= 0) afficher(courant);
+    });
   });
 
   function afficher(i: number) {
