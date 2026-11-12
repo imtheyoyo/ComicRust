@@ -119,4 +119,6 @@ Copie liée, base ComicRack MySQL.
 
 **Rapport de Yoyo du 12/11/2026** ([rapport](rapports/tauri-v0.7.0-2026-11-12.txt)) : 32 OK, 0 échec, 2 non testés (C-07 [m], **N-01 [B]**). Valeurs : P-01 0.7.0 / 0.7.0 ; T-02 5 323 livres, 52 listes, 0 doublon. Remarques → tauri-v0.7.1 : progression de lecture absente du panneau Détail (N-02), colonne des listes non redimensionnable, sélection multiple au clic droit, note en étoiles dans le Détail, regroupement qui n'empile pas les livres.
 
-**Décision :** en attente — N-01 (bloquant) à tester avant le GO.
+**Second rapport du 12/11/2026 12:28** ([rapport](rapports/tauri-v0.7.0-2026-11-12-b.txt)) : 32 OK, 1 échec, 1 non testé (C-07). **N-01 [B] en échec** : « le regroupement n'empile pas les livres » — la **vue empilée par série** (piles de couvertures, `📚 Empiler par série` de la version egui) n'existe pas dans la version Tauri : écart de parité, pas une régression de la 0.7.0 (aucun code de piles dans le front Tauri). À livrer en tauri-v0.7.1.
+
+**Décision :** NO-GO strict sur la règle (N-01 [B]) ; GO possible si Yoyo accepte N-01 comme écart de parité reporté à la tauri-v0.7.1.

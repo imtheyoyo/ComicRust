@@ -1,0 +1,14 @@
+Rapport de recette ComicRust tauri-v0.7.0 — 12/11/2026 12:28
+Résultat : 32 OK, 1 échec(s), 1 non testé(s) sur 34.
+Décision proposée : NO-GO (1 bloquant(s) en échec).
+
+ÉCHECS (1)
+- N-01 [Bloquant] Bibliothèque : grille, tableau, recherche, tri, groupement, couvertures (copie liée : 5 3xx livres).
+  Note : Le regroupement n'empile pas les livres.
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.7.0 / 0.7.0
+- T-02 : 5 323 livres, 52 listes, 0 doublon
+- N-02 : Il manque les information de la progression de lecture dans le panneau Détail du livre.
+
+NON TESTÉS (1) : C-07
