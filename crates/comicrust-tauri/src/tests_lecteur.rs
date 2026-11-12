@@ -276,6 +276,60 @@ fn mode_comicrack_lecture_seule_memoire_locale() {
     l.fermer_livre(&o.jeton).unwrap();
 }
 
+/// Relecture d'un livre lu (C-06) : notée dans `avancement.json` seulement, fiche ComicRack
+/// intacte, détail « lu » + relecture ; finie quand la fin est revue.
+#[test]
+fn relecture_d_un_livre_lu_memorisee_sans_toucher_la_fiche() {
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("data");
+    let f = d.path().join("Thanos 01.cbz");
+    cbz_tailles(&f, 4);
+    let mut livre = fiche("cr-1", &f);
+    livre.last_page_read = Some(3); // lu à 100 % dans ComicRack
+    let b = Biblio::nouvelle(data.clone());
+    b.installer(Mode::Comicrack, ComicDatabase::from_books(vec![livre]), None);
+    let l = Lecteur::nouveau(data.clone(), b.clone());
+    let memoire = || crate::avancement::Memoire::nouvelle(data.clone()).lire(&f).unwrap();
+    let o = l.ouvrir_livre("cr-1").unwrap();
+    l.enregistrer_avancement(&o.jeton, 0, false).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    assert!(memoire().relecture, "séance ouverte sur un livre lu : relecture");
+    assert_eq!(b.livre("cr-1").unwrap().last_page_read, Some(3), "fiche ComicRack intacte");
+    let mut det = b.detail("cr-1").unwrap();
+    l.completer_detail(&mut det);
+    assert!(det.lu);
+    assert_eq!(det.relecture.map(|r| (r.page, r.total)), Some((1, 4)));
+    // Relecture menée jusqu'au bout : plus de relecture en cours, même en revenant en arrière.
+    let o = l.ouvrir_livre("cr-1").unwrap();
+    l.enregistrer_avancement(&o.jeton, 99, true).unwrap();
+    l.enregistrer_avancement(&o.jeton, 0, false).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    assert!(!memoire().relecture);
+    let mut det = b.detail("cr-1").unwrap();
+    l.completer_detail(&mut det);
+    assert_eq!((det.lu, det.relecture), (true, None));
+}
+
+/// Première lecture (livre non lu) : jamais une relecture, même en revenant en arrière après
+/// la fin.
+#[test]
+fn premiere_lecture_n_est_pas_une_relecture() {
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("data");
+    let f = d.path().join("Thanos 01.cbz");
+    cbz_tailles(&f, 4);
+    let b = Biblio::nouvelle(data.clone());
+    b.installer(Mode::Comicrack, ComicDatabase::from_books(vec![fiche("cr-1", &f)]), None);
+    let l = Lecteur::nouveau(data.clone(), b.clone());
+    let o = l.ouvrir_livre("cr-1").unwrap();
+    l.enregistrer_avancement(&o.jeton, 1, false).unwrap();
+    l.enregistrer_avancement(&o.jeton, 99, true).unwrap();
+    l.enregistrer_avancement(&o.jeton, 0, false).unwrap();
+    l.fermer_livre(&o.jeton).unwrap();
+    let a = crate::avancement::Memoire::nouvelle(data.clone()).lire(&f).unwrap();
+    assert_eq!((a.page, a.relecture, a.pourcentage()), (0, false, Some(100)));
+}
+
 #[test]
 fn cache_borne() {
     let page = |n: usize| Arc::new(PageServie { mime: "image/jpeg", octets: vec![0; n] });

@@ -111,6 +111,17 @@ Repris de la version egui (`remember_position`, `store_progress`) :
 1. **Mémoire locale**, à chaque `enregistrer_avancement`, quel que soit le mode :
    `data\avancement.json` (`{ "<chemin du fichier>": {page, pageMax, pages} }`, équivalent de
    `last_pages` / `read_progress` de `comicrust.ron`). `pageMax` ne recule jamais.
+   `relecture: true` (absent sinon ; tauri-v0.7.3) : la séance qui a noté `page` a été ouverte sur
+   un livre **déjà lu** (fiche à 100 % ou `pageMax` à la fin) et n'a pas encore revu la dernière
+   page ; `detail_livre` rend alors `relecture: {page, total, pourcentage}` (`ipc-bibliotheque.md`).
+   Rien n'est écrit dans ComicRack pour cela.
+
+Côté interface (`Lecteur.svelte`), les envois d'avancement sont **enchaînés** et tous les chemins
+de fermeture (✖, Fermer, Échap, Ctrl+W, Annuler de la question de reprise, autre livre ouvert à la
+place, démontage) passent par un point unique, `terminer()` : dernier envoi attendu (même lancé
+par la minuterie de 800 ms), `fermer_livre`, **puis** rappel `onlecturefinie` qui relit la liste et
+le panneau Détail (recette tauri-v0.7.2, C-06 : Échap pressé pendant l'envoi de la minuterie
+relisait l'ancienne page).
 2. **Base de ComicRust** (mode autonome, livre de la bibliothèque) : **une fois par séance**, à
    `fermer_livre`, à `enregistrer_avancement` avec `termine: true`, à l'éviction (5ᵉ livre) et à la
    fermeture de l'application : `CurrentPage` = page courante, `LastPageRead` = max(ancienne valeur,

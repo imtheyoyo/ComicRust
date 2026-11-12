@@ -42,6 +42,8 @@ const MOTS = ['Le retour', 'La chute', "L'ombre", 'Origines', 'Rédemption', 'Le
 interface LivreInterne extends LivreResume {
   genre: string; scenariste: string; dessinateur: string; mois: number; ajout: number;
   resume: string; fichier: string; fichierPresent: boolean; pageCourante: number; note: number;
+  /** Relecture en cours d'un livre lu (`pageCourante` = position de la relecture). */
+  enRelecture?: boolean;
 }
 
 const couvertureCache = new Map<string, string>();
@@ -242,6 +244,11 @@ try {
 const sessions = new Map<string, LivreInterne>();
 let numeroSession = 0;
 const REPRISE_DIFFERENTE = new URLSearchParams(location.search).has('repriseDiff');
+// `?latenceAvancement=ms` : `enregistrer_avancement` répond (et note la page) après ce délai, comme
+// un backend lent ; sert à vérifier que la fermeture attend l'envoi en cours (C-06, tauri-v0.7.3).
+const LATENCE_AVANCEMENT = Number(new URLSearchParams(location.search).get('latenceAvancement')) || 0;
+/** Séances simulées : livre déjà lu à l'ouverture (relecture) et fin revue pendant la séance. */
+const relectures = new Map<string, { dejaLu: boolean; finVue: boolean }>();
 
 function pagesSimulees(l: LivreInterne): PageInfo[] {
   // Ordre et attributs enregistrés par l'onglet Pages (étape 4), s'ils ont changé.
@@ -418,6 +425,11 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       const l = LIVRES[Number(args.id) - 1];
       if (!l) throw new Error('Livre introuvable.');
       const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : Math.round((l.pageCourante / Math.max(1, l.pages - 1)) * 100), pageCourante: l.pageCourante, pageLue: l.pageCourante > 0 ? l.pageCourante + 1 : undefined, sourceLecture: l.lu || l.pageCourante > 0 ? (Number(l.id) % 5 === 0 ? 'comicrust' : 'comicrack') : undefined };
+      if (l.lu) d.pageLue = l.pages;
+      if (l.lu && l.enRelecture && l.pageCourante + 1 < l.pages) {
+        const page = l.pageCourante + 1;
+        d.relecture = { page, total: l.pages, pourcentage: Math.min(99, Math.max(1, Math.round((page * 100) / l.pages))) };
+      }
       return d;
     }
     case 'ouvrir_livre': {
@@ -427,7 +439,8 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       const jeton = `s${++numeroSession}`;
       sessions.set(jeton, l);
       simuleTests.ouverts.push(String(args.id));
-      const reprise = l.lu ? 0 : Math.min(l.pageCourante, l.pages - 1);
+      relectures.set(jeton, { dejaLu: l.lu, finVue: false });
+      const reprise = l.lu && !l.enRelecture ? 0 : Math.min(l.pageCourante, l.pages - 1);
       const ouvert: LivreOuvert = {
         jeton, id: l.id, titre: l.serie ? `${l.serie} #${l.numero} — ${l.titre}` : l.titre,
         fichier: l.fichier, format: 'eComic (ZIP)', nbPages: l.pages,
@@ -459,13 +472,22 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       const l = sessions.get(args.jeton as string);
       if (!l) throw new Error('Session de lecture inconnue.');
       const a = { jeton: args.jeton as string, page: args.page as number, termine: args.termine as boolean };
+      if (LATENCE_AVANCEMENT) await new Promise((r) => setTimeout(r, LATENCE_AVANCEMENT));
       simuleTests.avancements.push(a);
       l.pageCourante = a.page;
       if (a.termine) l.lu = true;
+      // Relecture (comme `Lecteur::enregistrer_avancement`) : séance ouverte sur un livre lu, fin
+      // pas encore revue.
+      const r = relectures.get(a.jeton);
+      if (r) {
+        r.finVue ||= a.termine || a.page >= l.pages - 1;
+        l.enRelecture = r.dejaLu && !r.finVue;
+      }
       return null;
     }
     case 'fermer_livre':
       sessions.delete(args.jeton as string);
+      relectures.delete(args.jeton as string);
       simuleTests.fermes.push(args.jeton as string);
       return null;
     case 'lister_dossiers':

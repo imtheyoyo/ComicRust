@@ -561,18 +561,83 @@ fn lecture_comicrust_prime_si_plus_avancee() {
     use crate::avancement::Avancement;
     let mut d = detail_pour_test(&livre_lu(4, 20, None)); // ComicRack : 25 %
                                                           // Moins avancée dans ComicRust : la fiche garde la main.
-    fusionner_lecture(&mut d, Some(Avancement { page: 2, page_max: 2, pages: 20 }));
+    fusionner_lecture(&mut d, Some(Avancement { page: 2, page_max: 2, pages: 20, relecture: false }));
     assert_eq!((d.progression, d.source_lecture.as_deref()), (Some(25), Some("comicrack")));
     // Plus avancée : elle prime (page_max 11 -> page 12 / 20 = 60 %).
-    fusionner_lecture(&mut d, Some(Avancement { page: 11, page_max: 11, pages: 20 }));
+    fusionner_lecture(&mut d, Some(Avancement { page: 11, page_max: 11, pages: 20, relecture: false }));
     assert_eq!((d.progression, d.page_lue, d.lu), (Some(60), Some(12), false));
     assert_eq!(d.source_lecture.as_deref(), Some("comicrust"));
     // Lu jusqu'au bout dans ComicRust, fiche jamais ouverte.
     let mut d = detail_pour_test(&livre_lu(0, 20, None));
-    fusionner_lecture(&mut d, Some(Avancement { page: 19, page_max: 19, pages: 20 }));
+    fusionner_lecture(&mut d, Some(Avancement { page: 19, page_max: 19, pages: 20, relecture: false }));
     assert_eq!((d.progression, d.page_lue, d.lu), (Some(100), Some(20), true));
     // Aucune lecture locale : inchangé.
     let mut d = detail_pour_test(&livre_lu(0, 20, None));
     fusionner_lecture(&mut d, None);
     assert_eq!((d.progression, d.source_lecture), (Some(0), None));
+}
+
+/// Relecture (recette tauri-v0.7.2, C-06) : livre lu, relu jusqu'à la page 7 / 59.
+#[test]
+fn fusion_relecture_d_un_livre_lu() {
+    use crate::avancement::Avancement;
+    // Fiche ComicRack lue à 100 %, relecture notée dans ComicRust (page 6 = 7e page).
+    let mut d = detail_pour_test(&livre_lu(58, 59, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 6, page_max: 6, pages: 59, relecture: true }));
+    // Le livre reste lu, la fiche n'est pas dégradée…
+    assert_eq!((d.lu, d.progression, d.page_lue), (true, Some(100), Some(59)));
+    assert_eq!(d.source_lecture.as_deref(), Some("comicrack"));
+    // … et la relecture est donnée à part (7 / 59 = 11,9 % -> 12 %).
+    assert_eq!(d.relecture, Some(Relecture { page: 7, total: 59, pourcentage: 12 }));
+    // Lu dans ComicRust (fin vue, fiche jamais ouverte), puis relu.
+    let mut d = detail_pour_test(&livre_lu(0, 20, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 0, page_max: 19, pages: 20, relecture: true }));
+    assert_eq!((d.lu, d.source_lecture.as_deref()), (true, Some("comicrust")));
+    assert_eq!(d.relecture, Some(Relecture { page: 1, total: 20, pourcentage: 5 }));
+    // Même position sans l'indicateur (fin vue puis retour en arrière dans la même séance) :
+    // pas de relecture.
+    let mut d = detail_pour_test(&livre_lu(58, 59, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 6, page_max: 58, pages: 59, relecture: false }));
+    assert_eq!((d.lu, d.relecture), (true, None));
+    // Relecture menée jusqu'à la dernière page : rien en cours.
+    let mut d = detail_pour_test(&livre_lu(58, 59, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 58, page_max: 58, pages: 59, relecture: true }));
+    assert_eq!(d.relecture, None);
+    // Le JSON porte le champ seulement s'il y a une relecture.
+    let mut d = detail_pour_test(&livre_lu(58, 59, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 6, page_max: 6, pages: 59, relecture: true }));
+    let json = serde_json::to_value(&d).unwrap();
+    assert_eq!(json["relecture"], serde_json::json!({ "page": 7, "total": 59, "pourcentage": 12 }));
+    assert!(serde_json::to_value(detail_pour_test(&livre_lu(58, 59, None))).unwrap().get("relecture").is_none());
+}
+
+/// Lecture ComicRust plus avancée que la fiche, sans relecture ; livre non lu marqué
+/// « relecture » (incohérent) : ignoré.
+#[test]
+fn fusion_lecture_plus_avancee_sans_relecture() {
+    use crate::avancement::Avancement;
+    let mut d = detail_pour_test(&livre_lu(4, 20, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 9, page_max: 9, pages: 20, relecture: true }));
+    assert_eq!((d.progression, d.page_lue, d.lu), (Some(50), Some(10), false));
+    assert_eq!(d.source_lecture.as_deref(), Some("comicrust"));
+    assert_eq!(d.relecture, None);
+}
+
+/// Fiche seule (aucune lecture ComicRust) et livre de 0 page : rien d'inventé.
+#[test]
+fn fusion_fiche_seule_et_zero_page() {
+    use crate::avancement::Avancement;
+    let mut d = detail_pour_test(&livre_lu(58, 59, None));
+    fusionner_lecture(&mut d, None);
+    assert_eq!((d.lu, d.progression, d.relecture), (true, Some(100), None));
+    assert_eq!(d.source_lecture.as_deref(), Some("comicrack"));
+    // 0 page partout : pas de pourcentage, pas de relecture, pas de division par zéro.
+    let mut d = detail_pour_test(&livre_lu(0, 0, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 0, page_max: 0, pages: 0, relecture: true }));
+    assert_eq!((d.lu, d.relecture, d.source_lecture.clone()), (false, None, None));
+    // Fiche lue mais 0 page connue nulle part : pas de relecture affichable.
+    let mut d = detail_pour_test(&livre_lu(0, 0, None));
+    d.lu = true;
+    fusionner_lecture(&mut d, Some(Avancement { page: 3, page_max: 3, pages: 0, relecture: true }));
+    assert_eq!(d.relecture, None);
 }

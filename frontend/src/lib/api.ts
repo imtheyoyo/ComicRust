@@ -144,6 +144,16 @@ export interface ReponseLivres {
   livres: LivreResume[];
 }
 
+/** Relecture en cours (`LivreDetail.relecture`). */
+export interface Relecture {
+  /** Page courante de la relecture, à partir de 1. */
+  page: number;
+  /** Nombre de pages du livre. */
+  total: number;
+  /** Avancement de la relecture, 1 à 99. */
+  pourcentage: number;
+}
+
 /** Champs absents = non renseignés. Seuls les champs courants sont déclarés ici. */
 export interface LivreDetail extends LivreResume {
   volume?: number;
@@ -156,6 +166,9 @@ export interface LivreDetail extends LivreResume {
   pageLue?: number;
   /** Origine de `progression` : fiche / base ComicRack, ou lecture faite dans ComicRust (plus avancée). */
   sourceLecture?: 'comicrack' | 'comicrust';
+  /** Relecture en cours d'un livre déjà lu (lecture ComicRust) : le livre reste `lu`, le panneau
+   *  affiche aussi « relecture en cours : x % (page n / total) ». Absente : pas de relecture. */
+  relecture?: Relecture;
   scenariste?: string;
   dessinateur?: string;
   encreur?: string;

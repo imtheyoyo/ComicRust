@@ -19,9 +19,13 @@
   interface Props {
     /** Livre de la bibliothèque (`{id}` = LivreResume.id) ou fichier hors bibliothèque (`{chemin}`). */
     source: SourceLecteur;
+    /** Demande de fermeture (appelée APRÈS `onlecturefinie`) : le parent retire le lecteur. */
     onfermer: () => void;
+    /** Séance terminée : avancement enregistré et livre fermé côté backend, par n'importe quel
+     *  chemin (y compris le démontage) ; le parent relit la liste et le panneau Détail. */
+    onlecturefinie?: () => void;
   }
-  let { source, onfermer }: Props = $props();
+  let { source, onfermer, onlecturefinie }: Props = $props();
 
   /** Délai avant l'envoi de l'avancement après un changement de page (ms). */
   const DELAI_AVANCEMENT = 800;
@@ -251,35 +255,59 @@
     minuterieAvancement = setTimeout(envoyerAvancement, DELAI_AVANCEMENT);
   });
   let termineVu = false;
-  async function envoyerAvancement(): Promise<void> {
+  /** Envois d'avancement enchaînés (un seul à la fois, dans l'ordre). La promesse renvoyée se
+   *  résout quand **le dernier envoi** est fini, y compris celui lancé plus tôt par la minuterie :
+   *  avant la tauri-v0.7.3, un envoi déjà parti (même page) faisait revenir tout de suite
+   *  `envoyerAvancement`, la fermeture n'attendait pas sa fin et le Détail pouvait relire l'ancienne
+   *  page (Échap pressé juste après la minuterie de 800 ms ; recette tauri-v0.7.2, C-06). */
+  let envois: Promise<void> = Promise.resolve();
+  function envoyerAvancement(): Promise<void> {
     clearTimeout(minuterieAvancement);
     const a = etatAvancement;
-    if (!livre || !a || questionReprise) return;
+    const l = livre;
+    if (!l || !a || questionReprise) return envois;
     termineVu ||= a.termine; // une fois la fin vue, le livre reste « lu » pour cette session
-    const clef = `${a.page}/${termineVu}`;
-    if (clef === dernierEnvoi) return;
+    const termine = termineVu;
+    const clef = `${a.page}/${termine}`;
+    if (clef === dernierEnvoi) return envois;
     dernierEnvoi = clef;
-    try {
-      await enregistrerAvancement(livre.jeton, a.page, termineVu);
-    } catch (e) {
-      console.warn('avancement non enregistré', e);
-    }
+    envois = envois.then(() =>
+      enregistrerAvancement(l.jeton, a.page, termine).catch((e) => console.warn('avancement non enregistré', e)),
+    );
+    return envois;
   }
 
-  let fermeture = false;
-  async function fermer() {
-    if (fermeture) return;
-    fermeture = true;
-    if (pleinEcranActif) void basculerPleinEcran();
-    const l = livre;
-    if (l) {
+  /** **Point unique de fin de séance**, quel que soit le chemin (bouton ✖ ou Fermer, Échap,
+   *  Ctrl+W, Annuler de la question de reprise, autre livre ouvert à la place, lecteur démonté) :
+   *  1. avancement enregistré (attend tous les envois en cours, voir `envoyerAvancement`) ;
+   *  2. livre fermé côté backend (lecture écrite dans la base s'il y a lieu) ;
+   *  3. PUIS `onlecturefinie` : le parent relit la liste et le Détail (« Lu dans ComicRust… »).
+   *  L'ordre compte : relu avant l'enregistrement, le Détail montrait l'ancienne page. Une seule
+   *  exécution par séance. */
+  let terminaison: Promise<void> | null = null;
+  function terminer(): Promise<void> {
+    terminaison ??= (async () => {
+      const l = livre;
+      if (!l) return; // livre pas encore ouvert : l'ouverture en cours le refermera (`vivant`)
       await envoyerAvancement();
       try {
         await fermerLivre(l.jeton);
       } catch (e) {
         console.warn('fermeture du livre', e);
       }
-    }
+      onlecturefinie?.();
+    })();
+    return terminaison;
+  }
+
+  let fermeture = false;
+  /** Fermeture demandée par l'utilisateur : séance terminée (`terminer`), puis le parent retire
+   *  le lecteur. */
+  async function fermer() {
+    if (fermeture) return;
+    fermeture = true;
+    if (pleinEcranActif) void basculerPleinEcran();
+    await terminer();
     onfermer();
   }
 
@@ -574,6 +602,9 @@
     document.addEventListener('fullscreenchange', pleinEcranDoc);
     return () => {
       vivant = false;
+      // Lecteur démonté sans passer par `fermer` (autre livre ouvert à sa place, vue quittée) :
+      // même fin de séance (enregistrement puis rafraîchissement du Détail).
+      void terminer();
       clearTimeout(minuterieBarres);
       clearTimeout(minuterieAvancement);
       window.removeEventListener('pagehide', quitter);

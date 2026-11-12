@@ -131,6 +131,18 @@ pub struct PagePiles {
     pub piles: Vec<Pile>,
 }
 
+/// Relecture en cours d'un livre déjà lu (voir [`LivreDetail::relecture`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Relecture {
+    /// Page courante de la relecture, à partir de 1.
+    pub page: u32,
+    /// Nombre de pages du livre.
+    pub total: u32,
+    /// Avancement de la relecture, 1 à 99 (arrondi).
+    pub pourcentage: u32,
+}
+
 /// Fiche complète d'un livre (champs absents = non renseignés).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +179,11 @@ pub struct LivreDetail {
     /// ComicRust, `avancement.json`, quand elle est plus avancée). Absente : jamais ouvert.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_lecture: Option<String>,
+    /// **Relecture en cours** d'un livre déjà lu (lecture ComicRust, `avancement.json`) : le
+    /// livre reste `lu` (fiche non dégradée), le panneau affiche aussi la position de la
+    /// relecture. Absente : pas de relecture en cours.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relecture: Option<Relecture>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scenariste: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1218,16 +1235,30 @@ fn resume(b: &LibraryBook) -> LivreResume {
 
 /// Fait primer la lecture faite dans ComicRust (`avancement.json`) quand elle est plus avancée que
 /// celle de la fiche, comme la version egui (`read_percent` : le plus avancé des deux). `lu` suit.
+///
+/// Relecture (C-06, tauri-v0.7.3) : si le livre est lu (fiche ou ComicRust) et que ComicRust a noté
+/// une position avant la dernière page **pendant une séance ouverte sur le livre déjà lu**
+/// ([`Avancement::relecture`](crate::avancement::Avancement::relecture)), le livre reste lu et
+/// `relecture` donne cette position. Rien n'est écrit (ni fiche ComicRack, ni base).
 pub fn fusionner_lecture(d: &mut LivreDetail, local: Option<crate::avancement::Avancement>) {
     let Some(a) = local else { return };
-    let Some(pct) = a.pourcentage() else { return };
-    if pct <= d.progression.unwrap_or(0) {
-        return;
+    if let Some(pct) = a.pourcentage() {
+        if pct > d.progression.unwrap_or(0) {
+            d.progression = Some(pct);
+            d.lu = pct == 100;
+            d.page_lue = Some(((a.page_max + 1) as u32).min(d.pages.max(a.pages as u32).max(1)));
+            d.source_lecture = Some("comicrust".to_string());
+        }
     }
-    d.progression = Some(pct);
-    d.lu = pct == 100;
-    d.page_lue = Some(((a.page_max + 1) as u32).min(d.pages.max(a.pages as u32).max(1)));
-    d.source_lecture = Some("comicrust".to_string());
+    d.relecture = None;
+    if d.lu && a.relecture {
+        let total = d.pages.max(a.pages as u32);
+        let page = a.page as u32 + 1;
+        if page < total {
+            let pourcentage = ((page * 100 + total / 2) / total).clamp(1, 99);
+            d.relecture = Some(Relecture { page, total, pourcentage });
+        }
+    }
 }
 
 /// Fiche détaillée d'un livre, sans accès disque (tests).
@@ -1255,6 +1286,7 @@ fn detail(b: &LibraryBook) -> LivreDetail {
         page_courante: b.last_page_read,
         page_lue: b.last_page_read.filter(|p| *p > 0).map(|p| p + 1),
         source_lecture: b.read_percent().filter(|p| *p > 0).map(|_| "comicrack".to_string()),
+        relecture: None,
         scenariste: non_vide(&b.writer),
         dessinateur: non_vide(&b.penciller),
         encreur: non_vide(&b.inker),

@@ -48,6 +48,11 @@
     const pct = Math.round(d.progression ?? 0);
     const lu = d.lu || pct >= 100;
     const origine = d.sourceLecture === 'comicrust' ? ' dans ComicRust' : '';
+    // Relecture d'un livre lu : il reste « Lu », la barre suit la relecture (C-06, tauri-v0.7.3).
+    const r = d.relecture;
+    if (lu && r) {
+      return { pct: r.pourcentage, texte: `Lu${origine} — relecture en cours : ${r.pourcentage} % (page ${r.page} / ${r.total})`, lu: true };
+    }
     if (lu) return { pct: 100, texte: `Lu${origine}`, lu: true };
     if (pct <= 0) return { pct: 0, texte: 'Non lu', lu: false };
     const page = d.pageLue ? ` (page ${d.pageLue}${d.pages ? ` / ${d.pages}` : ''})` : '';

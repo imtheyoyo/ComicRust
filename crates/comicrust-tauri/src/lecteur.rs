@@ -706,6 +706,11 @@ struct Session {
     ouvert_a: chrono::DateTime<chrono::FixedOffset>,
     /// Lecture déjà écrite dans la base (une fois par séance, comme `Book::stored`).
     enregistree: bool,
+    /// Livre déjà lu à l'ouverture (fiche à 100 % ou fin vue dans ComicRust) : la séance est une
+    /// **relecture** tant qu'elle n'a pas revu la dernière page (`fin_vue`).
+    deja_lu: bool,
+    /// La dernière page a été vue pendant cette séance.
+    fin_vue: bool,
     touchee: Instant,
 }
 
@@ -853,7 +858,12 @@ impl Lecteur {
             visibles.iter().copied().find(|&n| n >= numero).or(visibles.last().copied()).unwrap_or(0)
         };
         // Reprise (`open_book_at`, `Start::Auto`) : ComicRust (mémoire locale) et ComicRack (base).
-        let crust = self.memoire.lire(&chemin).map(|a| a.page).filter(|p| *p > 0);
+        let local = self.memoire.lire(&chemin);
+        let crust = local.map(|a| a.page).filter(|p| *p > 0);
+        // Déjà lu avant cette séance : ce qui sera lu maintenant est une relecture (le livre reste
+        // « lu », la position est notée à part : `Avancement::relecture`).
+        let deja_lu = fiche.as_ref().and_then(|f| f.read_percent()) == Some(100)
+            || local.and_then(|a| a.pourcentage()) == Some(100);
         let crack = fiche.as_ref().and_then(|f| f.current_page).map(|p| p as usize).filter(|p| *p > 0);
         let (reprise, autre) = match (crack, crust) {
             (Some(a), Some(b)) if a != b => (b, Some(a)),
@@ -932,6 +942,8 @@ impl Lecteur {
             store,
             ouvert_a: comicrust_core::db::write::now(),
             enregistree: false,
+            deja_lu,
+            fin_vue: false,
             touchee: Instant::now(),
         };
         self.inserer_session(jeton, session);
@@ -960,6 +972,8 @@ impl Lecteur {
             store: None,
             ouvert_a: comicrust_core::db::write::now(),
             enregistree: true,
+            deja_lu: false,
+            fin_vue: false,
             touchee: Instant::now(),
         };
         self.inserer_session(jeton.clone(), session);
@@ -1049,7 +1063,7 @@ impl Lecteur {
     /// (livre lu jusqu'au bout) ; la lecture est alors écrite dans la base sans attendre la
     /// fermeture.
     pub fn enregistrer_avancement(&self, jeton: &str, page: usize, termine: bool) -> Result<(), String> {
-        let (chemin, numero, numero_loin, total) = {
+        let (chemin, numero, numero_loin, total, relecture) = {
             let mut g = self.verrou();
             let s = g.get_mut(jeton).ok_or_else(|| format!("livre non ouvert (jeton inconnu) : {jeton}"))?;
             if s.nb == 0 {
@@ -1057,13 +1071,15 @@ impl Lecteur {
             }
             s.courante = page.min(s.nb - 1);
             s.plus_loin = s.plus_loin.max(s.courante);
+            let derniere = s.visibles.last().copied().unwrap_or(s.nb - 1);
             if termine {
-                s.plus_loin = s.plus_loin.max(s.visibles.last().copied().unwrap_or(s.nb - 1));
+                s.plus_loin = s.plus_loin.max(derniere);
             }
+            s.fin_vue |= termine || s.courante >= derniere;
             s.touchee = Instant::now();
-            (s.chemin.clone(), s.courante, s.plus_loin, s.total.max(s.nb))
+            (s.chemin.clone(), s.courante, s.plus_loin, s.total.max(s.nb), s.deja_lu && !s.fin_vue)
         };
-        self.memoire.noter(&chemin, numero, numero_loin, total)?;
+        self.memoire.noter(&chemin, numero, numero_loin, total, relecture)?;
         if termine {
             // Écrit hors du verrou des séances (la base peut être lente).
             let e = self.verrou().get_mut(jeton).and_then(Session::a_ecrire);

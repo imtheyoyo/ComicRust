@@ -68,6 +68,16 @@ interface LivreDetail {    // champs absents = non renseignés
   // (comme la version egui) : `progression` et `lu` en tiennent compte.
   pageLue?: number;        // page la plus loin lue, à partir de 1 (absente : jamais ouvert)
   sourceLecture?: 'comicrack' | 'comicrust';   // origine de `progression`
+  // Relecture en cours d'un livre déjà lu (tauri-v0.7.3, recette C-06) : le livre reste `lu`
+  // (progression 100, fiche jamais dégradée ni réécrite) ; le panneau affiche
+  // « Lu — relecture en cours : 12 % (page 7 / 59) », barre sur la relecture. Présente quand
+  // data\avancement.json porte `relecture: true` pour le fichier : la page a été notée par une
+  // séance ouverte sur le livre DÉJÀ lu (fiche à 100 % ou fin vue dans ComicRust) qui n'a pas
+  // encore revu la dernière page. Revoir la fin met fin à la relecture. Une première lecture où
+  // l'on revient en arrière après la fin n'est pas une relecture.
+  relecture?: { page: number;          // page courante de la relecture, à partir de 1
+                total: number;         // pages du livre
+                pourcentage: number }; // 1 à 99, arrondi
   // `note` : échelle ComicRack 0-5, demi-étoiles possibles ; absente = non noté (étoiles du panneau).
   scenariste?: string; dessinateur?: string; encreur?: string; coloriste?: string;
   lettreur?: string; artisteCouverture?: string; redacteur?: string; traducteur?: string;

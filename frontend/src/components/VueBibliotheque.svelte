@@ -273,14 +273,19 @@
     livreLu = { chemin };
   }
 
-  /** Lecteur fermé : l'avancement a changé (lu, page courante), on recharge sans perdre la
-   *  sélection ni le défilement, puis on rend le focus à la liste. */
+  /** Séance de lecture terminée (rappel `onlecturefinie` du lecteur, appelé APRÈS l'enregistrement
+   *  de l'avancement et la fermeture du livre côté backend, quel que soit le chemin : ✖, Échap,
+   *  Ctrl+W, autre livre ouvert…). Seul point qui relit la liste (sans perdre sélection ni
+   *  défilement) et le détail du livre affiché : même id, donc sans le compteur le panneau gardait
+   *  l'ancien détail (recette tauri-v0.7.1, D-02 ; tauri-v0.7.2, C-06). */
+  function lectureFinie() {
+    void bib.reinitialiser(false);
+    fichesModifiees++;
+  }
+
+  /** Lecteur fermé (après `lectureFinie`) : on le retire et on rend le focus à la liste. */
   async function lecteurFerme() {
     livreLu = null;
-    void bib.reinitialiser(false);
-    // Le détail du livre affiché est relu (« Lu dans ComicRust : … ») : même id, donc sans ce
-    // compteur le panneau gardait l'ancien détail (recette tauri-v0.7.1, D-02).
-    fichesModifiees++;
     await tick();
     document.querySelector<HTMLElement>('[data-testid="grille"], [data-testid="tableau"], [data-testid="grille-piles"]')?.focus();
   }
@@ -943,7 +948,7 @@
 
 {#if livreLu}
   {#key livreLu}
-    <Lecteur source={livreLu} onfermer={lecteurFerme} />
+    <Lecteur source={livreLu} onfermer={lecteurFerme} onlecturefinie={lectureFinie} />
   {/key}
 {/if}
 
