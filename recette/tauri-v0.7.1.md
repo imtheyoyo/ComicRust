@@ -74,6 +74,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 - Pas de réordonnancement des piles par glisser dans une liste de lecture (egui le permet) : il se fait en ouvrant la pile.
 - Le panneau Détail reste vide quand une **pile** est sélectionnée (il se remplit pour un livre).
+- Un livre lu **seulement dans ComicRust** (`avancement.json`) apparaît « lu » dans le panneau Détail, mais pas encore dans le tableau, la grille ni le compte « M lus » d'une pile (ils lisent la fiche) ; à harmoniser plus tard.
 - Le jaune des étoiles est fixe (variable `--cr-etoile` non définie par les thèmes).
 - Reprises de la tauri-v0.7.0 : pas d'écran « Changer de connexion » dans les Réglages ; annulation du transfert seulement entre deux lots.
 
@@ -81,6 +82,9 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
+| (relecture) | [M] | Pile ouverte sans résultat de recherche : plus de bouton « ← Piles » | **Corrigé** (barre affichée aussi dans ce cas) |
+| (relecture) | [M] | Sélection de livres périmée en activant « Empiler », puis Suppr retirait des livres invisibles | **Corrigé** (sélection vidée ; Suppr agit sur la pile sélectionnée) |
+| (relecture) | [m] | Infos depuis une pile : bouton Suivant actif sans effet | **Corrigé** |
 | | | | |
 
 ## Bilan

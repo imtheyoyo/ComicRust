@@ -157,6 +157,7 @@
     const e = enPiles;
     untrack(() => {
       if (!bib.regler(e)) return;
+      sel.vider(); // la sélection de livres ne vaut plus quand la vue change de nature (piles ↔ livres)
       if (!e && bib.params.serie !== undefined) changer({ serie: undefined });
       else void bib.reinitialiser(false);
     });
@@ -314,7 +315,9 @@
     if (e.key === 'Delete' && !saisieTexte && !fenetreOuverte() && liste?.type === 'lecture'
       && (e.target as HTMLElement | null)?.closest('[data-testid="grille"], [data-testid="tableau"], [data-testid="grille-piles"]')) {
       e.preventDefault();
-      void action('retirer');
+      if (pilesAffichees) {
+        if (pileSelectionnee !== null) void actionPile(pileSelectionnee, 'retirer');
+      } else void action('retirer');
       return;
     }
     if ((e.key === '/' && !saisieTexte) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) {
@@ -497,7 +500,7 @@
     document.querySelector(`[data-index="${i}"]`)?.scrollIntoView({ block: 'nearest' });
     return l.id;
   }
-  const avoisin = (pas: -1 | 1) => sel.curseur + pas >= 0 && sel.curseur + pas < bib.total;
+  const avoisin = (pas: -1 | 1) => sel.curseur >= 0 && sel.curseur + pas >= 0 && sel.curseur + pas < bib.total;
 
   // ───── Listes (étape 5) : glisser-déposer, en-têtes de groupe, ajout à une liste ─────
 
@@ -758,6 +761,13 @@
 
   <div class="corps">
     <div class="liste">
+      {#if pileOuverte && !bib.erreur}
+        <div class="barre-pile" data-testid="barre-pile">
+          <button onclick={() => void fermerPile()} title="Revenir aux piles (Échap)" data-testid="fermer-pile">← Piles</button>
+          <strong class="nom-pile">📚 {bib.params.serie}</strong>
+          <span class="discret">{bib.total.toLocaleString('fr-FR')} livre{bib.total > 1 ? 's' : ''}</span>
+        </div>
+      {/if}
       {#if bib.erreur}
         <p class="erreur" role="alert">{bib.erreur}</p>
       {:else if bib.total === 0 && bib.version > 0}
@@ -772,13 +782,6 @@
           onmenu={(serie, x, y) => (menu = { x, y, pile: serie })}
           onappui={(e, i) => glisserPile.appui(e, i)} />
       {:else if vue === 'grille'}
-        {#if pileOuverte}
-          <div class="barre-pile" data-testid="barre-pile">
-            <button onclick={() => void fermerPile()} title="Revenir aux piles (Échap)" data-testid="fermer-pile">← Piles</button>
-            <strong class="nom-pile">📚 {bib.params.serie}</strong>
-            <span class="discret">{bib.total.toLocaleString('fr-FR')} livre{bib.total > 1 ? 's' : ''}</span>
-          </div>
-        {/if}
         <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => (menu = { x, y })} onouvrir={ouvrir}
           onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={cliquerGroupe} />
       {:else}
