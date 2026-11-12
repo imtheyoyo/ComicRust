@@ -984,6 +984,15 @@ export const majRedemarrer = () => appeler<void>('maj_redemarrer');
 /** Change les réglages fournis (`versionIgnoree: null` : plus aucune version ignorée). */
 export const majRegler = (reglages: { verifierAuDemarrage?: boolean; versionIgnoree?: string | null }) =>
   appeler<EtatMaj>('maj_regler', reglages);
+/** Ouvre une page de la release dans le navigateur (le backend n'accepte que
+ *  `https://github.com/imtheyoyo/ComicRust/…`). Hors Tauri : nouvel onglet. */
+export async function majOuvrirPage(url: string): Promise<void> {
+  if (!dansTauri()) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  await appeler<void>('maj_ouvrir_page', { url });
+}
 /** Abonnement aux deux événements de la mise à jour ; renvoie la fonction de désabonnement. */
 export async function ecouterMaj(
   surStatut: (s: StatutMaj) => void,

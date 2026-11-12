@@ -2,6 +2,7 @@
   // Fenêtre « Mise à jour de ComicRust » (comme `update_window` de la version egui) : version
   // installée, vérification au démarrage, recherche manuelle, notes de version, téléchargement avec
   // progression en Mo, bilan et redémarrage. Créée à la demande (`miseAJour.fenetre`).
+  import { majOuvrirPage } from '../lib/api';
   import { fermerModale, modale } from '../lib/modale';
   import { enMo, miseAJour } from '../lib/maj.svelte';
   import NotesVersion from './NotesVersion.svelte';
@@ -54,7 +55,7 @@
     {:else if statut.etat === 'disponible' && release}
       <p><strong>ComicRust {release.tag} est disponible.</strong>{#if release.nom && release.nom !== `ComicRust ${release.tag}`} ({release.nom}){/if}</p>
       <NotesVersion notes={release.notes} />
-      <p><a href={release.urlPage} target="_blank" rel="noopener noreferrer" data-testid="maj-page">Page de la release sur GitHub</a></p>
+      <p><a href={release.urlPage} onclick={(e) => { e.preventDefault(); void majOuvrirPage(release.urlPage).catch(() => {}); }} data-testid="maj-page">Page de la release sur GitHub</a></p>
       {#if ignoree}
         <p class="discret petit">Cette version est ignorée : le bandeau ne la propose plus.
           <button type="button" class="lien" onclick={() => void miseAJour.neplusIgnorer()} data-testid="maj-ne-plus-ignorer">Ne plus l'ignorer</button></p>
@@ -87,7 +88,7 @@
       <button type="button" class="principal" onclick={() => void miseAJour.redemarrer()} data-testid="maj-redemarrer">Redémarrer maintenant</button>
     {:else if statut.etat === 'echec'}
       <p class="erreur" role="alert" data-testid="maj-erreur">✖ {statut.erreur || 'La mise à jour a échoué.'}</p>
-      {#if release}<p><a href={release.urlPage} target="_blank" rel="noopener noreferrer">Page de la release sur GitHub</a></p>{/if}
+      {#if release}<p><a href={release.urlPage} onclick={(e) => { e.preventDefault(); void majOuvrirPage(release.urlPage).catch(() => {}); }}>Page de la release sur GitHub</a></p>{/if}
     {/if}
   </div>
   {#if miseAJour.erreurCommande}<p class="erreur" role="alert" data-testid="maj-erreur-commande">✖ {miseAJour.erreurCommande}</p>{/if}

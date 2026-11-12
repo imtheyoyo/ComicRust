@@ -5,7 +5,7 @@
 // bandeau et la fenêtre de la version egui (crates/comicrust/src/ui/update_ui.rs).
 import {
   ecouterMaj, majEtat, majInstaller, majRedemarrer, majRegler, majVerifier, messageErreur,
-  type EtatMaj, type ProgressionMaj, type ReleaseMaj, type StatutMaj,
+  type EtatMaj, type ProgressionMaj, type ReleaseMaj, type StatutMaj, dansTauri,
 } from './api';
 
 export class EtatMiseAJour {
@@ -64,9 +64,9 @@ export class EtatMiseAJour {
       this.etat = e;
       // Statut déjà connu (vérification lancée par le backend avant l'abonnement) : on le garde.
       if (this.statut.etat === 'inactif') this.appliquer(e.statut);
-      // Rien de lancé côté backend : vérification automatique (résultat silencieux sauf
-      // « disponible », qui n'affiche que le bandeau).
-      if (e.verifierAuDemarrage && this.statut.etat === 'inactif') await majVerifier(false);
+      // Dans Tauri, la vérification automatique au démarrage est faite par le backend seul
+      // (docs/tauri/ipc-maj.md). Seul le mode simulé (navigateur) la déclenche ici.
+      if (!dansTauri() && e.verifierAuDemarrage && this.statut.etat === 'inactif') await majVerifier(false);
     } catch (err) {
       // Mise à jour indisponible : jamais bloquant pour le reste de l'application.
       console.warn('mise à jour indisponible', err);
