@@ -117,4 +117,6 @@ Copie liée, base ComicRack MySQL.
 | [M] majeurs | | | |
 | [m] mineurs | | | |
 
-**Décision :** ☐ GO ☐ NO-GO — Yoyo, le …
+**Rapport de Yoyo du 12/11/2026** ([rapport](rapports/tauri-v0.7.0-2026-11-12.txt)) : 32 OK, 0 échec, 2 non testés (C-07 [m], **N-01 [B]**). Valeurs : P-01 0.7.0 / 0.7.0 ; T-02 5 323 livres, 52 listes, 0 doublon. Remarques → tauri-v0.7.1 : progression de lecture absente du panneau Détail (N-02), colonne des listes non redimensionnable, sélection multiple au clic droit, note en étoiles dans le Détail, regroupement qui n'empile pas les livres.
+
+**Décision :** en attente — N-01 (bloquant) à tester avant le GO.
