@@ -51,6 +51,47 @@ pub struct Reglages {
     /// Réglages de l'édition (infos, fichiers, écriture dans ComicRack).
     #[serde(skip_serializing_if = "ReglagesEdition::est_vide")]
     pub edition: ReglagesEdition,
+    /// Mise à jour intégrée (vérification au démarrage, version ignorée).
+    #[serde(skip_serializing_if = "ReglagesMaj::est_vide")]
+    pub maj: ReglagesMaj,
+}
+
+/// Réglages de la mise à jour (section `maj`, `docs/tauri/ipc-maj.md`) : `verifierAuDemarrage`
+/// (absent = vrai) et `versionIgnoree` (tag d'une version que l'utilisateur ne veut pas
+/// installer : la vérification automatique ne la propose plus). Lecture tolérante.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReglagesMaj {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verifier_au_demarrage: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_ignoree: Option<String>,
+}
+
+impl ReglagesMaj {
+    pub fn est_vide(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Depuis du JSON quelconque (champ invalide ignoré).
+    pub fn depuis_json(v: &Value) -> Self {
+        let Some(o) = v.as_object() else { return Self::default() };
+        Self {
+            verifier_au_demarrage: o.get("verifierAuDemarrage").and_then(Value::as_bool),
+            version_ignoree: o
+                .get("versionIgnoree")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && s.len() <= 100)
+                .map(str::to_string),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ReglagesMaj {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::depuis_json(&Value::deserialize(d)?))
+    }
 }
 
 /// Lit une connexion MySQL enregistrée depuis du JSON quelconque (champs `host`, `port`, `user`,
@@ -541,6 +582,7 @@ mod tests {
             comicrack_mysql: None,
             vue: PreferencesVue::default(),
             edition: ReglagesEdition::default(),
+            maj: ReglagesMaj::default(),
         };
         ecrire(d.path(), &r).unwrap();
         assert_eq!(lire(d.path()).unwrap(), r);

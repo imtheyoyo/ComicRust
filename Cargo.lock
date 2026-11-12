@@ -1198,11 +1198,14 @@ dependencies = [
  "natord",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tempfile",
+ "ureq",
  "webview2-com",
  "windows",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

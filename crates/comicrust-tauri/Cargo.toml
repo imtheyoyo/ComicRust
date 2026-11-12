@@ -20,7 +20,7 @@ required-features = ["app"]
 [features]
 default = []
 # Application Tauri complète (fenêtre, commandes IPC).
-app = ["dep:tauri", "dep:tauri-build"]
+app = ["dep:tauri", "dep:tauri-build", "dep:ureq", "dep:windows-sys"]
 # Sert le front compilé (frontend/dist) depuis le binaire au lieu du serveur Vite :
 # obligatoire pour la version livrée, absent en développement (`npm run dev`).
 custom-protocol = ["app", "tauri/custom-protocol"]
@@ -39,11 +39,19 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Dates de lecture écrites dans la base ComicRack (`Opened`), comme le cœur.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { version = "2", optional = true }
+# Mise à jour intégrée (module `maj`) : empreintes et extraction du paquet (noyau testable).
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Mise à jour : accès à GitHub, mêmes fonctions que la version egui (certificats et proxy du
+# système). Fonction `app` seulement ; les tests l'ont en dépendance de développement.
+ureq = { version = "3", features = ["platform-verifier", "win-system-proxy"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # Protocole DevTools de WebView2 (fonction `mcp`) : mêmes versions que celles de Tauri (wry).
 webview2-com = { version = "0.39", optional = true }
 windows = { version = "0.62", optional = true }
+# Mise à jour : attente de la fin de l'ancienne instance (`--attendre-pid`).
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }
@@ -52,4 +60,5 @@ tauri-build = { version = "2", optional = true }
 tempfile = "3"
 # Base MySQL de test (COMICRUST_TEST_MYSQL) : tables de ComicRack créées par les tests.
 mysql = { version = "28", default-features = false, features = ["default-rust", "client_ed25519"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+# Tests du module `maj` (faux serveur HTTP local) sans la fonction `app`.
+ureq = { version = "3", features = ["platform-verifier", "win-system-proxy"] }

@@ -16,6 +16,7 @@ use crate::listes::{
 };
 use crate::listes_cbl::{ExportCbl, ImportCbl, RapportCbl};
 use crate::listes_criteres::{self, Apercu, CatalogueCriteres, Critere, CriteresListe, EditeurListe};
+use crate::maj::{self, EtatMaj, Maj};
 use crate::pages_livre::{OperationPages, PageLivre, PagesLivre};
 use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
 use crate::surveillance::{self, EtatBase, Surveillance};
@@ -621,6 +622,55 @@ fn annuler_transfert(transfert: tauri::State<'_, Transfert>) {
     transfert.annuler();
 }
 
+// ───────────────────────────── Mise à jour ─────────────────────────────
+// Contrat : docs/tauri/ipc-maj.md (module `maj`). Vérification et installation dans des fils à
+// part ; résultat et progression par les événements `maj://statut` et `maj://progression`.
+
+/// Version, réglages, statut courant, installation possible ou non.
+#[tauri::command]
+fn maj_etat(maj: tauri::State<'_, Maj>) -> EtatMaj {
+    maj.etat()
+}
+
+/// Lance la vérification en arrière-plan (`manuel` : afficher aussi « à jour » et les erreurs).
+#[tauri::command]
+fn maj_verifier(maj: tauri::State<'_, Maj>, manuel: Option<bool>) {
+    maj.verifier(manuel.unwrap_or(true));
+}
+
+/// Télécharge, vérifie (SHA-256) et installe la release `tag` de la dernière vérification.
+#[tauri::command]
+fn maj_installer(maj: tauri::State<'_, Maj>, tag: String) -> Result<(), String> {
+    maj.installer(&tag)
+}
+
+/// Relance le même exe avec les mêmes arguments puis ferme l'application (la lecture des livres
+/// ouverts est enregistrée par `RunEvent::Exit`).
+#[tauri::command]
+fn maj_redemarrer(app: tauri::AppHandle, maj: tauri::State<'_, Maj>) -> Result<(), String> {
+    maj.redemarrer()?;
+    app.exit(0);
+    Ok(())
+}
+
+/// Ouvre une page de `https://github.com/imtheyoyo/ComicRust/` dans le navigateur par défaut
+/// (page de la release, liens des notes de version) ; toute autre adresse est refusée.
+#[tauri::command]
+fn maj_ouvrir_page(url: String) -> Result<(), String> {
+    maj::ouvrir_page(&url)
+}
+
+/// Enregistre `verifierAuDemarrage` et/ou `versionIgnoree` (champ absent = inchangé, `null` efface
+/// la version ignorée) : arguments lus dans le JSON brut de l'appel pour distinguer absent et `null`.
+#[tauri::command]
+fn maj_regler(maj: tauri::State<'_, Maj>, request: tauri::ipc::Request<'_>) -> Result<EtatMaj, String> {
+    let demande = match request.body() {
+        tauri::ipc::InvokeBody::Json(v) => maj::analyser_demande_reglage(v)?,
+        tauri::ipc::InvokeBody::Raw(_) => return Err("maj_regler : arguments JSON attendus".into()),
+    };
+    maj.regler(demande)
+}
+
 /// Réponse HTTP du protocole `cr-page`.
 fn reponse_page(p: ReponsePage) -> tauri::http::Response<Vec<u8>> {
     // Une URL de page ne vaut que pour une séance (jeton) : gardée par la WebView tant que
@@ -650,6 +700,9 @@ fn reponse_couverture(statut: u16, jpeg: Vec<u8>) -> tauri::http::Response<Vec<u
 
 /// Lance l'application.
 pub fn run() {
+    // Relance après une mise à jour (`--attendre-pid <pid>`) : attendre (10 s au plus) que
+    // l'ancienne instance ait libéré le profil WebView2 et le port MCP. Tout au début.
+    maj::traiter_attendre_pid();
     // `--mcp-stdio` : passerelle pour les clients MCP qui lancent un programme (Claude Desktop).
     #[cfg(feature = "mcp")]
     if crate::mcp::passerelle_stdio() {
@@ -664,6 +717,10 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+    // Mise à jour précédente : suppression des `.old` notés dans `data\maj\anciens.txt` et des
+    // téléchargements, avant la création de la fenêtre.
+    let dossier_app = portable::exe_dir();
+    maj::cleanup(&dossier_app);
     // Profil WebView2 dans `data\webview2` : à positionner AVANT la création de la fenêtre,
     // sinon WebView2 écrit dans %LOCALAPPDATA%. Sans effet hors Windows.
     let webview = portable::dossier_webview(&data);
@@ -783,12 +840,30 @@ pub fn run() {
             exporter_cbl,
             apercu_transfert,
             lancer_transfert,
-            annuler_transfert
+            annuler_transfert,
+            maj_etat,
+            maj_verifier,
+            maj_installer,
+            maj_redemarrer,
+            maj_regler,
+            maj_ouvrir_page
         ])
-        .setup(|app| {
+        .setup(move |app| {
             // Thèmes livrés disponibles dès le premier lancement.
             let data = app.state::<DossierData>();
             let _ = themes::installer_themes_livres(&portable::dossier_themes(&data.0));
+            // Mise à jour : état géré avant la fenêtre (les commandes `maj_*` le trouvent dès le
+            // chargement de la page) ; événements `maj://statut` et `maj://progression`.
+            let emetteur_maj = app.handle().clone();
+            app.manage(Maj::nouveau(
+                data.0.clone(),
+                dossier_app,
+                maj::installable(),
+                Arc::new(move |evenement| {
+                    let (nom, charge) = evenement.pour_le_front();
+                    let _ = emetteur_maj.emit(nom, charge);
+                }),
+            ));
             // Fenêtre créée ici (et non dans tauri.conf.json) pour fixer le profil WebView2
             // dans `data\webview2` (chemin absolu) : cache, cookies et stockage local restent
             // dans le dossier portable. Titre et tailles : celles de l'ancienne configuration.
@@ -814,6 +889,9 @@ pub fn run() {
             ));
             #[cfg(feature = "mcp")]
             crate::mcp::demarrer(app.handle());
+            // Vérification automatique au démarrage (réglage `verifierAuDemarrage`, vrai par
+            // défaut), dans un fil à part : ne bloque jamais l'ouverture.
+            app.state::<Maj>().verifier_au_demarrage();
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -77,6 +77,22 @@ La passerelle relaie les messages vers l'instance en cours et lance `--mcp` si b
   la ligne sur la sortie d'erreur, le **titre de la fenêtre** affiche `⚠ serveur MCP : port … indisponible`
   (sans console sous Windows, la sortie d'erreur n'est vue de personne).
 
+### Après une mise à jour automatique
+
+La mise à jour intégrée (`docs/tauri/ipc-maj.md`) remplace aussi `ComicRust-Tauri-mcp.exe` (l'ancien
+devient `ComicRust-Tauri-mcp.exe.old`, supprimé au démarrage suivant) puis relance l'application avec
+les mêmes arguments (`--mcp=47803` conservé) et `--attendre-pid <pid>` : la nouvelle instance attend
+jusqu'à 10 s que l'ancienne ait libéré le port MCP et le profil WebView2.
+
+- **Relancer le client MCP** (quitter puis rouvrir Claude Desktop, ou recharger le serveur MCP dans
+  Claude Code) : la passerelle `--mcp-stdio` lancée par le client tourne toujours sur l'**ancien**
+  binaire (le `.old`), qu'elle garde verrouillé, et parle encore au nouveau serveur sans le savoir.
+  Après la relance du client, la passerelle utilise la nouvelle version et le `.old` sera supprimé au
+  démarrage suivant de ComicRust.
+- Si la passerelle trouve le port fermé pendant le redémarrage, elle peut relancer elle-même
+  l'application : la seconde instance trouve alors le port pris (titre `⚠ serveur MCP : port …
+  indisponible`) ; fermer cette fenêtre en trop.
+
 ## Outils
 
 | Outil | Rôle |
