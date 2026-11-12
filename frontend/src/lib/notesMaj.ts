@@ -7,8 +7,9 @@ export type Segment =
   | { type: 'texte'; texte: string }
   | { type: 'gras'; texte: string }
   | { type: 'code'; texte: string }
-  /** `url` présente seulement pour http(s) ; sinon le lien est affiché comme du texte. */
-  | { type: 'lien'; texte: string; url?: string };
+  /** `url` présente seulement pour une page du dépôt (ouvrable) ; sinon le lien est affiché
+   *  comme du texte, suivi de son `adresse` si elle est en http(s). */
+  | { type: 'lien'; texte: string; url?: string; adresse?: string };
 
 export type Bloc =
   | { type: 'titre'; niveau: number; segments: Segment[] }
@@ -19,7 +20,9 @@ export type Bloc =
 export function urlSure(url: string): string | undefined {
   try {
     const u = new URL(url.trim());
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : undefined;
+    // Seules les pages du dépôt peuvent être ouvertes (filtre du backend, maj_ouvrir_page) :
+    // un autre lien reste affiché en texte, avec son adresse, au lieu d'un clic sans effet.
+    return u.protocol === 'https:' && u.href.startsWith('https://github.com/imtheyoyo/ComicRust/') ? u.href : undefined;
   } catch {
     return undefined;
   }
@@ -34,7 +37,11 @@ export function segments(ligne: string): Segment[] {
     if (m.index > pos) res.push({ type: 'texte', texte: ligne.slice(pos, m.index) });
     if (m[1] !== undefined || m[2] !== undefined) res.push({ type: 'gras', texte: m[1] ?? m[2] });
     else if (m[3] !== undefined) res.push({ type: 'code', texte: m[3] });
-    else res.push({ type: 'lien', texte: m[4], url: urlSure(m[5]) });
+    else {
+      const url = urlSure(m[5]);
+      const adresse = !url && /^https?:\/\//i.test(m[5].trim()) ? m[5].trim() : undefined;
+      res.push({ type: 'lien', texte: m[4], url, adresse });
+    }
     pos = m.index + m[0].length;
   }
   if (pos < ligne.length) res.push({ type: 'texte', texte: ligne.slice(pos) });

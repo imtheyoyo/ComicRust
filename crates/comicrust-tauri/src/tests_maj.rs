@@ -623,3 +623,31 @@ fn filtre_des_pages_ouvertes() {
     }
     assert!(verifier_url_page(&format!("{PREFIXE_PAGE_AUTORISEE}{}", "a".repeat(3000))).is_err());
 }
+
+#[test]
+fn tags_tauri_stricts_et_finale_avant_rc() {
+    assert!(tag_tauri_valide("tauri-v0.8.0"));
+    assert!(tag_tauri_valide("tauri-v1.10.2-rc1"));
+    for t in ["tauri-vV1.0.0", "tauri-v1", "tauri-v1.0", "v0.10.7", "tauri-v1.0.x", "tauri-v.1.0", "Tauri-v1.0.0"] {
+        assert!(!tag_tauri_valide(t), "{t}");
+    }
+    // Tags malformés jamais retenus, même « plus récents ».
+    let malformes = r#"[{"tag_name":"tauri-vV9.0.0","name":"","draft":false,"html_url":"h","assets":[]},
+        {"tag_name":"tauri-v9","name":"","draft":false,"html_url":"h","assets":[]}]"#;
+    assert_eq!(pick_release(malformes, "0.7.0").unwrap(), None);
+    // À version égale, la finale l'emporte sur la rc, quel que soit l'ordre de la liste GitHub.
+    for json in [
+        r#"[{"tag_name":"tauri-v0.9.0-rc1","name":"","draft":false,"html_url":"h","assets":[]},
+            {"tag_name":"tauri-v0.9.0","name":"","draft":false,"html_url":"h","assets":[]}]"#,
+        r#"[{"tag_name":"tauri-v0.9.0","name":"","draft":false,"html_url":"h","assets":[]},
+            {"tag_name":"tauri-v0.9.0-rc1","name":"","draft":false,"html_url":"h","assets":[]}]"#,
+    ] {
+        assert_eq!(pick_release(json, "0.8.0").unwrap().unwrap().tag, "tauri-v0.9.0");
+    }
+}
+
+#[test]
+fn virgule_refusee_pour_explorer() {
+    // explorer.exe découpe ses options sur les virgules (/root,…, /select,…).
+    assert!(verifier_url_page("https://github.com/imtheyoyo/ComicRust/x,/root,C:").is_err());
+}

@@ -53,7 +53,7 @@
     {:else if statut.etat === 'aJour'}
       <p class="ok">✔ Tu as la dernière version.</p>
     {:else if statut.etat === 'disponible' && release}
-      <p><strong>ComicRust {release.tag} est disponible.</strong>{#if release.nom && release.nom !== `ComicRust ${release.tag}`} ({release.nom}){/if}</p>
+      <p><strong>ComicRust {release.tag} est disponible.</strong>{#if release.nom && !release.nom.endsWith(release.tag) && release.nom !== release.tag} ({release.nom}){/if}</p>
       <NotesVersion notes={release.notes} />
       <p><a href={release.urlPage} onclick={(e) => { e.preventDefault(); void majOuvrirPage(release.urlPage).catch(() => {}); }} data-testid="maj-page">Page de la release sur GitHub</a></p>
       {#if ignoree}

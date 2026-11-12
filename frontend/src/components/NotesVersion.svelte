@@ -13,7 +13,7 @@
     {#if s.type === 'gras'}<strong>{s.texte}</strong>
     {:else if s.type === 'code'}<code>{s.texte}</code>
     {:else if s.type === 'lien' && s.url}<a href={s.url} title={s.url} onclick={(e) => { e.preventDefault(); if (s.url) void majOuvrirPage(s.url).catch(() => {}); }}>{s.texte}</a>
-    {:else if s.type === 'lien'}{s.texte}
+    {:else if s.type === 'lien'}{s.texte}{#if s.adresse} ({s.adresse}){/if}
     {:else}{s.texte}{/if}
   {/each}
 {/snippet}

@@ -5,6 +5,25 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.8.0] — 2026-11-12
+
+Étape « mises à jour » de la version Tauri, avancée par Yoyo avant les scripts Python et les thèmes.
+
+### Nouveautés
+- **Mise à jour automatique** depuis les releases `tauri-v*` de GitHub (les releases egui `v*` sont
+  ignorées) : vérification au démarrage (désactivable) et à la demande (Réglages ▸ « Rechercher une
+  mise à jour… »), bandeau « tauri-vX.Y.Z est disponible » (Installer / Nouveautés… / Plus tard /
+  Ignorer cette version), fenêtre avec les notes de version et la progression.
+- Installation sûre : **empreinte SHA-256 vérifiée avant toute modification**, programmes remplacés
+  par renommage en `.old` (supprimés au lancement suivant), **`data\` jamais touché** (réglages,
+  profil WebView2, thèmes), redémarrage avec les mêmes options (`--mcp=PORT` compris).
+
+### Corrections
+- C-05 : ouvrir un autre livre à la place du premier enregistre d'abord la page lue du premier.
+
+### Recette
+[`recette/tauri-v0.8.0.md`](recette/tauri-v0.8.0.md).
+
 ## [tauri-v0.7.3] — 2026-11-12
 
 Version corrective suite à la recette tauri-v0.7.2 (12 OK sur 13, C-06 en échec).

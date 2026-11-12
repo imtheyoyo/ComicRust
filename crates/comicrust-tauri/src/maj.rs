@@ -144,6 +144,14 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     Some((it.next()??, it.next().flatten().unwrap_or(0), it.next().flatten().unwrap_or(0)))
 }
 
+/// Tag de release Tauri bien formé : « tauri-v » suivi de MAJ.MIN.CORR (suffixe « -… » toléré).
+pub fn tag_tauri_valide(tag: &str) -> bool {
+    let Some(reste) = tag.strip_prefix(PREFIXE_TAG) else { return false };
+    let coeur = reste.split(['-', '+']).next().unwrap_or("");
+    let parties: Vec<&str> = coeur.split('.').collect();
+    parties.len() == 3 && parties.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
 pub fn is_newer(candidate: &str, current: &str) -> bool {
     match (parse_version(candidate), parse_version(current)) {
         (Some(a), Some(b)) => a > b,
@@ -165,8 +173,12 @@ pub fn pick_release(json: &str, current: &str) -> Result<Option<Release>, String
     let list: Vec<GhRelease> = serde_json::from_str(json).map_err(|e| format!("réponse GitHub illisible : {e}"))?;
     let best = list
         .into_iter()
-        .filter(|r| !r.draft && r.tag_name.starts_with(PREFIXE_TAG) && is_newer(&r.tag_name, current))
-        .max_by_key(|r| parse_version(&r.tag_name));
+        .filter(|r| !r.draft && tag_tauri_valide(&r.tag_name) && is_newer(&r.tag_name, current))
+        .max_by_key(|r| {
+            // À version égale, la finale (sans suffixe après « tauri-v ») l'emporte sur une rc.
+            let finale = !r.tag_name.trim_start_matches(PREFIXE_TAG).contains(['-', '+']);
+            (parse_version(&r.tag_name), finale)
+        });
     Ok(best.map(|r| {
         let zip_name = nom_paquet(&r.tag_name);
         let zip = r.assets.iter().find(|a| a.name == zip_name).map(|a| (a.browser_download_url.clone(), a.size));
@@ -484,7 +496,9 @@ pub fn verifier_url_page(url: &str) -> Result<String, String> {
         return Err(refus());
     }
     let interdit = |c: char| {
-        c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '<' | '>' | '\\' | '^' | '`' | '|' | '{' | '}')
+        c.is_whitespace()
+            || c.is_control()
+            || matches!(c, '"' | '\'' | '<' | '>' | '\\' | '^' | '`' | '|' | '{' | '}' | ',')
     };
     if url.chars().any(interdit) {
         return Err(refus());
@@ -880,6 +894,15 @@ mod reseau {
                 let etat = g.statut.etat;
                 match etat {
                     EtatStatut::Installation => return,
+                    // Mise à jour déjà installée : on attend le redémarrage. Une nouvelle
+                    // vérification (encore faite avec l'ancienne version) reproposerait la même
+                    // release et ferait tout réinstaller. On réémet le statut pour le front.
+                    EtatStatut::Installee => {
+                        let statut = g.statut.clone();
+                        drop(g);
+                        (self.sortie)(EvenementMaj::Statut(statut));
+                        return;
+                    }
                     EtatStatut::Verification => {
                         // Une seule vérification à la fois : une demande manuelle reçue pendant une
                         // vérification automatique s'y rattache (son résultat sera montré).
@@ -926,11 +949,18 @@ mod reseau {
                         self.poser(StatutMaj::default(), false);
                     }
                 }
-                Ok(None) if manuel => self.poser(StatutMaj::simple(EtatStatut::AJour, true), true),
+                Ok(None) if manuel => {
+                    self.verrou().release = None;
+                    self.poser(StatutMaj::simple(EtatStatut::AJour, true), true)
+                }
                 Err(e) if manuel => {
+                    self.verrou().release = None;
                     self.poser(StatutMaj { erreur: Some(e), ..StatutMaj::simple(EtatStatut::Echec, true) }, true)
                 }
-                _ => self.poser(StatutMaj::default(), false),
+                _ => {
+                    self.verrou().release = None;
+                    self.poser(StatutMaj::default(), false)
+                }
             }
         }
 
