@@ -498,8 +498,26 @@
   $effect(() => {
     const p = position;
     if (!miniatures || !bandeau) return;
-    bandeau.querySelector<HTMLElement>(`[data-miniature="${p}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center' });
+    const m = bandeau.querySelector<HTMLElement>(`[data-miniature="${p}"]`);
+    if (!m) return;
+    // Pas de scrollIntoView : il fait défiler TOUS les ancêtres, y compris le cadre du lecteur
+    // (overflow masqué mais défilable par script). Bandeau bas rétracté (translateY(100%)), la
+    // miniature est sous la fenêtre : tout le lecteur remontait de la hauteur du bandeau et le
+    // haut de la page était coupé (recette tauri-v0.7.1, anomalie lecteur). On ne fait défiler
+    // que le bandeau, horizontalement, pour centrer la miniature.
+    const b = bandeau.getBoundingClientRect();
+    const r = m.getBoundingClientRect();
+    bandeau.scrollLeft += r.left + r.width / 2 - (b.left + b.width / 2);
   });
+
+  /** Garde-fou : le cadre du lecteur ne doit jamais défiler (focus d'un élément d'un bandeau
+   *  rétracté, etc.) ; seule la scène défile. */
+  function cadreFixe() {
+    if (racine && (racine.scrollTop !== 0 || racine.scrollLeft !== 0)) {
+      racine.scrollTop = 0;
+      racine.scrollLeft = 0;
+    }
+  }
 
   // ── Reprise : la bibliothèque et ce poste n'ont pas retenu la même page (windows.rs,
   // `resume_window` de la version egui) ──
@@ -616,6 +634,7 @@
   data-mode={mode}
   data-manga={manga}
   data-position={position}
+  onscroll={cadreFixe}
 >
   {#if erreur}
     <div class="message erreur" role="alert">
@@ -799,8 +818,10 @@
 
 <style>
   /* Fond du lecteur : variable facultative --cr-fond-lecteur (repli sur --cr-fond). */
+  /* overflow: clip (et non hidden) : le cadre n'est pas un conteneur défilable, aucun
+     scrollIntoView ni focus ne peut le décaler (repli hidden + garde-fou cadreFixe). */
   .lecteur {
-    position: fixed; inset: 0; z-index: 50; overflow: hidden; outline: none;
+    position: fixed; inset: 0; z-index: 50; overflow: hidden; overflow: clip; outline: none;
     background: var(--cr-fond-lecteur, var(--cr-fond)); color: var(--cr-texte);
   }
   .lecteur.sans-curseur .scene { cursor: none; }
