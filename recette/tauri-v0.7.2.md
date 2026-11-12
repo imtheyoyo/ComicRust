@@ -58,14 +58,16 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
-| | | | |
+| C-06 | [M] | Détail rafraîchi avec le bouton Fermer, **pas avec Échap** ; un livre marqué lu puis relu n'affiche pas la relecture en cours (x % page n / total) | tauri-v0.7.3 |
 
 ## Bilan
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 7 | 7 | 0 |
+| [M] majeurs | 3 | 2 | 1 (C-06) |
+| [m] mineurs | 3 | 3 | 0 |
 
-**Décision :** ☐ GO ☐ NO-GO — Yoyo, le …
+Rapport de Yoyo du 12/11/2026 19:01 ([rapport](rapports/tauri-v0.7.2-2026-11-12.txt)) : 12 OK, 1 échec (C-06 [M]), tous les bloquants OK. Demande d'ajout : contrôle et mise à jour automatique des nouvelles versions.
+
+**Décision :** GO proposé (C-06 [M] noté dans « Anomalies », correctif en tauri-v0.7.3) — en attente de la confirmation de Yoyo.

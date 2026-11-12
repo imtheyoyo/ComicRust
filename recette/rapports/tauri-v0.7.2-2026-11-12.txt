@@ -1,0 +1,16 @@
+Rapport de recette ComicRust tauri-v0.7.2 — 12/11/2026 19:01
+Résultat : 12 OK, 1 échec(s), 0 non testé(s) sur 13.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (1)
+- C-06 [Majeur] D-02 : lire quelques pages d'un livre puis fermer le lecteur : le panneau Détail affiche aussitôt « Lu dans ComicRust : x % (page n / total) », sans resélectionner le livre.
+  Note : Bouton fermer : OK
+         Bouton Echap :  N'est pas actualisé.
+         Si livre marqué LU, alors une relecture n'affiche pas l'état 'x % (page n / total)' en cours.
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.7.2 / 0.7.2
+
+Ajout :
+
+* Ajoute le contrôle et la mise à jour automatique lorsqu'une nouvelle version est publiée
