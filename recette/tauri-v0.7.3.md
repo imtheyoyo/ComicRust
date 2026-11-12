@@ -69,4 +69,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Rapport de Yoyo du 12/11/2026 20:07 ([rapport](rapports/tauri-v0.7.3-2026-11-12.txt)) : 9 OK, 1 échec mineur (C-05), 1 non testé (C-06 [m]) ; tous les bloquants et majeurs OK.
 
-**Décision :** GO proposé (seuls des tests mineurs non OK) — en attente de la confirmation de Yoyo.
+**Décision : GO** confirmé par Yoyo le 12/11/2026 (20:13) ; C-05 [m] corrigé en tauri-v0.8.0.
