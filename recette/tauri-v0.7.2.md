@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.7.2 (pré-release corrective) |
 | Paquet | `ComicRust-Tauri-tauri-v0.7.2-windows-x64.zip` (contient aussi `ComicRust-Tauri-mcp.exe`) |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `45e0cdc94f87e6d7726af6a650a0786f996f92fb6082d88332574efcfcdc5648` |
 | Contenu | menu du clic droit de nouveau fonctionnel (« Modifier les infos »…) ; lecteur : page coupée en haut quand les bandeaux sont rétractés ; poignées au clavier (R-02) ; Détail rafraîchi à la fermeture du lecteur (D-02) ; focus à l'ouverture d'une pile |
 | Origine | [recette tauri-v0.7.1](tauri-v0.7.1.md) : 24 OK sur 25, R-02 [M] en échec ([rapport](rapports/tauri-v0.7.1-2026-11-12.txt)) |
 
