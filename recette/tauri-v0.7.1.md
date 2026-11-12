@@ -82,6 +82,11 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
+| R-02 | [M] | Poignée de la colonne des listes : le double-clic marche, mais pas le clavier (flèches, Début, Fin) | tauri-v0.7.2 |
+| D-02 | [m] | Après fermeture du lecteur, le panneau Détail n'est pas rafraîchi (progression) | tauri-v0.7.2 |
+| (hors recette) | [M] | Lecteur : bandeaux rétractés, page suivante → image décalée vers le haut, partie coupée | tauri-v0.7.2 |
+| (hors recette) | [M] | Clic droit sur un livre → « Modifier les infos » sans effet (Ctrl+I fonctionne) | tauri-v0.7.2 |
+| (hors recette) | [m] | En ouvrant une pile, il faut cliquer un livre avant de naviguer aux flèches | tauri-v0.7.2 |
 | (relecture) | [M] | Pile ouverte sans résultat de recherche : plus de bouton « ← Piles » | **Corrigé** (barre affichée aussi dans ce cas) |
 | (relecture) | [M] | Sélection de livres périmée en activant « Empiler », puis Suppr retirait des livres invisibles | **Corrigé** (sélection vidée ; Suppr agit sur la pile sélectionnée) |
 | (relecture) | [m] | Infos depuis une pile : bouton Suivant actif sans effet | **Corrigé** |
@@ -91,8 +96,10 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 13 | 13 | 0 |
+| [M] majeurs | 8 | 7 | 1 (R-02) |
+| [m] mineurs | 4 | 4 | 0 |
 
-**Décision :** ☐ GO ☐ NO-GO — Yoyo, le …
+Rapport de Yoyo du 12/11/2026 15:42 ([rapport](rapports/tauri-v0.7.1-2026-11-12.txt)) : 24 OK, 1 échec (R-02 [M], clavier de la poignée), 0 non testé ; tous les bloquants OK.
+
+**Décision :** GO proposé (R-02 [M] noté dans « Anomalies », correctif en tauri-v0.7.2) — en attente de la confirmation de Yoyo.

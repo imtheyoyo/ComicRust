@@ -1,0 +1,18 @@
+Rapport de recette ComicRust tauri-v0.7.1 — 12/11/2026 15:42
+Résultat : 24 OK, 1 échec(s), 0 non testé(s) sur 25.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (1)
+- R-02 [Majeur] Double-clic sur la poignée : largeur par défaut. Au clavier (poignée ayant le focus) : flèches, Début, Fin.
+  Note : 'Double-clic sur la poignée : largeur par défaut.' OK
+         Ne fonctionne pas 'Au clavier (poignée ayant le focus) : flèches, Début, Fin'
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.7.1 / 0.7.1
+- D-02 : Lorsque le livre est fermé, le détail n'est pas rafraîchi.
+
+Constaté :
+
+* Lecture d'un livre : Quand le bandeau haut et le bandeau bas se rétractent, et qu'on passé à la page suivante, le livre est décalé vers le haut et il manque une partie de l'image.
+* Sur un livre : Clic droit, 'modifier les infos', ne fonctionne pas. 'CTRL+I' fonctionne
+* Lorsque on rentre dans une pile, il faut focus le premier livre pour pouvoir naviguer avec les fleches.
