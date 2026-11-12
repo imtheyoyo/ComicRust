@@ -100,8 +100,28 @@ export interface RequeteLivres {
   groupe?: Groupe;
   /** Étape 5 : seulement les livres de cette liste (identifiant d'un NoeudListe). */
   liste?: string;
+  /** Pile ouverte (vue empilée) : seulement les livres de cette série (titre d'une `Pile`). */
+  serie?: string;
   debut: number;
   nombre: number;
+}
+
+/** Pile de la vue empilée par série (`lister_piles`). */
+export interface Pile {
+  /** Série affichée ; « (sans série) » pour les livres sans série. */
+  serie: string;
+  nbLivres: number;
+  /** Livres lus à 100 %. */
+  nbLus: number;
+  /** Identifiants des livres de la pile, dans l'ordre de la vue. */
+  ids: string[];
+  /** Couverture du premier livre. */
+  urlCouverture: string;
+}
+
+export interface ReponsePiles {
+  totalLivres: number;
+  piles: Pile[];
 }
 
 export interface LivreResume {
@@ -159,6 +179,8 @@ export interface PreferencesVue {
   sensTri?: SensTri;
   groupe?: Groupe;
   vue?: 'grille' | 'tableau';
+  /** Vue empilée par série (grille seulement). */
+  empiler?: boolean;
   /** Taille des couvertures (100 à 260 px). */
   zoom?: number;
   details?: boolean;
@@ -179,6 +201,8 @@ export interface VueListe {
   sensTri?: SensTri;
   groupe?: Groupe;
   vue?: 'grille' | 'tableau';
+  /** Vue empilée par série de cette liste. */
+  empiler?: boolean;
 }
 
 // ───────────────────────────── Lecteur (étape 2) ─────────────────────────────
@@ -768,6 +792,7 @@ export const lireConnexionsMysql = () => appeler<ConnexionsMysql>('lire_connexio
 export const configurerMysql = (choix: ChoixMysql) => appeler<EtatBiblio>('configurer_mysql', { choix });
 
 export const listerLivres = (requete: RequeteLivres) => appeler<ReponseLivres>('lister_livres', { requete });
+export const listerPiles = (requete: RequeteLivres) => appeler<ReponsePiles>('lister_piles', { requete });
 export const detailLivre = (id: string) => appeler<LivreDetail>('detail_livre', { id });
 
 export const listerDossiers = () => appeler<string[]>('lister_dossiers');

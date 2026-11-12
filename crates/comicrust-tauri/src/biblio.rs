@@ -74,6 +74,10 @@ pub struct RequeteLivres {
     /// Liste affichée (`docs/tauri/ipc-listes.md`) ; absente : toute la bibliothèque.
     #[serde(default)]
     pub liste: Option<String>,
+    /// Pile ouverte (vue empilée par série) : seuls les livres de cette série sont listés. Titre tel
+    /// que renvoyé par `lister_piles` (`(sans série)` pour les livres sans série).
+    #[serde(default)]
+    pub serie: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -102,6 +106,29 @@ pub struct LivreResume {
 pub struct PageLivres {
     pub total: usize,
     pub livres: Vec<LivreResume>,
+}
+
+/// Une pile de la vue empilée par série (`lister_piles`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pile {
+    /// Titre de la pile : série affichée (`ShadowSeries`), `(sans série)` si vide.
+    pub serie: String,
+    pub nb_livres: usize,
+    /// Livres lus à 100 % (barre de lecture de la pile).
+    pub nb_lus: usize,
+    /// Identifiants des livres de la pile, dans l'ordre de la vue (glisser une pile vers une liste).
+    pub ids: Vec<String>,
+    /// Couverture du premier livre de la pile.
+    pub url_couverture: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PagePiles {
+    /// Nombre de livres de la vue (somme des piles).
+    pub total_livres: usize,
+    pub piles: Vec<Pile>,
 }
 
 /// Fiche complète d'un livre (champs absents = non renseignés).
@@ -518,8 +545,40 @@ impl Biblio {
         Ok(PageLivres { total, livres })
     }
 
-    /// Vue complète décrite par la requête (liste, recherche, tri, groupe), en cache.
+    /// Piles de la vue décrite par la requête (recherche, liste, tri, groupe ; `debut`, `nombre` et
+    /// `serie` sont ignorés) : une pile par série, dans l'ordre d'apparition de la série dans la vue,
+    /// comme `stacks()` de la version egui.
+    pub fn lister_piles(&self, req: &RequeteLivres) -> Result<PagePiles, String> {
+        let (base, vue) = self.vue_complete(req)?;
+        let revs = self.revisions.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut position: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut piles: Vec<Pile> = Vec::new();
+        for &i in &vue.indices {
+            let b = &base.books[i];
+            let titre = titre_pile(b);
+            let k = *position.entry(titre.clone()).or_insert_with(|| {
+                let url = avec_revision(url_couverture(&b.id), revs.get(&b.id.to_ascii_lowercase()));
+                piles.push(Pile { serie: titre, nb_livres: 0, nb_lus: 0, ids: Vec::new(), url_couverture: url });
+                piles.len() - 1
+            });
+            let p = &mut piles[k];
+            p.nb_livres += 1;
+            p.nb_lus += usize::from(b.read_percent() == Some(100));
+            p.ids.push(b.id.clone());
+        }
+        Ok(PagePiles { total_livres: vue.indices.len(), piles })
+    }
+
+    /// Vue décrite par la requête, restreinte à la pile ouverte (`serie`) s'il y en a une.
     pub(crate) fn vue(&self, req: &RequeteLivres) -> Result<(Arc<ComicDatabase>, Arc<Vue>), String> {
+        let (base, vue) = self.vue_complete(req)?;
+        let Some(serie) = req.serie.as_deref() else { return Ok((base, vue)) };
+        let indices = vue.indices.iter().copied().filter(|&i| titre_pile(&base.books[i]) == serie).collect();
+        Ok((base, Arc::new(Vue { indices, rangs: vue.rangs.clone() })))
+    }
+
+    /// Vue complète décrite par la requête (liste, recherche, tri, groupe), en cache.
+    fn vue_complete(&self, req: &RequeteLivres) -> Result<(Arc<ComicDatabase>, Arc<Vue>), String> {
         let clef = ClefTri::depuis_texte(&req.tri)?;
         let desc = req.sens_tri == SensTri::Desc;
         let groupe = regroupement(req.groupe);
@@ -1122,6 +1181,11 @@ pub fn id_depuis_uri(chemin: &str, hote: Option<&str>) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&sortie).into_owned()
+}
+
+/// Titre de la pile d'un livre : sa série affichée, `(sans série)` si elle est vide.
+fn titre_pile(b: &LibraryBook) -> String {
+    crate::tri::Regroupement::Serie.titre(b)
 }
 
 fn non_vide_txt(s: &str) -> Option<String> {

@@ -32,6 +32,9 @@ interface RequeteLivres {
   groupe?: 'aucun' | 'serie' | 'editeur'; // défaut 'aucun' ; les groupes se suivent, puis le tri joue dedans
   debut: number;           // rang du premier livre demandé (0 = début)
   nombre: number;          // taille de la fenêtre (plafonnée à 5000)
+  serie?: string;          // pile ouverte (vue empilée) : seulement les livres de cette série, titre d'une
+                           // `Pile` (« (sans série) » pour les livres sans série). Filtre appliqué à la vue
+                           // (liste, recherche, tri, groupe) : `total` et les index sont ceux de la pile.
 }
 
 interface LivreResume {
@@ -44,6 +47,16 @@ interface LivreResume {
 }
 
 interface PageLivres { total: number; livres: LivreResume[]; } // total = après recherche, avant fenêtre
+
+// Vue empilée par série (« 📚 Empiler par série » de la version egui).
+interface Pile {
+  serie: string;           // série affichée (ShadowSeries, comme tri / groupement), « (sans série) » si vide
+  nbLivres: number;
+  nbLus: number;           // livres lus à 100 % (barre de lecture de la pile, « N livres, M lus »)
+  ids: string[];           // livres de la pile, dans l'ordre de la vue (glisser une pile vers une liste)
+  urlCouverture: string;   // couverture du premier livre
+}
+interface PagePiles { totalLivres: number; piles: Pile[]; } // totalLivres = somme des nbLivres
 
 interface LivreDetail {    // champs absents = non renseignés
   id: string; titre: string; serie?: string; numero?: string; volume?: number;
@@ -74,12 +87,21 @@ interface PreferencesVue {
   sensTri?: 'asc' | 'desc';
   groupe?: 'aucun' | 'serie' | 'editeur';
   vue?: 'grille' | 'tableau';
+  empiler?: boolean;             // vue empilée par série (grille seulement) ; `false` mémorisé ≠ jamais réglé
   zoom?: number;                 // taille des couvertures, ramenée dans [100, 260]
   details?: boolean;             // panneau de détails affiché
   largeurDetails?: number;       // largeur du panneau, ramenée dans [220, 800]
   theme?: string;                // id du thème (fichier CSS de data\themes) ; disparu → thème par défaut
 }
 ```
+
+**Vue empilée.** `empiler` est mémorisé pour la Bibliothèque (champ de premier niveau de `vue`) et par liste
+(`vue.listes.<id>.empiler`, même mécanisme que tri / groupe / vue, lecture tolérante : un non-booléen est
+ignoré). Une liste jamais réglée suit le réglage de la Bibliothèque, sauf une liste de lecture (non empilée).
+Comportement du front (recette v0.5.2 A-01) : un clic sélectionne la pile sans l'ouvrir ; double-clic ou Entrée
+l'ouvre (`lister_livres` avec `serie`), le bouton « ← Piles » ou Échap revient ; glisser une pile sur une
+liste ajoute tous ses livres (`ids`) ; le menu contextuel de la pile agit sur tous ses livres. Le bouton
+n'existe qu'en grille (pas en tableau).
 
 Mode portable strict : **rien dans le `localStorage` de la WebView** (les anciennes clés `comicrust.*`
 de tauri-v0.2.0 sont reprises une fois puis effacées). Le front lit les préférences au démarrage,
@@ -101,6 +123,7 @@ temporaire renommé ensuite : chacune ne change que sa partie.
 | `ouvrir_bibliotheque` | – | `EtatBiblio`. Lit `data\comicrust-tauri.json` ; si un mode est choisi, ouvre la base (autonome : SQLite `data\comicrust.db` ; comicrack : MySQL du `ComicRack.ini` ou `ComicDb.xml`, **lecture seule**). Sans choix : `{mode:'autonome', nbLivres:0, premierDemarrage:true}`. Rappelable pour recharger. |
 | `configurer_premier_demarrage` | `{choix: ChoixPremierDemarrage}` | `EtatBiblio` (avec `premierDemarrage:false`). Autonome : crée la base. Comicrack : teste la connexion (erreur lisible si MySQL injoignable) ; rien n'est copié ni écrit dans ComicRack. |
 | `lister_livres` | `{requete: RequeteLivres}` | `PageLivres` |
+| `lister_piles` | `{requete: RequeteLivres}` | `PagePiles` : une pile par série, **dans l'ordre d'apparition de la série dans la vue** (même requête que `lister_livres` : recherche, liste, tri, groupe ; `debut`, `nombre` et `serie` sont ignorés). Réponse unique (pas de fenêtre). |
 | `detail_livre` | `{id}` | `LivreDetail` |
 | `lister_dossiers` | – | `string[]` (dossiers surveillés, triés ; vide en mode comicrack) |
 | `ajouter_dossier` | `{chemin}` | `string[]` (liste à jour). Erreur si le dossier n'existe pas ou en mode comicrack. Doublon ignoré. |

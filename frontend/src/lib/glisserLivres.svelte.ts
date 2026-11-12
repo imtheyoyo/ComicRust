@@ -19,6 +19,9 @@ export interface ContexteGlisser {
   choisir: (i: number) => void;
   /** Index sélectionnés. */
   indices: () => number[];
+  /** Nombre de livres que représentent ces index, si ce n'est pas leur nombre (piles : chaque
+   *  index est une pile de plusieurs livres). */
+  nombreLivres?: (indices: number[]) => number;
   /** Nombre de séries de la sélection (0 sans regroupement par série). */
   series: (indices: number[]) => number;
   /** Sélection d'un en-tête de série terminée (elle se calcule de façon asynchrone : début et fin
@@ -97,7 +100,7 @@ export class GlisserLivres {
       if (!this.ctx.contient(this.depart.index)) this.ctx.choisir(this.depart.index);
       this.indices = this.ctx.indices();
       if (this.indices.length === 0) return;
-      this.nb = this.indices.length;
+      this.nb = this.ctx.nombreLivres?.(this.indices) ?? this.indices.length;
       this.nbSeries = this.ctx.series(this.indices);
       this.groupes = this.depart.groupes;
       this.ctx.debut(this.groupes);

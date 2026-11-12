@@ -2,7 +2,9 @@
 //! appellent `comicrust-core` (ou les modules portables de ce crate) et renvoient du JSON ;
 //! aucune règle métier côté front.
 
-use crate::biblio::{self, Biblio, ChoixPremierDemarrage, EtatBiblio, LivreDetail, PageLivres, RequeteLivres};
+use crate::biblio::{
+    self, Biblio, ChoixPremierDemarrage, EtatBiblio, LivreDetail, PageLivres, PagePiles, RequeteLivres,
+};
 use crate::edition::{
     self, BilanOperation, ChampFiche, ChampModifie, DemandeModification, DemandeRenommage, Edition, ErreurChamp,
     EvenementEdition, FicheEdition, ModeleNom, Proposition, ResultatRenommage,
@@ -111,6 +113,12 @@ fn configurer_mysql(
 #[tauri::command(async)]
 fn lister_livres(biblio: tauri::State<'_, Biblio>, requete: RequeteLivres) -> Result<PageLivres, String> {
     biblio.lister(&requete)
+}
+
+/// Piles de la vue empilée par série (même requête que `lister_livres`).
+#[tauri::command(async)]
+fn lister_piles(biblio: tauri::State<'_, Biblio>, requete: RequeteLivres) -> Result<PagePiles, String> {
+    biblio.lister_piles(&requete)
 }
 
 /// Fiche complète d'un livre.
@@ -707,6 +715,7 @@ pub fn run() {
             lire_connexions_mysql,
             configurer_mysql,
             lister_livres,
+            lister_piles,
             detail_livre,
             lister_dossiers,
             ajouter_dossier,
