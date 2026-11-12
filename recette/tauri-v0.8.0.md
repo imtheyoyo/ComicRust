@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.8.0 (pré-release de l'étape **mises à jour**, avancée par Yoyo le 12/11/2026) |
 | Paquet | `ComicRust-Tauri-tauri-v0.8.0-windows-x64.zip` (contient aussi `ComicRust-Tauri-mcp.exe`) |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `6bc161350c34fb96a4a35fdcf716dc506ac16367360691ebff21f5e385e4f8f5` |
 | Contenu | mise à jour automatique depuis les releases `tauri-v*` (vérification, bandeau, notes de version, téléchargement, SHA-256, remplacement `.old`, redémarrage) ; correctif C-05 |
 | Origine | [recette tauri-v0.7.3](tauri-v0.7.3.md) : **GO** du 12/11/2026 (C-05 [m] à corriger) |
 
