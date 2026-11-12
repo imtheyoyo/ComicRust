@@ -5,6 +5,25 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.7.2] — 2026-11-12
+
+Version corrective suite à la recette tauri-v0.7.1 (24 OK sur 25, R-02 en échec) et aux constats de Yoyo.
+
+### Corrections
+- **Clic droit sur un livre ou une pile** : « Modifier les infos » et les autres entrées du menu ne
+  faisaient plus rien depuis la tauri-v0.7.1 (le menu se refermait avant l'action) ; Ctrl+I marchait.
+- **Lecteur** : bandeaux rétractés et miniatures affichées, passer à la page suivante décalait tout le
+  lecteur vers le haut et coupait le haut de la page. Seul le bandeau des miniatures défile désormais.
+- **Poignées des colonnes** (listes et Détail) : utilisables au clavier (flèches, Début, Fin) dès qu'on
+  les a cliquées (R-02) ; la poignée du Détail gagne Début, Fin et le double-clic.
+- **Panneau Détail** rafraîchi à la fermeture du lecteur : la progression apparaît sans resélectionner
+  le livre (D-02).
+- **Piles** : à l'ouverture, le premier livre est sélectionné et les flèches marchent tout de suite ;
+  au retour, le focus revient sur la pile quittée.
+
+### Recette
+[`recette/tauri-v0.7.2.md`](recette/tauri-v0.7.2.md).
+
 ## [tauri-v0.7.1] — 2026-11-12
 
 Version corrective de l'étape 6, suite à la recette tauri-v0.7.0 (GO du 12/11/2026) : remarques de
