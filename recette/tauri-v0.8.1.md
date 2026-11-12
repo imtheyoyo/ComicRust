@@ -59,8 +59,10 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 5 | 5 | 0 |
+| [M] majeurs | 2 | 2 | 0 |
+| [m] mineurs | 3 | 3 | 0 |
 
-**Décision :** ☐ GO ☐ NO-GO — Yoyo, le …
+Rapport de Yoyo du 12/11/2026 21:25 ([rapport](rapports/tauri-v0.8.1-2026-11-12.txt)) : 10 OK sur 10 ; première vraie mise à jour 0.8.0 → 0.8.1 réussie ; C-05 corrigé.
+
+**Décision :** GO proposé (tous les tests OK) — en attente de la confirmation de Yoyo.

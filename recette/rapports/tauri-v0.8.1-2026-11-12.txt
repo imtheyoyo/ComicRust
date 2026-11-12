@@ -1,0 +1,6 @@
+Rapport de recette ComicRust tauri-v0.8.1 — 12/11/2026 21:25
+Résultat : 10 OK, 0 échec(s), 0 non testé(s) sur 10.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
