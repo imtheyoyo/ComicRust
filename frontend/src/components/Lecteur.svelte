@@ -251,9 +251,13 @@
   $effect(() => {
     const a = etatAvancement;
     if (!a) return;
+    dernierEtat = a;
     clearTimeout(minuterieAvancement);
     minuterieAvancement = setTimeout(envoyerAvancement, DELAI_AVANCEMENT);
   });
+  /** Dernier état d'avancement connu, copie non réactive : la fin de séance lancée au démontage
+   *  ne dépend pas de la relecture des valeurs dérivées d'un composant en cours de destruction. */
+  let dernierEtat: { page: number; termine: boolean } | null = null;
   let termineVu = false;
   /** Envois d'avancement enchaînés (un seul à la fois, dans l'ordre). La promesse renvoyée se
    *  résout quand **le dernier envoi** est fini, y compris celui lancé plus tôt par la minuterie :
@@ -263,7 +267,7 @@
   let envois: Promise<void> = Promise.resolve();
   function envoyerAvancement(): Promise<void> {
     clearTimeout(minuterieAvancement);
-    const a = etatAvancement;
+    const a = etatAvancement ?? dernierEtat;
     const l = livre;
     if (!l || !a || questionReprise) return envois;
     termineVu ||= a.termine; // une fois la fin vue, le livre reste « lu » pour cette session
@@ -285,7 +289,8 @@
    *  L'ordre compte : relu avant l'enregistrement, le Détail montrait l'ancienne page. Une seule
    *  exécution par séance. */
   let terminaison: Promise<void> | null = null;
-  function terminer(): Promise<void> {
+  /** Exportée : le parent l'attend avant d'ouvrir un autre livre à la place de celui-ci (C-05). */
+  export function terminer(): Promise<void> {
     terminaison ??= (async () => {
       const l = livre;
       if (!l) return; // livre pas encore ouvert : l'ouverture en cours le refermera (`vivant`)

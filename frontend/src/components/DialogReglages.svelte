@@ -17,8 +17,10 @@
     onecriture?: () => void;
     /** « Transférer la bibliothèque ComicRack… » : ferme les réglages et ouvre la fenêtre du transfert. */
     ontransfert?: () => void;
+    /** « Rechercher une mise à jour… » : ferme les réglages et ouvre la fenêtre « Mise à jour ». */
+    onmaj?: () => void;
   }
-  let { themeActif, onTheme, mode = 'autonome', onecriture, ontransfert }: Props = $props();
+  let { themeActif, onTheme, mode = 'autonome', onecriture, ontransfert, onmaj }: Props = $props();
   let ecritureComicrack = $state(false);
   let confirmerEcriture = $state(false);
   let enregistre = $state('');
@@ -117,6 +119,13 @@
       <p class="discret petit transfert">Copie les livres, la lecture, les listes et les dossiers de ComicRack dans la base de ComicRust
         (ComicRack n'est pas modifié ; le transfert peut être relancé sans doublon).</p>
       <button onclick={() => { fermerModale(dialogue); ontransfert(); }} data-testid="ouvrir-transfert">Transférer la bibliothèque ComicRack…</button>
+    </fieldset>
+  {/if}
+  {#if onmaj}
+    <fieldset class="comicrack" data-testid="reglage-maj">
+      <legend>Mise à jour</legend>
+      <p class="discret petit transfert">Cherche une nouvelle version de ComicRust sur GitHub ; le paquet est vérifié avant d'être installé.</p>
+      <button onclick={() => { fermerModale(dialogue); onmaj(); }} data-testid="ouvrir-maj">Rechercher une mise à jour…</button>
     </fieldset>
   {/if}
   {#if info}
