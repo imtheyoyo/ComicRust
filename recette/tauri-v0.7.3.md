@@ -50,20 +50,23 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 ## Limites connues (acceptées pour cette version)
 
 - Reprises : pas de réordonnancement des piles par glisser ; Détail vide pour une pile ; un livre lu seulement dans ComicRust n'apparaît « lu » que dans le Détail ; jaune des étoiles fixe ; pas d'écran « Changer de connexion » ; annulation du transfert entre deux lots.
-- Mise à jour automatique : prévue à l'étape 9 de la feuille de route (ordre à confirmer par Yoyo).
+- Mise à jour automatique : avancée par Yoyo le 12/11/2026, ce sera la tauri-v0.8.0.
 
 ## Anomalies
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
-| | | | |
+| C-05 | [m] | Ouvrir un autre livre à la place du premier (sans le fermer) : la page lue du premier n'est pas mise à jour dans son Détail | tauri-v0.8.0 |
+| C-06 | [m] | Non testé (fiche ComicRack inchangée après une relecture) | — |
 
 ## Bilan
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 6 | 6 | 0 |
+| [M] majeurs | 2 | 2 | 0 |
+| [m] mineurs | 3 | 1 | 1 (C-05) + 1 non testé (C-06) |
 
-**Décision :** ☐ GO ☐ NO-GO — Yoyo, le …
+Rapport de Yoyo du 12/11/2026 20:07 ([rapport](rapports/tauri-v0.7.3-2026-11-12.txt)) : 9 OK, 1 échec mineur (C-05), 1 non testé (C-06 [m]) ; tous les bloquants et majeurs OK.
+
+**Décision :** GO proposé (seuls des tests mineurs non OK) — en attente de la confirmation de Yoyo.

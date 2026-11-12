@@ -1,0 +1,12 @@
+Rapport de recette ComicRust tauri-v0.7.3 — 12/11/2026 20:07
+Résultat : 9 OK, 1 échec(s), 1 non testé(s) sur 11.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (1)
+- C-05 [Mineur] Ouvrir un autre livre à la place du premier (sans fermer) puis fermer : le Détail du premier est à jour quand on le resélectionne.
+  Note : La mis à jour de la page lu n'est pas faite.
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.7.3 / 0.7.3
+
+NON TESTÉS (1) : C-06

@@ -70,4 +70,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Rapport de Yoyo du 12/11/2026 19:01 ([rapport](rapports/tauri-v0.7.2-2026-11-12.txt)) : 12 OK, 1 échec (C-06 [M]), tous les bloquants OK. Demande d'ajout : contrôle et mise à jour automatique des nouvelles versions.
 
-**Décision :** GO proposé (C-06 [M] noté dans « Anomalies », correctif en tauri-v0.7.3) — en attente de la confirmation de Yoyo.
+**Décision : GO** confirmé par Yoyo le 12/11/2026 (20:07), C-06 [M] accepté, corrigé en tauri-v0.7.3.

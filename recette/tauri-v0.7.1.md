@@ -102,4 +102,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Rapport de Yoyo du 12/11/2026 15:42 ([rapport](rapports/tauri-v0.7.1-2026-11-12.txt)) : 24 OK, 1 échec (R-02 [M], clavier de la poignée), 0 non testé ; tous les bloquants OK.
 
-**Décision :** GO proposé (R-02 [M] noté dans « Anomalies », correctif en tauri-v0.7.2) — en attente de la confirmation de Yoyo.
+**Décision : GO** confirmé par Yoyo le 12/11/2026 (20:07), R-02 [M] accepté, corrigé en tauri-v0.7.2.

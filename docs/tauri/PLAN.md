@@ -107,23 +107,23 @@ Connexion MySQL (réglages, mot de passe chiffré `secret`), base de ComicRust (
 transfert depuis ComicRack, écriture dans la base de ComicRack, comportement hors ligne.
 **Recette** `recette/tauri-v0.7.0.md` : reprend v0.7.x, v0.8.0 (5 323 livres, 47 listes, 0 doublon).
 
-### Étape 7 : scripts Python (`tauri-v0.8.0`)
+### Étape 7 : scripts Python (`tauri-v0.9.0`)
 Hôte de scripts (Python embarqué, processus séparé), menu Scripts, formulaires générés,
 exécution automatique, application des modifications, scripts d'exemple (Bedetheque, Comic Vine,
 nettoyage…). Python embarqué ajouté au paquet (`scripts/python_embarque.ps1`).
-**Recette** `recette/tauri-v0.8.0.md` : reprend v0.10.0 à v0.10.7 (scripts d'exemple, Bedetheque).
+**Recette** `recette/tauri-v0.9.0.md` : reprend v0.10.0 à v0.10.7 (scripts d'exemple, Bedetheque).
 
-### Étape 8 : thèmes (`tauri-v0.9.0`)
+### Étape 8 : thèmes (`tauri-v0.10.0`)
 Au-delà du socle de l'étape 0 : contrat de variables `--cr-*` documenté (`docs/tauri/themes.md`),
 couverture de toutes les vues, choix du thème dans les réglages, aperçu en direct, rechargement à
 chaud d'un fichier modifié, import/export d'un thème, thèmes Moderne clair/sombre et Classique
 fidèles aux équivalents egui, vérification du contraste.
-**Recette** `recette/tauri-v0.9.0.md` : thème perso créé sans recompiler et appliqué à **toutes** les vues.
+**Recette** `recette/tauri-v0.10.0.md` : thème perso créé sans recompiler et appliqué à **toutes** les vues.
 
-### Étape 9 : mises à jour (`tauri-v0.10.0`)
+### Étape 9 : mises à jour (`tauri-v0.8.0`, avancée par Yoyo le 12/11/2026 avant les étapes 7 et 8)
 Mise à jour intégrée depuis les releases `tauri-v*` (vérification, téléchargement, SHA-256,
 remplacement par renommage `.old`, `data\` jamais touché, redémarrage), notes de version affichées.
-**Recette** `recette/tauri-v0.10.0.md` : mise à jour d'une version à la suivante sur un dossier réel.
+**Recette** `recette/tauri-v0.8.0.md` : mise à jour d'une version à la suivante sur un dossier réel.
 
 ### Étape 10 : audit de parité (`tauri-v0.11.0`)
 Tableau fonction par fonction egui ↔ Tauri (réglages, raccourcis clavier, glisser-déposer, ligne de
