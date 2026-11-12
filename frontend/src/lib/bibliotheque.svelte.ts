@@ -2,8 +2,8 @@
 // Aucune logique métier : recherche, tri et groupement sont faits par le backend (lister_livres).
 import { SvelteMap } from 'svelte/reactivity';
 import {
-  ecouter, listerLivres, messageErreur, type ClefTri, type ErreurScan, type Groupe, type LivreResume,
-  type ProgressionScan, type ResultatScan, type SensTri,
+  ecouter, listerLivres, listerPiles, messageErreur, type ClefTri, type ErreurScan, type Groupe, type LivreResume,
+  type Pile, type ProgressionScan, type ResultatScan, type SensTri,
 } from './api';
 
 export const TAILLE_PAGE = 200;
@@ -17,6 +17,8 @@ export interface ParametresRequete {
   groupe: Groupe;
   /** Étape 5 : liste affichée (absent : toute la bibliothèque). */
   liste?: string;
+  /** Pile ouverte (vue empilée par série) : seulement les livres de cette série. */
+  serie?: string;
 }
 
 export class Bibliotheque {
@@ -35,6 +37,10 @@ export class Bibliotheque {
   /** Liste dont les livres sont affichés (`total` lui correspond), une fois la page 0 reçue. */
   listeChargee = $state<string | undefined | null>(null);
   pages = new SvelteMap<number, LivreResume[]>();
+  /** Vue empilée par série affichée (grille) : `reinitialiser` charge aussi les piles. */
+  empile = $state(false);
+  /** Piles de la vue courante (recherche, liste, tri, groupe), chargées si `empile`. */
+  piles = $state<Pile[]>([]);
 
   private generation = 0;
   private enCours = new Set<number>();
@@ -59,14 +65,28 @@ export class Bibliotheque {
     return v || (this.params.groupe === 'serie' ? 'Sans série' : 'Sans éditeur');
   }
 
-  /** Nouvelle requête (ou rafraîchissement) : charge la page 0, puis la fenêtre visible. */
+  /** Active ou désactive la vue empilée ; les piles sont chargées au prochain `reinitialiser`
+   *  (rappelé ici si le réglage change). Renvoie vrai si le réglage a changé. */
+  regler(empile: boolean): boolean {
+    if (this.empile === empile) return false;
+    this.empile = empile;
+    return true;
+  }
+
+  /** Nouvelle requête (ou rafraîchissement) : charge la page 0 (et les piles en vue empilée, sauf
+   *  pile ouverte), puis la fenêtre visible. */
   async reinitialiser(nouvelle = true): Promise<void> {
     const gen = ++this.generation;
     this.enCours.clear();
     try {
-      const r = await listerLivres({ ...this.params, debut: 0, nombre: TAILLE_PAGE });
+      const avecPiles = this.empile && this.params.serie === undefined;
+      const [r, p] = await Promise.all([
+        listerLivres({ ...this.params, debut: 0, nombre: TAILLE_PAGE }),
+        avecPiles ? listerPiles({ ...this.params, debut: 0, nombre: 0 }) : Promise.resolve(null),
+      ]);
       if (gen !== this.generation) return;
       this.erreur = '';
+      if (p) this.piles = p.piles;
       this.total = r.total;
       this.listeChargee = this.params.liste;
       this.pages.clear();
@@ -76,6 +96,7 @@ export class Bibliotheque {
       if (gen === this.generation) {
         this.erreur = messageErreur(e);
         this.total = 0;
+        this.piles = [];
         this.pages.clear();
         this.listeChargee = this.params.liste;
       }

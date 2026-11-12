@@ -37,6 +37,7 @@ fn requete(tri: &str, sens: SensTri, groupe: Option<Groupe>, recherche: Option<&
         debut: 0,
         nombre: 100,
         liste: None,
+        serie: None,
     }
 }
 
@@ -57,6 +58,56 @@ fn scanner(b: &Biblio) -> Vec<EvenementScan> {
             return tous;
         }
     }
+}
+
+/// Vue empilée par série : une pile par série dans l'ordre de la vue, comptes de livres et de lus,
+/// recherche prise en compte, pile ouverte (`serie`) = les seuls livres de la série.
+#[test]
+fn piles_par_serie_et_pile_ouverte() {
+    let d = tempfile::tempdir().unwrap();
+    let bd = d.path().join("bd");
+    creer_bd(&bd);
+    let b = autonome(&d.path().join("data"));
+    b.ajouter_dossier(&bd.to_string_lossy()).unwrap();
+    scanner(&b);
+
+    let req = requete("serie", SensTri::Asc, None, None);
+    let piles = b.lister_piles(&req).unwrap();
+    assert_eq!(piles.total_livres, 4);
+    let noms: Vec<_> = piles.piles.iter().map(|p| (p.serie.as_str(), p.nb_livres, p.nb_lus)).collect();
+    assert_eq!(noms, [("Astérix", 1, 0), ("Hors-serie", 1, 0), ("Thanos", 2, 0)]);
+    let thanos = &piles.piles[2];
+    assert_eq!(thanos.ids.len(), 2);
+    assert!(thanos.url_couverture.contains(&thanos.ids[0]), "couverture du premier livre de la pile");
+
+    // Tri décroissant : l'ordre des piles suit celui de la vue (première apparition de la série).
+    let desc = b.lister_piles(&requete("serie", SensTri::Desc, None, None)).unwrap();
+    assert_eq!(desc.piles[0].serie, "Thanos");
+
+    // Un livre lu à 100 % (Thanos n° 2, 3 pages : dernière page lue = 2) est compté.
+    let p = b.lister(&req).unwrap();
+    let thanos_2 =
+        p.livres.iter().find(|l| l.serie.as_deref() == Some("Thanos") && l.numero.as_deref() == Some("2")).unwrap();
+    b.noter_lecture(&thanos_2.id, 2, 2, "2026-01-01T00:00:00");
+    let piles = b.lister_piles(&req).unwrap();
+    assert_eq!(piles.piles[2].nb_lus, 1);
+    assert_eq!(piles.piles[2].nb_livres, 2);
+
+    // Recherche : seules les piles des livres retenus.
+    let r = b.lister_piles(&requete("serie", SensTri::Asc, None, Some("astérix"))).unwrap();
+    assert_eq!(r.piles.len(), 1);
+    assert_eq!(r.piles[0].serie, "Astérix");
+    assert_eq!(r.total_livres, 1);
+
+    // Pile ouverte : `lister` ne rend que ses livres ; `lister_piles` ignore `serie`.
+    let ouverte = RequeteLivres { serie: Some("Thanos".into()), ..req.clone() };
+    let l = b.lister(&ouverte).unwrap();
+    assert_eq!(l.total, 2);
+    assert!(l.livres.iter().all(|x| x.serie.as_deref() == Some("Thanos")));
+    assert_eq!(b.lister_piles(&ouverte).unwrap().piles.len(), 3);
+    assert_eq!(b.lister(&RequeteLivres { serie: Some("Inconnue".into()), ..req.clone() }).unwrap().total, 0);
+    // Le résultat sans `serie` n'est pas pollué par la requête filtrée (cache de vue).
+    assert_eq!(b.lister(&req).unwrap().total, 4);
 }
 
 fn autonome(data: &Path) -> Biblio {

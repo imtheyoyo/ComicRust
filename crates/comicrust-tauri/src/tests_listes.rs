@@ -160,6 +160,7 @@ fn requete(liste: Option<&str>, tri: &str, groupe: Option<Groupe>) -> RequeteLiv
         debut: 0,
         nombre: 1000,
         liste: liste.map(str::to_string),
+        serie: None,
     }
 }
 

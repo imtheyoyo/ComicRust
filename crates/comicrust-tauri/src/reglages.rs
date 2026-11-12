@@ -191,6 +191,9 @@ pub struct PreferencesVue {
     /// `grille` ou `tableau`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vue: Option<String>,
+    /// Vue empilée par série (« 📚 Empiler par série »), grille seulement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub empiler: Option<bool>,
     /// Taille des couvertures (px).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zoom: Option<u32>,
@@ -232,6 +235,9 @@ pub struct VueListe {
     /// `grille` ou `tableau`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vue: Option<String>,
+    /// Vue empilée par série de cette liste.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub empiler: Option<bool>,
 }
 
 /// Nombre maximal de listes dont la vue est gardée (fichier modifié à la main, etc.).
@@ -247,8 +253,13 @@ impl VueListe {
         };
         let tri =
             o.get("tri").and_then(Value::as_str).filter(|s| *s == "ordre" || TRIS.contains(s)).map(str::to_string);
-        let r =
-            Self { tri, sens_tri: parmi("sensTri", SENS), groupe: parmi("groupe", GROUPES), vue: parmi("vue", VUES) };
+        let r = Self {
+            tri,
+            sens_tri: parmi("sensTri", SENS),
+            groupe: parmi("groupe", GROUPES),
+            vue: parmi("vue", VUES),
+            empiler: o.get("empiler").and_then(Value::as_bool),
+        };
         (r != Self::default()).then_some(r)
     }
 }
@@ -352,6 +363,7 @@ impl PreferencesVue {
             sens_tri: parmi("sensTri", SENS),
             groupe: parmi("groupe", GROUPES),
             vue: parmi("vue", VUES),
+            empiler: o.get("empiler").and_then(Value::as_bool),
             zoom: borne("zoom", ZOOM),
             details: o.get("details").and_then(Value::as_bool),
             largeur_details: borne("largeurDetails", LARGEUR_DETAILS),
@@ -367,7 +379,7 @@ impl PreferencesVue {
         macro_rules! prendre {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
-        prendre!(tri, sens_tri, groupe, vue, zoom, details, largeur_details, largeur_listes, theme, lecteur);
+        prendre!(tri, sens_tri, groupe, vue, empiler, zoom, details, largeur_details, largeur_listes, theme, lecteur);
         // Vues des listes : fusion liste par liste (`null` efface), jamais d'entrée `null` gardée.
         if let Some(patch) = m.listes {
             let mut listes = self.listes.take().unwrap_or_default();
@@ -554,7 +566,7 @@ mod tests {
         enregistrer_preferences_vue(
             d.path(),
             patch(serde_json::json!({
-                "aaaa-1": { "tri": "ordre", "sensTri": "desc", "groupe": "serie", "vue": "tableau" },
+                "aaaa-1": { "tri": "ordre", "sensTri": "desc", "groupe": "serie", "vue": "tableau", "empiler": true },
                 "bbbb-2": { "tri": "pages" }
             })),
         )
@@ -571,7 +583,8 @@ mod tests {
                 tri: Some("ordre".into()),
                 sens_tri: Some("desc".into()),
                 groupe: Some("serie".into()),
-                vue: Some("tableau".into())
+                vue: Some("tableau".into()),
+                empiler: Some(true)
             }
         );
         assert_eq!(l["bbbb-2"].clone().unwrap(), VueListe { groupe: Some("editeur".into()), ..Default::default() });
@@ -596,6 +609,42 @@ mod tests {
         assert!(PreferencesVue::depuis_json(&serde_json::json!({ "tri": "ordre" })).tri.is_none());
     }
 
+    /// Réglage « empiler par série » : valeur de la bibliothèque et de chaque liste, lecture
+    /// tolérante (mauvais type ignoré), `false` mémorisé (il se distingue de « jamais réglé »).
+    #[test]
+    fn empiler_memorise_par_liste_et_tolerant() {
+        let d = tempfile::tempdir().unwrap();
+        let patch = |j: serde_json::Value| PreferencesVue::depuis_json(&j);
+        enregistrer_preferences_vue(
+            d.path(),
+            patch(serde_json::json!({ "empiler": true, "listes": { "aaaa-1": { "empiler": false }, "bbbb-2": { "empiler": true } } })),
+        )
+        .unwrap();
+        let p = lire_preferences_vue(d.path()).unwrap();
+        assert_eq!(p.empiler, Some(true));
+        let l = p.listes.unwrap();
+        assert_eq!(l["aaaa-1"].clone().unwrap().empiler, Some(false));
+        assert_eq!(l["bbbb-2"].clone().unwrap().empiler, Some(true));
+        // Une autre préférence ne touche pas au réglage ; le réglage d'une liste ne touche pas aux autres.
+        enregistrer_preferences_vue(
+            d.path(),
+            patch(serde_json::json!({ "zoom": 180, "listes": { "bbbb-2": { "empiler": false } } })),
+        )
+        .unwrap();
+        let p = lire_preferences_vue(d.path()).unwrap();
+        assert_eq!(p.empiler, Some(true));
+        let l = p.listes.unwrap();
+        assert_eq!(l["aaaa-1"].clone().unwrap().empiler, Some(false));
+        assert_eq!(l["bbbb-2"].clone().unwrap().empiler, Some(false));
+        // Lecture tolérante : un texte à la place du booléen est ignoré, le reste est gardé.
+        let p = patch(
+            serde_json::json!({ "empiler": "oui", "tri": "titre", "listes": { "cccc-3": { "empiler": 1, "vue": "tableau" } } }),
+        );
+        assert_eq!(p.empiler, None);
+        assert_eq!(p.tri.as_deref(), Some("titre"));
+        assert_eq!(p.listes.unwrap()["cccc-3"].clone().unwrap().empiler, None);
+    }
+
     #[test]
     fn preferences_vue_aller_retour_et_fusion() {
         let d = tempfile::tempdir().unwrap();
@@ -605,6 +654,7 @@ mod tests {
             sens_tri: Some("desc".into()),
             groupe: Some("editeur".into()),
             vue: Some("tableau".into()),
+            empiler: Some(true),
             zoom: Some(200),
             details: Some(false),
             largeur_details: Some(400),

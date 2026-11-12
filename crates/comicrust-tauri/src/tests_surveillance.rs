@@ -56,6 +56,7 @@ fn titres(b: &Biblio) -> Vec<String> {
         debut: 0,
         nombre: 100,
         liste: None,
+        serie: None,
     };
     b.lister(&req).unwrap().livres.into_iter().map(|l| l.titre).collect()
 }

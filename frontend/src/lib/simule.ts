@@ -3,7 +3,7 @@
 // latence et les événements de scan. Rien de ceci n'est utilisé dans la fenêtre Tauri.
 import type {
   PreferencesVue, ClefTri, ChoixMysql, ConnexionsMysql, EtatBiblio, ParametresMysql, LivreDetail, LivreOuvert, LivreResume, PageInfo, RequeteLivres,
-  ReponseLivres, Theme,
+  ReponseLivres, ReponsePiles, Pile, Theme,
 } from './api';
 import { creerEditionSimulee } from './simuleEdition';
 import { creerBaseSimulee } from './simuleBase';
@@ -168,6 +168,13 @@ function ordonner(q: RequeteLivres): LivreInterne[] {
   return liste;
 }
 
+/** Vue d'une requête, restreinte à la pile ouverte (`serie`) s'il y en a une. */
+const titrePile = (l: LivreInterne) => l.serie ?? '(sans série)';
+function ordonnerPile(q: RequeteLivres): LivreInterne[] {
+  const liste = ordonner(q);
+  return q.serie === undefined ? liste : liste.filter((l) => titrePile(l) === q.serie);
+}
+
 const resume = (l: LivreInterne): LivreResume => ({
   id: l.id, titre: l.titre, serie: l.serie, numero: l.numero, editeur: l.editeur,
   annee: l.annee, pages: l.pages, lu: l.lu, urlCouverture: l.urlCouverture,
@@ -298,7 +305,7 @@ const listes = creerListesSimulees({
     return r.ecritureComicrack ? undefined : 'lecture seule';
   },
   comicrackLance: () => etat.mode === 'comicrack' && new URLSearchParams(location.search).has('comicrackOuvert'),
-  vue: (q) => ordonner(q),
+  vue: (q) => ordonnerPile(q),
   titreGroupe: (l, g) => (g === 'editeur' ? l.editeur ?? '(sans éditeur)' : l.serie ?? '(sans série)'),
 });
 
@@ -382,13 +389,29 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'lister_livres': {
       const q = args.requete as RequeteLivres;
       simuleTests.requetes.push(q);
-      const liste = ordonner(q);
+      const liste = ordonnerPile(q);
       // Étape 5 : rang du livre dans la liste affichée (colonne « # »).
       const rangs = q.liste ? new Map(listes.livresDe(q.liste).map((id, i) => [id, i + 1])) : null;
       const rep: ReponseLivres = {
         total: liste.length,
         livres: liste.slice(q.debut, q.debut + q.nombre).map((l) => (rangs ? { ...resume(l), rang: rangs.get(l.id) } : resume(l))),
       };
+      return rep;
+    }
+    case 'lister_piles': {
+      const q = args.requete as RequeteLivres;
+      simuleTests.requetes.push(q);
+      const liste = ordonner({ ...q, serie: undefined });
+      const piles = new Map<string, Pile>();
+      for (const l of liste) {
+        const t = titrePile(l);
+        let p = piles.get(t);
+        if (!p) piles.set(t, (p = { serie: t, nbLivres: 0, nbLus: 0, ids: [], urlCouverture: l.urlCouverture }));
+        p.nbLivres++;
+        if (l.lu) p.nbLus++;
+        p.ids.push(l.id);
+      }
+      const rep: ReponsePiles = { totalLivres: liste.length, piles: [...piles.values()] };
       return rep;
     }
     case 'detail_livre': {
