@@ -4,7 +4,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import {
     ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, deplacerGroupesListe, deplacerLivresListe, ecouter,
-    groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
+    dansTauri, groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
     type BibliothequeModifiee, type ClefTri, type Groupe, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
   } from '../lib/api';
   import { GlisserLivres } from '../lib/glisserLivres.svelte';
@@ -129,6 +129,10 @@
       void bib.reinitialiser(false);
       fichesModifiees++;
     }).then((f) => (desabonner = f));
+    // MODE SIMULÉ seulement : ouverture d'un autre livre (indice dans la vue) alors que le lecteur
+    // est ouvert, pour tester ce chemin (recette tauri-v0.7.3, C-05) sans interface dédiée.
+    const essais = (globalThis as { __comicrustSimule?: { ouvrirALaPlace?: (i: number) => Promise<void> } }).__comicrustSimule;
+    if (!dansTauri() && essais) essais.ouvrirALaPlace = (i) => ouvrir(i);
     return () => {
       clearTimeout(minuterie);
       desabonner?.();
@@ -229,11 +233,23 @@
     else changer({ tri: clef, sensTri: 'asc' });
   }
 
-  function ouvrir(i: number) {
+  /** Lecteur affiché (pour terminer sa séance avant d'en ouvrir une autre à sa place). */
+  let lecteur = $state<Lecteur>();
+  /** Ouverture en cours (la dernière demandée l'emporte). */
+  let ouverture = 0;
+
+  /** Ouvre le livre `i` dans le lecteur. Si un livre est déjà ouvert, sa séance est d'abord
+   *  terminée (avancement enregistré, livre fermé, Détail relu) et SEULEMENT ENSUITE le nouveau
+   *  livre est ouvert : avant la tauri-v0.8.0, le second s'ouvrait pendant l'enregistrement du
+   *  premier, et le Détail du premier, resélectionné tout de suite, montrait l'ancienne page
+   *  (recette tauri-v0.7.3, C-05). */
+  async function ouvrir(i: number) {
     const l = bib.livre(i);
     if (!l) return;
+    const n = ++ouverture;
     sel.unique(i);
-    livreLu = { id: l.id };
+    if (livreLu && lecteur) await lecteur.terminer();
+    if (n === ouverture) livreLu = { id: l.id };
   }
 
   /** Le focus peut-il être déplacé vers la zone affichée ? Oui s'il est perdu (la grille des piles
@@ -270,7 +286,11 @@
     const chemin = cheminFichier.trim();
     if (!chemin) return;
     fermerModale(dialogueFichier);
-    livreLu = { chemin };
+    const n = ++ouverture;
+    void (async () => {
+      if (livreLu && lecteur) await lecteur.terminer();
+      if (n === ouverture) livreLu = { chemin };
+    })();
   }
 
   /** Séance de lecture terminée (rappel `onlecturefinie` du lecteur, appelé APRÈS l'enregistrement
@@ -285,6 +305,7 @@
 
   /** Lecteur fermé (après `lectureFinie`) : on le retire et on rend le focus à la liste. */
   async function lecteurFerme() {
+    ouverture++;
     livreLu = null;
     await tick();
     document.querySelector<HTMLElement>('[data-testid="grille"], [data-testid="tableau"], [data-testid="grille-piles"]')?.focus();
@@ -948,7 +969,7 @@
 
 {#if livreLu}
   {#key livreLu}
-    <Lecteur source={livreLu} onfermer={lecteurFerme} onlecturefinie={lectureFinie} />
+    <Lecteur bind:this={lecteur} source={livreLu} onfermer={lecteurFerme} onlecturefinie={lectureFinie} />
   {/key}
 {/if}
 

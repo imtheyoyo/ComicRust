@@ -9,6 +9,7 @@ import { creerEditionSimulee } from './simuleEdition';
 import { creerBaseSimulee } from './simuleBase';
 import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
+import { creerMajSimulee } from './simuleMaj';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -327,8 +328,13 @@ const transfert = creerTransfertSimule({
   },
 });
 
+// Mise à jour (tauri-v0.8.0) : voir simuleMaj.ts.
+const maj = creerMajSimulee({ emettre, pause });
+
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
+  const rm = maj.appeler(commande, args);
+  if (rm !== undefined) return rm;
   switch (commande) {
     case 'infos':
       return {

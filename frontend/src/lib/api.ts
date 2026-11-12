@@ -707,6 +707,54 @@ export interface RapportCbl {
   texte: string;
 }
 
+// ───────────────────────────── Mise à jour (tauri-v0.8.0) ─────────────────────────────
+// Contrat : docs/tauri/ipc-maj.md. Le backend vérifie les releases GitHub, télécharge le paquet,
+// vérifie son SHA-256 et l'installe ; le front n'affiche que l'état reçu.
+
+/** Release proposée (`StatutMaj.release`). */
+export interface ReleaseMaj {
+  /** Étiquette GitHub, ex. « tauri-v0.8.1 ». */
+  tag: string;
+  nom: string;
+  /** Notes de version en markdown brut (rendues en texte simple, jamais en HTML). */
+  notes: string;
+  urlPage: string;
+  /** Taille du paquet en octets. */
+  taille: number;
+  /** La release a un paquet Windows installable. */
+  aPaquet: boolean;
+}
+
+export type EtatVerificationMaj = 'inactif' | 'verification' | 'aJour' | 'disponible' | 'installation' | 'installee' | 'echec';
+
+/** Charge de l'événement `maj://statut` (et champ `statut` de `EtatMaj`). */
+export interface StatutMaj {
+  etat: EtatVerificationMaj;
+  /** Vérification demandée par l'utilisateur (sinon automatique, au démarrage). */
+  manuel: boolean;
+  release?: ReleaseMaj;
+  erreur?: string;
+  bilan?: { remplaces: number; restesOld: number };
+}
+
+export interface EtatMaj {
+  /** Version installée, ex. « 0.8.0 ». */
+  version: string;
+  /** Version comparée aux releases (différente en mode recette). */
+  versionComparee: string;
+  verifierAuDemarrage: boolean;
+  versionIgnoree: string | null;
+  statut: StatutMaj;
+  /** Faux hors Windows ou en développement : l'installation est impossible. */
+  installable: boolean;
+}
+
+/** Charge de l'événement `maj://progression` (au plus 10 par seconde). */
+export interface ProgressionMaj {
+  recu: number;
+  total: number;
+}
+
 // ───────────────────────────── Aiguillage Tauri / simulé ─────────────────────────────
 
 /** `true` dans la fenêtre Tauri ; `false` dans un navigateur (mode simulé). */
@@ -923,6 +971,30 @@ export function urlImagePage(livre: PagesLivre, p: PageLivre, largeur?: number):
 
 /** Montre le fichier du livre dans son dossier (Explorateur de Windows, fichier sélectionné). */
 export const ouvrirDossierFichier = (id: string) => appeler<void>('ouvrir_dossier_fichier', { id });
+
+// Mise à jour (docs/tauri/ipc-maj.md) : résultats et progression par `maj://statut` et
+// `maj://progression` (voir `ecouterMaj`).
+export const majEtat = () => appeler<EtatMaj>('maj_etat');
+/** Lance la vérification en arrière-plan ; le résultat arrive par `maj://statut`. */
+export const majVerifier = (manuel: boolean) => appeler<void>('maj_verifier', { manuel });
+/** Télécharge, vérifie (SHA-256) et installe la release `tag` ; progression et résultat par événements. */
+export const majInstaller = (tag: string) => appeler<void>('maj_installer', { tag });
+/** Relance ComicRust (même exécutable, mêmes arguments) puis ferme l'application. */
+export const majRedemarrer = () => appeler<void>('maj_redemarrer');
+/** Change les réglages fournis (`versionIgnoree: null` : plus aucune version ignorée). */
+export const majRegler = (reglages: { verifierAuDemarrage?: boolean; versionIgnoree?: string | null }) =>
+  appeler<EtatMaj>('maj_regler', reglages);
+/** Abonnement aux deux événements de la mise à jour ; renvoie la fonction de désabonnement. */
+export async function ecouterMaj(
+  surStatut: (s: StatutMaj) => void,
+  surProgression: (p: ProgressionMaj) => void,
+): Promise<UnlistenFn> {
+  const [a, b] = await Promise.all([
+    ecouter<StatutMaj>('maj://statut', surStatut),
+    ecouter<ProgressionMaj>('maj://progression', surProgression),
+  ]);
+  return () => { a(); b(); };
+}
 
 /** URL d'une page. `largeurMax` : largeur souhaitée en pixels physiques (0 = taille d'origine ;
  *  le backend ne grossit jamais l'image). En mode simulé, image SVG générée. */

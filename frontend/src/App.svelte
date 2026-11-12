@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import BarreLaterale, { type Section } from './components/BarreLaterale.svelte';
   import BandeauBase from './components/BandeauBase.svelte';
+  import BandeauMaj from './components/BandeauMaj.svelte';
+  import DialogMaj from './components/DialogMaj.svelte';
   import DialogDossiers from './components/DialogDossiers.svelte';
   import DialogReglages from './components/DialogReglages.svelte';
   import DialogTransfert from './components/DialogTransfert.svelte';
@@ -11,6 +13,7 @@
   import { SuiviScan } from './lib/bibliotheque.svelte';
   import { connexion } from './lib/connexion.svelte';
   import { EtatListes } from './lib/listes.svelte';
+  import { miseAJour } from './lib/maj.svelte';
   import { chargerPreferences, enregistrerPreference } from './lib/prefs';
   import { appliquerTheme, themeMemorise } from './lib/theme';
 
@@ -41,6 +44,8 @@
         themeActif = await appliquerTheme(themeMemorise());
         await scan.demarrer(() => rafraichir++);
         await connexion.demarrer();
+        // Mise à jour : jamais bloquante (vérification automatique en arrière-plan, bandeau seul).
+        void miseAJour.demarrer();
         etat = await ouvrirBibliotheque();
         nbLivres = etat.nbLivres;
         if (!etat.premierDemarrage) {
@@ -73,6 +78,7 @@
       desabonnerBase?.();
       scan.arreter();
       connexion.arreter();
+      miseAJour.arreter();
       listes.arreter();
     };
   });
@@ -148,6 +154,12 @@
     rafraichir++;
   }
 
+  /** « Rechercher une mise à jour… » (Réglages) : fenêtre « Mise à jour » et recherche manuelle. */
+  function rechercherMaj() {
+    miseAJour.ouvrir();
+    if (!miseAJour.occupe) void miseAJour.verifier();
+  }
+
   function choisirSection(s: Section) {
     section = s;
     if (s !== 'listes') listes.courante = null;
@@ -169,6 +181,7 @@
   <PremierDemarrage onpret={pret} />
 {:else}
   <div class="cadre">
+  <BandeauMaj />
   <BandeauBase />
   <div class="appli">
     <BarreLaterale
@@ -212,8 +225,11 @@
   </div>
   </div>
   <DialogDossiers bind:this={dossiers} {scan} />
-  <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} />
+  <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} onmaj={rechercherMaj} />
   <DialogTransfert bind:this={transfert} onbibliotheque={bibliothequeRouverte} />
+{/if}
+{#if miseAJour.fenetre}
+  <DialogMaj />
 {/if}
 
 <style>
