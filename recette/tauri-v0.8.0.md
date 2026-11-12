@@ -88,10 +88,12 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 7 | 7 | 0 |
+| [M] majeurs | 7 | 7 | 0 |
+| [m] mineurs | 3 | 2 | 1 (C-01) |
 
 Rapport de Yoyo du 12/11/2026 21:14 ([rapport](rapports/tauri-v0.8.0-2026-11-12.txt)) : 6 OK, 1 échec (C-01 [m], attendu : cause corrigée en tauri-v0.8.1), 10 non testés (toute la section « Mise à jour », dont 4 bloquants).
 
-**Décision :** incomplète — les tests de mise à jour restent à faire (ici avec `MAJ.cmd`, ou par la vraie mise à jour 0.8.0 → 0.8.1 de la [recette tauri-v0.8.1](tauri-v0.8.1.md)).
+Second rapport du 12/11/2026 21:21 ([rapport](rapports/tauri-v0.8.0-2026-11-12-b.txt)) : 16 OK, 1 échec (C-01 [m], attendu) ; section « Mise à jour » faite avec `MAJ.cmd` (copie « ComicRust-Tauri MAJ »).
+
+**Décision :** GO proposé (seul un mineur en échec, corrigé en tauri-v0.8.1) — en attente de la confirmation de Yoyo.

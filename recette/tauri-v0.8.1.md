@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.8.1 (pré-release corrective) |
 | Paquet | `ComicRust-Tauri-tauri-v0.8.1-windows-x64.zip` (contient aussi `ComicRust-Tauri-mcp.exe`) |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `69c5adf74dfc24282256affd0092cdddbc4b68143341582a9016f29efcd15cdc` |
 | Contenu | C-05 : reprise d'un livre déjà lu ; **première vraie mise à jour** 0.8.0 → 0.8.1 par la mise à jour intégrée |
 | Origine | [recette tauri-v0.8.0](tauri-v0.8.0.md) ; précision de Yoyo sur C-05 : « J'ai fermé le premier livre et ouvert le second » |
 
