@@ -121,4 +121,4 @@ Copie liée, base ComicRack MySQL.
 
 **Second rapport du 12/11/2026 12:28** ([rapport](rapports/tauri-v0.7.0-2026-11-12-b.txt)) : 32 OK, 1 échec, 1 non testé (C-07). **N-01 [B] en échec** : « le regroupement n'empile pas les livres » — la **vue empilée par série** (piles de couvertures, `📚 Empiler par série` de la version egui) n'existe pas dans la version Tauri : écart de parité, pas une régression de la 0.7.0 (aucun code de piles dans le front Tauri). À livrer en tauri-v0.7.1.
 
-**Décision :** NO-GO strict sur la règle (N-01 [B]) ; GO possible si Yoyo accepte N-01 comme écart de parité reporté à la tauri-v0.7.1.
+**Décision : GO** confirmé par Yoyo le 12/11/2026 (12:31), avec N-01 accepté comme écart de parité (vue empilée par série) reporté à la tauri-v0.7.1.
