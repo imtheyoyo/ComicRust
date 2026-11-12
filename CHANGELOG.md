@@ -5,6 +5,22 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.7.3] — 2026-11-12
+
+Version corrective suite à la recette tauri-v0.7.2 (12 OK sur 13, C-06 en échec).
+
+### Corrections
+- **Panneau Détail après fermeture du lecteur par Échap** (C-06) : la dernière page tournée pouvait ne pas
+  être encore enregistrée quand le Détail était relu. Les enregistrements d'avancement passent
+  maintenant l'un après l'autre et toute fermeture (bouton, Échap, Ctrl+W, ouverture d'un autre livre)
+  attend le dernier avant de rafraîchir le Détail.
+- **Relecture d'un livre déjà lu** : le livre reste « Lu », et le Détail affiche aussi la relecture en
+  cours (« Lu — relecture en cours : 12 % (page 7 / 59) »). Revoir la dernière page termine la
+  relecture. Rien n'est écrit dans ComicRack.
+
+### Recette
+[`recette/tauri-v0.7.3.md`](recette/tauri-v0.7.3.md).
+
 ## [tauri-v0.7.2] — 2026-11-12
 
 Version corrective suite à la recette tauri-v0.7.1 (24 OK sur 25, R-02 en échec) et aux constats de Yoyo.
