@@ -1,0 +1,12 @@
+Rapport de recette ComicRust tauri-v0.8.0 — 12/11/2026 21:14
+Résultat : 6 OK, 1 échec(s), 10 non testé(s) sur 17.
+Décision proposée : incomplète (4 bloquant(s) non testé(s)).
+
+ÉCHECS (1)
+- C-01 [Mineur] Fermer un premier livre, en ouvrir un second, fermer ; resélectionner le premier : son Détail affiche sa page lue. *(Scénario précisé par Yoyo après publication ; la vraie cause — reprise d'un livre déjà lu — est corrigée en tauri-v0.8.1 : ce test peut échouer ici.)*
+  Note : (pas de note)
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.8.0 / 0.8.0
+
+NON TESTÉS (10) : U-01*, U-02, U-03*, U-04*, U-05*, U-06, U-07, U-08, U-09, U-10   (* = bloquant)
