@@ -91,7 +91,8 @@
   let operation = $state<{ type: 'conversion' | 'ecritureInfos'; ids: string[] } | null>(null);
   let renommerDe = $state<string[] | null>(null);
   let erreurAction = $state('');
-  /** Incrémenté quand des fiches ont changé (bibliotheque-modifiee) : le panneau relit le détail. */
+  /** Incrémenté quand des fiches ont changé (bibliotheque-modifiee) ou à la fermeture du lecteur
+   *  (progression de lecture) : le panneau relit le détail. */
   let fichesModifiees = $state(0);
   /** Livre ouvert dans le lecteur plein écran (livre de la bibliothèque ou fichier), ou null. */
   let livreLu = $state<SourceLecteur | null>(null);
@@ -277,6 +278,9 @@
   async function lecteurFerme() {
     livreLu = null;
     void bib.reinitialiser(false);
+    // Le détail du livre affiché est relu (« Lu dans ComicRust : … ») : même id, donc sans ce
+    // compteur le panneau gardait l'ancien détail (recette tauri-v0.7.1, D-02).
+    fichesModifiees++;
     await tick();
     document.querySelector<HTMLElement>('[data-testid="grille"], [data-testid="tableau"], [data-testid="grille-piles"]')?.focus();
   }
