@@ -164,6 +164,8 @@ pub const VUES: &[&str] = &["grille", "tableau"];
 pub const ZOOM: (u32, u32) = (100, 260);
 /// Bornes de la largeur du panneau de détails (px).
 pub const LARGEUR_DETAILS: (u32, u32) = (220, 800);
+/// Bornes de la largeur de la colonne des listes (barre latérale, px) ; 250 par défaut côté front.
+pub const LARGEUR_LISTES: (u32, u32) = (180, 500);
 /// Modes du lecteur (`ModeLecture` de `frontend/src/lib/api.ts`).
 pub const MODES_LECTURE: &[&str] = &["simple", "double", "defilement"];
 /// Ajustements de la page (`Ajustement` de `frontend/src/lib/api.ts`).
@@ -198,6 +200,9 @@ pub struct PreferencesVue {
     /// Largeur du panneau de détails (px).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub largeur_details: Option<u32>,
+    /// Largeur de la colonne des listes (barre latérale, px).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub largeur_listes: Option<u32>,
     /// Identifiant du thème (nom du fichier CSS de `data\themes`, sans extension). Un thème
     /// disparu est remplacé par le thème par défaut côté front.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -350,6 +355,7 @@ impl PreferencesVue {
             zoom: borne("zoom", ZOOM),
             details: o.get("details").and_then(Value::as_bool),
             largeur_details: borne("largeurDetails", LARGEUR_DETAILS),
+            largeur_listes: borne("largeurListes", LARGEUR_LISTES),
             theme: o.get("theme").and_then(Value::as_str).filter(|s| id_theme_valide(s)).map(str::to_string),
             lecteur: o.get("lecteur").and_then(PreferencesLecteur::depuis_json),
             listes: o.get("listes").and_then(listes_depuis_json),
@@ -361,7 +367,7 @@ impl PreferencesVue {
         macro_rules! prendre {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
-        prendre!(tri, sens_tri, groupe, vue, zoom, details, largeur_details, theme, lecteur);
+        prendre!(tri, sens_tri, groupe, vue, zoom, details, largeur_details, largeur_listes, theme, lecteur);
         // Vues des listes : fusion liste par liste (`null` efface), jamais d'entrée `null` gardée.
         if let Some(patch) = m.listes {
             let mut listes = self.listes.take().unwrap_or_default();
@@ -602,6 +608,7 @@ mod tests {
             zoom: Some(200),
             details: Some(false),
             largeur_details: Some(400),
+            largeur_listes: Some(310),
             theme: Some("moderne-sombre".into()),
             lecteur: None,
             listes: None,
@@ -615,10 +622,23 @@ mod tests {
         assert_eq!(apres.tri.as_deref(), Some("parution"));
         let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
         assert!(
-            texte.contains("\"vue\"") && texte.contains("\"sensTri\": \"desc\"") && texte.contains("largeurDetails"),
+            texte.contains("\"vue\"")
+                && texte.contains("\"sensTri\": \"desc\"")
+                && texte.contains("largeurDetails")
+                && texte.contains("\"largeurListes\": 310"),
             "{texte}"
         );
         assert!(!d.path().join("comicrust-tauri.json.tmp").exists());
+    }
+
+    #[test]
+    fn largeur_listes_bornee() {
+        let lire_largeur = |j: serde_json::Value| PreferencesVue::depuis_json(&j).largeur_listes;
+        assert_eq!(lire_largeur(serde_json::json!({ "largeurListes": 300 })), Some(300));
+        assert_eq!(lire_largeur(serde_json::json!({ "largeurListes": 5 })), Some(LARGEUR_LISTES.0));
+        assert_eq!(lire_largeur(serde_json::json!({ "largeurListes": 99999 })), Some(LARGEUR_LISTES.1));
+        assert_eq!(lire_largeur(serde_json::json!({ "largeurListes": "x" })), None);
+        assert_eq!(lire_largeur(serde_json::json!({})), None);
     }
 
     #[test]
@@ -638,7 +658,7 @@ mod tests {
         std::fs::write(
             chemin_reglages(d.path()),
             r#"{"mode":"autonome","inconnu":1,"vue":{"tri":"bidule","sensTri":"desc","groupe":3,
-               "vue":"mosaique","zoom":9999,"details":"oui","largeurDetails":-5,"theme":"../x","futur":true}}"#,
+               "vue":"mosaique","zoom":9999,"details":"oui","largeurDetails":-5,"largeurListes":"large","theme":"../x","futur":true}}"#,
         )
         .unwrap();
         let r = lire(d.path()).unwrap();

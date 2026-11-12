@@ -11,7 +11,7 @@
   import { SuiviScan } from './lib/bibliotheque.svelte';
   import { connexion } from './lib/connexion.svelte';
   import { EtatListes } from './lib/listes.svelte';
-  import { chargerPreferences } from './lib/prefs';
+  import { chargerPreferences, enregistrerPreference } from './lib/prefs';
   import { appliquerTheme, themeMemorise } from './lib/theme';
 
   let etat = $state<EtatBiblio | null>(null);
@@ -20,6 +20,11 @@
   let themeActif = $state('');
   let nbLivres = $state(0);
   let rafraichir = $state(0);
+  // Colonne des listes (barre latérale) : largeur réglable, mémorisée (section vue des préférences).
+  const LISTES_DEFAUT = 250;
+  const LISTES_MIN = 180;
+  const LISTES_MAX = 500;
+  let largeurListes = $state(LISTES_DEFAUT);
   const scan = new SuiviScan();
   /** Listes ComicRack (étape 5) : arbre partagé par le panneau et la vue. */
   const listes = new EtatListes();
@@ -31,7 +36,8 @@
     void (async () => {
       try {
         // Préférences d'affichage d'abord : le thème et le premier lister_livres en dépendent.
-        await chargerPreferences();
+        const prefs = await chargerPreferences();
+        if (typeof prefs.largeurListes === 'number') largeurListes = borneListes(prefs.largeurListes);
         themeActif = await appliquerTheme(themeMemorise());
         await scan.demarrer(() => rafraichir++);
         await connexion.demarrer();
@@ -70,6 +76,53 @@
       listes.arreter();
     };
   });
+
+  /** Largeur permise : bornes fixes, et jamais plus de 60 % de la fenêtre (le min l'emporte). */
+  const borneListes = (l: number) =>
+    Math.round(Math.min(Math.max(l, LISTES_MIN), Math.max(LISTES_MIN, Math.min(LISTES_MAX, window.innerWidth * 0.6))));
+
+  function fixerLargeurListes(l: number) {
+    largeurListes = borneListes(l);
+    enregistrerPreference({ largeurListes });
+  }
+
+  function debutRedimensionListes(e: PointerEvent) {
+    const poignee = e.currentTarget as HTMLElement;
+    poignee.setPointerCapture(e.pointerId);
+    const x0 = e.clientX;
+    const l0 = largeurListes;
+    const bouger = (m: PointerEvent) => fixerLargeurListes(l0 + m.clientX - x0);
+    const finir = () => {
+      poignee.removeEventListener('pointermove', bouger);
+      poignee.removeEventListener('pointerup', finir);
+      poignee.removeEventListener('pointercancel', finir);
+    };
+    poignee.addEventListener('pointermove', bouger);
+    poignee.addEventListener('pointerup', finir);
+    poignee.addEventListener('pointercancel', finir);
+    e.preventDefault();
+  }
+
+  function clavierPoigneeListes(e: KeyboardEvent) {
+    const pas = e.shiftKey ? 64 : 16;
+    if (e.key === 'ArrowRight') fixerLargeurListes(largeurListes + pas);
+    else if (e.key === 'ArrowLeft') fixerLargeurListes(largeurListes - pas);
+    else if (e.key === 'Home') fixerLargeurListes(LISTES_MIN);
+    else if (e.key === 'End') fixerLargeurListes(LISTES_MAX);
+    else return;
+    e.preventDefault();
+  }
+
+  /** Écouteurs posés par attachement (séparateur focalisable : composant interactif ARIA). */
+  function ecouteursPoigneeListes(el: HTMLElement) {
+    el.addEventListener('pointerdown', debutRedimensionListes);
+    el.addEventListener('keydown', clavierPoigneeListes);
+    el.addEventListener('dblclick', () => fixerLargeurListes(LISTES_DEFAUT));
+    return () => {
+      el.removeEventListener('pointerdown', debutRedimensionListes);
+      el.removeEventListener('keydown', clavierPoigneeListes);
+    };
+  }
 
   function pret(e: EtatBiblio) {
     etat = e;
@@ -120,7 +173,22 @@
       onreglages={() => reglages?.ouvrir()}
       {listes}
       onliste={choisirListe}
+      largeur={largeurListes}
     />
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      class="poignee-listes"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Largeur de la colonne des listes"
+      aria-valuemin={LISTES_MIN}
+      aria-valuemax={LISTES_MAX}
+      aria-valuenow={largeurListes}
+      tabindex="0"
+      title="Tirer pour élargir ou réduire la colonne des listes (double-clic : largeur par défaut)"
+      {@attach ecouteursPoigneeListes}
+      data-testid="poignee-listes"
+    ></div>
     {#if section === 'bibliotheque' || listeAffichee}
       <VueBibliotheque {scan} bind:nbLivres {rafraichir} {listes} liste={listeAffichee} />
     {:else if section === 'listes'}
@@ -144,6 +212,8 @@
 <style>
   .cadre { height: 100vh; display: flex; flex-direction: column; }
   .appli { flex: 1; min-height: 0; display: flex; }
+  .poignee-listes { flex: none; width: 5px; margin-left: -5px; position: relative; z-index: 1; cursor: col-resize; touch-action: none; }
+  .poignee-listes:hover, .poignee-listes:focus-visible { background: var(--cr-accent); outline: none; }
   .message { padding: 40px; text-align: center; color: var(--cr-texte-discret); }
   .erreur { color: var(--cr-erreur); }
   .bientot { flex: 1; display: grid; place-content: center; text-align: center; color: var(--cr-texte-discret); }

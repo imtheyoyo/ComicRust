@@ -1038,6 +1038,13 @@ impl Lecteur {
         }
     }
 
+    /// Complète la fiche détaillée avec la lecture faite dans ComicRust (`avancement.json`).
+    pub fn completer_detail(&self, d: &mut crate::biblio::LivreDetail) {
+        if let Some(f) = d.fichier.clone() {
+            crate::biblio::fusionner_lecture(d, self.memoire.lire(Path::new(&f)));
+        }
+    }
+
     /// Note la page courante (index = numéro de page). `termine` : la dernière page a été vue
     /// (livre lu jusqu'au bout) ; la lecture est alors écrite dans la base sans attendre la
     /// fermeture.

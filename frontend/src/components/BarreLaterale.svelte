@@ -16,8 +16,10 @@
     listes: EtatListes;
     /** Liste choisie dans l'arbre (null : plus de liste affichée). */
     onliste: (id: string | null) => void;
+    /** Largeur en px (réglable, mémorisée). */
+    largeur?: number;
   }
-  let { section, nbLivres, mode, onsection, ondossiers, onreglages, listes, onliste }: Props = $props();
+  let { section, nbLivres, mode, onsection, ondossiers, onreglages, listes, onliste, largeur = 250 }: Props = $props();
 
   // « Listes » n'est plus une entrée : l'arbre des listes occupe le milieu du panneau.
   const entrees: Array<{ id: Section; titre: string; glyphe: string }> = [
@@ -26,7 +28,7 @@
   ];
 </script>
 
-<nav class="laterale" aria-label="Navigation principale">
+<nav class="laterale" aria-label="Navigation principale" style:width="{largeur}px">
   <div class="marque">ComicRust</div>
   <ul>
     {#each entrees as e (e.id)}

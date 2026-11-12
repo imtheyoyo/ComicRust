@@ -477,3 +477,51 @@ fn detail_avec_fichier_present_et_delai() {
     std::fs::remove_file(&f).unwrap();
     assert!(!b.detail("a").unwrap().fichier_present);
 }
+
+// --- Progression de lecture du panneau Détail (lot Q) ---
+
+fn livre_lu(last: u32, total: u32, note: Option<f32>) -> LibraryBook {
+    LibraryBook {
+        id: "L1".into(),
+        file: Some("Z:/BD/Thanos 01.cbz".into()),
+        page_count: Some(total),
+        last_page_read: Some(last),
+        rating: note,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn detail_progression_depuis_la_fiche() {
+    let d = detail_pour_test(&livre_lu(9, 20, Some(3.5)));
+    assert_eq!((d.progression, d.page_lue, d.lu), (Some(50), Some(10), false));
+    assert_eq!(d.source_lecture.as_deref(), Some("comicrack"));
+    assert_eq!(d.note, Some(3.5));
+    // Jamais ouvert : ni page lue ni source.
+    let d = detail_pour_test(&livre_lu(0, 20, None));
+    assert_eq!((d.page_lue, d.source_lecture.clone(), d.note), (None, None, None));
+    // Lu en entier.
+    let d = detail_pour_test(&livre_lu(19, 20, None));
+    assert_eq!((d.progression, d.page_lue, d.lu), (Some(100), Some(20), true));
+}
+
+#[test]
+fn lecture_comicrust_prime_si_plus_avancee() {
+    use crate::avancement::Avancement;
+    let mut d = detail_pour_test(&livre_lu(4, 20, None)); // ComicRack : 25 %
+                                                          // Moins avancée dans ComicRust : la fiche garde la main.
+    fusionner_lecture(&mut d, Some(Avancement { page: 2, page_max: 2, pages: 20 }));
+    assert_eq!((d.progression, d.source_lecture.as_deref()), (Some(25), Some("comicrack")));
+    // Plus avancée : elle prime (page_max 11 -> page 12 / 20 = 60 %).
+    fusionner_lecture(&mut d, Some(Avancement { page: 11, page_max: 11, pages: 20 }));
+    assert_eq!((d.progression, d.page_lue, d.lu), (Some(60), Some(12), false));
+    assert_eq!(d.source_lecture.as_deref(), Some("comicrust"));
+    // Lu jusqu'au bout dans ComicRust, fiche jamais ouverte.
+    let mut d = detail_pour_test(&livre_lu(0, 20, None));
+    fusionner_lecture(&mut d, Some(Avancement { page: 19, page_max: 19, pages: 20 }));
+    assert_eq!((d.progression, d.page_lue, d.lu), (Some(100), Some(20), true));
+    // Aucune lecture locale : inchangé.
+    let mut d = detail_pour_test(&livre_lu(0, 20, None));
+    fusionner_lecture(&mut d, None);
+    assert_eq!((d.progression, d.source_lecture), (Some(0), None));
+}

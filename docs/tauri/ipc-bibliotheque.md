@@ -50,6 +50,12 @@ interface LivreDetail {    // champs absents = non renseignés
   annee?: number; mois?: number; jour?: number; editeur?: string; collection?: string;
   pages: number; lu: boolean; progression?: number;   // 0-100
   pageCourante?: number;   // dernière page lue (à partir de 0)
+  // Panneau Détail : « Lu : x % (page n / total) ». `detail_livre` fait primer la lecture faite
+  // dans ComicRust (data\avancement.json) sur la fiche / base ComicRack quand elle est plus avancée
+  // (comme la version egui) : `progression` et `lu` en tiennent compte.
+  pageLue?: number;        // page la plus loin lue, à partir de 1 (absente : jamais ouvert)
+  sourceLecture?: 'comicrack' | 'comicrust';   // origine de `progression`
+  // `note` : échelle ComicRack 0-5, demi-étoiles possibles ; absente = non noté (étoiles du panneau).
   scenariste?: string; dessinateur?: string; encreur?: string; coloriste?: string;
   lettreur?: string; artisteCouverture?: string; redacteur?: string; traducteur?: string;
   genre?: string; arcNarratif?: string; personnages?: string; equipes?: string; lieux?: string;
@@ -77,6 +83,7 @@ interface PreferencesVue {
   zoom?: number;                 // taille des couvertures, ramenée dans [100, 260]
   details?: boolean;             // panneau de détails affiché
   largeurDetails?: number;       // largeur du panneau, ramenée dans [220, 800]
+  largeurListes?: number;        // largeur de la colonne des listes (barre latérale), ramenée dans [180, 500] ; défaut 250
   theme?: string;                // id du thème (fichier CSS de data\themes) ; disparu → thème par défaut
 }
 ```

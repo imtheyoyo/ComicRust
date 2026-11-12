@@ -41,6 +41,23 @@
   const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
   const taille = (o: number) => (o >= 1048576 ? `${(o / 1048576).toFixed(1)} Mo` : `${Math.round(o / 1024)} Ko`);
 
+  /** Lecture affichée : `null` tant que le détail n'est pas là (le résumé de la liste sert alors). */
+  const lecture = $derived.by(() => {
+    const d = detail;
+    if (!d) return null;
+    const pct = Math.round(d.progression ?? 0);
+    const lu = d.lu || pct >= 100;
+    const origine = d.sourceLecture === 'comicrust' ? ' dans ComicRust' : '';
+    if (lu) return { pct: 100, texte: `Lu${origine}`, lu: true };
+    if (pct <= 0) return { pct: 0, texte: 'Non lu', lu: false };
+    const page = d.pageLue ? ` (page ${d.pageLue}${d.pages ? ` / ${d.pages}` : ''})` : '';
+    return { pct, texte: `Lu${origine} : ${pct} %${page}`, lu: false };
+  });
+
+  /** Note ComicRack 0–5, arrondie au demi (les demi-étoiles existent dans la fiche). */
+  const note = $derived(detail?.note ? Math.min(5, Math.max(0, Math.round(detail.note * 2) / 2)) : 0);
+  const texteNote = $derived(`Note : ${note.toLocaleString('fr-FR')} sur 5`);
+
   const champs = $derived.by(() => {
     const d = detail;
     if (!d) return [] as Array<[string, string]>;
@@ -63,8 +80,6 @@
       ['Format', d.format],
       ['Pages', String(d.pages)],
       ['Taille', d.tailleFichier ? taille(d.tailleFichier) : undefined],
-      ['Lecture', d.progression !== undefined && d.progression > 0 ? `${Math.round(d.progression)} %` : undefined],
-      ['Note', d.note ? `${d.note} / 5` : undefined],
       ['ISBN', d.isbn],
     ];
     return lignes.filter((l): l is [string, string] => !!l[1]);
@@ -77,10 +92,23 @@
   {:else}
     <div class="couv"><img src={livre.urlCouverture} alt="Couverture de {livre.titre}" draggable="false" /></div>
     <h2>{livre.titre}</h2>
-    <p class="etat">
-      <span class:lu={livre.lu}>{livre.lu ? 'Lu' : 'Non lu'}</span>
+    <div class="etat">
+      {#if lecture}
+        <span class="lecture" class:lu={lecture.lu} data-testid="details-lecture">{lecture.texte}</span>
+        <div class="barre-lecture" role="progressbar" aria-label="Progression de lecture" aria-valuemin="0" aria-valuemax="100"
+          aria-valuenow={lecture.pct} data-testid="details-barre"><div style:width="{lecture.pct}%"></div></div>
+      {:else}
+        <span class="lecture" class:lu={livre.lu}>{livre.lu ? 'Lu' : 'Non lu'}</span>
+      {/if}
       {#if detail && (detail.manquant || !detail.fichierPresent)}<span class="manquant">Fichier manquant</span>{/if}
-    </p>
+      {#if note > 0}
+        <span class="etoiles" role="img" aria-label={texteNote} title={texteNote} data-testid="details-note">
+          {#each [1, 2, 3, 4, 5] as rang (rang)}
+            <span class="etoile" aria-hidden="true">★<span class="pleine" style:width="{Math.min(1, Math.max(0, note - rang + 1)) * 100}%">★</span></span>
+          {/each}
+        </span>
+      {/if}
+    </div>
     <div class="actions">
       <button class="ouvrir" onclick={onouvrir}>Lire</button>
       {#if onmodifier}
@@ -114,8 +142,15 @@
   .couv { border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); box-shadow: var(--cr-ombre); overflow: hidden; background: var(--cr-fond-survol); aspect-ratio: 2 / 3; max-width: 200px; margin: 0 auto 12px; }
   .couv img { width: 100%; height: 100%; object-fit: cover; display: block; }
   h2 { margin: 0 0 4px; font-size: 17px; text-align: center; overflow-wrap: anywhere; }
-  .etat { display: flex; justify-content: center; gap: 10px; margin: 0 0 10px; color: var(--cr-texte-discret); }
+  .etat { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--cr-texte-discret); }
+  .lecture { text-align: center; }
   .lu { color: var(--cr-accent); font-weight: 600; }
+  .barre-lecture { width: 70%; max-width: 200px; height: 6px; overflow: hidden; background: var(--cr-fond-survol); border: 1px solid var(--cr-bordure); border-radius: 4px; }
+  .barre-lecture > div { height: 100%; background: var(--cr-accent); }
+  /* Étoiles : grises (variable de bordure du thème) sous une étoile jaune rognée à la note. */
+  .etoiles { display: inline-flex; font-size: 20px; line-height: 1; }
+  .etoile { position: relative; display: inline-block; color: var(--cr-bordure); }
+  .pleine { position: absolute; left: 0; top: 0; overflow: hidden; white-space: nowrap; color: var(--cr-etoile, #f2b01e); }
   .manquant, .erreur { color: var(--cr-erreur); }
   .actions { display: flex; justify-content: center; gap: 8px; margin: 0 0 14px; }
   .multi { text-align: center; font-size: 12px; margin: -6px 0 12px; }

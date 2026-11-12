@@ -115,8 +115,15 @@ fn lister_livres(biblio: tauri::State<'_, Biblio>, requete: RequeteLivres) -> Re
 
 /// Fiche complète d'un livre.
 #[tauri::command(async)]
-fn detail_livre(biblio: tauri::State<'_, Biblio>, id: String) -> Result<LivreDetail, String> {
-    biblio.detail(&id)
+fn detail_livre(
+    biblio: tauri::State<'_, Biblio>,
+    lecteur: tauri::State<'_, Lecteur>,
+    id: String,
+) -> Result<LivreDetail, String> {
+    let mut d = biblio.detail(&id)?;
+    // La lecture faite dans ComicRust prime quand elle est plus avancée (parité avec egui).
+    lecteur.completer_detail(&mut d);
+    Ok(d)
 }
 
 /// Dossiers de BD surveillés.

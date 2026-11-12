@@ -132,6 +132,14 @@ pub struct LivreDetail {
     pub progression: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_courante: Option<u32>,
+    /// Page la plus loin lue, à partir de 1 (affichage « page n / total »), d'après la source
+    /// de `progression`. Absente : jamais ouvert.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_lue: Option<u32>,
+    /// D'où vient `progression` : `"comicrack"` (fiche / base) ou `"comicrust"` (lecture faite dans
+    /// ComicRust, `avancement.json`, quand elle est plus avancée). Absente : jamais ouvert.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_lecture: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scenariste: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1144,6 +1152,26 @@ fn resume(b: &LibraryBook) -> LivreResume {
     }
 }
 
+/// Fait primer la lecture faite dans ComicRust (`avancement.json`) quand elle est plus avancée que
+/// celle de la fiche, comme la version egui (`read_percent` : le plus avancé des deux). `lu` suit.
+pub fn fusionner_lecture(d: &mut LivreDetail, local: Option<crate::avancement::Avancement>) {
+    let Some(a) = local else { return };
+    let Some(pct) = a.pourcentage() else { return };
+    if pct <= d.progression.unwrap_or(0) {
+        return;
+    }
+    d.progression = Some(pct);
+    d.lu = pct == 100;
+    d.page_lue = Some(((a.page_max + 1) as u32).min(d.pages.max(a.pages as u32).max(1)));
+    d.source_lecture = Some("comicrust".to_string());
+}
+
+/// Fiche détaillée d'un livre, sans accès disque (tests).
+#[cfg(test)]
+pub fn detail_pour_test(b: &LibraryBook) -> LivreDetail {
+    detail(b)
+}
+
 fn detail(b: &LibraryBook) -> LivreDetail {
     let fichier = non_vide(&b.file);
     LivreDetail {
@@ -1161,6 +1189,8 @@ fn detail(b: &LibraryBook) -> LivreDetail {
         lu: b.read_percent() == Some(100),
         progression: b.read_percent(),
         page_courante: b.last_page_read,
+        page_lue: b.last_page_read.filter(|p| *p > 0).map(|p| p + 1),
+        source_lecture: b.read_percent().filter(|p| *p > 0).map(|_| "comicrack".to_string()),
         scenariste: non_vide(&b.writer),
         dessinateur: non_vide(&b.penciller),
         encreur: non_vide(&b.inker),

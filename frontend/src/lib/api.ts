@@ -132,6 +132,10 @@ export interface LivreDetail extends LivreResume {
   collection?: string;
   progression?: number;
   pageCourante?: number;
+  /** Page la plus loin lue (à partir de 1) d'après `sourceLecture`. */
+  pageLue?: number;
+  /** Origine de `progression` : fiche / base ComicRack, ou lecture faite dans ComicRust (plus avancée). */
+  sourceLecture?: 'comicrack' | 'comicrust';
   scenariste?: string;
   dessinateur?: string;
   encreur?: string;
@@ -164,6 +168,8 @@ export interface PreferencesVue {
   details?: boolean;
   /** Largeur du panneau de détails (220 à 800 px). */
   largeurDetails?: number;
+  /** Largeur de la colonne des listes (180 à 500 px). */
+  largeurListes?: number;
   /** Identifiant du thème (fichier CSS de data\themes). */
   theme?: string;
   /** Réglages du lecteur (sous-objet remplacé en entier à chaque enregistrement). */

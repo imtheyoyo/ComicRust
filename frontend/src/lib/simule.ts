@@ -394,7 +394,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     case 'detail_livre': {
       const l = LIVRES[Number(args.id) - 1];
       if (!l) throw new Error('Livre introuvable.');
-      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : Math.round((l.pageCourante / Math.max(1, l.pages - 1)) * 100), pageCourante: l.pageCourante };
+      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : Math.round((l.pageCourante / Math.max(1, l.pages - 1)) * 100), pageCourante: l.pageCourante, pageLue: l.pageCourante > 0 ? l.pageCourante + 1 : undefined, sourceLecture: l.lu || l.pageCourante > 0 ? (Number(l.id) % 5 === 0 ? 'comicrust' : 'comicrack') : undefined };
       return d;
     }
     case 'ouvrir_livre': {
