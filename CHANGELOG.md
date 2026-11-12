@@ -5,6 +5,19 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.8.1] — 2026-11-12
+
+Version corrective ; c'est aussi la **première vraie mise à jour** proposée par la mise à jour
+intégrée de la tauri-v0.8.0.
+
+### Corrections
+- **C-05** : un livre déjà lu, rouvert à sa dernière page, était aussitôt compté « terminé » (même sans
+  rien lire) : la relecture n'était jamais notée et le Détail restait sur « Lu ». La reprise d'un livre
+  n'est plus comptée comme une lecture tant qu'on n'a pas quitté la page de reprise.
+
+### Recette
+[`recette/tauri-v0.8.1.md`](recette/tauri-v0.8.1.md).
+
 ## [tauri-v0.8.0] — 2026-11-12
 
 Étape « mises à jour » de la version Tauri, avancée par Yoyo avant les scripts Python et les thèmes.

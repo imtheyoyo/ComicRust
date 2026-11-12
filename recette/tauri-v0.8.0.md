@@ -59,7 +59,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 ## 3. Correction C-05
 
-- [ ] **C-01 [m]** Ouvrir un autre livre à la place du premier sans fermer le lecteur (de la façon dont tu l'avais fait à la recette 0.7.3), puis fermer : le Détail du premier, resélectionné, affiche sa page lue.
+- [ ] **C-01 [m]** Fermer un premier livre, en ouvrir un second, fermer ; resélectionner le premier : son Détail affiche sa page lue. *(Scénario précisé par Yoyo après publication ; la vraie cause — reprise d'un livre déjà lu — est corrigée en [tauri-v0.8.1](tauri-v0.8.1.md) : ce test peut échouer ici.)*
 
 ## 4. Non-régression
 
