@@ -15,6 +15,7 @@
 //!   [`listes_criteres`] : éditeur de listes intelligentes ; [`listes_cbl`] : import / export `.cbl`),
 //! - le transfert de la bibliothèque ComicRack vers la base de ComicRust ([`transfert`]),
 //! - la surveillance de la base et l'état hors ligne ([`surveillance`]),
+//! - les scripts Python ([`scripts`] : hôte de scripts du cœur, aperçu, application, automatismes),
 //! - la mise à jour intégrée depuis les releases `tauri-v*` ([`maj`]),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
@@ -35,6 +36,7 @@ pub mod maj;
 pub mod pages_livre;
 pub mod portable;
 pub mod reglages;
+pub mod scripts;
 pub mod surveillance;
 pub mod themes;
 pub mod transfert;
@@ -46,6 +48,8 @@ mod tests_biblio;
 mod tests_connexion;
 #[cfg(test)]
 mod tests_listes;
+#[cfg(test)]
+mod tests_scripts;
 #[cfg(test)]
 mod tests_transfert;
 

@@ -1101,6 +1101,12 @@ impl Lecteur {
         }
     }
 
+    /// Livre de la bibliothèque affiché par la séance `jeton` (aucun pour un fichier hors
+    /// bibliothèque ou une séance de vignettes) : automatisme `BookClosed` des scripts.
+    pub fn livre_de_seance(&self, jeton: &str) -> Option<String> {
+        self.verrou().get(jeton).and_then(|s| s.id.clone())
+    }
+
     /// Ferme tous les livres (fermeture de l'application).
     pub fn fermer_tout(&self) {
         let toutes: Vec<String> = self.verrou().keys().cloned().collect();

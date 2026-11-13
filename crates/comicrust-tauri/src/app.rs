@@ -19,9 +19,13 @@ use crate::listes_criteres::{self, Apercu, CatalogueCriteres, Critere, CriteresL
 use crate::maj::{self, EtatMaj, Maj};
 use crate::pages_livre::{OperationPages, PageLivre, PagesLivre};
 use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
+use crate::scripts::apercu::{Apercu as ApercuScript, Bilan as BilanScript};
+use crate::scripts::{self, ConfigScripts, EtatScripts, Scripts};
 use crate::surveillance::{self, EtatBase, Surveillance};
 use crate::transfert::{ApercuTransfert, DemandeTransfert, ResumeTransfert, Transfert};
 use crate::{infos_application, portable, themes, InfosApplication};
+use comicrust_core::scripting::Hook;
+use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -72,17 +76,28 @@ fn enregistrer_preferences_vue(
 
 /// Ouvre la bibliothèque choisie (ou signale le premier démarrage).
 #[tauri::command(async)]
-fn ouvrir_bibliotheque(biblio: tauri::State<'_, Biblio>) -> Result<EtatBiblio, String> {
-    biblio.ouvrir()
+fn ouvrir_bibliotheque(
+    biblio: tauri::State<'_, Biblio>,
+    scripts: tauri::State<'_, Scripts>,
+) -> Result<EtatBiblio, String> {
+    let etat = biblio.ouvrir()?;
+    if !etat.premier_demarrage {
+        // Automatismes `Startup` des scripts (une fois par session, s'ils sont activés).
+        scripts.bibliotheque_ouverte();
+    }
+    Ok(etat)
 }
 
 /// Enregistre le choix du premier démarrage (autonome ou lié à ComicRack) et ouvre la base.
 #[tauri::command(async)]
 fn configurer_premier_demarrage(
     biblio: tauri::State<'_, Biblio>,
+    scripts: tauri::State<'_, Scripts>,
     choix: ChoixPremierDemarrage,
 ) -> Result<EtatBiblio, String> {
-    biblio.configurer(&choix)
+    let etat = biblio.configurer(&choix)?;
+    scripts.bibliotheque_ouverte();
+    Ok(etat)
 }
 
 /// Teste une connexion MySQL saisie (mot de passe jamais renvoyé ni inclus dans les erreurs).
@@ -105,9 +120,12 @@ fn lire_connexions_mysql(data: tauri::State<'_, DossierData>) -> Result<crate::c
 #[tauri::command(async)]
 fn configurer_mysql(
     biblio: tauri::State<'_, Biblio>,
+    scripts: tauri::State<'_, Scripts>,
     choix: crate::connexion::ChoixMysql,
 ) -> Result<EtatBiblio, String> {
-    biblio.configurer_mysql(&choix)
+    let etat = biblio.configurer_mysql(&choix)?;
+    scripts.bibliotheque_ouverte();
+    Ok(etat)
 }
 
 /// Une fenêtre de la liste (recherche, tri et regroupement faits ici).
@@ -156,10 +174,22 @@ fn retirer_dossier(biblio: tauri::State<'_, Biblio>, chemin: String) -> Result<V
 /// Lance l'analyse des dossiers et rend la main ; la suite arrive par les événements
 /// `scan-progression`, `scan-termine` et `scan-erreur`.
 #[tauri::command(async)]
-fn lancer_scan(app: tauri::AppHandle, biblio: tauri::State<'_, Biblio>) -> Result<(), String> {
+fn lancer_scan(
+    app: tauri::AppHandle,
+    biblio: tauri::State<'_, Biblio>,
+    scripts: tauri::State<'_, Scripts>,
+) -> Result<(), String> {
+    let (bib, sc) = (biblio.inner().clone(), scripts.inner().clone());
     biblio.lancer_scan(Arc::new(move |evenement| {
         let (nom, charge) = evenement.pour_le_front();
         let _ = app.emit(nom, charge);
+        // Analyse qui a ajouté des livres : automatismes `NewBooks` des scripts.
+        if let biblio::EvenementScan::Termine { ajoutes, .. } = &evenement {
+            let ids = bib.prendre_ajoutes();
+            if *ajoutes > 0 && !ids.is_empty() {
+                sc.declencher(Hook::NewBooks, ids);
+            }
+        }
     }))
 }
 
@@ -424,14 +454,31 @@ fn exporter_cbl(biblio: tauri::State<'_, Biblio>, id: String, chemin: String) ->
 
 /// Ouvre un livre de la bibliothèque (ordre des pages de sa fiche, page de reprise).
 #[tauri::command(async)]
-fn ouvrir_livre(lecteur: tauri::State<'_, Lecteur>, id: String) -> Result<LivreOuvert, String> {
-    lecteur.ouvrir_livre(&id)
+fn ouvrir_livre(
+    lecteur: tauri::State<'_, Lecteur>,
+    scripts: tauri::State<'_, Scripts>,
+    id: String,
+) -> Result<LivreOuvert, String> {
+    let l = lecteur.ouvrir_livre(&id)?;
+    if let Some(id) = &l.id {
+        scripts.declencher(Hook::BookOpened, vec![id.clone()]);
+    }
+    Ok(l)
 }
 
 /// Ouvre un fichier ou un dossier d'images hors bibliothèque.
 #[tauri::command(async)]
-fn ouvrir_fichier(lecteur: tauri::State<'_, Lecteur>, chemin: String) -> Result<LivreOuvert, String> {
-    lecteur.ouvrir_fichier(&chemin)
+fn ouvrir_fichier(
+    lecteur: tauri::State<'_, Lecteur>,
+    scripts: tauri::State<'_, Scripts>,
+    chemin: String,
+) -> Result<LivreOuvert, String> {
+    let l = lecteur.ouvrir_fichier(&chemin)?;
+    // Automatisme `BookOpened` : livres de la bibliothèque seulement (comme la version egui).
+    if let Some(id) = &l.id {
+        scripts.declencher(Hook::BookOpened, vec![id.clone()]);
+    }
+    Ok(l)
 }
 
 /// Préfixe des URL de pages d'un livre ouvert (`urlBase` de `LivreOuvert`).
@@ -453,8 +500,17 @@ fn enregistrer_avancement(
 
 /// Ferme un livre (lecture écrite dans la base en mode autonome).
 #[tauri::command(async)]
-fn fermer_livre(lecteur: tauri::State<'_, Lecteur>, jeton: String) -> Result<(), String> {
-    lecteur.fermer_livre(&jeton)
+fn fermer_livre(
+    lecteur: tauri::State<'_, Lecteur>,
+    scripts: tauri::State<'_, Scripts>,
+    jeton: String,
+) -> Result<(), String> {
+    let id = lecteur.livre_de_seance(&jeton);
+    let r = lecteur.fermer_livre(&jeton);
+    if let Some(id) = id {
+        scripts.declencher(Hook::BookClosed, vec![id]);
+    }
+    r
 }
 
 // ───────────────────────────── Édition ─────────────────────────────
@@ -671,6 +727,116 @@ fn maj_regler(maj: tauri::State<'_, Maj>, request: tauri::ipc::Request<'_>) -> R
     maj.regler(demande)
 }
 
+// ───────────────────────────── Scripts Python ─────────────────────────────
+// Contrat : docs/tauri/ipc-scripts.md (module `scripts`). Toutes les commandes sont `async` :
+// une question du script bloque le fil du script, jamais l'IPC.
+
+/// État des scripts (Python, scripts découverts, automatismes, écriture autorisée).
+#[tauri::command(async)]
+fn scripts_lister(scripts: tauri::State<'_, Scripts>) -> EtatScripts {
+    scripts.lister()
+}
+
+/// Relit le dossier des scripts.
+#[tauri::command(async)]
+fn scripts_recharger(scripts: tauri::State<'_, Scripts>) -> EtatScripts {
+    scripts.recharger()
+}
+
+/// Active ou désactive un script.
+#[tauri::command(async)]
+fn scripts_activer(scripts: tauri::State<'_, Scripts>, id: String, actif: bool) -> Result<EtatScripts, String> {
+    scripts.activer(&id, actif)
+}
+
+/// Active ou coupe les automatismes (désactivés par défaut).
+#[tauri::command(async)]
+fn scripts_auto(scripts: tauri::State<'_, Scripts>, actif: bool) -> Result<EtatScripts, String> {
+    scripts.regler_auto(actif)
+}
+
+/// Lance un script depuis un menu ; rend l'identifiant de l'exécution.
+#[tauri::command(async)]
+fn script_lancer(
+    scripts: tauri::State<'_, Scripts>,
+    id: String,
+    hook: String,
+    ids: Option<Vec<String>>,
+) -> Result<String, String> {
+    scripts.lancer(&id, &hook, ids.unwrap_or_default())
+}
+
+/// Réponse à une question, un message, un formulaire ou une liste de choix.
+#[tauri::command(async)]
+fn script_repondre(
+    scripts: tauri::State<'_, Scripts>,
+    run_id: String,
+    req_id: u64,
+    valeur: Option<Value>,
+) -> Result<(), String> {
+    scripts.repondre(&run_id, req_id, valeur.unwrap_or(Value::Null))
+}
+
+/// Vignettes attendues d'une liste de choix (lignes survolées ou choisies).
+#[tauri::command(async)]
+fn script_vignettes_voulues(
+    scripts: tauri::State<'_, Scripts>,
+    run_id: String,
+    req_id: u64,
+    rangs: Vec<usize>,
+) -> Result<(), String> {
+    scripts.vignettes_voulues(&run_id, req_id, &rangs)
+}
+
+/// Arrêt poli, puis forcé après 3 s.
+#[tauri::command(async)]
+fn script_arreter(scripts: tauri::State<'_, Scripts>, run_id: String) -> Result<(), String> {
+    scripts.arreter(&run_id)
+}
+
+/// Aperçu des modifications d'une exécution terminée.
+#[tauri::command(async)]
+fn script_apercu(scripts: tauri::State<'_, Scripts>, run_id: String) -> Result<ApercuScript, String> {
+    scripts.apercu(&run_id)
+}
+
+/// Applique les lignes choisies de l'aperçu (refusé en lecture seule).
+#[tauri::command(async)]
+fn script_appliquer(
+    scripts: tauri::State<'_, Scripts>,
+    run_id: String,
+    cles: Vec<String>,
+) -> Result<BilanScript, String> {
+    scripts.appliquer(&run_id, &cles)
+}
+
+/// Hook Editor de la fenêtre Infos : champs proposés dans `script:fin.champs`.
+#[tauri::command(async)]
+fn script_hook_editeur(
+    scripts: tauri::State<'_, Scripts>,
+    id: String,
+    livre_id: String,
+    champs: Option<Map<String, Value>>,
+) -> Result<String, String> {
+    scripts.hook_editeur(&id, &livre_id, &champs.unwrap_or_default())
+}
+
+/// Réglages d'un script (valeurs secrètes masquées).
+#[tauri::command(async)]
+fn script_reglages_lire(scripts: tauri::State<'_, Scripts>, id: String) -> Result<Map<String, Value>, String> {
+    scripts.reglages_lire(&id)
+}
+
+/// Fusionne des réglages d'un script (une valeur secrète laissée masquée reste inchangée).
+#[tauri::command(async)]
+fn script_reglages_ecrire(
+    scripts: tauri::State<'_, Scripts>,
+    id: String,
+    valeurs: Map<String, Value>,
+) -> Result<Map<String, Value>, String> {
+    scripts.reglages_ecrire(&id, &valeurs)
+}
+
 /// Réponse HTTP du protocole `cr-page`.
 fn reponse_page(p: ReponsePage) -> tauri::http::Response<Vec<u8>> {
     // Une URL de page ne vaut que pour une séance (jeton) : gardée par la WebView tant que
@@ -849,7 +1015,20 @@ pub fn run() {
             maj_installer,
             maj_redemarrer,
             maj_regler,
-            maj_ouvrir_page
+            maj_ouvrir_page,
+            scripts_lister,
+            scripts_recharger,
+            scripts_activer,
+            scripts_auto,
+            script_lancer,
+            script_repondre,
+            script_vignettes_voulues,
+            script_arreter,
+            script_apercu,
+            script_appliquer,
+            script_hook_editeur,
+            script_reglages_lire,
+            script_reglages_ecrire
         ])
         .setup(move |app| {
             // Thèmes livrés disponibles dès le premier lancement.
@@ -865,6 +1044,19 @@ pub fn run() {
                 Arc::new(move |evenement| {
                     let (nom, charge) = evenement.pour_le_front();
                     let _ = emetteur_maj.emit(nom, charge);
+                }),
+            ));
+            // Scripts Python : état géré avant la fenêtre (commandes `script*` et déclencheurs des
+            // automatismes) ; événements `script:*`, `scripts:auto` et `bibliotheque-modifiee`.
+            let emetteur_scripts = app.handle().clone();
+            app.manage(Scripts::nouveau(
+                ConfigScripts::portable(data.0.clone()),
+                app.state::<Biblio>().inner().clone(),
+                app.state::<Edition>().inner().clone(),
+                app.state::<Lecteur>().inner().clone(),
+                Arc::new(move |evenement| {
+                    let (nom, charge) = evenement.pour_le_front();
+                    let _ = emetteur_scripts.emit(nom, charge);
                 }),
             ));
             // Fenêtre créée ici (et non dans tauri.conf.json) pour fixer le profil WebView2
@@ -899,11 +1091,22 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("erreur au lancement de ComicRust-Tauri")
-        .run(|app, evenement| {
+        .run(|app, evenement| match evenement {
+            // Fermeture demandée : scripts et automatismes annulés, attente de 8 s au plus (une
+            // application en cours finit le livre en cours : jamais de fichier sans sa fiche).
+            tauri::RunEvent::ExitRequested { .. } => {
+                if let Some(s) = app.try_state::<Scripts>() {
+                    s.fermer(scripts::ATTENTE_FERMETURE);
+                }
+            }
             // Fermeture de l'application : la lecture des livres ouverts est enregistrée
             // (comme la version egui à la fermeture de la fenêtre).
-            if let tauri::RunEvent::Exit = evenement {
+            tauri::RunEvent::Exit => {
+                if let Some(s) = app.try_state::<Scripts>() {
+                    s.fermer(scripts::ATTENTE_FERMETURE);
+                }
                 app.state::<Lecteur>().fermer_tout();
             }
+            _ => {}
         });
 }
