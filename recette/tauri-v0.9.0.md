@@ -23,9 +23,9 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Vérification | Où | Résultat |
 |---|---|---|
-| **193 tests** du backend `comicrust-tauri`, dont : faux front qui répond à une question, un formulaire et un choix, puis arrête un script pendant une question ; script d'exemple **nettoyage** réellement exécuté (Python 3.13) sur une base de test : aperçu, application partielle, relecture de la base ; **refus d'appliquer en lecture seule** (ComicDb.xml) ; **secret jamais renvoyé ni écrit en clair** (« •••• » ne l'écrase pas) ; arrêt forcé puis fermeture en moins de 8 s ; automatisme « nouveaux livres » après une vraie analyse ; hook Editor ; mise à jour sur 5 versions successives : script modifié gardé (`.nouveau`), script supprimé non réinstallé, manifeste créé au premier lancement | `cargo test -p comicrust-tauri` | ✅ 193/193 |
+| **199 tests** du backend `comicrust-tauri`, dont : faux front qui répond à une question, un formulaire et un choix, puis arrête un script pendant une question ; script d'exemple **nettoyage** réellement exécuté (Python 3.13) sur une base de test : aperçu, application partielle, relecture de la base ; **refus d'appliquer en lecture seule** (ComicDb.xml) ; **secret jamais renvoyé ni écrit en clair** (« •••• » ne l'écrase pas) ; arrêt forcé puis fermeture en moins de 8 s ; automatisme « nouveaux livres » après une vraie analyse ; hook Editor ; mise à jour sur 5 versions successives : script modifié gardé (`.nouveau`), script supprimé non réinstallé, manifeste créé au premier lancement | `cargo test -p comicrust-tauri` | ✅ 199/199 |
 | 11 tests des scripts d'exemple du cœur (nettoyage, rangement, Bedetheque, Library Organizer…) ; la CI les relance **sur le contenu du paquet** avant de le zipper | `cargo test -p comicrust-core --test scripts_exemples` | ✅ 11/11 |
-| Front : `svelte-check` (0 erreur), `vite build` ; parcours simulé complet : menu, gestion, lancement, questions oui/non, texte masqué, choix, formulaire, choix à vignettes chargées à l'affichage, aperçu et application, arrêt, erreur, lecture seule, Python introuvable, bouton Editor, clavier, thème sombre ; **textes piégés d'un script affichés en texte, jamais exécutés** | local, Playwright | ✅ 74/74 |
+| Front : `svelte-check` (0 erreur), `vite build` ; parcours simulé complet : menu, gestion, lancement, questions oui/non, texte masqué, choix, formulaire, choix à vignettes chargées à l'affichage, aperçu et application, arrêt, erreur, lecture seule, Python introuvable, bouton Editor, clavier, thème sombre ; **textes piégés d'un script affichés en texte, jamais exécutés** | local, Playwright | ✅ 95/95 |
 | Concordance des 13 commandes et 10 événements entre l'interface et le moteur | relecture | ✅ |
 | Rustfmt, Clippy `-D warnings` ; compilation Windows (fenêtre, `-mcp`), Python embarqué (empreinte figée), paquet | local + CI Windows | ✅ local ; CI à la publication |
 
@@ -48,6 +48,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 - [ ] **S-08 [M]** Copie **liée**, ComicRack en **écriture** (sauvegarde faite, « Lecture et écriture » coché), ComicRack fermé : « Nettoyer les fiches » sur 2 livres → Appliquer ; ouvrir ComicRack : fiches modifiées, rien d'autre ; ComicRust n'affiche pas « modifié ailleurs ».
 - [ ] **R-01 [B]** Copie **liée** en **lecture seule** : un script s'exécute et montre son aperçu, mais « Appliquer » est **désactivé** avec l'explication ; ComicRack n'est pas modifié.
 - [ ] **A-01 [M]** « Gérer les scripts… » : cocher « Exécuter les automatismes » et activer l'automatisme « nouveaux livres » ; ajouter un CBZ dans un dossier surveillé, analyser les dossiers : le nouveau livre reçoit l'étiquette du script ; le journal des automatismes le montre.
+- [ ] **S-09 [M]** Pendant l'application d'un rangement (quelques livres de test) : la fenêtre affiche « Application en cours… » avec **Arrêter** ; Annuler et Fermer sont indisponibles ; lancer un autre script est refusé. « Arrêter » : arrêt entre deux livres, bilan « arrêté ».
 - [ ] **A-02 [B]** Fermer ComicRust pendant l'application d'un aperçu (rangement de quelques livres de test) : ComicRust finit le livre en cours puis se ferme ; à la relance, aucun livre à moitié renommé.
 - [ ] **A-03 [m]** Après fermeture de ComicRust, aucun `python.exe` ne reste dans le gestionnaire des tâches.
 
@@ -93,7 +94,9 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
-| | | | |
+| (relecture) | [M] | Pendant l'application d'un aperçu, un second script pouvait être lancé et la fenêtre fermée (« rien n'a été appliqué » affiché à tort) | **Corrigé** : « Application en cours… », Arrêter (entre deux livres), lancement refusé jusqu'au bilan |
+| (relecture) | [M] | Fermer ComicRust pendant qu'un automatisme renommait des fichiers pouvait couper un livre au milieu | **Corrigé** : la fermeture attend la fin du livre en cours |
+| (relecture) | [m] | Fenêtre console au « copier » d'un script ; automatismes bloqués après un échec de lancement ; ordre d'écriture des réglages ; secret affichable en clair ; images SVG acceptées | **Corrigés** |
 
 ## Bilan
 
