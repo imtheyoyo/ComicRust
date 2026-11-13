@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.9.0 (pré-release de l'étape **scripts Python**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.9.0-windows-x64.zip` (contient `ComicRust-Tauri.exe`, `ComicRust-Tauri-mcp.exe`, `python\`, `scripts\`, `scripts.md`) |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `e08a3175f821a05edd7f1943a30e76d3dd950e80cbc53c52efb43453e28b9e41` |
 | Contenu | hôte de scripts Python (même moteur que la version egui), menu Scripts, formulaires et choix générés, aperçu puis application, automatismes, scripts d'exemple (nettoyage, rangement, Comic Vine, Bedetheque Scraper 2, Library Organizer), bouton Scripts de la fenêtre Infos ; mise à jour qui préserve les scripts modifiés |
 | Origine | [recette tauri-v0.8.1](tauri-v0.8.1.md) : **GO** du 12/11/2026 ; tests repris des recettes egui [v0.10.0](v0.10.0.md) à [v0.10.7](v0.10.7.md) |
 
