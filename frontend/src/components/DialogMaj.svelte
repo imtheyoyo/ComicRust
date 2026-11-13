@@ -2,7 +2,7 @@
   // Fenêtre « Mise à jour de ComicRust » (comme `update_window` de la version egui) : version
   // installée, vérification au démarrage, recherche manuelle, notes de version, téléchargement avec
   // progression en Mo, bilan et redémarrage. Créée à la demande (`miseAJour.fenetre`).
-  import { majOuvrirPage } from '../lib/api';
+  import { majOuvrirPage, type BilanMaj } from '../lib/api';
   import { fermerModale, modale } from '../lib/modale';
   import { enMo, miseAJour } from '../lib/maj.svelte';
   import NotesVersion from './NotesVersion.svelte';
@@ -19,7 +19,7 @@
   });
 
   /** Bilan de l'installation : fichiers remplacés, anciens fichiers (.old) encore utilisés. */
-  function texteBilan(b: { remplaces: number; restesOld: number }): string {
+  function texteBilan(b: BilanMaj): string {
     const s = (n: number) => (n > 1 ? 's' : '');
     let t = `${b.remplaces} fichier${s(b.remplaces)} remplacé${s(b.remplaces)}.`;
     if (b.restesOld > 0) {
@@ -84,6 +84,12 @@
       <p class="ok">✔ ComicRust {release?.tag ?? ''} est installée. Redémarre ComicRust pour l'utiliser.</p>
       {#if statut.bilan}
         <p class="petit" data-testid="maj-bilan">{texteBilan(statut.bilan)}</p>
+        {#if statut.bilan.scriptsNouveaux > 0}
+          {@const n = statut.bilan.scriptsNouveaux}
+          <p class="petit" data-testid="maj-bilan-scripts" title={(statut.bilan.cheminsNouveaux ?? []).join('\n')}>
+            {n} script{n > 1 ? 's' : ''} modifié{n > 1 ? 's' : ''} par toi {n > 1 ? 'ont été gardés' : 'a été gardé'} ; la nouvelle version est à côté (.nouveau).
+          </p>
+        {/if}
       {/if}
       <button type="button" class="principal" onclick={() => void miseAJour.redemarrer()} data-testid="maj-redemarrer">Redémarrer maintenant</button>
     {:else if statut.etat === 'echec'}

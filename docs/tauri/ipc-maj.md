@@ -51,15 +51,27 @@ type StatutMaj = {
     aPaquet: boolean;         // zip Windows ET son .sha256 présents : installation possible
   };
   erreur?: string;            // pour echec : message en français
-  bilan?: { remplaces: number; restesOld: number }; // pour installee
+  bilan?: {                   // pour installee
+    remplaces: number;
+    restesOld: number;
+    scriptsNouveaux: number;            // tauri-v0.9.0 : `.nouveau` posés (scripts modifiés gardés)
+    cheminsNouveaux?: string[];         // chemins de ces `.nouveau` (absent si aucun)
+    scriptsNonReinstalles?: string[];   // scripts livrés supprimés par l'utilisateur (absent si aucun)
+  };
 };
 ```
 
 Champs absents (`release`, `erreur`, `bilan`) : **non sérialisés** (pas de `null`).
 
 - `bilan.remplaces` : fichiers installés (remplacés ou nouveaux, hors `data\`).
-- `bilan.restesOld` : anciens fichiers renommés en `.old` (exe, `pdfium.dll`, `.md`, licences), supprimés au
-  prochain démarrage.
+- `bilan.restesOld` : anciens fichiers renommés en `.old` (exe, `pdfium.dll`, `.md`, licences, `python\`,
+  scripts livrés non modifiés), supprimés au prochain démarrage.
+- `bilan.scriptsNouveaux` *(tauri-v0.9.0)* : scripts de `scripts\` modifiés par l'utilisateur, **gardés** ; la
+  nouvelle version est posée à côté (`nom.py.nouveau`). `cheminsNouveaux` les liste (chemins relatifs, `/`). Le
+  front affiche « N scripts modifiés par toi ont été gardés ; la nouvelle version est à côté (.nouveau) » si
+  N > 0 (liste en info-bulle).
+- `bilan.scriptsNonReinstalles` *(tauri-v0.9.0)* : scripts livrés que l'utilisateur avait supprimés, non
+  réinstallés (information, non affichée).
 
 ## Commandes en détail
 
@@ -126,12 +138,29 @@ enregistrée comme à la fermeture normale).
   du paquet.
 - **Remplacement** : chaque fichier existant devient `nom.old` (ou `nom.1.old`… si un `.old` existe déjà ; jamais
   un fichier écrasé), noté dans `data\maj\anciens.txt`. Le paquet contient `ComicRust-Tauri.exe`,
-  `ComicRust-Tauri-mcp.exe`, `pdfium.dll`, `*.md`, `licences\`. **Rien sous `data\`** (réglages, thèmes, profil
-  WebView2 `data\webview2`). Fichier verrouillé : `echec` avec un message clair ; les `.old` déjà créés restent
-  notés ; si la copie d'un nouveau fichier échoue, l'ancien reprend sa place.
+  `ComicRust-Tauri-mcp.exe`, `pdfium.dll`, `*.md` (dont `scripts.md`), `licences\` (dont `Python-LICENSE.txt`),
+  `python\` (Python embarqué, remplacé normalement) et `scripts\` (exemples). **Aucun fichier du paquet sous
+  `data\`** (réglages, thèmes, profil WebView2 `data\webview2`) ; seul le manifeste `data\scripts-livres.txt` y
+  est tenu. Fichier verrouillé : `echec` avec un message clair ; les `.old` déjà créés restent notés ; si la
+  copie d'un nouveau fichier échoue, l'ancien reprend sa place.
+- **Scripts de l'utilisateur** *(tauri-v0.9.0, même logique que la version egui)* : manifeste
+  `data\scripts-livres.txt` (`<sha256>\t<chemin relatif>` de chaque fichier livré de `scripts\`).
+  - fichier livré non modifié (empreinte = celle du manifeste) : remplacé (`.old`) ;
+  - fichier existant **modifié** ou inconnu (ex. script de l'utilisateur homonyme) : jamais écrasé, nouvelle
+    version posée à côté en `.nouveau` (écrase un `.nouveau` précédent ; pas découvert comme script) ;
+  - fichier livré puis supprimé par l'utilisateur (dans le manifeste, absent du disque) : pas réinstallé ;
+  - nouveau fichier livré : ajouté ; fichier déjà identique : simplement noté ;
+  - le manifeste est réécrit à la fin (même après une erreur).
+  Premier lancement sans manifeste (paquet décompressé à la main, ou mise à jour depuis une version ≤ 0.8.x) :
+  il est créé au démarrage (et avant toute installation) à partir des fichiers présents de
+  `scripts\exemples\`, `scripts\README.md`, `scripts\lib\LISEZMOI.txt` et
+  `scripts\LICENCE-library-organizer.txt` (jamais les autres scripts de l'utilisateur, ni `.old`, `.nouveau`,
+  `__pycache__`).
+- **Limite connue** : un fichier retiré du paquet (ancien exemple, fichier de `python\` disparu d'une version de
+  Python) reste sur le disque ; il n'est pas supprimé par la mise à jour.
 - **Démarrage** : `--attendre-pid <pid>` traité tout au début (attente de 10 s au plus de la fin de l'ancienne
   instance : profil WebView2 et port MCP libérés), puis nettoyage des `.old` listés et de `data\maj\` avant la
-  création de la fenêtre. `--attendre-pid` n'est jamais retransmis (retiré des arguments d'une relance suivante).
+  création de la fenêtre, et relevé du manifeste des scripts s'il manque. `--attendre-pid` n'est jamais retransmis (retiré des arguments d'une relance suivante).
 - **Installable** : Windows, version livrée (`custom-protocol`, compilation optimisée). En développement ou hors
   Windows, la vérification fonctionne, l'installation est refusée.
 

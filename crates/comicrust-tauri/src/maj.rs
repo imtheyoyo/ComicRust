@@ -12,9 +12,20 @@
 //! 3. **Installation** : extraction (chemins relatifs uniquement, `../` refusé), le paquet doit
 //!    contenir `ComicRust-Tauri.exe`. Windows interdit d'écraser un exe en cours d'exécution mais
 //!    permet de le **renommer** : chaque fichier remplacé (les deux exe, `pdfium.dll`, les `.md`,
-//!    `licences\`) devient `nom.old`, noté dans `data\maj\anciens.txt` et supprimé au lancement
-//!    suivant (seuls ceux-là). Le dossier `data\` (réglages, thèmes, profil WebView2) n'est
-//!    jamais touché.
+//!    `licences\`, `python\`) devient `nom.old`, noté dans `data\maj\anciens.txt` et supprimé au
+//!    lancement suivant (seuls ceux-là). Aucun fichier du paquet n'est écrit sous `data\`
+//!    (réglages, thèmes, profil WebView2) ; seul le manifeste des scripts livrés
+//!    (`data\scripts-livres.txt`) y est tenu à jour.
+//!
+//!    Dossier `scripts\` (scripts de l'utilisateur, exemples livrés dans `scripts\exemples\`),
+//!    même logique que la version egui :
+//!    - un fichier livré que l'utilisateur n'a pas modifié (empreinte notée dans
+//!      `data\scripts-livres.txt`) est mis à jour normalement ;
+//!    - un fichier existant **modifié** (ou inconnu) n'est jamais écrasé : la nouvelle version
+//!      est posée à côté, `nom.py.nouveau` (extension non découverte comme script), et comptée
+//!      dans le bilan (`scriptsNouveaux`) ;
+//!    - un fichier livré puis supprimé par l'utilisateur n'est pas réinstallé ;
+//!    - un nouveau fichier livré est ajouté.
 //! 4. **Redémarrage** : le même exe est relancé avec les mêmes arguments (`--mcp=47803`…) et
 //!    `--attendre-pid <pid>` : la nouvelle instance attend (10 s au plus) la fin de l'ancienne,
 //!    qui libère le profil WebView2 et le port MCP.
@@ -53,6 +64,19 @@ const SUFFIXE_OLD: &str = ".old";
 /// `.old` créés par la mise à jour (chemins relatifs au dossier de l'application, un par
 /// ligne), dans `data\maj\` : seuls ceux-là sont supprimés au lancement suivant.
 const LISTE_OLD: &str = "anciens.txt";
+/// Nouvelle version d'un fichier de `scripts\` modifié par l'utilisateur, posée à côté
+/// (`nom.py.nouveau` : pas découvert comme script, seuls les `.py` le sont).
+pub const SUFFIXE_NOUVEAU: &str = ".nouveau";
+/// Dossier des scripts (protégé : voir l'en-tête du module).
+const DOSSIER_SCRIPTS: &str = "scripts";
+/// Fichiers de `scripts\` livrés par ComicRust (`<sha256>\t<chemin relatif>`), dans `data\`.
+pub const MANIFESTE_SCRIPTS: &str = "scripts-livres.txt";
+/// Fichiers de `scripts\` relevés comme « livrés » au premier lancement sans manifeste (paquet
+/// décompressé à la main, ou mis à jour par une version qui ne le tenait pas) : les exemples et
+/// les fichiers d'accompagnement, jamais les scripts de l'utilisateur. Clés en minuscules
+/// (comparaison insensible à la casse, comme Windows).
+const SCRIPTS_LIVRES: [&str; 4] =
+    ["scripts/exemples/", "scripts/readme.md", "scripts/lib/lisezmoi.txt", "scripts/licence-library-organizer.txt"];
 
 /// Adresse de l'API (`COMICRUST_MAJ_URL` pour un faux serveur de test).
 pub fn url_api() -> String {
@@ -254,17 +278,100 @@ pub fn contient_exe_principal(files: &[PathBuf]) -> bool {
 }
 
 /// Bilan d'une installation (`bilan` de `StatutMaj`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Bilan {
     /// Fichiers installés (remplacés ou nouveaux).
     pub remplaces: usize,
     /// Anciens fichiers renommés en `.old`, supprimés au prochain démarrage.
     pub restes_old: usize,
+    /// Scripts modifiés par l'utilisateur gardés : nombre de `.nouveau` posés à côté.
+    pub scripts_nouveaux: usize,
+    /// Chemins (relatifs, séparateur `/`) des `.nouveau` posés, dans l'ordre du paquet.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub chemins_nouveaux: Vec<String>,
+    /// Scripts livrés supprimés par l'utilisateur, non réinstallés (chemins relatifs, `/`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scripts_non_reinstalles: Vec<String>,
 }
 
 fn dans_dossier(rel: &Path, dir: &str) -> bool {
     rel.components().next().is_some_and(|c| c.as_os_str().eq_ignore_ascii_case(dir))
+}
+
+// ─────────────────────────── Scripts livrés (manifeste) ───────────────────────────
+
+/// Chemin relatif → texte avec `/` (tel qu'écrit dans le manifeste et le bilan).
+fn texte_rel(rel: &Path) -> String {
+    rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+}
+
+/// Chemin relatif → clé de comparaison (`/`, minuscules : Windows ignore la casse).
+fn cle_rel(rel: &Path) -> String {
+    texte_rel(rel).to_lowercase()
+}
+
+/// Manifeste des scripts livrés : clé → (empreinte, chemin relatif tel qu'écrit).
+type Manifeste = std::collections::BTreeMap<String, (String, String)>;
+
+fn chemin_manifeste(app_dir: &Path) -> PathBuf {
+    app_dir.join("data").join(MANIFESTE_SCRIPTS)
+}
+
+fn lire_manifeste(app_dir: &Path) -> Option<Manifeste> {
+    let texte = std::fs::read_to_string(chemin_manifeste(app_dir)).ok()?;
+    let mut m = Manifeste::new();
+    for ligne in texte.lines() {
+        if let Some((h, rel)) = ligne.split_once('\t') {
+            m.insert(cle_rel(Path::new(rel)), (h.to_string(), rel.to_string()));
+        }
+    }
+    Some(m)
+}
+
+fn ecrire_manifeste(app_dir: &Path, m: &Manifeste) -> Result<(), String> {
+    let path = chemin_manifeste(app_dir);
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+    }
+    let texte: String = m.values().map(|(h, rel)| format!("{h}\t{rel}\n")).collect();
+    std::fs::write(&path, texte).map_err(|e| format!("{} : {e}", path.display()))
+}
+
+fn lister_fichiers(dir: &Path, out: &mut Vec<PathBuf>, profondeur: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        match e.file_type() {
+            Ok(t) if t.is_dir() && profondeur > 0 => lister_fichiers(&e.path(), out, profondeur - 1),
+            Ok(t) if t.is_file() => out.push(e.path()),
+            _ => {}
+        }
+    }
+}
+
+/// Premier lancement sans manifeste des scripts livrés : relève les fichiers livrés présents
+/// (voir [`SCRIPTS_LIVRES`]) comme non modifiés et écrit `data\scripts-livres.txt`. Sans effet
+/// si le manifeste existe déjà. Appelé au démarrage (après [`cleanup`]) et avant toute
+/// installation.
+pub fn assurer_manifeste_scripts(app_dir: &Path) {
+    if chemin_manifeste(app_dir).exists() {
+        return;
+    }
+    let mut fichiers = Vec::new();
+    lister_fichiers(&app_dir.join(DOSSIER_SCRIPTS), &mut fichiers, 8);
+    let mut m = Manifeste::new();
+    for f in fichiers {
+        let Ok(rel) = f.strip_prefix(app_dir) else { continue };
+        let cle = cle_rel(rel);
+        let livre = SCRIPTS_LIVRES.iter().any(|d| if d.ends_with('/') { cle.starts_with(d) } else { cle == *d });
+        let a_nous = cle.ends_with(SUFFIXE_NOUVEAU) || cle.ends_with(SUFFIXE_OLD) || cle.contains("/__pycache__/");
+        if livre && !a_nous {
+            if let Ok(h) = sha256_of(&f) {
+                m.insert(cle, (h, texte_rel(rel)));
+            }
+        }
+    }
+    let _ = ecrire_manifeste(app_dir, &m);
 }
 
 /// `x.old`, ou `x.1.old`, `x.2.old`… : jamais un fichier existant (qui peut être à
@@ -279,11 +386,14 @@ fn free_old_name(dst: &Path) -> PathBuf {
 }
 
 /// Copie les fichiers extraits dans `app_dir`, en renommant d'abord ceux qui existent
-/// (`x.exe` → `x.exe.old`, noté dans `data\maj\anciens.txt`). Rien n'est écrit sous `data\`.
-/// Un fichier verrouillé arrête l'installation avec une erreur en français ; les `.old` déjà
-/// créés restent notés (supprimés au prochain démarrage).
+/// (`x.exe` → `x.exe.old`, noté dans `data\maj\anciens.txt`). Aucun fichier du paquet n'est
+/// écrit sous `data\` (seul le manifeste `data\scripts-livres.txt` est mis à jour) ; `scripts\`
+/// est protégé (voir l'en-tête du module). Un fichier verrouillé arrête l'installation avec une
+/// erreur en français ; les `.old` déjà créés restent notés (supprimés au prochain démarrage).
 pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bilan, String> {
     let mut bilan = Bilan::default();
+    assurer_manifeste_scripts(app_dir);
+    let mut manifeste = lire_manifeste(app_dir).unwrap_or_default();
     let mut olds: Vec<PathBuf> = Vec::new();
     let result = (|| -> Result<(), String> {
         for rel in files {
@@ -294,6 +404,38 @@ pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bila
             let dst = app_dir.join(rel);
             if let Some(p) = dst.parent() {
                 std::fs::create_dir_all(p).map_err(|e| format!("{} : {e}", p.display()))?;
+            }
+            let cle = cle_rel(rel);
+            let nouvelle_empreinte = if dans_dossier(rel, DOSSIER_SCRIPTS) {
+                Some(sha256_of(&src).map_err(|e| format!("impossible de lire {} : {e}", rel.display()))?)
+            } else {
+                None
+            };
+            if let Some(nouvelle) = &nouvelle_empreinte {
+                if dst.exists() {
+                    let actuelle =
+                        sha256_of(&dst).map_err(|e| format!("impossible de lire {} : {e}", rel.display()))?;
+                    if &actuelle == nouvelle {
+                        // Déjà identique : rien à copier, le fichier est (re)noté comme livré.
+                        manifeste.insert(cle, (actuelle, texte_rel(rel)));
+                        bilan.remplaces += 1;
+                        continue;
+                    }
+                    if !manifeste.get(&cle).is_some_and(|(h, _)| *h == actuelle) {
+                        // Modifié par l'utilisateur (ou fichier inconnu) : gardé, nouvelle version
+                        // posée à côté (écrase un `.nouveau` d'une mise à jour précédente).
+                        let a_cote = PathBuf::from(format!("{}{SUFFIXE_NOUVEAU}", dst.display()));
+                        std::fs::copy(&src, &a_cote)
+                            .map_err(|e| format!("impossible d'écrire {}{SUFFIXE_NOUVEAU} : {e}", rel.display()))?;
+                        bilan.scripts_nouveaux += 1;
+                        bilan.chemins_nouveaux.push(format!("{}{SUFFIXE_NOUVEAU}", texte_rel(rel)));
+                        continue;
+                    }
+                } else if manifeste.contains_key(&cle) {
+                    // Livré par une version précédente puis supprimé par l'utilisateur.
+                    bilan.scripts_non_reinstalles.push(texte_rel(rel));
+                    continue;
+                }
             }
             let mut ancien = None;
             if dst.exists() {
@@ -318,11 +460,16 @@ pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bila
                 }
                 return Err(format!("impossible d'écrire {} (dossier en lecture seule ?) : {e}", rel.display()));
             }
+            if let Some(h) = nouvelle_empreinte {
+                manifeste.insert(cle, (h, texte_rel(rel)));
+            }
             bilan.remplaces += 1;
         }
         Ok(())
     })();
-    // Notés même après une erreur : les `.old` déjà créés seront supprimés au lancement suivant.
+    // Notés même après une erreur : les `.old` déjà créés seront supprimés au lancement suivant,
+    // le manifeste des scripts livrés reste juste.
+    let _ = ecrire_manifeste(app_dir, &manifeste);
     record_olds(app_dir, &olds);
     bilan.restes_old = olds.len();
     result.map(|()| bilan)

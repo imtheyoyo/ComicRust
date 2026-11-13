@@ -721,6 +721,9 @@ pub fn run() {
     // téléchargements, avant la création de la fenêtre.
     let dossier_app = portable::exe_dir();
     maj::cleanup(&dossier_app);
+    // Premier lancement : relevé des scripts livrés présents (`data\scripts-livres.txt`), pour que
+    // la mise à jour distingue les scripts modifiés par l'utilisateur.
+    maj::assurer_manifeste_scripts(&dossier_app);
     // Profil WebView2 dans `data\webview2` : à positionner AVANT la création de la fenêtre,
     // sinon WebView2 écrit dans %LOCALAPPDATA%. Sans effet hors Windows.
     let webview = portable::dossier_webview(&data);

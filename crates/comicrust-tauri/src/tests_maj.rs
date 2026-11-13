@@ -141,7 +141,7 @@ fn extraction_et_remplacement_gardent_data_et_renomment_en_old() {
 
     let bilan = apply(&extrait, &files, &app).unwrap();
     // 7 fichiers hors data\ ; les deux exe et la dll existaient : 3 `.old`.
-    assert_eq!(bilan, Bilan { remplaces: 7, restes_old: 3 });
+    assert_eq!(bilan, Bilan { remplaces: 7, restes_old: 3, ..Default::default() });
     assert_eq!(std::fs::read(app.join("ComicRust-Tauri.exe")).unwrap(), b"exe 2");
     assert_eq!(std::fs::read(app.join("ComicRust-Tauri.exe.old")).unwrap(), b"exe ancien");
     assert_eq!(std::fs::read(app.join("ComicRust-Tauri-mcp.exe")).unwrap(), b"mcp 2");
@@ -254,7 +254,7 @@ fn contrat_json_du_statut() {
         etat: EtatStatut::Installee,
         manuel: true,
         release: pick_release(JSON, "0.7.3").unwrap().map(|r| r.infos()),
-        bilan: Some(Bilan { remplaces: 7, restes_old: 3 }),
+        bilan: Some(Bilan { remplaces: 7, restes_old: 3, ..Default::default() }),
         ..Default::default()
     };
     let (nom, v) = EvenementMaj::Statut(s).pour_le_front();
@@ -433,7 +433,7 @@ fn bout_en_bout_avec_un_serveur_local() {
     maj.installer("tauri-v99.0.0").unwrap();
     let s = attendre_statut(&maj, &[EtatStatut::Installee, EtatStatut::Echec]);
     assert_eq!(s.etat, EtatStatut::Installee, "{s:?}");
-    assert_eq!(s.bilan, Some(Bilan { remplaces: 7, restes_old: 3 }));
+    assert_eq!(s.bilan, Some(Bilan { remplaces: 7, restes_old: 3, ..Default::default() }));
     assert!(maj.installer("tauri-v99.0.0").is_err(), "déjà installée");
     assert_eq!(std::fs::read(app.join("ComicRust-Tauri.exe")).unwrap(), b"exe 99");
     assert_eq!(std::fs::read(app.join("ComicRust-Tauri-mcp.exe.old")).unwrap(), b"mcp ancien");
@@ -650,4 +650,181 @@ fn tags_tauri_stricts_et_finale_avant_rc() {
 fn virgule_refusee_pour_explorer() {
     // explorer.exe découpe ses options sur les virgules (/root,…, /select,…).
     assert!(verifier_url_page("https://github.com/imtheyoyo/ComicRust/x,/root,C:").is_err());
+}
+
+// ─────────────────────────── Scripts de l'utilisateur ───────────────────────────
+
+/// Extrait le zip `files` (version `n`) puis l'applique à `app`.
+fn installer_zip(tmp: &Path, app: &Path, n: u32, files: &[(&str, &[u8])]) -> Bilan {
+    let zip_path = tmp.join(format!("v{n}.zip"));
+    std::fs::write(&zip_path, zip_of(files)).unwrap();
+    let extrait = tmp.join(format!("extrait{n}"));
+    let liste = extract(&zip_path, &extrait).unwrap();
+    apply(&extrait, &liste, app).unwrap()
+}
+
+fn cles_manifeste(app: &Path) -> Vec<String> {
+    lire_manifeste(app).unwrap().into_keys().collect()
+}
+
+/// Scripts de l'utilisateur (comme la version egui) : un exemple modifié n'est jamais écrasé
+/// (nouvelle version à côté, `.nouveau`, comptée dans le bilan), un exemple non modifié est mis
+/// à jour, un exemple supprimé ne revient pas, un nouvel exemple est ajouté, les `.old` de
+/// l'utilisateur ne sont jamais supprimés ; `python\` est remplacé normalement ; `data\` intact.
+#[test]
+fn mise_a_jour_respecte_les_scripts_de_l_utilisateur() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = installation(tmp.path());
+    let ex = |n: &str| app.join("scripts").join("exemples").join(n);
+    // Paquet v1 décompressé à la main (scripts et Python embarqué).
+    let v1: &[(&str, &[u8])] = &[
+        ("scripts/exemples/a.py", b"a 1"),
+        ("scripts/exemples/b.py", b"b 1"),
+        ("scripts/exemples/c.py", b"c 1"),
+        ("scripts/exemples/bd2/motifs.json", b"motifs 1"),
+        ("scripts/README.md", b"lisez 1"),
+        ("scripts/lib/LISEZMOI.txt", b"lib 1"),
+        ("python/python.exe", b"python 1"),
+    ];
+    for (name, data) in v1 {
+        let p = app.join(name);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, data).unwrap();
+    }
+    // Script, module et `.old` de l'utilisateur.
+    std::fs::write(app.join("scripts/mon_script.py"), b"perso").unwrap();
+    std::fs::write(app.join("scripts/lib/mon_module.py"), b"module perso").unwrap();
+    std::fs::write(app.join("scripts/mon_script.py.old"), b"sauvegarde perso").unwrap();
+    std::fs::write(ex("c.py.old"), b"ma sauvegarde de c").unwrap();
+
+    // Premier lancement : manifeste créé à partir des fichiers livrés présents (ni les scripts
+    // de l'utilisateur, ni ses `.old`) ; un second appel ne le change pas.
+    assurer_manifeste_scripts(&app);
+    assert_eq!(
+        cles_manifeste(&app),
+        [
+            "scripts/exemples/a.py",
+            "scripts/exemples/b.py",
+            "scripts/exemples/bd2/motifs.json",
+            "scripts/exemples/c.py",
+            "scripts/lib/lisezmoi.txt",
+            "scripts/readme.md",
+        ]
+    );
+    let texte = std::fs::read_to_string(app.join("data").join(MANIFESTE_SCRIPTS)).unwrap();
+    assert!(texte.contains(&format!("{}\tscripts/README.md\n", sha_hex(b"lisez 1"))), "{texte}");
+    // L'utilisateur modifie a.py, supprime b.py.
+    std::fs::write(ex("a.py"), b"a 1 modifie").unwrap();
+    std::fs::remove_file(ex("b.py")).unwrap();
+    assurer_manifeste_scripts(&app);
+    assert_eq!(std::fs::read_to_string(app.join("data").join(MANIFESTE_SCRIPTS)).unwrap(), texte);
+
+    let bilan = installer_zip(
+        tmp.path(),
+        &app,
+        2,
+        &[
+            ("ComicRust-Tauri.exe", b"exe 2"),
+            ("python/python.exe", b"python 2"),
+            ("scripts/exemples/a.py", b"a 2"),
+            ("scripts/exemples/b.py", b"b 2"),
+            ("scripts/exemples/c.py", b"c 2"),
+            ("scripts/exemples/d.py", b"d 2"),
+            ("scripts/exemples/bd2/motifs.json", b"motifs 1"),
+            ("scripts/mon_script.py", b"homonyme livre"),
+            ("scripts/README.md", b"lisez 1"),
+        ],
+    );
+    assert_eq!(std::fs::read(ex("a.py")).unwrap(), b"a 1 modifie", "modifié : jamais écrasé");
+    assert_eq!(std::fs::read(ex("a.py.nouveau")).unwrap(), b"a 2");
+    assert!(!ex("b.py").exists(), "supprimé par l'utilisateur : pas réinstallé");
+    assert_eq!(std::fs::read(ex("c.py")).unwrap(), b"c 2", "non modifié : mis à jour");
+    assert_eq!(std::fs::read(ex("d.py")).unwrap(), b"d 2", "nouvel exemple installé");
+    assert_eq!(std::fs::read(app.join("scripts/mon_script.py")).unwrap(), b"perso");
+    assert_eq!(std::fs::read(app.join("scripts/mon_script.py.nouveau")).unwrap(), b"homonyme livre");
+    assert_eq!(std::fs::read(app.join("scripts/lib/mon_module.py")).unwrap(), b"module perso");
+    // Python embarqué : remplacé comme le reste (`.old`).
+    assert_eq!(std::fs::read(app.join("python/python.exe")).unwrap(), b"python 2");
+    assert_eq!(std::fs::read(app.join("python/python.exe.old")).unwrap(), b"python 1");
+    // L'ancien c.py est mis de côté sans toucher au `.old` de l'utilisateur.
+    assert_eq!(std::fs::read(ex("c.py.old")).unwrap(), b"ma sauvegarde de c");
+    assert_eq!(std::fs::read(ex("c.py.1.old")).unwrap(), b"c 1");
+    // Bilan : exe, python, c, d, motifs (identique), README (identique) ; 3 `.old`.
+    assert_eq!(
+        bilan,
+        Bilan {
+            remplaces: 6,
+            restes_old: 3,
+            scripts_nouveaux: 2,
+            chemins_nouveaux: vec!["scripts/exemples/a.py.nouveau".into(), "scripts/mon_script.py.nouveau".into()],
+            scripts_non_reinstalles: vec!["scripts/exemples/b.py".into()],
+        }
+    );
+    let statut = StatutMaj { bilan: Some(bilan), ..StatutMaj::simple(EtatStatut::Installee, true) };
+    let (_, v) = EvenementMaj::Statut(statut).pour_le_front();
+    assert_eq!(v["bilan"]["scriptsNouveaux"], 2);
+    assert_eq!(v["bilan"]["cheminsNouveaux"][1], "scripts/mon_script.py.nouveau");
+    assert_eq!(v["bilan"]["scriptsNonReinstalles"][0], "scripts/exemples/b.py");
+    // Manifeste : d.py ajouté, c.py à sa nouvelle empreinte, b.py gardé (jamais réinstallé),
+    // a.py à l'empreinte livrée d'origine, script de l'utilisateur absent.
+    let m = lire_manifeste(&app).unwrap();
+    assert_eq!(m["scripts/exemples/d.py"].0, sha_hex(b"d 2"));
+    assert_eq!(m["scripts/exemples/c.py"].0, sha_hex(b"c 2"));
+    assert_eq!(m["scripts/exemples/b.py"].0, sha_hex(b"b 1"));
+    assert_eq!(m["scripts/exemples/a.py"].0, sha_hex(b"a 1"));
+    assert!(!m.contains_key("scripts/mon_script.py"));
+    data_intact(&app);
+
+    // Lancement suivant : seuls les `.old` de la mise à jour sont supprimés.
+    cleanup(&app);
+    assert!(!app.join("ComicRust-Tauri.exe.old").exists() && !app.join("python/python.exe.old").exists());
+    assert!(!ex("c.py.1.old").exists());
+    assert_eq!(std::fs::read(ex("c.py.old")).unwrap(), b"ma sauvegarde de c");
+    assert_eq!(std::fs::read(app.join("scripts/mon_script.py.old")).unwrap(), b"sauvegarde perso");
+    assert!(app.join("data").join(MANIFESTE_SCRIPTS).exists(), "manifeste conservé par le nettoyage");
+    // Les `.nouveau` ne sont pas des scripts.
+    let trouves = comicrust_core::scripting::discover(&app.join("scripts"));
+    assert!(trouves.iter().all(|s| !s.rel_path.ends_with(SUFFIXE_NOUVEAU)), "{trouves:?}");
+
+    // Mise à jour suivante : c.py (non modifié depuis) suit ; a.py reste, son `.nouveau` est
+    // remplacé ; b.py ne revient toujours pas.
+    let bilan = installer_zip(
+        tmp.path(),
+        &app,
+        3,
+        &[("scripts/exemples/c.py", b"c 3"), ("scripts/exemples/a.py", b"a 3"), ("scripts/exemples/b.py", b"b 3")],
+    );
+    assert_eq!(std::fs::read(ex("c.py")).unwrap(), b"c 3");
+    assert_eq!(std::fs::read(ex("a.py")).unwrap(), b"a 1 modifie");
+    assert_eq!(std::fs::read(ex("a.py.nouveau")).unwrap(), b"a 3");
+    assert!(!ex("b.py").exists());
+    assert_eq!((bilan.remplaces, bilan.scripts_nouveaux), (1, 1));
+    // L'utilisateur reprend la version livrée de a.py : de nouveau suivi par les mises à jour.
+    std::fs::write(ex("a.py"), b"a 3").unwrap();
+    installer_zip(tmp.path(), &app, 4, &[("scripts/exemples/a.py", b"a 3")]);
+    installer_zip(tmp.path(), &app, 5, &[("scripts/exemples/a.py", b"a 5")]);
+    assert_eq!(std::fs::read(ex("a.py")).unwrap(), b"a 5");
+    data_intact(&app);
+}
+
+/// Sans manifeste au moment d'installer, il est relevé d'abord : un exemple livré non modifié
+/// est mis à jour (pas de `.nouveau`). Une installation sans `scripts\` (ancienne version Tauri)
+/// reçoit tous les scripts.
+#[test]
+fn manifeste_releve_avant_installation_et_premiere_livraison() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = installation(tmp.path());
+    let b = installer_zip(tmp.path(), &app, 1, &[("scripts/exemples/a.py", b"a 1"), ("scripts/README.md", b"l 1")]);
+    assert_eq!((b.remplaces, b.scripts_nouveaux, b.restes_old), (2, 0, 0));
+    assert_eq!(cles_manifeste(&app), ["scripts/exemples/a.py", "scripts/readme.md"]);
+
+    // Paquet décompressé à la main, sans manifeste.
+    let app2 = tmp.path().join("app2");
+    std::fs::create_dir_all(app2.join("scripts/exemples")).unwrap();
+    std::fs::write(app2.join("scripts/exemples/a.py"), b"a 1").unwrap();
+    std::fs::write(app2.join("scripts/perso.py"), b"perso").unwrap();
+    let b = installer_zip(tmp.path(), &app2, 2, &[("scripts/exemples/a.py", b"a 2"), ("scripts/perso.py", b"livre")]);
+    assert_eq!(std::fs::read(app2.join("scripts/exemples/a.py")).unwrap(), b"a 2");
+    assert_eq!(std::fs::read(app2.join("scripts/perso.py")).unwrap(), b"perso");
+    assert_eq!(b.chemins_nouveaux, ["scripts/perso.py.nouveau"]);
 }

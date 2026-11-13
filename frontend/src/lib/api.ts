@@ -734,7 +734,21 @@ export interface StatutMaj {
   manuel: boolean;
   release?: ReleaseMaj;
   erreur?: string;
-  bilan?: { remplaces: number; restesOld: number };
+  bilan?: BilanMaj;
+}
+
+/** Bilan d'une installation réussie (`StatutMaj.bilan`, état `installee`). */
+export interface BilanMaj {
+  /** Fichiers installés (remplacés ou nouveaux, hors `data\`). */
+  remplaces: number;
+  /** Anciens fichiers renommés en `.old`, supprimés au prochain démarrage. */
+  restesOld: number;
+  /** Scripts de `scripts\` modifiés par l'utilisateur et gardés : `.nouveau` posés à côté. */
+  scriptsNouveaux: number;
+  /** Chemins des `.nouveau` posés (absent si aucun). */
+  cheminsNouveaux?: string[];
+  /** Scripts livrés supprimés par l'utilisateur, non réinstallés (absent si aucun). */
+  scriptsNonReinstalles?: string[];
 }
 
 export interface EtatMaj {

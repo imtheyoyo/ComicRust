@@ -109,7 +109,7 @@ export function creerMajSimulee(ctx: ContexteMaj) {
     ctx.emettre('maj://progression', { recu: total, total });
     await ctx.pause(300);
     occupe = false;
-    publier({ etat: 'installee', manuel, release: RELEASE, bilan: { remplaces: 42, restesOld: 1 } });
+    publier({ etat: 'installee', manuel, release: RELEASE, bilan: { remplaces: 42, restesOld: 1, scriptsNouveaux: 0 } });
   }
 
   return {

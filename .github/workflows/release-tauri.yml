@@ -84,6 +84,12 @@ jobs:
           tar -xzf pdfium.tgz -C pdfium
           echo "PDFIUM_DYNAMIC_LIB_PATH=$(cygpath -w "$PWD/pdfium/bin")" >> "$GITHUB_ENV"
 
+      - name: Python embarqué (téléchargement et vérification SHA-256)
+        shell: pwsh
+        # Même distribution que la version egui : version et empreinte figées dans
+        # .github/python-embarque.env ; définit COMICRUST_PYTHON (scripts testés avec ce Python).
+        run: ./scripts/python_embarque.ps1 -Destination python-embed
+
       - name: Clippy et tests de la crate Tauri
         run: |
           cargo clippy --locked --target $env:TARGET -p comicrust-tauri --features app --all-targets -- -D warnings
@@ -115,12 +121,51 @@ jobs:
           Copy-Item "recette/$tag.md" "$name/RECETTE.md"
           Copy-Item pdfium/LICENSE "$name/licences/PDFium-LICENSE.txt"
           Copy-Item licences/* "$name/licences/"
+          # Python embarqué (distribution officielle « embeddable », vérifiée plus haut) et sa
+          # licence (PSF). Partagé par ComicRust-Tauri.exe et ComicRust-Tauri-mcp.exe.
+          Copy-Item -Recurse python-embed "$name/python"
+          Copy-Item python-embed/LICENSE.txt "$name/licences/Python-LICENSE.txt"
+          # Dossier scripts\ (même disposition que scripts-exemples/) : exemples dans
+          # scripts\exemples\, scripts\lib\ avec son LISEZMOI, README.md. La mise à jour intégrée
+          # ne remplace jamais un script modifié par l'utilisateur (data\scripts-livres.txt).
+          New-Item -ItemType Directory -Force "$name/scripts" | Out-Null
+          Copy-Item -Recurse scripts-exemples/* "$name/scripts/"
+          Copy-Item docs/scripts.md $name
+          if (-not (Test-Path "$name/scripts/exemples/nettoyage.py")) { throw "scripts\exemples\ absent du paquet" }
+          if (-not (Test-Path "$name/scripts/exemples/bd2/motifs.json")) { throw "bd2\motifs.json absent du paquet" }
+          Get-ChildItem "$name/scripts" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
           # Le dossier data\ (réglages, thèmes, profil WebView2) est créé au premier lancement.
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "zip=$name.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Essai du paquet (Python embarqué et scripts d'exemple)
+        shell: pwsh
+        run: |
+          $name = "${{ steps.pkg.outputs.name }}"
+          $py = (Resolve-Path "$name/python/python.exe").Path
+          # Modules natifs de la distribution (SSL, SQLite…).
+          & $py -I -c "import ssl, json, urllib.request, sqlite3, zipfile, lzma, bz2, ctypes; print(ssl.OPENSSL_VERSION, '- SQLite', sqlite3.sqlite_version)"
+          if ($LASTEXITCODE -ne 0) { throw "Python embarqué : modules natifs indisponibles" }
+          # HTTPS avec les certificats du magasin Windows (comme les scripts Comic Vine).
+          & $py -I -c "import ssl, urllib.request as u; r = u.urlopen(u.Request('https://api.github.com/', headers={'User-Agent': 'ComicRust-CI'}), timeout=30, context=ssl.create_default_context()); print('HTTPS', r.status)"
+          if ($LASTEXITCODE -ne 0) { throw "Python embarqué : HTTPS en échec" }
+          # Scripts d'exemple du paquet, exécutés par l'hôte de scripts (comicrust-core) avec ce
+          # Python et le dossier scripts\ du paquet.
+          $env:COMICRUST_PYTHON = $py
+          $env:COMICRUST_EXIGER_PYTHON = "1"
+          $env:COMICRUST_DOSSIER_EXEMPLES = (Resolve-Path "$name/scripts").Path
+          cargo test --locked --target $env:TARGET -p comicrust-core --test scripts_exemples
+          if ($LASTEXITCODE -ne 0) { throw "scripts d'exemple en échec avec le Python du paquet" }
+          Get-ChildItem "$name/scripts" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+
+      - name: Archive zip et empreinte SHA-256
+        shell: pwsh
+        run: |
+          $name = "${{ steps.pkg.outputs.name }}"
           Compress-Archive -Path "$name/*" -DestinationPath "$name.zip" -Force
           $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "zip=$name.zip" >> $env:GITHUB_OUTPUT
 
       - name: Publication de la release
         uses: softprops/action-gh-release@v3
