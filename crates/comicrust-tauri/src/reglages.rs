@@ -54,6 +54,62 @@ pub struct Reglages {
     /// Mise à jour intégrée (vérification au démarrage, version ignorée).
     #[serde(skip_serializing_if = "ReglagesMaj::est_vide")]
     pub maj: ReglagesMaj,
+    /// Scripts Python (automatismes, scripts activés / désactivés, réglages de chaque script ;
+    /// valeurs secrètes chiffrées par `comicrust_core::secret`). Lecture tolérante.
+    #[serde(skip_serializing_if = "ReglagesScripts::est_vide")]
+    pub scripts: ReglagesScripts,
+}
+
+/// Réglages des scripts Python (section `scripts`, `docs/tauri/ipc-scripts.md`) :
+/// - `auto` : exécuter les automatismes (absent = **non**, comme la version egui) ;
+/// - `desactives` / `actives` : choix de l'utilisateur (identifiants de points d'entrée) qui
+///   priment sur l'en-tête `#@Enabled` ;
+/// - `valeurs` : réglages de chaque script (clé = chemin relatif du fichier), forme
+///   `ScriptSettings::to_stored` (valeur secrète = `{"$secret": "dpapi:…"}`, jamais en clair).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReglagesScripts {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto: Option<bool>,
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub desactives: std::collections::BTreeSet<String>,
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub actives: std::collections::BTreeSet<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub valeurs: BTreeMap<String, Value>,
+}
+
+impl ReglagesScripts {
+    pub fn est_vide(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Depuis du JSON quelconque (entrée invalide ignorée).
+    pub fn depuis_json(v: &Value) -> Self {
+        let Some(o) = v.as_object() else { return Self::default() };
+        let ids = |c: &str| {
+            o.get(c)
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).filter(|s| s.len() <= 1024).map(str::to_string).collect())
+                .unwrap_or_default()
+        };
+        Self {
+            auto: o.get("auto").and_then(Value::as_bool),
+            desactives: ids("desactives"),
+            actives: ids("actives"),
+            valeurs: o
+                .get("valeurs")
+                .and_then(Value::as_object)
+                .map(|m| m.iter().filter(|(_, v)| v.is_object()).map(|(k, v)| (k.clone(), v.clone())).collect())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ReglagesScripts {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::depuis_json(&Value::deserialize(d)?))
+    }
 }
 
 /// Réglages de la mise à jour (section `maj`, `docs/tauri/ipc-maj.md`) : `verifierAuDemarrage`
@@ -583,11 +639,27 @@ mod tests {
             vue: PreferencesVue::default(),
             edition: ReglagesEdition::default(),
             maj: ReglagesMaj::default(),
+            scripts: ReglagesScripts {
+                auto: Some(true),
+                desactives: ["a.py:f".to_string()].into(),
+                actives: Default::default(),
+                valeurs: [("a.py".to_string(), serde_json::json!({"n": 3}))].into(),
+            },
         };
         ecrire(d.path(), &r).unwrap();
         assert_eq!(lire(d.path()).unwrap(), r);
         let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
         assert!(texte.contains("\"mode\": \"comicrack\"") && texte.contains("cheminIni"), "{texte}");
+    }
+
+    #[test]
+    fn reglages_scripts_tolerants() {
+        let v = serde_json::json!({"auto": "oui", "desactives": ["x", 3], "valeurs": {"a.py": {"k": 1}, "b.py": 2}});
+        let r = ReglagesScripts::depuis_json(&v);
+        assert_eq!(r.auto, None, "booléen attendu");
+        assert_eq!(r.desactives.iter().collect::<Vec<_>>(), ["x"]);
+        assert_eq!(r.valeurs.len(), 1, "valeur non objet ignorée");
+        assert_eq!(ReglagesScripts::depuis_json(&serde_json::json!(12)), ReglagesScripts::default());
     }
 
     #[test]

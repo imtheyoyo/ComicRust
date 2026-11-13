@@ -313,6 +313,9 @@ struct Interne {
     /// Mode lié à ComicRack par MySQL : paramètres de connexion (en mémoire seulement, relus
     /// dans `ComicRack.ini` à chaque ouverture ; jamais écrits dans les réglages).
     comicrack: Option<DbConfig>,
+    /// Livres ajoutés par la dernière analyse, pas encore lus par les automatismes `NewBooks`
+    /// des scripts ([`Biblio::prendre_ajoutes`]).
+    ajoutes: Vec<String>,
 }
 
 /// D'où vient la bibliothèque ouverte (pour l'édition : où écrire).
@@ -883,6 +886,7 @@ impl Biblio {
                 g.contenu += 1;
                 g.vue = None;
             }
+            g.ajoutes = rapport.added.iter().map(|b| b.id.clone()).collect();
         }
         self.negatif.lock().unwrap_or_else(|e| e.into_inner()).clear();
         Ok(EvenementScan::Termine {
@@ -925,6 +929,11 @@ impl Biblio {
         let SourceBiblio::ComicrackMysql(cfg) = self.source() else { return None };
         let ecriture = reglages::lire(&self.data).ok()?.edition.ecriture_comicrack.unwrap_or(false);
         ecriture.then_some(cfg)
+    }
+
+    /// Livres ajoutés par la dernière analyse (vidé à la lecture) : automatismes `NewBooks`.
+    pub fn prendre_ajoutes(&self) -> Vec<String> {
+        std::mem::take(&mut self.verrou().ajoutes)
     }
 
     /// Une analyse est-elle en cours ?
