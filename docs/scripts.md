@@ -4,6 +4,13 @@ Depuis la v0.10.0, ComicRust exécute des **scripts Python 3** pour modifier les
 renommer ou ranger les fichiers, récupérer des informations en ligne (Comic Vine…) ou
 automatiser des tâches (scripts déclenchés tout seuls).
 
+> **Deux versions, mêmes scripts.** Ce document vaut pour `ComicRust.exe` (interface egui,
+> depuis la v0.10.0) et pour `ComicRust-Tauri.exe` (interface web, depuis la tauri-v0.9.0) :
+> même moteur, même module `comicrust`, mêmes en-têtes, mêmes scripts fournis. Partout où il est
+> écrit « à côté de `ComicRust.exe` », lire « à côté de l'exécutable » : `ComicRust-Tauri.exe`
+> pour la version Tauri (`ComicRust-Tauri-mcp.exe` partage le même dossier). Les différences
+> d'interface sont indiquées dans « Dans ComicRust ».
+
 > Ce ne sont **pas** les scripts IronPython de ComicRack : leur API (`ComicRack.App`,
 > objets .NET) n'existe pas ici. Le principe des en-têtes `#@Name`, `#@Hook`… est repris.
 
@@ -700,6 +707,18 @@ s.save()                          # aussi fait automatiquement à la fin si modi
   la bibliothèque sans aperçu. Un seul automatisme à la fois par hook (les suivants
   attendent), jamais pendant un transfert ; erreurs signalées avec le nom du script.
 - Réglages des scripts gardés dans `data\comicrust.ron` (valeurs secrètes chiffrées).
+- **Version Tauri (`ComicRust-Tauri.exe`)** : même fonctionnement, avec ces différences
+  d'interface. Menu **📜 Scripts** de la barre d'outils : scripts `Library`, scripts `Books`,
+  « Gérer les scripts… », « Recharger les scripts » (le dossier `scripts\` est indiqué dans
+  « Gérer les scripts »). Dans « Gérer les scripts » : case « Exécuter les scripts
+  automatiques » (décochée par défaut), « ⚙ Configurer… » (lance la fonction `ConfigScript` du
+  fichier) et « Réglages… » (réglages enregistrés, communs à tout le fichier ; une valeur
+  secrète s'affiche « •••• » et reste inchangée si on n'y touche pas). Questions : saisie de
+  texte (masquée pour `secret=True`), choix dans une liste (`ask_choice`) ou Oui / Non
+  (`confirm`) ; Annuler ou Échap = valeur par défaut. Fenêtre **Infos** : bouton
+  **📜 Scripts ▾** (scripts `Editor`) qui remplit les champs sans rien enregistrer (et coche
+  « Écrire aussi les infos dans le fichier » si le script le demande). Réglages des scripts
+  enregistrés dans `data\comicrust-tauri.json` (section `scripts`).
 
 ## Exemples
 

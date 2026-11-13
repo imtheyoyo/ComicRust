@@ -1,7 +1,7 @@
 <script lang="ts">
   // Fenêtre d'exécution d'un script (comme script_run_window de la version egui) : progression
   // (fraction, texte, détail, image), journal défilant coloré par genre, Arrêter ; questions
-  // (ask : Oui / Non, message : OK), formulaires et listes de choix dans leurs propres fenêtres ;
+  // (QuestionScript : texte, choix, confirmation, message), formulaires et listes de choix dans leurs propres fenêtres ;
   // à la fin, aperçu des modifications (cases à cocher, conflits) puis Appliquer / Annuler et
   // bilan. En lecture seule, l'aperçu reste visible mais Appliquer est désactivé avec le motif.
   // Les fenêtres de question / formulaire / choix sont des <dialog> frères (pas enfants) : Échap
@@ -12,6 +12,7 @@
   import { scripts, type ExecutionScript } from '../lib/scripts.svelte';
   import ChoixScript from './ChoixScript.svelte';
   import FormulaireScript from './FormulaireScript.svelte';
+  import QuestionScript from './QuestionScript.svelte';
 
   interface Props { execution: ExecutionScript }
   let { execution: e }: Props = $props();
@@ -76,9 +77,11 @@
     }
   }
 
+  // Résumé rédigé par le backend ; recomposé seulement s'il manque.
   const resumeBilan = $derived.by(() => {
     const b = e.bilan;
     if (!b) return '';
+    if (b.resume?.trim()) return b.resume.trim().replace(/\.$/, '');
     const p = [`${b.fiches} fiche(s)`, `${b.renommages} renommage(s)`, `${b.comicinfo} ComicInfo.xml écrit(s)`];
     if (b.erreurs.length) p.push(`${b.erreurs.length} erreur(s)`);
     return p.join(', ') + (b.arrete ? ' — arrêté en cours de route' : '');
@@ -117,7 +120,7 @@
     {:else if e.fin.nbModifs === 0}
       <p class="discret">Aucune modification demandée.</p>
     {:else}
-      <p>{e.fin.nbModifs} modification(s) préparée(s) avant {e.fin.etat === 'annule' ? "l'arrêt" : "l'erreur"}.</p>
+      <p>{e.fin.nbModifs} modification(s) préparée(s){e.fin.etat === 'termine' ? '' : e.fin.etat === 'annule' ? " avant l'arrêt" : " avant l'erreur"}.</p>
       <button onclick={() => void scripts.chargerApercu()} data-testid="voir-apercu">Voir l'aperçu de ces modifications</button>
     {/if}
   {/if}
@@ -127,6 +130,7 @@
     <section class="apercu" aria-label="Aperçu des modifications" data-testid="apercu-script">
       <h3>Aperçu des modifications</h3>
       <p>{[nb.fiche ? `${nb.fiche} champ(s) de fiche` : '', nb.renommage ? `${nb.renommage} renommage(s)` : '', nb.comicinfo ? `${nb.comicinfo} ComicInfo.xml` : ''].filter(Boolean).join(' · ') || 'Aucune modification.'}</p>
+      {#if a.inchanges > 0}<p class="discret petit" data-testid="apercu-inchanges">{a.inchanges} valeur(s) déjà identique(s) à la fiche, ignorée(s).</p>{/if}
       {#each a.conflits as m, k (k)}<p class="conflit" role="alert">⚠ {m}</p>{/each}
       {#if a.lectureSeule}<p class="lecture-seule" role="note" data-testid="motif-lecture-seule">🔒 Lecture seule : {a.motif ?? 'la bibliothèque ne peut pas être modifiée.'}</p>{/if}
       <div class="ligne-outils">
@@ -140,9 +144,9 @@
           <tbody>
             {#each a.lignes as l (l.cle)}
               <tr class:conflit={!!l.conflit} class:decoche={!cochees.has(l.cle)} title={l.conflit ? `Conflit : ${l.conflit}` : undefined}>
-                <td><input type="checkbox" checked={cochees.has(l.cle)} onchange={(ev) => basculer(l.cle, ev.currentTarget.checked)} aria-label="Appliquer {l.champ} de {l.titre}" /></td>
+                <td><input type="checkbox" checked={cochees.has(l.cle)} onchange={(ev) => basculer(l.cle, ev.currentTarget.checked)} aria-label="Appliquer {l.libelle || l.champ} de {l.titre}" /></td>
                 <td class="titre">{l.titre}</td>
-                <td>{l.champ}</td>
+                <td title={l.libelle && l.libelle !== l.champ ? l.champ : undefined}>{l.libelle || l.champ}</td>
                 <td class="valeur avant">{l.avant}</td>
                 <td aria-hidden="true">→</td>
                 <td class="valeur">{l.apres}{#if l.conflit}<span class="conflit-texte">⚠ {l.conflit}</span>{/if}</td>
@@ -181,26 +185,9 @@
 </dialog>
 
 {#if e.question}
-  {@const qu = e.question}
-  {#key qu.reqId}
-    <dialog class="question" aria-labelledby="titre-question" aria-describedby="texte-question"
-      use:modale={{ peutFermer: () => true, fermer: () => void scripts.repondre('question', null), ouvrirAuMontage: true }} data-testid="question-script">
-      <p class="discret petit">📜 {e.script.nom}</p>
-      <h2 id="titre-question">{qu.titre || (qu.genre === 'ask' ? 'Question du script' : 'Message du script')}</h2>
-      <p id="texte-question" class="texte-question">{qu.texte}</p>
-      <footer>
-        <button class="mini" onclick={() => void scripts.arreterScript()}>⏹ Arrêter le script</button>
-        <span class="espace"></span>
-        {#if qu.genre === 'ask'}
-          <!-- svelte-ignore a11y_autofocus -->
-          <button class="principal" autofocus onclick={() => void scripts.repondre('question', true)} data-testid="question-oui">Oui</button>
-          <button onclick={() => void scripts.repondre('question', false)} data-testid="question-non">Non</button>
-        {:else}
-          <!-- svelte-ignore a11y_autofocus -->
-          <button class="principal" autofocus onclick={() => void scripts.repondre('question', null)} data-testid="question-ok">OK</button>
-        {/if}
-      </footer>
-    </dialog>
+  {#key e.question.reqId}
+    <QuestionScript question={e.question} nomScript={e.script.nom} onrepondre={(v) => void scripts.repondre('question', v)}
+      onarreter={() => void scripts.arreterScript()} />
   {/key}
 {/if}
 
@@ -220,7 +207,7 @@
 
 <style>
   .execution { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 8px; }
-  .execution:not([open]), .question:not([open]) { display: none; }
+  .execution:not([open]) { display: none; }
   h2 { margin: 0; overflow-wrap: anywhere; }
   h3 { margin: 0; font-size: 15px; }
   p { margin: 0; }
@@ -264,8 +251,6 @@
   footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--cr-bordure); padding-top: 8px; }
   .espace { flex: 1; }
   .mini { padding: 2px 8px; font-size: 12px; }
-  .question { width: min(480px, calc(100vw - 32px)); }
-  .texte-question { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow-y: auto; margin-bottom: 12px; }
   button.principal { background: var(--cr-accent); color: var(--cr-accent-texte); border-color: var(--cr-accent); font-weight: 600; min-width: 80px; }
   button.principal:hover:not(:disabled) { background: var(--cr-accent); filter: brightness(1.1); }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

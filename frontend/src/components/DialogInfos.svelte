@@ -9,7 +9,7 @@
   // Aucune logique métier ici : valeurs, validation et suggestions viennent du backend.
   import { onDestroy, onMount, tick } from 'svelte';
   import {
-    ajouterValeurPerso, appliquerModifications, annulerOperation, ecouter, lireFiches, messageErreur, verifierChamps,
+    ajouterValeurPerso, appliquerModifications, annulerOperation, CLE_ECRIRE_DANS_FICHIER, ecouter, lireFiches, messageErreur, verifierChamps,
     type BilanOperation, type ChampFiche, type ChampModifie, type FicheEdition, type PageLivre, type ProgressionEdition,
   } from '../lib/api';
   import { connexion } from '../lib/connexion.svelte';
@@ -260,7 +260,15 @@
       }
       const remplis: string[] = [];
       const ignores: string[] = [];
+      // Le script a demandé write_info : la case « Écrire aussi les infos dans le fichier » est cochée
+      // (si possible ; rien n'est enregistré avant OK / Appliquer).
+      let ecrire = '';
+      if (champs[CLE_ECRIRE_DANS_FICHIER] === true) {
+        if (fiche?.ecrireDansFichierPossible) { ecrireFichier = true; ecrire = '\nCase « Écrire aussi les infos dans le fichier » cochée à la demande du script.'; }
+        else ecrire = '\nLe script demande d\'écrire les infos dans le fichier : impossible pour ce livre.';
+      }
       for (const [nom, v] of Object.entries(champs)) {
+        if (nom === CLE_ECRIRE_DANS_FICHIER) continue;
         const c = champsParNom.get(nom);
         if (!c) { ignores.push(nom); continue; }
         saisir(c, texteValeur(v));
@@ -269,7 +277,7 @@
       message = {
         texte: (remplis.length === 0 ? 'Script terminé : aucun champ rempli.'
           : `Script terminé : ${remplis.length} champ(s) rempli(s) (${remplis.join(', ')}). Vérifie, puis OK ou Appliquer pour enregistrer.`)
-          + (ignores.length ? `\nIgnoré(s) : ${ignores.join(', ')}.` : ''),
+          + (ignores.length ? `\nIgnoré(s) : ${ignores.join(', ')}.` : '') + ecrire,
         erreur: false,
       };
     });

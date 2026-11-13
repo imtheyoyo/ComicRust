@@ -7,7 +7,7 @@ import {
   scriptsActiver, scriptsAuto, scriptsLister, scriptsRecharger, scriptVignettesVoulues, imageScriptSure,
   type ApercuScript, type BilanScript, type ChooseSpecScript, type EtatScripts, type EvAppliqueScript, type EvAutoScript,
   type EvChoixScript, type EvFinScript, type EvFormulaireScript, type EvJournalScript, type EvProgressionScript,
-  type EvQuestionScript, type EvVignetteScript, type FormSpecScript, type GenreJournal, type HookScript, type InfoScript,
+  type EvQuestionScript, type EvVignetteScript, type DetailQuestionScript, type FormSpecScript, type GenreJournal, type HookScript, type InfoScript,
 } from './api';
 
 /** Nombre maximal de lignes gardées dans le journal d'une exécution (les plus anciennes partent). */
@@ -16,7 +16,9 @@ const MAX_JOURNAL = 5000;
 const MAX_AUTO = 1000;
 
 export interface LigneJournal { n: number; genre: GenreJournal; texte: string }
-export interface QuestionScript { reqId: number; genre: 'ask' | 'message'; titre?: string; texte: string }
+/** Question en cours. `question` absent pour un message ; pour une question d'un ancien
+ *  contrat sans détail, on la traite comme une confirmation. */
+export interface QuestionScript { reqId: number; genre: 'ask' | 'message'; titre?: string; texte: string; question?: DetailQuestionScript }
 export interface FormulaireEnCours { reqId: number; spec: FormSpecScript }
 export interface ChoixEnCours { reqId: number; spec: ChooseSpecScript; vignettes: Record<number, string> }
 
@@ -81,10 +83,18 @@ class GestionScripts {
     return (this.etat?.scripts ?? []).filter((s) => s.actif && s.hooks.includes(hook));
   }
 
+  /** Point d'entrée par son id (opaque). */
+  script(id: string | undefined): InfoScript | undefined {
+    return id ? this.etat?.scripts.find((s) => s.id === id) : undefined;
+  }
+
   /** Raison pour laquelle on ne peut pas lancer de script (Python absent, script en cours…). */
   get raisonIndisponible(): string | undefined {
     if (this.etat?.python.erreur) return this.etat.python.erreur;
-    if (this.execution?.enCours) return 'Un script est déjà en cours.';
+    if (this.execution?.enCours || this.execution?.application) return 'Un script est déjà en cours.';
+    // Exécution interactive connue du backend mais pas de cette fenêtre (page rechargée…).
+    const autre = this.etat?.executionEnCours;
+    if (autre && autre !== this.execution?.runId) return 'Un script est déjà en cours.';
     return undefined;
   }
 
@@ -104,7 +114,11 @@ class GestionScripts {
         e.progression = p;
       }),
       ec<EvQuestionScript>('script:question', (e, c) => {
-        e.question = { reqId: c.reqId, genre: c.genre === 'message' ? 'message' : 'ask', titre: c.titre, texte: String(c.texte ?? '') };
+        const genre = c.genre === 'message' ? 'message' : 'ask';
+        e.question = {
+          reqId: c.reqId, genre, titre: c.titre, texte: String(c.texte ?? ''),
+          question: genre === 'ask' ? detailQuestion(c.question) : undefined,
+        };
       }),
       ec<EvFormulaireScript>('script:formulaire', (e, c) => { e.formulaire = { reqId: c.reqId, spec: c.spec ?? {} }; }),
       ec<EvChoixScript>('script:choix', (e, c) => { e.choix = { reqId: c.reqId, spec: c.spec ?? {}, vignettes: {} }; }),
@@ -154,6 +168,7 @@ class GestionScripts {
     e.question = null;
     e.formulaire = null;
     e.choix = null;
+    void this.charger(); // executionEnCours relu
     if (e.editeur) {
       e.editeur(c.etat === 'termine' ? (c.champs ?? {}) : null, c);
       // Comme la version egui : pas d'aperçu, la fenêtre du script se ferme si tout s'est bien passé.
@@ -161,6 +176,7 @@ class GestionScripts {
       return;
     }
     if (c.etat === 'termine' && c.nbModifs > 0) void this.chargerApercu();
+    // Arrêté ou en erreur : l'aperçu de ce qui a été demandé reste proposé (bouton).
   }
 
   async charger() {
@@ -278,9 +294,10 @@ class GestionScripts {
       e.bilan = await scriptAppliquer(e.runId, cles);
     } catch (err) {
       e.ajouterJournal('erreur', `Application refusée : ${messageErreur(err)}`);
-      e.bilan = { fiches: 0, renommages: 0, comicinfo: 0, erreurs: [messageErreur(err)], arrete: false };
+      e.bilan = { fiches: 0, renommages: 0, comicinfo: 0, erreurs: [messageErreur(err)], arrete: false, resume: 'Rien n\'a été appliqué' };
     } finally {
       e.application = false;
+      void this.charger();
     }
   }
 
@@ -291,7 +308,18 @@ class GestionScripts {
   fermerExecution() {
     if (this.execution?.enCours) return;
     this.execution = null;
+    // executionEnCours du backend relu (sinon un état périmé bloquerait les lancements).
+    void this.charger();
   }
+}
+
+/** Détail d'une question `ask`, lu avec prudence (valeurs venant d'un script). */
+function detailQuestion(q: unknown): DetailQuestionScript {
+  const o = (q && typeof q === 'object' ? q : {}) as Partial<DetailQuestionScript>;
+  const type = o.type === 'texte' || o.type === 'choix' || o.type === 'confirmation' ? o.type : 'confirmation';
+  const choix = Array.isArray(o.choix) ? o.choix.map((c) => String(c ?? '')) : [];
+  const secret = o.secret === true;
+  return { type, defaut: secret ? null : (o.defaut ?? null), choix, secret };
 }
 
 export const scripts = new GestionScripts();

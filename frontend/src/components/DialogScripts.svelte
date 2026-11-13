@@ -43,16 +43,26 @@
       return;
     }
     try {
-      await scriptReglagesEcrire(r.script.id, valeurs);
-      r.message = 'Réglages enregistrés.';
-      r.erreur = '';
+      // Le backend rend les réglages enregistrés (secrets masqués) : ils remplacent la saisie.
+      const lues = await scriptReglagesEcrire(r.script.id, valeurs);
+      const json: Record<string, string> = {};
+      for (const [k, v] of Object.entries(lues ?? {})) if (v !== null && typeof v === 'object') json[k] = JSON.stringify(v, null, 1);
+      reglages = { script: r.script, lues: lues ?? {}, saisies: { ...(lues ?? {}) }, erreur: '', message: 'Réglages enregistrés.', json };
     } catch (e) {
       r.erreur = messageErreur(e);
     }
   }
 
+  /** Point d'entrée ConfigScript du fichier de `s` (id dans `s.reglages`, opaque). */
+  function entreeConfig(s: InfoScript): InfoScript | undefined {
+    if (!s.reglages) return undefined;
+    return scripts.script(s.reglages) ?? (s.reglages === s.id ? s : undefined);
+  }
+
   function configurer(s: InfoScript) {
-    void scripts.lancer(s, 'ConfigScript', []);
+    const c = entreeConfig(s);
+    // Un ConfigScript se lance même si le script est désactivé (comme la version egui).
+    if (c) void scripts.lancer(c, 'ConfigScript', []);
   }
 
   const peutFermer = () => true;
@@ -104,8 +114,9 @@
         {#each etat.avertissements as a, k (k)}<p class="avertissement">⚠ {a}</p>{/each}
 
         {#if etat.scripts.length === 0}
-          <p class="discret">Aucun script : place des fichiers .py dans le dossier « scripts » de ComicRust, puis « Recharger ».</p>
+          <p class="discret">Aucun script : place des fichiers .py dans le dossier « scripts » de ComicRust{etat.dossier ? ` (${etat.dossier})` : ''}, puis « Recharger ».</p>
         {:else}
+          <p class="discret petit" data-testid="dossier-scripts">Dossier : {etat.dossier}</p>
           <ul class="liste" data-testid="liste-scripts">
             {#each etat.scripts as s (s.id)}
               <li class:inactif={!s.actif}>
@@ -120,10 +131,12 @@
                   <span class="discret petit">{s.fichier}{s.auteur ? ` — ${s.auteur}` : ''}</span>
                 </p>
                 <div class="actions">
-                  {#if s.hooks.includes('ConfigScript')}
-                    <button class="mini" disabled={!s.actif || !!scripts.raisonIndisponible} title={scripts.raisonIndisponible} onclick={() => configurer(s)}>⚙ Configurer…</button>
+                  {#if entreeConfig(s)}
+                    <button class="mini" disabled={!!scripts.raisonIndisponible} title={scripts.raisonIndisponible ?? 'Fenêtre de configuration du script'}
+                      onclick={() => configurer(s)} data-testid="configurer-{s.id}">⚙ Configurer…</button>
                   {/if}
-                  <button class="mini" onclick={() => void ouvrirReglages(s)} data-testid="reglages-{s.id}">Réglages…</button>
+                  <button class="mini" onclick={() => void ouvrirReglages(s)} title="Réglages enregistrés du fichier {s.fichier} (communs à ses points d'entrée)"
+                    data-testid="reglages-{s.id}">Réglages…</button>
                 </div>
                 {#if reglages?.script.id === s.id}
                   {@const r = reglages}

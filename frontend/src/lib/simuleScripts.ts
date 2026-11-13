@@ -1,8 +1,9 @@
 // MODE SIMULÉ (tauri-v0.9.0) : faux backend des scripts Python (docs/tauri/ipc-scripts.md), utilisé
 // seulement hors de Tauri pour développer et tester l'interface. Aucun Python n'est lancé : chaque
 // script simulé est une petite fonction asynchrone qui émet les mêmes événements que le backend
-// (journal, progression, questions, formulaire, choix à vignettes, fin) et prépare des
-// modifications à prévisualiser.
+// (journal, progression, questions texte / choix / confirmation, formulaire, choix à vignettes,
+// fin) et prépare des modifications à prévisualiser. Les identifiants des scripts sont ceux des
+// points d'entrée (`fichier.py:fonction`) ; les réglages sont communs à tout le fichier.
 //
 // Paramètres d'adresse :
 // - `?scripts=lectureSeule` : bibliothèque en lecture seule (aperçu visible, application refusée) ;
@@ -10,8 +11,14 @@
 // - `?scripts=vide` : aucun script.
 // `window.__comicrustScripts` expose aux tests les appels reçus (réponses, vignettes, application…).
 import type {
-  ApercuScript, BilanScript, ChooseSpecScript, EtatScripts, FormSpecScript, HookScript, InfoScript, LigneApercu,
+  ApercuScript, BilanScript, ChooseSpecScript, DetailQuestionScript, EtatScripts, FormSpecScript, HookScript, InfoScript, LigneApercu,
 } from './api';
+
+/** Libellés français des champs (comme `libelle` du backend). */
+const LIBELLES: Record<string, string> = {
+  Title: 'Titre', Series: 'Série', Number: 'Numéro', Writer: 'Scénariste', Penciller: 'Dessinateur', Summary: 'Résumé',
+  Fichier: 'Fichier', 'ComicInfo.xml': 'ComicInfo.xml',
+};
 
 export interface ContexteScripts {
   emettre: (nom: string, charge: unknown) => void;
@@ -38,11 +45,15 @@ function imageSvg(texte: string, teinte: number, l = 120, h = 170): string {
 interface Execution {
   runId: string;
   script: string;
+  /** Nom du script (titre des questions). */
+  nom: string;
   arret: boolean;
   /** Questions en attente de réponse : reqId → résolution. */
   attentes: Map<number, (v: unknown) => void>;
   lignes: LigneApercu[];
   conflits: string[];
+  /** Valeurs demandées déjà identiques à la fiche. */
+  inchanges: number;
   fini: boolean;
   applique: boolean;
   /** Choix ouvert : rangs dont la vignette a déjà été envoyée. */
@@ -73,11 +84,13 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     },
     {
       id: 'bedetheque/bd2.py:scraper', nom: 'Bedetheque Scraper 2', fichier: 'bedetheque/bd2.py', hooks: ['Books', 'Editor'], actif: true,
-      description: 'Remplit les fiches depuis bedetheque.com (série, album, auteurs, résumé).', auteur: 'kiwi13 (portage ComicRust)',
+      description: 'Remplit les fiches depuis bedetheque.com (série, album, auteurs, résumé).',
+      image: imageSvg('BD2', 30, 32, 32), reglages: 'BD2_CONFIG',
     },
     {
-      id: 'bedetheque/bd2.py:configurer', nom: 'Configurer BD2', fichier: 'bedetheque/bd2.py', hooks: ['ConfigScript'], actif: true,
-      description: 'Options de Bedetheque Scraper 2.',
+      // #@Key : identifiant libre (opaque pour le front).
+      id: 'BD2_CONFIG', nom: 'Configurer BD2', fichier: 'bedetheque/bd2.py', hooks: ['ConfigScript'], actif: true,
+      description: 'Options de Bedetheque Scraper 2.', reglages: 'BD2_CONFIG',
     },
     {
       id: 'rangement.py:ranger', nom: 'Rangement de la bibliothèque', fichier: 'rangement.py', hooks: ['Library'], actif: true,
@@ -93,16 +106,25 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     },
   ];
   const avertissements = variante === 'vide' ? [] : ['vieux.py : ligne 3 : #@Hook inconnu « Bookz » (ignoré)'];
+  /** Réglages par fichier (communs à tous les points d'entrée du fichier). */
   const reglages: Record<string, Record<string, unknown>> = {
-    'bedetheque/bd2.py:configurer': { langue: 'fr', delai: 2, couverture: true, cleApi: 'secret-simule', dossier: 'D:\\BD\\Couvertures' },
-    'bedetheque/bd2.py:scraper': { langue: 'fr', delai: 2, couverture: true, cleApi: 'secret-simule' },
+    'bedetheque/bd2.py': { langue: 'fr', delai: 2, couverture: true, cleApi: 'secret-simule', dossier: 'D:\\BD\\Couvertures' },
   };
+  const reglagesDe = (id: string): Record<string, unknown> | undefined => {
+    const s = scripts.find((x) => x.id === id);
+    if (!s) throw new Error(`script inconnu : ${id}`);
+    return reglages[s.fichier];
+  };
+  const masquer = (v: Record<string, unknown> | undefined) =>
+    Object.fromEntries(Object.entries(v ?? {}).map(([k, x]) => [k, secrets.has(k) ? (x ? '••••' : '') : x]));
   const secrets = new Set(['cleApi']);
 
   const execs = new Map<string, Execution>();
   let numero = 0;
   let reqSuivant = 1;
   let interactif: Execution | null = null;
+  /** Exécution en cours d'application (executionEnCours). */
+  let enApplication: string | null = null;
 
   const etat = (): EtatScripts => {
     const motif = variante === 'lectureSeule' ? 'Bibliothèque ComicRack en lecture seule (cocher « Lecture et écriture » dans Réglages).' : ctx.lectureSeule();
@@ -115,6 +137,8 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
       auto,
       ecritureAutorisee: !motif,
       ...(motif ? { motifLectureSeule: motif } : {}),
+      dossier: 'C:\\ComicRust\\scripts',
+      ...(enApplication ? { executionEnCours: enApplication } : interactif && !interactif.fini ? { executionEnCours: interactif.runId } : {}),
     };
   };
 
@@ -134,8 +158,19 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
       ctx.emettre(nom, { runId: e.runId, reqId, ...charge });
     });
   }
-  const ask = (e: Execution, texte: string, titre?: string) => demander(e, 'script:question', { genre: 'ask', texte, ...(titre ? { titre } : {}) });
-  const message = (e: Execution, texte: string, titre?: string) => demander(e, 'script:question', { genre: 'message', texte, ...(titre ? { titre } : {}) });
+  /** Question `ask` (titre = nom du script). Comme le cœur : une réponse invalide ou `null`
+   *  rend la valeur par défaut (texte → chaîne, choix → un des choix, confirmation → booléen). */
+  async function ask(e: Execution, texte: string, q: Partial<DetailQuestionScript> & { type: DetailQuestionScript['type'] }): Promise<unknown> {
+    const secret = q.secret === true;
+    const question: DetailQuestionScript = { type: q.type, defaut: secret ? null : (q.defaut ?? null), choix: q.choix ?? [], secret };
+    const defaut = q.defaut ?? (q.type === 'confirmation' ? false : q.type === 'texte' ? '' : null);
+    const v = await demander(e, 'script:question', { genre: 'ask', titre: e.nom, texte, question });
+    const valide = (q.type === 'texte' && typeof v === 'string') || (q.type === 'choix' && typeof v === 'string' && question.choix.includes(v))
+      || (q.type === 'confirmation' && typeof v === 'boolean');
+    return valide ? v : defaut;
+  }
+  const confirmer = (e: Execution, texte: string, defaut = true) => ask(e, texte, { type: 'confirmation', defaut });
+  const message = (e: Execution, texte: string) => demander(e, 'script:question', { genre: 'message', titre: e.nom, texte });
   const formulaire = (e: Execution, spec: FormSpecScript) => demander(e, 'script:formulaire', { spec });
   function choix(e: Execution, spec: ChooseSpecScript, vignette: (rang: number) => string): Promise<unknown> {
     const p = demander(e, 'script:choix', { spec });
@@ -146,8 +181,9 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
   }
   const fournisseurs = new Map<string, (rang: number) => string>();
 
-  function modif(e: Execution, l: Omit<LigneApercu, 'cle'>) {
-    e.lignes.push({ ...l, cle: `${e.runId}-${e.lignes.length}` });
+  function modif(e: Execution, l: Omit<LigneApercu, 'cle' | 'libelle'>) {
+    if (l.genre === 'fiche' && l.avant === l.apres) { e.inchanges++; return; }
+    e.lignes.push({ ...l, libelle: LIBELLES[l.champ] ?? l.champ, cle: `${e.runId}-${e.lignes.length}` });
   }
 
   function terminer(e: Execution, etat: 'termine' | 'annule' | 'erreur', erreur?: string, champs?: Record<string, unknown>) {
@@ -239,7 +275,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     const premier = ctx.livre(ids[0] ?? '');
     let options: Record<string, unknown> | null = null;
     if (!editeur) {
-      const oui = await ask(e, `Rechercher ${ids.length} album(s) sur bedetheque.com ?\n(une pause est faite entre deux albums)`, 'Bedetheque Scraper 2');
+      const oui = await confirmer(e, `Rechercher ${ids.length} album(s) sur bedetheque.com ?\n(une pause est faite entre deux albums)`);
       if (oui !== true) { journal(e, 'info', 'Abandon demandé par l\'utilisateur.'); terminer(e, 'annule'); return; }
       let couverture = imageSvg(premier?.serie ?? 'BD', 210);
       for (;;) {
@@ -269,7 +305,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
       await attendre(e, 200);
       terminer(e, 'termine', undefined, {
         Series: 'Astérix', Number: String(r + 1), Title: album[0].split(' — ')[0], Writer: 'René Goscinny', Penciller: 'Albert Uderzo',
-        Summary: `Résumé simulé ${PIEGE}`, Inconnu: 'champ inconnu ignoré',
+        Summary: `Résumé simulé ${PIEGE}`, Inconnu: 'champ inconnu ignoré', $ecrireDansFichier: true,
       });
       return;
     }
@@ -290,12 +326,24 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     }
     progression(e, { fraction: 1, texte: 'Terminé', detail: '' });
     if (e.lignes.some((l) => l.conflit)) e.conflits.push('1 renommage en conflit : il ne sera fait que si tu le coches.');
-    await message(e, `${ids.length} album(s) traité(s). Vérifie l'aperçu avant d'appliquer.`, 'Bedetheque Scraper 2');
+    if (ids[0]) modif(e, { livreId: ids[0], titre: ctx.livre(ids[0])?.titre ?? ids[0], champ: 'Number', avant: '1', apres: '1', genre: 'fiche' });
+    await message(e, `${ids.length} album(s) traité(s). Vérifie l'aperçu avant d'appliquer.`);
     terminer(e, 'termine');
   }
 
   async function configurer(e: Execution) {
-    const v = reglages['bedetheque/bd2.py:configurer'];
+    const v = (reglages['bedetheque/bd2.py'] ??= {});
+    // comicrust.ask_choice / comicrust.ask(secret=True) / comicrust.ask : questions simples.
+    const LANGUES: Record<string, string> = { Français: 'fr', Anglais: 'en', Néerlandais: 'nl' };
+    const langue = await ask(e, 'Langue des recherches sur bedetheque.com ?', {
+      type: 'choix', choix: Object.keys(LANGUES), defaut: Object.keys(LANGUES).find((k) => LANGUES[k] === v.langue) ?? 'Français',
+    });
+    v.langue = LANGUES[String(langue)] ?? v.langue;
+    const cle = await ask(e, `Clé d'accès à l'API ${PIEGE}\n(vide : garder la clé actuelle)`, { type: 'texte', secret: true, defaut: '' });
+    if (typeof cle === 'string' && cle) v.cleApi = cle;
+    const prefixe = await ask(e, 'Préfixe des numéros de tome :', { type: 'texte', defaut: String(v.prefixe ?? 'T.') });
+    v.prefixe = prefixe;
+    journal(e, 'info', `Langue : ${String(v.langue)} ; préfixe : ${String(prefixe)} ; clé ${cle ? 'changée' : 'inchangée'}.`);
     const r = (await formulaire(e, {
       title: 'Configurer BD2', buttons: ['Enregistrer', 'Annuler'],
       values: { langue: v.langue, delai: v.delai, couverture: v.couverture, dossier: v.dossier },
@@ -335,17 +383,24 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
   function lancer(id: string, hook: HookScript, ids: string[], editeur = false): string {
     const s = scripts.find((x) => x.id === id);
     if (!s) throw new Error(`script inconnu : ${id}`);
-    if (!s.actif) throw new Error(`script désactivé : ${s.nom}`);
-    if (!s.hooks.includes(hook)) throw new Error(`le script « ${s.nom} » ne se lance pas par ${hook}`);
+    if (!['Books', 'Library', 'ConfigScript', 'Editor'].includes(hook)) throw new Error(`le hook ${hook} ne se lance pas depuis un menu`);
+    if (!s.hooks.includes(hook)) throw new Error(`« ${s.nom} » n'a pas le hook ${hook}`);
+    // Un ConfigScript se lance même si le script est désactivé.
+    if (!s.actif && hook !== 'ConfigScript') throw new Error(`« ${s.nom} » est désactivé (Gérer les scripts)`);
     if (variante === 'sansPython') throw new Error('Python introuvable : impossible de lancer un script.');
-    if (interactif && !interactif.fini) throw new Error('Un script est déjà en cours : attends sa fin ou arrête-le.');
-    const e: Execution = { runId: `run${++numero}`, script: id, arret: false, attentes: new Map(), lignes: [], conflits: [], fini: false, applique: false, vignettes: new Map() };
+    if ((interactif && !interactif.fini) || enApplication) throw new Error('Un script est déjà en cours : attends sa fin ou arrête-le.');
+    if (hook === 'Books' && ids.length === 0) throw new Error('aucun livre sélectionné');
+    // Library : ids vide = toute la bibliothèque (le backend prend tous les livres).
+    const e: Execution = {
+      runId: `run${++numero}`, script: id, nom: s.nom, arret: false, attentes: new Map(), lignes: [], conflits: [], inchanges: 0,
+      fini: false, applique: false, vignettes: new Map(),
+    };
     execs.set(e.runId, e);
     interactif = e;
     tests.lancements.push({ id, hook, ids: [...ids] });
     const corps = id.startsWith('nettoyage') ? () => nettoyage(e, ids)
       : id === 'bedetheque/bd2.py:scraper' ? () => bedetheque(e, ids, editeur)
-      : id === 'bedetheque/bd2.py:configurer' ? () => configurer(e)
+      : id === 'BD2_CONFIG' ? () => configurer(e)
       : id.startsWith('rangement') ? () => rangement(e)
       : () => casse(e);
     // Démarrage après la réponse (comme le backend : les premiers événements peuvent la suivre de peu).
@@ -423,7 +478,9 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
       case 'script_apercu': {
         const e = exec(args);
         const motif = etat().motifLectureSeule;
-        const a: ApercuScript = { lignes: e.lignes.map((l) => ({ ...l })), conflits: [...e.conflits], lectureSeule: !!motif, ...(motif ? { motif } : {}) };
+        const a: ApercuScript = e.applique
+          ? { lignes: [], conflits: [], inchanges: 0, lectureSeule: !!motif, ...(motif ? { motif } : {}) }
+          : { lignes: e.lignes.map((l) => ({ ...l })), conflits: [...e.conflits], inchanges: e.inchanges, lectureSeule: !!motif, ...(motif ? { motif } : {}) };
         return a;
       }
       case 'script_appliquer': {
@@ -433,7 +490,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
         if (e.applique) throw new Error('Modifications déjà appliquées.');
         const cles = new Set((args.cles as string[]) ?? []);
         tests.appliques.push([...cles]);
-        const b: BilanScript = { fiches: 0, renommages: 0, comicinfo: 0, erreurs: [], arrete: false };
+        const b: BilanScript = { fiches: 0, renommages: 0, comicinfo: 0, erreurs: [], arrete: false, resume: '' };
         for (const l of e.lignes) {
           if (!cles.has(l.cle)) continue;
           if (l.conflit) { b.erreurs.push(`${l.titre} : ${l.conflit}`); continue; }
@@ -442,21 +499,22 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
           else b.comicinfo++;
         }
         e.applique = true;
+        b.resume = `${b.fiches} fiche(s) modifiée(s), ${b.renommages} renommage(s), ${b.comicinfo} ComicInfo.xml écrit(s)`
+          + (b.erreurs.length ? `, ${b.erreurs.length} erreur(s)` : '') + '.';
         ctx.emettre('script:applique', { runId: e.runId, bilan: b });
         return b;
       }
-      case 'script_reglages_lire': {
-        const v = reglages[String(args.id)];
-        if (!v) return {};
-        return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, secrets.has(k) && x ? '••••' : x]));
-      }
+      case 'script_reglages_lire':
+        return masquer(reglagesDe(String(args.id)));
       case 'script_reglages_ecrire': {
         const id = String(args.id);
         const valeurs = (args.valeurs as Record<string, unknown>) ?? {};
         tests.reglages.push({ id, valeurs: JSON.parse(JSON.stringify(valeurs)) as Record<string, unknown> });
-        const v = (reglages[id] ??= {});
+        reglagesDe(id);
+        const fichier = scripts.find((x) => x.id === id)!.fichier;
+        const v = (reglages[fichier] ??= {});
         for (const [k, x] of Object.entries(valeurs)) if (!(secrets.has(k) && x === '••••')) v[k] = x;
-        return null;
+        return masquer(v);
       }
       default:
         return undefined;

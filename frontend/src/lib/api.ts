@@ -1098,16 +1098,20 @@ export function messageErreur(e: unknown): string {
 export type HookScript = 'Books' | 'Library' | 'Editor' | 'ConfigScript' | 'BookOpened' | 'BookClosed' | 'NewBooks' | 'Startup';
 
 export interface InfoScript {
-  /** Chemin relatif au dossier scripts\ (+ point d'entrée) : identifiant stable. */
+  /** Identifiant du point d'entrée (`#@Key`, sinon `chemin/relatif.py:fonction`) : opaque pour le
+   *  front, à rendre tel quel au backend. Un fichier peut déclarer plusieurs points d'entrée. */
   id: string;
   nom: string;
   description?: string;
   auteur?: string;
   hooks: HookScript[];
+  /** Fichier, chemin relatif au dossier scripts\ (séparateurs /). */
   fichier: string;
   actif: boolean;
-  /** Icône du script (URL cr-…). */
+  /** Icône du script (#@Image) en URL data: (≤ 512 Ko). */
   image?: string;
+  /** Id du point d'entrée ConfigScript du même fichier (bouton « Configurer… »). */
+  reglages?: string;
 }
 
 export interface EtatScripts {
@@ -1118,6 +1122,10 @@ export interface EtatScripts {
   auto: boolean;
   ecritureAutorisee: boolean;
   motifLectureSeule?: string;
+  /** Dossier des scripts (à côté de l'exe). */
+  dossier: string;
+  /** runId du script interactif en cours (lancé ou en application), s'il y en a un. */
+  executionEnCours?: string;
 }
 
 export type GenreModif = 'fiche' | 'renommage' | 'comicinfo';
@@ -1126,7 +1134,10 @@ export interface LigneApercu {
   cle: string;
   livreId: string;
   titre: string;
+  /** Nom ComicRack du champ (ou « Fichier », « ComicInfo.xml »). */
   champ: string;
+  /** Libellé français du champ, à afficher. */
+  libelle: string;
   avant: string;
   apres: string;
   genre: GenreModif;
@@ -1136,6 +1147,8 @@ export interface LigneApercu {
 export interface ApercuScript {
   lignes: LigneApercu[];
   conflits: string[];
+  /** Valeurs demandées déjà identiques à la fiche (ignorées). */
+  inchanges: number;
   lectureSeule: boolean;
   motif?: string;
 }
@@ -1146,12 +1159,25 @@ export interface BilanScript {
   comicinfo: number;
   erreurs: string[];
   arrete: boolean;
+  /** Résumé en français, rédigé par le backend. */
+  resume: string;
 }
 
 export type GenreJournal = 'info' | 'sortie' | 'erreur' | 'systeme';
 export interface EvJournalScript { runId: string; genre: GenreJournal; texte: string }
 export interface EvProgressionScript { runId: string; fraction?: number; texte?: string; detail?: string; image?: string }
-export interface EvQuestionScript { runId: string; reqId: number; genre: 'ask' | 'message'; titre?: string; texte: string }
+/** Nature d'une question `ask` : `comicrust.ask` (texte), `ask_choice` (un des `choix`), `confirm` (oui/non). */
+export type TypeQuestionScript = 'texte' | 'choix' | 'confirmation';
+export interface DetailQuestionScript {
+  type: TypeQuestionScript;
+  /** Valeur par défaut (jamais pour une saisie secrète). */
+  defaut: unknown;
+  choix: string[];
+  /** Saisie masquée (clé d'API…) : une réponse vide garde la valeur actuelle côté script. */
+  secret: boolean;
+}
+/** `titre` : nom du script. `question` : présent pour `genre: "ask"`. */
+export interface EvQuestionScript { runId: string; reqId: number; genre: 'ask' | 'message'; titre?: string; texte: string; question?: DetailQuestionScript }
 export interface EvFormulaireScript { runId: string; reqId: number; spec: FormSpecScript }
 export interface EvChoixScript { runId: string; reqId: number; spec: ChooseSpecScript }
 export interface EvVignetteScript { runId: string; reqId: number; rang: number; image: string }
@@ -1168,6 +1194,8 @@ export type ChoixBrut = string | number | boolean | [unknown, unknown] | { value
  *  de `type` : text, textarea, secret, checkbox, number, choice, radio, multichoice, list_edit,
  *  table, folder, file, label, separator, image, group, columns, tabs, button. */
 export interface ControleScript {
+  /** Numéro unique ajouté par le backend. */
+  id?: number;
   type: string;
   key?: string;
   label?: string;
@@ -1266,10 +1294,13 @@ export const scriptsLister = () => appeler<EtatScripts>('scripts_lister');
 export const scriptsRecharger = () => appeler<EtatScripts>('scripts_recharger');
 export const scriptsActiver = (id: string, actif: boolean) => appeler<EtatScripts>('scripts_activer', { id, actif });
 export const scriptsAuto = (actif: boolean) => appeler<EtatScripts>('scripts_auto', { actif });
-/** Lance un script ; rend l'identifiant de l'exécution. Refusé si un script interactif tourne. */
+/** Lance un script ; rend l'identifiant de l'exécution. `Books` : sélection (non vide) ;
+ *  `Library` : `ids` vide = toute la bibliothèque ; `ConfigScript` : `[]` (id du point d'entrée
+ *  ConfigScript, voir `InfoScript.reglages`). Refusé si un script interactif tourne. */
 export const scriptLancer = (id: string, hook: HookScript, ids: string[]) => appeler<string>('script_lancer', { id, hook, ids });
-/** Réponse : ask → booléen, message → null, formulaire → objet des valeurs (null = annulé),
- *  choix → rang (liste de rangs pour un choix multiple) ou null. */
+/** Réponse : question texte → chaîne, question choix → la chaîne choisie, confirmation →
+ *  booléen (null → valeur par défaut) ; message → null ; formulaire → objet des valeurs avec
+ *  `$bouton` (null = annulé) ; liste de choix → rang (liste de rangs si multiple) ou null. */
 export const scriptRepondre = (runId: string, reqId: number, valeur: unknown) =>
   appeler<void>('script_repondre', { runId, reqId, valeur: valeur === undefined ? null : valeur });
 export const scriptVignettesVoulues = (runId: string, reqId: number, rangs: number[]) =>
@@ -1280,7 +1311,11 @@ export const scriptAppliquer = (runId: string, cles: string[]) => appeler<BilanS
 export const scriptHookEditeur = (id: string, livreId: string, champs: Record<string, string>) =>
   appeler<string>('script_hook_editeur', { id, livreId, champs });
 export const scriptReglagesLire = (id: string) => appeler<Record<string, unknown>>('script_reglages_lire', { id });
+/** Fusionne les réglages ; rend les réglages enregistrés (secrets masqués). */
 export const scriptReglagesEcrire = (id: string, valeurs: Record<string, unknown>) =>
-  appeler<void>('script_reglages_ecrire', { id, valeurs });
+  appeler<Record<string, unknown>>('script_reglages_ecrire', { id, valeurs });
+/** Clé ajoutée par le backend à `script:fin.champs` (hook Editor) : le script a demandé
+ *  `write_info` (case « Écrire aussi les infos dans le fichier » de la fenêtre Infos). */
+export const CLE_ECRIRE_DANS_FICHIER = '$ecrireDansFichier';
 /** Valeur d'un secret défini, renvoyée masquée par le backend. */
 export const SECRET_MASQUE = '••••';
