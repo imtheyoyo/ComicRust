@@ -7,6 +7,8 @@
   import DialogDossiers from './components/DialogDossiers.svelte';
   import DialogReglages from './components/DialogReglages.svelte';
   import DialogTransfert from './components/DialogTransfert.svelte';
+  import DialogScripts from './components/DialogScripts.svelte';
+  import FenetreScript from './components/FenetreScript.svelte';
   import PremierDemarrage from './components/PremierDemarrage.svelte';
   import VueBibliotheque from './components/VueBibliotheque.svelte';
   import { dansTauri, ecouter, ouvrirBibliotheque, type BibliothequeModifiee, type EtatBiblio, messageErreur } from './lib/api';
@@ -14,6 +16,7 @@
   import { connexion } from './lib/connexion.svelte';
   import { EtatListes } from './lib/listes.svelte';
   import { miseAJour } from './lib/maj.svelte';
+  import { scripts } from './lib/scripts.svelte';
   import { chargerPreferences, enregistrerPreference } from './lib/prefs';
   import { appliquerTheme, themeMemorise } from './lib/theme';
 
@@ -51,6 +54,8 @@
         if (!etat.premierDemarrage) {
           void listes.charger();
           listes.demarrer();
+          // Scripts (tauri-v0.9.0) : liste et écoute des événements, jamais bloquant.
+          void scripts.demarrer();
         }
       } catch (e) {
         erreur = messageErreur(e);
@@ -80,6 +85,7 @@
       connexion.arreter();
       miseAJour.arreter();
       listes.arreter();
+      scripts.arreter();
     };
   });
 
@@ -142,6 +148,7 @@
     nbLivres = e.nbLivres;
     void listes.charger();
     listes.demarrer();
+    void scripts.demarrer();
   }
 
   /** Le backend a rouvert la bibliothèque (transfert terminé : bascule en autonome ou rechargement). */
@@ -227,6 +234,14 @@
   <DialogDossiers bind:this={dossiers} {scan} />
   <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} onmaj={rechercherMaj} />
   <DialogTransfert bind:this={transfert} onbibliotheque={bibliothequeRouverte} />
+  {#if scripts.gestionOuverte}
+    <DialogScripts />
+  {/if}
+  {#if scripts.execution}
+    {#key scripts.execution}
+      <FenetreScript execution={scripts.execution} />
+    {/key}
+  {/if}
 {/if}
 {#if miseAJour.fenetre}
   <DialogMaj />

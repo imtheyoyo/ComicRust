@@ -17,6 +17,9 @@
   import ChampSuggestions from './ChampSuggestions.svelte';
   import OngletPages from './OngletPages.svelte';
   import ResultatsLot, { pourcent } from './ResultatsLot.svelte';
+  import MenuContextuel, { type EntreeMenu } from './MenuContextuel.svelte';
+  import { scripts } from '../lib/scripts.svelte';
+  import { texteValeur } from '../lib/formulaireScript';
 
   interface Props {
     ids: string[];
@@ -53,6 +56,9 @@
   let pagesVues = $state(false);
   let pagesModifiees = $state(false);
   let pagesOccupe = $state(false);
+  /** Scripts `Editor` (tauri-v0.9.0) : menu ouvert et script en cours. */
+  let menuScripts = $state<{ x: number; y: number } | null>(null);
+  let scriptEnCours = $state(false);
   let minuterieVerif: ReturnType<typeof setTimeout> | undefined;
   let sequenceVerif = 0;
   let desabonner: (() => void) | undefined;
@@ -226,7 +232,52 @@
   }
 
   /** Échap : ferme seulement si rien n'est modifié (sinon Annuler, explicitement), comme egui. */
-  const peutFermerParEchap = () => !sale && !pagesOccupe && !enregistrement && !confirmation;
+  const peutFermerParEchap = () => !sale && !pagesOccupe && !enregistrement && !confirmation && !scriptEnCours;
+
+  // ───── Scripts `#@Hook Editor` (tauri-v0.9.0) ─────
+  // Le script reçoit les valeurs affichées ; à la fin (script:fin.champs), ses propositions
+  // remplissent les champs SANS enregistrer : l'utilisateur vérifie puis OK ou Appliquer.
+  const scriptsEditeur = $derived(scripts.scriptsDe('Editor'));
+  const entreesScripts = $derived<EntreeMenu[]>(scriptsEditeur.map((s) => ({
+    id: s.id, libelle: s.nom, desactive: !!scripts.raisonIndisponible, aide: scripts.raisonIndisponible ?? s.description,
+  })));
+
+  function ouvrirMenuScripts(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    menuScripts = { x: r.left, y: Math.max(4, r.top - 8 - 32 * Math.max(1, scriptsEditeur.length)) };
+  }
+
+  async function lancerScriptEditeur(id: string) {
+    const s = scriptsEditeur.find((x) => x.id === id);
+    if (!s || !fiche || fiche.multiple || !ids[0]) return;
+    message = null;
+    scriptEnCours = true;
+    const err = await scripts.lancerEditeur(s, ids[0], { ...textes }, (champs) => {
+      scriptEnCours = false;
+      if (!champs) {
+        message = { texte: 'Script arrêté ou en erreur : rien n\'a été repris (voir la fenêtre du script).', erreur: true };
+        return;
+      }
+      const remplis: string[] = [];
+      const ignores: string[] = [];
+      for (const [nom, v] of Object.entries(champs)) {
+        const c = champsParNom.get(nom);
+        if (!c) { ignores.push(nom); continue; }
+        saisir(c, texteValeur(v));
+        remplis.push(c.libelle);
+      }
+      message = {
+        texte: (remplis.length === 0 ? 'Script terminé : aucun champ rempli.'
+          : `Script terminé : ${remplis.length} champ(s) rempli(s) (${remplis.join(', ')}). Vérifie, puis OK ou Appliquer pour enregistrer.`)
+          + (ignores.length ? `\nIgnoré(s) : ${ignores.join(', ')}.` : ''),
+        erreur: false,
+      };
+    });
+    if (err) {
+      scriptEnCours = false;
+      message = { texte: `Script : ${err}`, erreur: true };
+    }
+  }
 
   function clavier(e: KeyboardEvent) {
     // Ctrl+Entrée : OK (comme le bouton par défaut d'une fenêtre Windows).
@@ -436,6 +487,10 @@
         {/if}
       </span>
       <span class="espace"></span>
+      {#if fiche && !fiche.multiple && scriptsEditeur.length}
+        <button disabled={!modifiable || scriptEnCours} onclick={ouvrirMenuScripts} aria-haspopup="menu"
+          title={scriptEnCours ? 'Script en cours' : 'Lancer un script qui remplit les champs (rien n\'est enregistré avant OK)'} data-testid="infos-scripts">📜 Scripts ▾</button>
+      {/if}
       <button class="principal" disabled={!peutOk} title={peutOk ? 'Enregistrer et fermer (Ctrl+Entrée)' : raisonBlocage}
         onclick={() => void enregistrer('fermer')} data-testid="infos-ok">OK</button>
       <button disabled={enregistrement} onclick={annuler} data-testid="infos-annuler">Annuler</button>
@@ -443,6 +498,9 @@
         onclick={() => void enregistrer('rester')} data-testid="infos-appliquer">Appliquer</button>
     </div>
   </footer>
+  {#if menuScripts}
+    <MenuContextuel x={menuScripts.x} y={menuScripts.y} entrees={entreesScripts} onchoix={(id) => void lancerScriptEditeur(id)} onfermer={() => (menuScripts = null)} />
+  {/if}
 </dialog>
 
 <style>
