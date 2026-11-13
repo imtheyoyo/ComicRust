@@ -5,6 +5,29 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.9.0] — 2026-11-13
+
+Étape « scripts Python » de la version Tauri (même moteur et mêmes scripts que la version egui).
+
+### Nouveautés
+- **Scripts Python** : Python embarqué et scripts d'exemple livrés dans le paquet (`python\`, `scripts\`,
+  `scripts.md`) ; menu **📜 Scripts** et sous-menu du clic droit (livres ou pile), « Gérer les
+  scripts… » (scripts actifs, Python trouvé, réglages, journal des automatismes).
+- Fenêtre d'exécution : progression, journal, Arrêter ; questions (oui/non, texte, choix),
+  **formulaires** et **choix à vignettes** générés par les scripts ; **aperçu** des modifications
+  (livre / champ / avant → après, cases à cocher, conflits signalés) puis Appliquer ; en lecture seule
+  (ComicRack sans écriture, ComicDb.xml, hors ligne) l'aperçu reste visible mais n'est pas appliqué.
+- Scripts d'exemple : nettoyage des fiches, rangement des fichiers, Comic Vine, nouveaux livres,
+  **Bedetheque Scraper 2** (avec QuickScrape et « tester le site ») et **Library Organizer**.
+- Bouton **Scripts** dans la fenêtre Infos (les champs se remplissent, rien n'est enregistré avant OK).
+- **Automatismes** (désactivés par défaut) : démarrage, ouverture et fermeture d'un livre, nouveaux livres.
+- Réglages des scripts gardés dans `data\comicrust-tauri.json`, **clés et mots de passe chiffrés**.
+- **Mise à jour intégrée** : un script que tu as modifié n'est jamais écrasé (la nouvelle version est
+  posée à côté en `.nouveau`) ; un script livré que tu as supprimé n'est pas réinstallé.
+
+### Recette
+[`recette/tauri-v0.9.0.md`](recette/tauri-v0.9.0.md).
+
 ## [tauri-v0.8.1] — 2026-11-12
 
 Version corrective ; c'est aussi la **première vraie mise à jour** proposée par la mise à jour
