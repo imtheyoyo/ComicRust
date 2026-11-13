@@ -1,4 +1,4 @@
-Recette ComicRust tauri-v0.9.0 — exécution par l'IA (Claude) — 13/11/2026 20:52-21:25
+Recette ComicRust tauri-v0.9.0 — exécution par l'IA (Claude) — 13/11/2026 20:52-21:25, reprise 21:38-21:50
 Demandée par Yoyo : « réaliser la recette en créant une copie de test dans mon dossier, et en utilisant les dossiers échantillons ».
 
 Montage
@@ -8,7 +8,7 @@ Montage
 - Pilotage : outils MCP de la copie (commandes IPC + écoute des événements des scripts).
 - Ta collection du NAS et ComicRack n'ont pas été touchés. La copie liée est en « Lecture et écriture » : aucun script n'y a été lancé.
 
-OK (17)
+OK (19 + 1 partiel)
 - P-02 : Python trouvé (python\python.exe de la copie), 20 points d'entrée listés, aucun avertissement, automatismes décochés.
 - S-01 : « Nettoyer les fiches » sur 4 livres → aperçu de 8 lignes (résumé, année, série, numéro) ; rien appliqué sans « Appliquer ».
 - S-02 : 6 lignes cochées sur 8 appliquées (bilan « 3 fiche(s) modifiée(s) ») ; le livre décoché (Silver Surfer 03) est resté intact ; années relues en base (1961, 1963, 1965). [La vérification après relance n'a pas pu être faite : déconnexion du PC.]
@@ -26,14 +26,19 @@ OK (17)
 - O-04 : doublon à la destination → fenêtre « Fichier que vous déplacez / Fichier déjà présent », boutons « Déplacer, mais garder les deux » / « Ne pas déplacer » / « Annuler », mention « ComicRust n'écrase jamais un fichier » ; « Ne pas déplacer » → rien déplacé.
 - O-05 : « annuler le dernier rangement » → les 2 fichiers reviennent à leur place ; « supprimer les dossiers vides » propose les 3 dossiers vides sous le dossier de base (jamais le dossier de base ni au-dessus), confirmation → supprimés.
 
+- U-01 : `scripts\exemples\nettoyage.py` modifié, copie relancée avec COMICRUST_SIMULER_VERSION=0.8.1 (lanceur 12) → bandeau tauri-v0.9.0, « Installer » : bilan 61 fichiers installés, 48 .old, **scriptsNouveaux : 1 (scripts/exemples/nettoyage.py.nouveau)** ; le script modifié garde sa ligne, le `.nouveau` est la version livrée (identique hors ligne ajoutée) ; script personnel `recette_tags_test.py` intact ; data\ intact. « Redémarrer » : l'appli revient seule en MCP sur le même port (version 0.9.0, 21 livres, 21 scripts, automatismes toujours activés), plus aucun .old (dossier et python\), data\maj supprimé.
+- N-03 : data\comicrust-tauri.json sans aucun secret en clair (recherche de la clé factice dans tout data\ : rien).
+PARTIEL
+- S-06 : sans vraie clé Comic Vine : « Comic Vine : réglages » demande la clé en champ **secret** ; clé factice enregistrée `{"$secret": "dpapi:…"}` ; relue par l'interface : « •••• » (jamais en clair). La recherche sur Comic Vine reste à faire avec une vraie clé.
+
 NON CONCLUANT
 - S-05 : avec 21 livres, « Nettoyer » finit avant « Arrêter » ; à refaire sur une grande bibliothèque.
 - B-02 : 2 albums traités l'un après l'autre (Blacksad, Astérix) sans erreur ni « site bloqué » ; comparaison avec ComicRack non faite.
 
 NON FAITS PAR L'IA (à faire par Yoyo)
-- P-01 (installation par la mise à jour : tes deux copies répondent déjà « 0.9.0 » par le MCP), S-06 (clé Comic Vine), S-08 et R-01 (copie liée / ComicRack), S-09, A-02, A-03, B-03 (App.Config), B-07, O-01 (losettingsx.dat), U-01 (préparé — script modifié et lanceur 12 en place — interrompu par la déconnexion du PC), N-01 à N-04.
+- P-01 (installation par la mise à jour : tes deux copies répondent déjà « 0.9.0 » par le MCP), S-06 avec une vraie clé, S-08 et R-01 (copie liée / ComicRack), S-09 et A-02 (application assez longue pour agir pendant : les opérations locales sur les échantillons finissent en moins d'une seconde), A-03 (processus python.exe : non visible depuis l'IA), B-03 (App.Config), B-07, O-01 (losettingsx.dat), N-01, N-02, N-04.
 
 REMARQUES
 - [m] Une copie dont data\comicrust-tauri.json indique « mode autonome » mais sans data\comicrust.db affiche seulement « base ComicRust introuvable », sans proposer l'assistant (cas d'une base supprimée à la main).
 - [outil] L'outil MCP `eval_js` ne répond plus (délai de 80 s dépassé) quand un script pose une question pendant l'appel ; l'appli, elle, continue normalement.
-- Le PC s'est déconnecté à 21:25 pendant U-01.
+- Le PC s'est déconnecté à 21:25 pendant U-01 ; reprise à 21:38. La copie de test a été refermée à la fin (lanceur 11) : relance ta copie autonome si tu en as besoin (lanceur 1 ou à la main).
