@@ -1075,3 +1075,198 @@ export function messageErreur(e: unknown): string {
   }
   return 'Erreur inconnue.';
 }
+
+// ───────────────────────────── Scripts Python (tauri-v0.9.0) ─────────────────────────────
+// Contrat : docs/tauri/ipc-scripts.md. Tout texte venant d'un script (nom, journal, libellés,
+// valeurs) est affiché comme du texte (jamais d'innerHTML) ; les images ne sont acceptées que
+// sous forme d'URL `data:image/…` ou `cr-…` (voir `imageScriptSure`).
+
+export type HookScript = 'Books' | 'Library' | 'Editor' | 'ConfigScript' | 'BookOpened' | 'BookClosed' | 'NewBooks' | 'Startup';
+
+export interface InfoScript {
+  /** Chemin relatif au dossier scripts\ (+ point d'entrée) : identifiant stable. */
+  id: string;
+  nom: string;
+  description?: string;
+  auteur?: string;
+  hooks: HookScript[];
+  fichier: string;
+  actif: boolean;
+  /** Icône du script (URL cr-…). */
+  image?: string;
+}
+
+export interface EtatScripts {
+  python: { chemin?: string; erreur?: string };
+  scripts: InfoScript[];
+  avertissements: string[];
+  /** Automatismes (BookOpened, NewBooks…) : désactivés par défaut. */
+  auto: boolean;
+  ecritureAutorisee: boolean;
+  motifLectureSeule?: string;
+}
+
+export type GenreModif = 'fiche' | 'renommage' | 'comicinfo';
+
+export interface LigneApercu {
+  cle: string;
+  livreId: string;
+  titre: string;
+  champ: string;
+  avant: string;
+  apres: string;
+  genre: GenreModif;
+  conflit?: string;
+}
+
+export interface ApercuScript {
+  lignes: LigneApercu[];
+  conflits: string[];
+  lectureSeule: boolean;
+  motif?: string;
+}
+
+export interface BilanScript {
+  fiches: number;
+  renommages: number;
+  comicinfo: number;
+  erreurs: string[];
+  arrete: boolean;
+}
+
+export type GenreJournal = 'info' | 'sortie' | 'erreur' | 'systeme';
+export interface EvJournalScript { runId: string; genre: GenreJournal; texte: string }
+export interface EvProgressionScript { runId: string; fraction?: number; texte?: string; detail?: string; image?: string }
+export interface EvQuestionScript { runId: string; reqId: number; genre: 'ask' | 'message'; titre?: string; texte: string }
+export interface EvFormulaireScript { runId: string; reqId: number; spec: FormSpecScript }
+export interface EvChoixScript { runId: string; reqId: number; spec: ChooseSpecScript }
+export interface EvVignetteScript { runId: string; reqId: number; rang: number; image: string }
+export type EtatFinScript = 'termine' | 'annule' | 'erreur';
+export interface EvFinScript { runId: string; etat: EtatFinScript; erreur?: string; nbModifs: number; champs?: Record<string, unknown> }
+export interface EvAppliqueScript { runId: string; bilan: BilanScript }
+export interface EvAutoScript { script: string; hook: string; ligne: string }
+
+/** Choix d'une liste : `"texte"`, `[valeur, "libellé"]` ou `{value, label}` (forms.rs, parse_choices). */
+export type ChoixBrut = string | number | boolean | [unknown, unknown] | { value?: unknown; label?: unknown };
+
+/** Contrôle d'un formulaire de script, tel que décrit par le script et vérifié par
+ *  comicrust_core::scripting::forms (noms de champs du JSON des scripts). Les champs dépendent
+ *  de `type` : text, textarea, secret, checkbox, number, choice, radio, multichoice, list_edit,
+ *  table, folder, file, label, separator, image, group, columns, tabs, button. */
+export interface ControleScript {
+  type: string;
+  key?: string;
+  label?: string;
+  help?: string;
+  enabled_if?: string;
+  width?: number;
+  default?: unknown;
+  placeholder?: string;
+  required?: boolean;
+  rows?: number;
+  secret?: boolean;
+  inserts?: Array<ChoixBrut | { group?: string; items: ChoixBrut[] }>;
+  paste?: boolean;
+  hints?: Array<[string, string]>;
+  hint_none?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  decimals?: number;
+  choices?: ChoixBrut[];
+  editable?: boolean;
+  horizontal?: boolean;
+  height?: number;
+  unique?: boolean;
+  /** Tableau : colonnes ; conteneur « columns » : listes de contrôles. */
+  columns?: unknown[];
+  widths?: Array<number | null>;
+  filters?: Array<[string, string | string[]]>;
+  save?: boolean;
+  text?: string;
+  style?: string;
+  /** Image : URL data:/cr-… (ou base64 brut, converti en data:). */
+  data?: string;
+  caption?: string;
+  max_width?: number;
+  max_height?: number;
+  title?: string;
+  controls?: ControleScript[];
+  tabs?: Array<{ title?: string; controls?: ControleScript[] }>;
+  validate?: boolean;
+}
+
+export interface ColonneTableScript { title?: string; type?: string; choices?: ChoixBrut[]; width?: number }
+
+export interface FormSpecScript {
+  title?: string;
+  message?: string;
+  controls?: ControleScript[];
+  buttons?: string[];
+  /** Libellé du bouton d'annulation (null : aucun ; absent : le dernier s'il y en a plusieurs). */
+  cancel?: string | null;
+  width?: number;
+  label_width?: number;
+  values?: Record<string, unknown>;
+}
+
+export interface ChooseSpecScript {
+  title?: string;
+  message?: string;
+  columns?: string[];
+  rows?: Array<unknown[] | string>;
+  /** Vignettes données avec la liste (URL data:/cr-…, base64 brut toléré, null = sans). */
+  images?: Array<string | null>;
+  /** Rangs dont la vignette arrive après coup (dès que possible / à la demande). */
+  lazy?: number[];
+  on_demand?: number[];
+  multi?: boolean;
+  default?: number | number[];
+  filter?: boolean;
+  timeout?: number;
+  thumb_size?: number;
+  layout?: 'table' | 'cards' | '';
+}
+
+/** Clé réservée ajoutée à l'objet des valeurs d'un formulaire : bouton cliqué (libellé d'un
+ *  bouton du bas ou clé d'un bouton du formulaire). Le cœur retire les clés inconnues. */
+export const CLE_BOUTON_FORMULAIRE = '$bouton';
+
+/** Image venant d'un script affichable sans risque : data:image/… ou protocole cr-… seulement.
+ *  Un base64 brut (forme des scripts) est converti en data: ; tout le reste est refusé. */
+export function imageScriptSure(v: unknown): string | undefined {
+  if (typeof v !== 'string' || !v) return undefined;
+  const t = v.trim();
+  if (/^data:image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml)[;,]/i.test(t)) return t;
+  if (/^cr-[a-z0-9-]+:\/\//i.test(t) || /^http:\/\/cr-[a-z0-9-]+\.localhost\//i.test(t)) return t;
+  if (/^[A-Za-z0-9+/=_\-\s]+$/.test(t) && t.length > 16) {
+    const b = t.replace(/\s+/g, '');
+    const type = b.startsWith('/9j/') ? 'jpeg' : b.startsWith('iVBOR') ? 'png' : b.startsWith('R0lG') ? 'gif'
+      : b.startsWith('UklG') ? 'webp' : b.startsWith('Qk') ? 'bmp' : null;
+    return type ? `data:image/${type};base64,${b}` : undefined;
+  }
+  return undefined;
+}
+
+export const scriptsLister = () => appeler<EtatScripts>('scripts_lister');
+export const scriptsRecharger = () => appeler<EtatScripts>('scripts_recharger');
+export const scriptsActiver = (id: string, actif: boolean) => appeler<EtatScripts>('scripts_activer', { id, actif });
+export const scriptsAuto = (actif: boolean) => appeler<EtatScripts>('scripts_auto', { actif });
+/** Lance un script ; rend l'identifiant de l'exécution. Refusé si un script interactif tourne. */
+export const scriptLancer = (id: string, hook: HookScript, ids: string[]) => appeler<string>('script_lancer', { id, hook, ids });
+/** Réponse : ask → booléen, message → null, formulaire → objet des valeurs (null = annulé),
+ *  choix → rang (liste de rangs pour un choix multiple) ou null. */
+export const scriptRepondre = (runId: string, reqId: number, valeur: unknown) =>
+  appeler<void>('script_repondre', { runId, reqId, valeur: valeur === undefined ? null : valeur });
+export const scriptVignettesVoulues = (runId: string, reqId: number, rangs: number[]) =>
+  appeler<void>('script_vignettes_voulues', { runId, reqId, rangs });
+export const scriptArreter = (runId: string) => appeler<void>('script_arreter', { runId });
+export const scriptApercu = (runId: string) => appeler<ApercuScript>('script_apercu', { runId });
+export const scriptAppliquer = (runId: string, cles: string[]) => appeler<BilanScript>('script_appliquer', { runId, cles });
+export const scriptHookEditeur = (id: string, livreId: string, champs: Record<string, string>) =>
+  appeler<string>('script_hook_editeur', { id, livreId, champs });
+export const scriptReglagesLire = (id: string) => appeler<Record<string, unknown>>('script_reglages_lire', { id });
+export const scriptReglagesEcrire = (id: string, valeurs: Record<string, unknown>) =>
+  appeler<void>('script_reglages_ecrire', { id, valeurs });
+/** Valeur d'un secret défini, renvoyée masquée par le backend. */
+export const SECRET_MASQUE = '••••';

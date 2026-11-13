@@ -23,6 +23,7 @@
   import Lecteur from './Lecteur.svelte';
   import PanneauDetails from './PanneauDetails.svelte';
   import VueTableau from './VueTableau.svelte';
+  import { scripts } from '../lib/scripts.svelte';
 
   interface Props {
     scan: SuiviScan;
@@ -81,6 +82,66 @@
   function ouvrirMenu(x: number, y: number, pile?: string) {
     pileMenu = pile;
     menu = { x, y, pile };
+    positionMenu = { x, y };
+  }
+  /** Dernière position du menu contextuel : le sous-menu « Scripts ▸ » s'ouvre au même endroit. */
+  let positionMenu = { x: 0, y: 0 };
+
+  // ───── Scripts Python (tauri-v0.9.0) : menu de la barre d'outils et sous-menu du clic droit ─────
+
+  /** Menu des scripts ouvert : entrées et livres visés (null : sélection lue au choix). */
+  let menuScripts = $state<{ x: number; y: number; entrees: EntreeMenu[]; ids: string[] | null } | null>(null);
+
+  function entreesScriptsLivres(n: number, prefixe = 'books'): EntreeMenu[] {
+    const indispo = scripts.raisonIndisponible;
+    const liste = scripts.scriptsDe('Books');
+    if (liste.length === 0) return [{ id: `${prefixe}-aucun`, libelle: 'Aucun script pour les livres', desactive: true }];
+    return liste.map((s) => ({
+      id: `${prefixe}:${s.id}`, libelle: s.nom, desactive: !!indispo || n === 0,
+      aide: indispo ?? (n === 0 ? 'Sélectionner des livres d\'abord' : s.description),
+    }));
+  }
+
+  function ouvrirMenuScripts(ev: MouseEvent) {
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    void scripts.charger();
+    const indispo = scripts.raisonIndisponible;
+    const biblio = scripts.scriptsDe('Library');
+    const entrees: EntreeMenu[] = [
+      { id: 'titre-biblio', libelle: 'Toute la bibliothèque', desactive: true },
+      ...(biblio.length
+        ? biblio.map((s) => ({ id: `lib:${s.id}`, libelle: s.nom, desactive: !!indispo, aide: indispo ?? s.description }))
+        : [{ id: 'lib-aucun', libelle: 'Aucun script de bibliothèque', desactive: true }]),
+      { id: 'titre-livres', libelle: nbSel > 0 ? `Livres sélectionnés (${nbSel.toLocaleString('fr-FR')})` : 'Livres sélectionnés (aucun)', desactive: true, separe: true },
+      ...entreesScriptsLivres(nbSel || (sel.curseur >= 0 ? 1 : 0)),
+      { id: 'gerer', libelle: 'Gérer les scripts…', separe: true },
+      { id: 'recharger', libelle: '⟳ Recharger les scripts' },
+      { id: 'journal', libelle: 'Journal des automatismes…' },
+    ];
+    menuScripts = { x: r.left, y: r.bottom + 2, entrees, ids: null };
+  }
+
+  async function choixScript(id: string) {
+    const cible = menuScripts?.ids ?? null;
+    if (id === 'gerer') { scripts.ouvrirGestion(); return; }
+    if (id === 'journal') { scripts.ouvrirGestion('journal'); return; }
+    if (id === 'recharger') { void scripts.recharger(); return; }
+    const [genre, ...reste] = id.split(':');
+    const s = scripts.etat?.scripts.find((x) => x.id === reste.join(':'));
+    if (!s) return;
+    if (genre === 'lib') { void scripts.lancer(s, 'Library', []); return; }
+    if (genre === 'books') {
+      let ids = cible;
+      if (!ids) {
+        try {
+          ids = await idsSelection();
+        } catch (e) {
+          erreurAction = messageErreur(e);
+          return;
+        }
+      }
+      if (ids.length) void scripts.lancer(s, 'Books', ids);
+    }
   }
   function choixMenu(id: string) {
     const pile = pileMenu;
@@ -454,9 +515,16 @@
       { id: 'renommer', libelle: 'Renommer / déplacer…' },
       { id: 'dossier', libelle: 'Ouvrir le dossier du fichier', separe: true, desactive: plusieurs,
         aide: plusieurs ? 'Un seul livre à la fois' : 'Montre le fichier dans l\'Explorateur de Windows' },
+      entreeScripts(),
       ...entreesListes,
     ];
   });
+
+  /** Entrée « 📜 Scripts ▸ » du menu contextuel : ouvre la liste des scripts du hook Books. */
+  function entreeScripts(): EntreeMenu {
+    const n = scripts.scriptsDe('Books').length;
+    return { id: 'scripts', libelle: '📜 Scripts ▸', separe: true, desactive: n === 0, aide: n === 0 ? 'Aucun script actif pour les livres' : 'Lancer un script sur ces livres' };
+  }
 
   /** Menu contextuel d'une pile : les actions portent sur tous ses livres. */
   function entreesPile(serie: string): EntreeMenu[] {
@@ -471,6 +539,7 @@
         aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
       { id: 'conversion', libelle: n > 1 ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ', aide: 'Seuls les CBR, CB7 et CBT se convertissent' },
       { id: 'renommer', libelle: 'Renommer / déplacer…' },
+      entreeScripts(),
       { id: 'ajouter', libelle: `➕ Ajouter ${quoi} à une liste…`, separe: true, desactive: !!raison, aide: raison },
       ...(liste?.type === 'lecture'
         ? [{ id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' }]
@@ -551,6 +620,13 @@
       const idl = liste.id;
       const r = await listes.executer('Retrait de la liste', () => retirerLivresListe(idl, ids));
       if (r) sel.vider();
+      return;
+    }
+    if (id === 'scripts') {
+      menuScripts = {
+        x: positionMenu.x, y: positionMenu.y, ids,
+        entrees: [{ id: 'titre-sur', libelle: `Sur ${ids.length.toLocaleString('fr-FR')} livre(s)`, desactive: true }, ...entreesScriptsLivres(ids.length)],
+      };
       return;
     }
     if (id === 'infos') infosDe = ids;
@@ -832,6 +908,7 @@
       title="Afficher ou masquer le panneau de détails"
     >Détails</button>
     <button onclick={() => dialogueFichier?.showModal()} title="Lire un fichier qui n'est pas dans la bibliothèque" data-testid="ouvrir-fichier">Ouvrir un fichier…</button>
+    <button onclick={ouvrirMenuScripts} aria-haspopup="menu" aria-expanded={!!menuScripts && !menuScripts.ids} title="Scripts Python (bibliothèque, livres sélectionnés, gestion)" data-testid="menu-scripts">📜 Scripts ▾</button>
   </header>
 
   <div class="corps">
@@ -956,6 +1033,10 @@
 {#if menu}
   <MenuContextuel x={menu.x} y={menu.y} entrees={menu.pile !== undefined ? entreesPile(menu.pile) : entreesMenu}
     onchoix={choixMenu} onfermer={() => (menu = null)} />
+{/if}
+{#if menuScripts}
+  <MenuContextuel x={menuScripts.x} y={menuScripts.y} entrees={menuScripts.entrees} onchoix={(id) => void choixScript(id)}
+    onfermer={() => { const m = menuScripts; queueMicrotask(() => { if (menuScripts === m) menuScripts = null; }); }} />
 {/if}
 {#if infosDe}
   <DialogInfos ids={infosDe} onvoisin={voisin} {avoisin} onfermer={fenetreFermee} />

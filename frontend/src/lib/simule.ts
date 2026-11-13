@@ -10,6 +10,7 @@ import { creerBaseSimulee } from './simuleBase';
 import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
 import { creerMajSimulee } from './simuleMaj';
+import { creerScriptsSimules } from './simuleScripts';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -333,10 +334,28 @@ const transfert = creerTransfertSimule({
 // Mise à jour (tauri-v0.8.0) : voir simuleMaj.ts.
 const maj = creerMajSimulee({ emettre, pause });
 
+// Scripts Python (tauri-v0.9.0) : voir simuleScripts.ts.
+const scriptsSimules = creerScriptsSimules({
+  emettre,
+  pause,
+  livre: (id) => LIVRES[Number(id) - 1],
+  lectureSeule: () => {
+    const h = base.motif();
+    if (h) return h;
+    if (etat.mode !== 'comicrack') return undefined;
+    const r = edition('lire_reglages_edition', {}) as { ecritureComicrack: boolean };
+    return r.ecritureComicrack ? undefined : 'Bibliothèque ComicRack en lecture seule (cocher « Lecture et écriture » dans Réglages).';
+  },
+});
+
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
   const rm = maj.appeler(commande, args);
   if (rm !== undefined) return rm;
+  if (commande.startsWith('script')) {
+    const rs = scriptsSimules.appeler(commande, args);
+    if (rs !== undefined) return rs;
+  }
   switch (commande) {
     case 'infos':
       return {
