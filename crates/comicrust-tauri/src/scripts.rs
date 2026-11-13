@@ -15,8 +15,12 @@
 //!   un à la fois par hook, aucune question, 300 s au plus, modifications appliquées au fil de
 //!   l'eau, journal `scripts:auto` ;
 //! - hook `Editor` (fenêtre Infos) : les champs proposés reviennent dans `script:fin.champs` ;
+//! - pendant l'application des modifications d'un script du menu, le **créneau interactif reste
+//!   occupé** jusqu'au bilan (aucun autre script ne se lance, `executionEnCours` le signale) ;
+//!   `script_arreter` l'arrête entre deux livres ;
 //! - fermeture de l'application : tout est annulé, attente de 8 s au plus, sans jamais couper
-//!   une application en cours au milieu d'un livre.
+//!   une application en cours (menu ou automatisme) au milieu d'un livre (borne de sécurité :
+//!   [`ATTENTE_FERMETURE_APPLICATION`]).
 //!
 //! Aucune dépendance à Tauri : tout est testé ici (`tests_scripts.rs`) ; `app.rs` ne fait que
 //! relier les commandes et les événements.
@@ -36,7 +40,7 @@ use comicrust_core::scripting::{
     self, discover_with_warnings, AppliedRenames, DiscoveryWarning, Hook, RunContext, RunHandle, RunOptions, RunResult,
     RunState, ScriptEntry, ScriptRunner, ScriptSettings,
 };
-use hote::{Attentes, EnDirect, HoteTauri, Ouvreur, ReglagesScriptsHote};
+use hote::{Attentes, Decompte, EnDirect, HoteTauri, Ouvreur, ReglagesScriptsHote};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -47,8 +51,18 @@ use std::time::{Duration, Instant};
 
 /// Fermeture de l'application : délai maximum d'attente des scripts (comme la version egui).
 pub const ATTENTE_FERMETURE: Duration = Duration::from_secs(8);
+/// Fermeture pendant une application de modifications (menu ou automatisme) : l'arrêt est
+/// demandé entre deux livres et l'on attend la fin du livre en cours — un fichier déplacé a
+/// toujours sa fiche à jour (comme la version egui, qui attend sans limite). Borne de sécurité
+/// de **5 minutes** : largement de quoi finir le déplacement d'un gros fichier vers un partage
+/// réseau lent ; au-delà, l'opération est considérée comme bloquée (partage injoignable…) et
+/// ComicRust se ferme quand même.
+pub const ATTENTE_FERMETURE_APPLICATION: Duration = Duration::from_secs(300);
 /// Valeur montrée à la place d'une valeur secrète définie (jamais la valeur elle-même).
 pub const SECRET_MASQUE: &str = "••••";
+/// Clé réservée des réglages rendus au front : liste des clés secrètes (champ toujours masqué,
+/// même quand le secret n'est pas défini ou illisible). Ignorée à l'écriture.
+pub const CLE_SECRETS: &str = "$secrets";
 /// Exécutions terminées gardées (aperçu, application).
 const EXECUTIONS_GARDEES: usize = 8;
 /// Taille maximale d'une image de menu (`#@Image`) renvoyée en URL `data:`.
@@ -294,13 +308,13 @@ impl Reglages {
         reglages::modifier(&self.data, |r| r.scripts = copie).map(drop)
     }
 
+    /// Modifie les réglages en mémoire et les écrit **sous le verrou** : deux modifications
+    /// simultanées sont écrites dans l'ordre où elles ont été faites (le fichier finit toujours
+    /// identique aux réglages en mémoire).
     fn modifier(&self, f: impl FnOnce(&mut ReglagesScripts)) -> Result<(), String> {
-        let copie = {
-            let mut g = verrou(&self.r);
-            f(&mut g);
-            g.clone()
-        };
-        self.enregistrer(copie)
+        let mut g = verrou(&self.r);
+        f(&mut g);
+        self.enregistrer(g.clone())
     }
 }
 
@@ -406,8 +420,10 @@ struct Interne {
     presse_papiers: Ouvreur,
     reglages: Arc<Reglages>,
     etat: Mutex<Etat>,
-    fermeture: AtomicBool,
-    applications: AtomicUsize,
+    /// Fermeture demandée (partagée avec les applications au fil de l'eau des automatismes).
+    fermeture: Arc<AtomicBool>,
+    /// Applications de modifications en cours (menu et automatismes).
+    applications: Arc<AtomicUsize>,
     compteur: AtomicU64,
 }
 
@@ -429,8 +445,8 @@ impl Scripts {
             presse_papiers: Arc::new(hote::copier_texte),
             reglages,
             etat: Mutex::default(),
-            fermeture: AtomicBool::new(false),
-            applications: AtomicUsize::new(0),
+            fermeture: Arc::default(),
+            applications: Arc::default(),
             compteur: AtomicU64::new(0),
         }));
         s.recharger_dossier();
@@ -636,7 +652,7 @@ impl Scripts {
         let cle = self.entree(id)?.settings_key();
         let mut s = self.0.reglages.lire(&cle);
         for (k, v) in valeurs {
-            if s.secret.contains(k) && v.as_str() == Some(SECRET_MASQUE) {
+            if k == CLE_SECRETS || (s.secret.contains(k) && v.as_str() == Some(SECRET_MASQUE)) {
                 continue;
             }
             s.values.insert(k.clone(), v.clone());
@@ -798,10 +814,19 @@ impl Scripts {
         *verrou(&x.handle) = Some(handle);
         let me = self.clone();
         let x2 = x.clone();
-        std::thread::Builder::new()
-            .name("comicrust-script-attente".into())
-            .spawn(move || me.attendre_fin(&x2))
-            .map_err(|e| format!("fil d'attente du script impossible : {e}"))?;
+        let lance =
+            std::thread::Builder::new().name("comicrust-script-attente".into()).spawn(move || me.attendre_fin(&x2));
+        if let Err(e) = lance {
+            // Sans fil d'attente, l'exécution ne finirait jamais : arrêtée et oubliée (le créneau
+            // interactif est libéré).
+            x.arreter();
+            let mut g = self.etat();
+            if g.interactif.as_ref().is_some_and(|y| Arc::ptr_eq(y, &x)) {
+                g.interactif = None;
+            }
+            g.execs.retain(|y| !Arc::ptr_eq(y, &x));
+            return Err(format!("fil d'attente du script impossible : {e}"));
+        }
         Ok(x.run_id.clone())
     }
 
@@ -867,10 +892,17 @@ impl Scripts {
     /// grâce du cœur) ; une application en cours s'arrête entre deux livres.
     pub fn arreter(&self, run_id: &str) -> Result<(), String> {
         let x = self.execution(run_id)?;
-        if x.occupee() {
+        let en_application = x.en_application.load(Ordering::SeqCst);
+        if en_application {
+            self.systeme(run_id, "Arrêt demandé : l'application s'arrête après le livre en cours…".into());
+        } else if x.occupee() {
             self.systeme(run_id, "Arrêt demandé…".into());
         }
         x.arreter();
+        if en_application {
+            // Écriture des ComicInfo.xml en cours : l'édition s'arrête elle aussi entre deux livres.
+            self.0.applicateur.edition.annuler();
+        }
         Ok(())
     }
 
@@ -897,18 +929,34 @@ impl Scripts {
         if let Some(m) = self.motif_lecture_seule() {
             return Err(m);
         }
-        if x.en_application.swap(true, Ordering::SeqCst) {
-            return Err("application déjà en cours".into());
+        {
+            // Le créneau interactif est repris jusqu'au bilan : pas d'autre script pendant
+            // l'application (`executionEnCours` vaut ce runId, `script_lancer` est refusé).
+            let mut g = self.etat();
+            if g.interactif.as_ref().is_some_and(|y| !Arc::ptr_eq(y, &x) && y.occupee()) {
+                return Err("Un autre script est en cours : attends sa fin avant d'appliquer.".into());
+            }
+            if x.en_application.swap(true, Ordering::SeqCst) {
+                return Err("application déjà en cours".into());
+            }
+            g.interactif = Some(x.clone());
         }
-        self.0.applications.fetch_add(1, Ordering::SeqCst);
+        // Un arrêt antérieur (script arrêté avant sa fin) ne vaut pas pour cette application ;
+        // remis à zéro AVANT d'être compté, pour qu'un arrêt de la fermeture ne soit jamais effacé.
+        x.stop_application.store(false, Ordering::SeqCst);
+        let compte = Decompte::compter(&self.0.applications);
         let fin = Fin(self, &x);
+        // Comptée avant de regarder la fermeture : soit `fermer` voit cette application (et
+        // attend la fin du livre en cours), soit elle voit la fermeture (et n'applique rien).
+        if self.0.fermeture.load(Ordering::SeqCst) {
+            return Err("ComicRust se ferme : modifications non appliquées".into());
+        }
         let plan = {
             let a = verrou(&x.apercu);
             let Some(a) = a.as_ref() else { return Err("rien à appliquer".into()) };
             let base = self.0.applicateur.biblio.base()?;
             a.plan(cles, &base)
         };
-        x.stop_application.store(false, Ordering::SeqCst);
         let run_id = x.run_id.clone();
         let progression = |t: String| {
             self.emettre(EvenementScript::Progression {
@@ -936,6 +984,7 @@ impl Scripts {
         *verrou(&x.apercu) = None;
         self.systeme(&run_id, format!("Bilan : {}", bilan.resume));
         drop(fin);
+        drop(compte);
         self.emettre(EvenementScript::Applique { run_id, bilan: bilan.clone() });
         Ok(bilan)
     }
@@ -986,7 +1035,9 @@ impl Scripts {
         self.lancer_autos();
     }
 
-    /// Lance les automatismes prêts.
+    /// Lance les automatismes prêts. Chaque automatisme lancé est suivi par une [`GardeAuto`] :
+    /// quel que soit le chemin (fin normale, fil impossible à créer, panique), son hook est
+    /// libéré et l'exécution retirée de la liste attendue par la fermeture.
     fn lancer_autos(&self) {
         if self.0.fermeture.load(Ordering::SeqCst) {
             return;
@@ -995,33 +1046,47 @@ impl Scripts {
         if taches.is_empty() {
             return;
         }
-        let refus = match (self.motif_lecture_seule(), self.0.applicateur.biblio.base()) {
-            (Some(m), _) => Some(format!("non lancé : lecture seule ({m})")),
-            (None, Err(e)) => Some(format!("non lancé : {e}")),
-            (None, Ok(_)) => self.python().err().map(|e| format!("non lancé : {e}")),
+        // Une seule lecture de la base et de l'interpréteur : ce qui a été vérifié est ce qui sert.
+        let pret = match self.motif_lecture_seule() {
+            Some(m) => Err(format!("non lancé : lecture seule ({m})")),
+            None => self
+                .0
+                .applicateur
+                .biblio
+                .base()
+                .and_then(|db| self.python().map(|p| (db, p)))
+                .map_err(|e| format!("non lancé : {e}")),
         };
-        if let Some(m) = refus {
-            let mut g = self.etat();
-            for t in &taches {
-                g.file.terminee(t.hook);
+        let (db, python) = match pret {
+            Ok(x) => x,
+            Err(m) => {
+                let mut g = self.etat();
+                for t in &taches {
+                    g.file.terminee(t.hook);
+                }
+                g.file.vider();
+                drop(g);
+                for t in &taches {
+                    self.journal_auto(&t.entree.name, t.hook, format!("« {} » ({}) {m}", t.entree.name, t.hook.name()));
+                }
+                return;
             }
-            g.file.vider();
-            drop(g);
-            for t in &taches {
-                self.journal_auto(&t.entree.name, t.hook, format!("« {} » ({}) {m}", t.entree.name, t.hook.name()));
-            }
-            return;
-        }
-        let (Ok(db), Ok(python)) = (self.0.applicateur.biblio.base(), self.python()) else { return };
+        };
         for t in taches {
             let x = self.nouvelle_execution(t.entree.clone(), t.hook, None);
             self.etat().autos.push(x.clone());
+            let garde = GardeAuto { s: self.clone(), x: x.clone() };
             let me = self.clone();
             let journal: Arc<dyn Fn(String) + Send + Sync> = {
                 let (nom, hook) = (t.entree.name.clone(), t.hook);
                 Arc::new(move |l| me.journal_auto(&nom, hook, l))
             };
-            let direct = EnDirect { applicateur: self.0.applicateur.clone(), journal };
+            let direct = EnDirect {
+                applicateur: self.0.applicateur.clone(),
+                journal,
+                applications: self.0.applications.clone(),
+                fermeture: self.0.fermeture.clone(),
+            };
             let hote = Arc::new(self.hote(&x, db.clone(), Some(direct)));
             let contexte = RunContext::new(t.hook, t.ids.clone());
             let n = if t.ids.is_empty() { String::new() } else { format!(" sur {} livre(s)", t.ids.len()) };
@@ -1030,7 +1095,8 @@ impl Scripts {
             *verrou(&x.handle) = Some(handle);
             let me = self.clone();
             let lance = std::thread::Builder::new().name("comicrust-automatisme".into()).spawn(move || {
-                let r = me.attendre_fin(&x);
+                let r = me.attendre_fin(&garde.x);
+                let x = &garde.x;
                 let etat = match r.state {
                     RunState::Finished => "terminé".to_string(),
                     RunState::Cancelled => "arrêté".to_string(),
@@ -1040,25 +1106,40 @@ impl Scripts {
                     }
                 };
                 me.journal_auto(&x.entree.name, x.hook, format!("« {} » ({}) {etat}", x.entree.name, x.hook.name()));
-                {
-                    let mut g = me.etat();
-                    g.file.terminee(x.hook);
-                    g.autos.retain(|y| !Arc::ptr_eq(y, &x));
-                }
+                // Hook libéré et exécution oubliée avant de lancer la suivante.
+                drop(garde);
                 me.lancer_autos();
             });
-            if lance.is_err() {
-                self.etat().file.terminee(t.hook);
+            if let Err(e) = lance {
+                // La fermeture a été rendue (la garde est déjà libérée) : processus arrêté.
+                x.arreter();
+                self.journal_auto(
+                    &t.entree.name,
+                    t.hook,
+                    format!("« {} » ({}) non suivi : fil impossible à créer ({e})", t.entree.name, t.hook.name()),
+                );
             }
         }
     }
 
+    /// Automatismes en cours (lancés et pas encore finis) et hooks occupés (tests).
+    pub fn automatismes_en_cours(&self) -> (usize, usize) {
+        let g = self.etat();
+        (g.autos.len(), g.file.en_cours.len())
+    }
+
     // ───────────── Fermeture ─────────────
 
-    /// Fermeture de l'application : annule tout (scripts, automatismes, application entre deux
-    /// livres) et attend au plus `delai` ; une application en cours n'est jamais coupée au milieu
-    /// d'un livre (attente jusqu'à la fin du livre en cours). Vrai si tout est arrêté.
+    /// Fermeture de l'application : annule tout (scripts, automatismes, applications du menu
+    /// ou au fil de l'eau arrêtées entre deux livres, écriture des ComicInfo.xml) et attend au
+    /// plus `delai` ; une application en cours n'est jamais coupée au milieu d'un livre (attente
+    /// de la fin du livre en cours, [`ATTENTE_FERMETURE_APPLICATION`] au plus). Vrai si tout est
+    /// arrêté.
     pub fn fermer(&self, delai: Duration) -> bool {
+        self.fermer_borne(delai, ATTENTE_FERMETURE_APPLICATION)
+    }
+
+    fn fermer_borne(&self, delai: Duration, borne_application: Duration) -> bool {
         self.0.fermeture.store(true, Ordering::SeqCst);
         let toutes: Vec<Arc<Execution>> = {
             let mut g = self.etat();
@@ -1068,9 +1149,9 @@ impl Scripts {
         for x in &toutes {
             x.arreter();
         }
-        if self.0.applications.load(Ordering::SeqCst) > 0 {
-            self.0.applicateur.edition.annuler();
-        }
+        // Toujours : une application (menu ou automatisme) peut commencer son écriture des
+        // ComicInfo.xml à tout moment ; le relais `stop` → édition la rattrape alors.
+        self.0.applicateur.edition.annuler();
         let debut = Instant::now();
         loop {
             let scripts_finis = toutes.iter().all(|x| x.terminee()) && self.etat().autos.is_empty();
@@ -1078,7 +1159,12 @@ impl Scripts {
             if scripts_finis && applications == 0 {
                 return true;
             }
-            if applications == 0 && debut.elapsed() >= delai {
+            let ecoule = debut.elapsed();
+            if applications == 0 && ecoule >= delai {
+                return false;
+            }
+            if applications > 0 && ecoule >= borne_application {
+                eprintln!("ComicRust : fermeture malgré une application de modifications bloquée ({ecoule:?})");
                 return false;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -1091,13 +1177,28 @@ impl Scripts {
     }
 }
 
-/// Fin d'une application (même en cas d'erreur) : compteur et indicateurs remis à zéro.
+/// Suivi d'un automatisme lancé : à sa disparition (fin du fil, fil impossible à créer,
+/// panique), hook libéré dans la file et exécution retirée de la liste des automatismes.
+struct GardeAuto {
+    s: Scripts,
+    x: Arc<Execution>,
+}
+
+impl Drop for GardeAuto {
+    fn drop(&mut self) {
+        let mut g = self.s.etat();
+        g.file.terminee(self.x.hook);
+        g.autos.retain(|y| !Arc::ptr_eq(y, &self.x));
+    }
+}
+
+/// Fin d'une application (même en cas d'erreur) : indicateur remis à zéro, créneau interactif
+/// libéré.
 struct Fin<'a>(&'a Scripts, &'a Arc<Execution>);
 
 impl Drop for Fin<'_> {
     fn drop(&mut self) {
         self.1.en_application.store(false, Ordering::SeqCst);
-        (self.0).0.applications.fetch_sub(1, Ordering::SeqCst);
         let mut g = self.0.etat();
         if g.interactif.as_ref().is_some_and(|y| Arc::ptr_eq(y, self.1)) && !self.1.occupee() {
             g.interactif = None;
@@ -1106,9 +1207,11 @@ impl Drop for Fin<'_> {
 }
 
 /// Réglages pour le front : valeurs secrètes remplacées par [`SECRET_MASQUE`] (vide si non
-/// définie).
+/// définie ou illisible), clés secrètes listées dans [`CLE_SECRETS`] (une clé marquée secrète
+/// sans valeur apparaît vide, pour pouvoir la saisir).
 pub fn masquer(s: &ScriptSettings) -> Map<String, Value> {
-    s.values
+    let mut m: Map<String, Value> = s
+        .values
         .iter()
         .map(|(k, v)| {
             let v = if s.secret.contains(k) {
@@ -1123,7 +1226,14 @@ pub fn masquer(s: &ScriptSettings) -> Map<String, Value> {
             };
             (k.clone(), v)
         })
-        .collect()
+        .collect();
+    if !s.secret.is_empty() {
+        for k in &s.secret {
+            m.entry(k.clone()).or_insert_with(|| Value::String(String::new()));
+        }
+        m.insert(CLE_SECRETS.into(), json!(s.secret.iter().collect::<Vec<_>>()));
+    }
+    m
 }
 
 /// Image de menu en URL `data:` (fichier absent, trop gros ou format inconnu : `None`).
@@ -1133,4 +1243,103 @@ fn image_menu(p: &Path) -> Option<String> {
         return None;
     }
     formulaires::url_image(&std::fs::read(p).ok()?)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests internes (sans Python) : libération des automatismes, ordre d'écriture des réglages.
+    use super::*;
+
+    fn service(data: &Path) -> Scripts {
+        let b = Biblio::nouvelle(data.to_path_buf());
+        let lecteur = Lecteur::nouveau(data.to_path_buf(), b.clone());
+        let edition = Edition::nouvelle(b.clone(), lecteur.clone());
+        let config = ConfigScripts {
+            data: data.to_path_buf(),
+            dossier: data.join("scripts"),
+            dossier_exe: PathBuf::from("/nulle-part"),
+            python: None,
+        };
+        Scripts::nouveau(config, b, edition, lecteur, Arc::new(|_| {}))
+    }
+
+    #[test]
+    fn garde_auto_libere_le_hook_meme_si_le_fil_ne_part_pas() {
+        let d = tempfile::tempdir().unwrap();
+        let s = service(d.path());
+        std::fs::write(d.path().join("scripts/a.py"), "#@Name A\n#@Hook NewBooks\ndef a(books):\n    pass\n").unwrap();
+        s.recharger();
+        let entree = s.etat().entrees[0].clone();
+        let tache = TacheAuto { entree: entree.clone(), hook: Hook::NewBooks, ids: Vec::new() };
+        {
+            let mut g = s.etat();
+            assert!(g.file.ajouter(tache.clone()) && g.file.ajouter(tache));
+            assert_eq!(g.file.pretes().len(), 1);
+        }
+        let x = s.nouvelle_execution(entree, Hook::NewBooks, None);
+        s.etat().autos.push(x.clone());
+        assert_eq!(s.automatismes_en_cours(), (1, 1));
+        // Ce que fait `std::thread::Builder::spawn` quand le fil ne peut pas être créé : la
+        // fermeture (et la garde qu'elle porte) est détruite sans avoir tourné.
+        let garde = GardeAuto { s: s.clone(), x };
+        let fil = move || drop(garde);
+        drop(fil);
+        assert_eq!(s.automatismes_en_cours(), (0, 0), "hook libéré, exécution oubliée");
+        assert_eq!(s.etat().file.pretes().len(), 1, "la tâche suivante du même hook peut partir");
+    }
+
+    #[test]
+    fn automatisme_sans_bibliotheque_libere_son_hook() {
+        let d = tempfile::tempdir().unwrap();
+        let s = service(d.path());
+        std::fs::write(d.path().join("scripts/a.py"), "#@Name A\n#@Hook NewBooks\ndef a(books):\n    pass\n").unwrap();
+        s.recharger();
+        s.regler_auto(true).unwrap();
+        for _ in 0..3 {
+            s.declencher(Hook::NewBooks, vec!["x".into()]);
+            assert_eq!(s.automatismes_en_cours(), (0, 0), "rien de bloqué « en cours »");
+        }
+        let debut = Instant::now();
+        assert!(s.fermer(ATTENTE_FERMETURE));
+        assert!(debut.elapsed() < Duration::from_secs(1), "fermeture immédiate : {:?}", debut.elapsed());
+    }
+
+    #[test]
+    fn reglages_ecrits_dans_l_ordre_des_modifications() {
+        let d = tempfile::tempdir().unwrap();
+        let r = Arc::new(Reglages { data: d.path().to_path_buf(), r: Mutex::default() });
+        let fils: Vec<_> = (0..8)
+            .map(|i| {
+                let r = r.clone();
+                std::thread::spawn(move || {
+                    for j in 0..100 {
+                        r.modifier(|x| {
+                            x.desactives.insert(format!("{i}-{j}"));
+                        })
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for f in fils {
+            f.join().unwrap();
+        }
+        let lu = reglages::lire(d.path()).unwrap().scripts;
+        assert_eq!(lu.desactives.len(), 800);
+        assert_eq!(lu, *verrou(&r.r), "le fichier finit identique aux réglages en mémoire");
+    }
+
+    #[test]
+    fn secrets_listes_meme_non_definis() {
+        let mut st = ScriptSettings::default();
+        st.values.insert("api".into(), json!("abc"));
+        st.values.insert("illisible".into(), Value::Null);
+        st.values.insert("n".into(), json!(3));
+        st.secret.extend(["api".to_string(), "illisible".to_string(), "jeton".to_string()]);
+        let m = masquer(&st);
+        assert_eq!(m["api"], SECRET_MASQUE);
+        assert_eq!((m["illisible"].as_str(), m["jeton"].as_str()), (Some(""), Some("")));
+        assert_eq!(m[CLE_SECRETS], json!(["api", "illisible", "jeton"]));
+        assert!(!masquer(&ScriptSettings::default()).contains_key(CLE_SECRETS));
+    }
 }

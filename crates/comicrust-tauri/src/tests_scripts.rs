@@ -2,13 +2,17 @@
 //! s'il manque) : faux front qui répond aux questions / formulaires / listes de choix, arrêt
 //! pendant une question, script d'exemple `nettoyage` sur une base SQLite temporaire (aperçu puis
 //! application), refus en lecture seule (ComicDb.xml), réglages secrets jamais renvoyés, arrêt
-//! forcé d'un script qui ignore l'annulation, fermeture, automatisme `NewBooks` après une analyse.
+//! forcé d'un script qui ignore l'annulation, fermeture, automatisme `NewBooks` après une analyse,
+//! créneau interactif occupé pendant l'application et arrêt de l'application entre deux livres,
+//! fermeture qui attend la fin d'une application au fil de l'eau d'un automatisme.
 
 use crate::biblio::{Biblio, ChoixPremierDemarrage, EvenementScan};
 use crate::edition::Edition;
 use crate::lecteur::Lecteur;
 use crate::reglages::Mode;
-use crate::scripts::{masquer, ConfigScripts, EvenementScript, Scripts, Sortie, ATTENTE_FERMETURE, SECRET_MASQUE};
+use crate::scripts::{
+    masquer, ConfigScripts, EvenementScript, Scripts, Sortie, ATTENTE_FERMETURE, CLE_SECRETS, SECRET_MASQUE,
+};
 use comicrust_core::db::ComicDatabase;
 use comicrust_core::library::LibraryBook;
 use comicrust_core::scripting::{Hook, ScriptSettings};
@@ -41,7 +45,37 @@ struct Front {
     tous: Arc<Mutex<Vec<EvenementScript>>>,
 }
 
+/// Événement du backend retenu (le fil qui l'émet attend) jusqu'à `liberer`.
+struct Barriere {
+    atteinte: Receiver<()>,
+    liberer: mpsc::Sender<()>,
+}
+
+impl Barriere {
+    fn attendre(&self) {
+        self.atteinte.recv_timeout(Duration::from_secs(30)).expect("barrière atteinte");
+    }
+}
+
 impl Front {
+    /// Comme [`Front::nouveau`], mais le premier événement pour lequel `retenir` est vrai bloque
+    /// le fil qui l'émet (application en cours…) jusqu'à `Barriere::liberer`.
+    fn avec_barriere(retenir: impl Fn(&EvenementScript) -> bool + Send + Sync + 'static) -> (Sortie, Front, Barriere) {
+        let (sortie, front) = Front::nouveau();
+        let (tx_atteinte, atteinte) = mpsc::channel();
+        let (liberer, rx_liberer) = mpsc::channel::<()>();
+        let attente = Mutex::new(Some((tx_atteinte, rx_liberer)));
+        let s2: Sortie = Arc::new(move |e: EvenementScript| {
+            let bloque = if retenir(&e) { attente.lock().unwrap().take() } else { None };
+            sortie(e);
+            if let Some((tx, rx)) = bloque {
+                let _ = tx.send(());
+                let _ = rx.recv_timeout(Duration::from_secs(60));
+            }
+        });
+        (s2, front, Barriere { atteinte, liberer })
+    }
+
     fn nouveau() -> (Sortie, Front) {
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
@@ -348,6 +382,14 @@ fn reglages_secrets_jamais_renvoyes() {
     st.secret.extend(["api".to_string(), "vide".to_string()]);
     let m = masquer(&st);
     assert_eq!((m["api"].as_str(), m["vide"].as_str(), m["n"].as_i64()), (Some(SECRET_MASQUE), Some(""), Some(3)));
+    assert_eq!(m[CLE_SECRETS], json!(["api", "vide"]), "clés secrètes listées pour le front");
+    // Le front renvoie la liste réservée avec ses valeurs : elle n'est jamais enregistrée.
+    let mut v = r2.clone();
+    v.insert("dossier".into(), json!("F:/BD"));
+    let r3 = s.reglages_ecrire("cle", &v).unwrap();
+    assert_eq!(r3["dossier"], "F:/BD");
+    let fichier = std::fs::read_to_string(data.join(crate::reglages::FICHIER_REGLAGES)).unwrap();
+    assert!(!fichier.contains(CLE_SECRETS), "{fichier}");
 }
 
 const SCRIPT_TETU: &str = "import comicrust, time\n\n#@Name Têtu\n#@Hook Library\n#@Key tetu\ndef t(books):\n    \
@@ -476,4 +518,103 @@ fn hook_editeur_rend_les_champs_sans_rien_enregistrer() {
     assert_eq!(etat, "termine", "{}", front.journal());
     assert_eq!(champs.unwrap()["Title"], "Titre de Saisie non enregistrée");
     assert_eq!(b.livre(&l.id).unwrap().title, None, "rien d'enregistré");
+}
+
+const SCRIPT_COMICINFO: &str = "import comicrust\n\n#@Name Infos\n#@Hook Books\n#@Key ci\ndef ci(books):\n    \
+for b in books:\n        comicrust.write_info(b)\n";
+
+#[test]
+fn application_occupe_le_creneau_et_s_arrete_entre_deux_livres() {
+    let _py = besoin_python!();
+    let d = tempfile::tempdir().unwrap();
+    let dossier = d.path().join("scripts");
+    std::fs::create_dir_all(&dossier).unwrap();
+    std::fs::write(dossier.join("ci.py"), SCRIPT_COMICINFO).unwrap();
+    let bd = d.path().join("BD");
+    std::fs::create_dir_all(&bd).unwrap();
+    let livres: Vec<LibraryBook> = (1..=3)
+        .map(|i| {
+            let f = bd.join(format!("Album {i}.cbz"));
+            crate::couvertures::cbz_de_test(&f, [10, 20, 30, 255], 1, None);
+            let mut l = livre(&format!("cccccccc-0000-0000-0000-00000000000{i}"), &f.to_string_lossy());
+            l.series = Some(format!("Série {i}"));
+            l
+        })
+        .collect();
+    let ids: Vec<String> = livres.iter().map(|l| l.id.clone()).collect();
+    let data = d.path().join("data");
+    let b = biblio_autonome(&data, &livres);
+    // L'application est retenue à son premier avancement de l'écriture des ComicInfo.xml.
+    let (sortie, front, barriere) = Front::avec_barriere(
+        |e| matches!(e, EvenementScript::Progression { texte: Some(t), .. } if t.starts_with("ComicInfo.xml")),
+    );
+    let (s, _) = service(&data, &dossier, &b, sortie);
+    let run = s.lancer("ci", "Books", ids.clone()).unwrap();
+    assert_eq!(front.fin(&run).0, "termine", "{}", front.journal());
+    let ap = s.apercu(&run).unwrap();
+    assert_eq!(ap.lignes.len(), 3, "{ap:?}");
+    assert!(ap.lignes.iter().all(|l| l.genre == "comicinfo" && l.conflit.is_none()), "{ap:?}");
+    assert!(s.lister().execution_en_cours.is_none(), "script fini : créneau libre");
+    let cles: Vec<String> = ap.lignes.iter().map(|l| l.cle.clone()).collect();
+
+    let (s2, run2, cles2) = (s.clone(), run.clone(), cles.clone());
+    let application = std::thread::spawn(move || s2.appliquer(&run2, &cles2));
+    barriere.attendre();
+    // Pendant l'application : créneau occupé, lancement et seconde application refusés.
+    assert_eq!(s.lister().execution_en_cours.as_deref(), Some(run.as_str()), "executionEnCours pendant l'application");
+    let refus = s.lancer("ci", "Books", ids.clone()).unwrap_err();
+    assert!(refus.contains("déjà en cours"), "{refus}");
+    assert!(s.appliquer(&run, &cles).is_err(), "une seule application à la fois");
+    // Arrêt : entre deux livres (l'écriture des ComicInfo.xml est annulée).
+    s.arreter(&run).unwrap();
+    barriere.liberer.send(()).unwrap();
+    let bilan = application.join().unwrap().unwrap();
+    assert!(bilan.arrete, "{bilan:?}");
+    assert_eq!(bilan.comicinfo, 0, "aucun livre écrit après l'arrêt : {bilan:?}");
+    assert!(front.journal().contains("l'application s'arrête après le livre en cours"), "{}", front.journal());
+    let tous = front.tous.lock().unwrap().clone();
+    assert!(tous
+        .iter()
+        .any(|e| matches!(e, EvenementScript::Applique { run_id, bilan } if *run_id == run && bilan.arrete)));
+    // Bilan rendu : créneau libéré, un nouveau script peut partir.
+    assert!(s.lister().execution_en_cours.is_none());
+    let run3 = s.lancer("ci", "Books", ids).unwrap();
+    assert_eq!(front.fin(&run3).0, "termine");
+}
+
+const SCRIPT_AUTO_DIRECT: &str = "import comicrust, time\n\n#@Name Direct\n#@Hook NewBooks\n#@Key direct\n\
+def d(books):\n    for b in books:\n        b.Tags = 'vu'\n    comicrust.flush()\n    \
+while not comicrust.cancelled():\n        time.sleep(0.05)\n";
+
+#[test]
+fn fermeture_attend_l_application_au_fil_de_l_eau_d_un_automatisme() {
+    let _py = besoin_python!();
+    let d = tempfile::tempdir().unwrap();
+    let dossier = d.path().join("scripts");
+    std::fs::create_dir_all(&dossier).unwrap();
+    std::fs::write(dossier.join("direct.py"), SCRIPT_AUTO_DIRECT).unwrap();
+    let data = d.path().join("data");
+    let l = livre("dddddddd-0000-0000-0000-000000000001", "/bd/x.cbz");
+    let b = biblio_autonome(&data, std::slice::from_ref(&l));
+    // L'application au fil de l'eau est retenue juste après avoir écrit la fiche.
+    let (sortie, front, barriere) = Front::avec_barriere(|e| matches!(e, EvenementScript::BibliothequeModifiee { .. }));
+    let (s, _) = service(&data, &dossier, &b, sortie);
+    s.regler_auto(true).unwrap();
+    s.declencher(Hook::NewBooks, vec![l.id.clone()]);
+    barriere.attendre();
+    assert_eq!(s.automatismes_en_cours(), (1, 1));
+
+    let s2 = s.clone();
+    let fermeture = std::thread::spawn(move || s2.fermer(Duration::from_millis(200)));
+    std::thread::sleep(Duration::from_millis(1200));
+    assert!(!fermeture.is_finished(), "la fermeture attend la fin de l'application en cours");
+    barriere.liberer.send(()).unwrap();
+    fermeture.join().unwrap();
+    // Le script, arrêté par la fermeture, finit peu après ; rien ne reste « en cours ».
+    let fin = Instant::now() + Duration::from_secs(15);
+    while s.automatismes_en_cours() != (0, 0) {
+        assert!(Instant::now() < fin, "automatisme toujours en cours : {}", front.journal());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(b.livre(&l.id).unwrap().tags.as_deref(), Some("vu"), "{}", front.journal());
 }

@@ -22,9 +22,10 @@ Commandes :
 - `script_repondre(runId: string, reqId: number, valeur: any|null)`
 - `script_vignettes_voulues(runId: string, reqId: number, rangs: number[])`
 - `script_arreter(runId: string)` : annulation polie, puis arrêt forcé du processus Python après 3 s ; pendant
-  une application, arrêt entre deux livres.
+  une application, arrêt **entre deux livres** (écriture des ComicInfo.xml comprise), bilan `arrete: true`.
 - `script_apercu(runId: string) -> Apercu`
-- `script_appliquer(runId: string, cles: string[]) -> Bilan`
+- `script_appliquer(runId: string, cles: string[]) -> Bilan` : occupe le créneau interactif jusqu'au bilan (voir
+  « Application en cours »).
 - `script_hook_editeur(id: string, livreId: string, champs: object) -> string (runId)`
 - `script_reglages_lire(id: string) -> object` / `script_reglages_ecrire(id: string, valeurs: object) -> object`
 
@@ -57,7 +58,7 @@ type InfoScript = {
   hooks: string[];     // "Books"|"Library"|"Editor"|"ConfigScript"|"BookOpened"|"BookClosed"|"NewBooks"|"Startup"
   fichier: string;     // chemin relatif à scripts\ (séparateurs /)
   actif: boolean;      // choix de l'utilisateur, sinon en-tête #@Enabled
-  image?: string;      // #@Image en URL data: (≤ 512 Ko)
+  image?: string;      // #@Image en URL data:image/(png|jpeg|gif|webp|bmp);base64 (≤ 512 Ko)
   reglages?: string;   // précision : id de la fonction ConfigScript du même fichier (bouton « Réglages »)
 };
 ```
@@ -161,6 +162,21 @@ type Bilan = { fiches: number; renommages: number; comicinfo: number; erreurs: s
 - Lecture seule : `script_apercu` rend `lectureSeule: true` et `motif` ; `script_appliquer` est rejeté avec ce
   motif.
 
+#### Application en cours
+
+- `script_appliquer` **reprend le créneau interactif** (libéré à la fin du script) et le garde jusqu'au bilan :
+  pendant toute l'application, `executionEnCours` vaut ce `runId`, `script_lancer` / `script_hook_editeur` sont
+  refusés (« Un script est déjà en cours… ») et un second `script_appliquer` aussi (« application déjà en
+  cours »). Refusé si un autre script interactif tourne. Le créneau est libéré **avant** `script:applique`.
+- Avancement : `script:progression { runId, texte }` (écriture des ComicInfo.xml : `"ComicInfo.xml 2/5 Titre"`).
+- Arrêt : `script_arreter(runId)` pendant l'application → arrêt entre deux livres (jamais au milieu d'un
+  renommage ou d'une écriture), l'écriture des ComicInfo.xml en cours est annulée (`Edition::annuler`) ;
+  journal `systeme` « Arrêt demandé : l'application s'arrête après le livre en cours… » ; le bilan rendu (et
+  `script:applique`) porte `arrete: true` et l'erreur « N opération(s) non faite(s) : arrêt demandé avant leur
+  tour ».
+- Front : pendant l'application, la fenêtre affiche « Application en cours… » et un bouton **Arrêter** ; ni
+  Annuler, ni Fermer, ni Échap avant le bilan.
+
 ### Hook Editor (fenêtre Infos)
 
 `script_hook_editeur(id, livreId, champs)` : `champs` = valeurs actuelles de la fenêtre (nom ComicRack → texte,
@@ -171,8 +187,11 @@ non enregistrées) ; le script voit la fiche avec ces valeurs. À la fin, `scrip
 ### Réglages des scripts
 
 `script_reglages_lire(id)` : réglages du fichier du script ; une valeur secrète définie vaut **`"••••"`** (vide
-si non définie), jamais la valeur en clair. `script_reglages_ecrire(id, valeurs)` fusionne `valeurs` ; un secret
-renvoyé inchangé (`"••••"`) **garde l'ancienne valeur chiffrée**. Rend les réglages masqués (précision).
+si non définie ou illisible), jamais la valeur en clair. Clé réservée **`"$secrets"`** : liste des clés secrètes
+(une clé marquée secrète sans valeur apparaît avec `""`), pour que le front affiche **toujours** ces champs en
+mot de passe (bouton œil pour voir la saisie, jamais la valeur enregistrée). `script_reglages_ecrire(id,
+valeurs)` fusionne `valeurs` (la clé `"$secrets"` est ignorée) ; un secret renvoyé inchangé (`"••••"`) **garde
+l'ancienne valeur chiffrée**. Rend les réglages masqués (précision).
 
 Stockage : `data\comicrust-tauri.json`, section `scripts` (lecture tolérante) :
 `{ auto?: bool, desactives: string[], actives: string[], valeurs: { "<fichier relatif>": { …, "<clé>": {"$secret":
@@ -192,12 +211,28 @@ une application) : pas de `script:journal`, `script:fin`… (le front ignore les
 
 ### Fermeture
 
-`RunEvent::ExitRequested` / `Exit` : scripts et automatismes annulés, application arrêtée entre deux livres,
-attente de 8 s au plus — sauf une application en cours, toujours menée jusqu'à la fin du livre en cours.
+`RunEvent::ExitRequested` / `Exit` (`Scripts::fermer`) :
+
+- plus aucun lancement ni application (`script_appliquer`, application au fil de l'eau d'un automatisme) ;
+- scripts et automatismes annulés (arrêt forcé après le délai de grâce), file des automatismes vidée ;
+- applications en cours — celle d'un script du menu **et** celles des automatismes (`apply_live`, comptées
+  elles aussi) — arrêtées **entre deux livres** ; `Edition::annuler()` est appelé dans tous les cas (écriture des
+  ComicInfo.xml) ;
+- attente de 8 s au plus (`ATTENTE_FERMETURE`) pour les scripts ; tant qu'une application tourne, attente de la
+  fin du livre en cours (un fichier déplacé a toujours sa fiche à jour), avec une borne de sécurité de
+  **5 minutes** (`ATTENTE_FERMETURE_APPLICATION` : de quoi finir le déplacement d'un gros fichier vers un partage
+  réseau lent ; au-delà, l'opération est jugée bloquée et ComicRust se ferme quand même).
 
 ### Divers
 
 - Le module `comicrust.py` est écrit dans `data\python\` ; l'interpréteur est `COMICRUST_PYTHON`, puis
   `python\python.exe` à côté de l'exe (Python embarqué), puis (hors Windows) `python3`.
 - `comicrust.open_url` : adresse vérifiée par `check_url` du cœur (http/https avec hôte), ouverte comme
-  `maj::ouvrir_page`. `comicrust.clipboard_set` : presse-papiers du système (`clip.exe` sous Windows).
+  `maj::ouvrir_page`. `comicrust.clipboard_set` : presse-papiers du système (`clip.exe` sous Windows). Sous
+  Windows, `clip.exe` et `explorer.exe` sont lancés avec `CREATE_NO_WINDOW` (aucune console qui clignote).
+- **Images** : tout ce que le backend envoie (icône `#@Image`, contrôle `image`, `images` et `script:vignette`
+  des listes de choix, `script:progression.image`) est une URL `data:image/(png|jpeg|gif|webp|bmp);base64,…`
+  (format reconnu d'après les octets). Le front (`imageScriptSure`) **refuse tout le reste** : SVG (peut porter du
+  script), `cr-…://`, `http://cr-….localhost/`, base64 brut.
+- Automatismes : un automatisme qui ne peut pas partir (lecture seule, base ou Python indisponible, fil
+  impossible à créer) libère toujours son hook et n'est jamais attendu par la fermeture.

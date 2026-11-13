@@ -603,7 +603,13 @@ impl Applicateur {
             let sortie = |e: EvenementEdition| match e {
                 EvenementEdition::BibliothequeModifiee { ids } => modifies.lock().unwrap().extend(ids),
                 EvenementEdition::Progression { fait, total, livre, .. } => {
-                    progression(format!("ComicInfo.xml {fait}/{total} {livre}"))
+                    progression(format!("ComicInfo.xml {fait}/{total} {livre}"));
+                    // Arrêt demandé pendant l'écriture : relayé à l'édition (qui s'arrête entre
+                    // deux livres). Vérifié à chaque avancement signalé, car l'édition remet son
+                    // propre drapeau à zéro au début de l'opération.
+                    if stop.load(Ordering::SeqCst) {
+                        self.edition.annuler();
+                    }
                 }
             };
             match self.edition.ecrire_infos_fichiers(&plan.write_info, true, &sortie) {

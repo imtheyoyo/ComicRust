@@ -15,7 +15,7 @@ use comicrust_core::scripting::{
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -87,6 +87,26 @@ pub struct EnDirect {
     pub applicateur: Applicateur,
     /// Journal `scripts:auto` (ligne).
     pub journal: Arc<dyn Fn(String) + Send + Sync>,
+    /// Applications en cours (compteur du service, attendu par la fermeture de l'application).
+    pub applications: Arc<AtomicUsize>,
+    /// Fermeture de l'application demandée : plus rien n'est appliqué.
+    pub fermeture: Arc<AtomicBool>,
+}
+
+/// Application comptée tant que la garde vit (décomptée même en cas d'erreur ou de panique).
+pub struct Decompte<'a>(&'a AtomicUsize);
+
+impl<'a> Decompte<'a> {
+    pub fn compter(n: &'a AtomicUsize) -> Self {
+        n.fetch_add(1, Ordering::SeqCst);
+        Decompte(n)
+    }
+}
+
+impl Drop for Decompte<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 pub struct HoteTauri {
@@ -284,6 +304,12 @@ impl ScriptHost for HoteTauri {
 
     fn apply_live(&self, changes: &[ScriptChange]) -> Result<(), String> {
         let Some(direct) = &self.direct else { return Err("application immédiate non prévue".into()) };
+        // Comptée **avant** de regarder la fermeture : soit la fermeture voit cette application
+        // (et attend la fin du livre en cours), soit l'application voit la fermeture (et ne fait rien).
+        let _compte = Decompte::compter(&direct.applications);
+        if direct.fermeture.load(Ordering::SeqCst) {
+            return Err("ComicRust se ferme : modifications non appliquées".into());
+        }
         let plan = Plan::depuis_changements(changes, |id| self.livre(id));
         let r = direct.applicateur.appliquer(&plan, &self.stop, &|_| {});
         {
@@ -306,12 +332,28 @@ impl ScriptHost for HoteTauri {
     }
 }
 
+/// `CREATE_NO_WINDOW` (Windows) : aucune fenêtre console ne clignote au lancement.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Commande système lancée sans fenêtre console sous Windows (`clip.exe`, `explorer.exe`).
+fn commande_discrete(programme: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut c = std::process::Command::new(programme);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 /// Ouvre une adresse dans le navigateur par défaut (même mécanisme que `maj::ouvrir_page`,
 /// adresse vérifiée par `check_url` du cœur : http/https avec un hôte).
 pub fn ouvrir_url(url: &str) -> bool {
     let Ok(url) = comicrust_core::scripting::forms::check_url(url) else { return false };
     let programme = if cfg!(windows) { "explorer" } else { "xdg-open" };
-    std::process::Command::new(programme)
+    commande_discrete(programme)
         .arg(&url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -327,7 +369,7 @@ pub fn copier_texte(texte: &str) -> bool {
     let essais: &[(&str, &[&str])] =
         if cfg!(windows) { &[("clip", &[])] } else { &[("wl-copy", &[]), ("xclip", &["-selection", "clipboard"])] };
     for (programme, args) in essais {
-        let Ok(mut enfant) = std::process::Command::new(programme)
+        let Ok(mut enfant) = commande_discrete(programme)
             .args(*args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())

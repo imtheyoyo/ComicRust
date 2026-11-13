@@ -1093,7 +1093,7 @@ export function messageErreur(e: unknown): string {
 // ───────────────────────────── Scripts Python (tauri-v0.9.0) ─────────────────────────────
 // Contrat : docs/tauri/ipc-scripts.md. Tout texte venant d'un script (nom, journal, libellés,
 // valeurs) est affiché comme du texte (jamais d'innerHTML) ; les images ne sont acceptées que
-// sous forme d'URL `data:image/…` ou `cr-…` (voir `imageScriptSure`).
+// sous forme d'URL `data:image/(png|jpeg|gif|webp|bmp);base64,…` (voir `imageScriptSure`).
 
 export type HookScript = 'Books' | 'Library' | 'Editor' | 'ConfigScript' | 'BookOpened' | 'BookClosed' | 'NewBooks' | 'Startup';
 
@@ -1274,20 +1274,13 @@ export interface ChooseSpecScript {
  *  bouton du bas ou clé d'un bouton du formulaire). Le cœur retire les clés inconnues. */
 export const CLE_BOUTON_FORMULAIRE = '$bouton';
 
-/** Image venant d'un script affichable sans risque : data:image/… ou protocole cr-… seulement.
- *  Un base64 brut (forme des scripts) est converti en data: ; tout le reste est refusé. */
+/** Image venant d'un script affichable sans risque : seulement une URL
+ *  `data:image/(png|jpeg|gif|webp|bmp);base64,…` (forme produite par le backend, qui reconnaît le
+ *  format d'après les octets). Tout le reste est refusé : SVG (peut porter du script), autres
+ *  protocoles, base64 brut. */
 export function imageScriptSure(v: unknown): string | undefined {
-  if (typeof v !== 'string' || !v) return undefined;
-  const t = v.trim();
-  if (/^data:image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml)[;,]/i.test(t)) return t;
-  if (/^cr-[a-z0-9-]+:\/\//i.test(t) || /^http:\/\/cr-[a-z0-9-]+\.localhost\//i.test(t)) return t;
-  if (/^[A-Za-z0-9+/=_\-\s]+$/.test(t) && t.length > 16) {
-    const b = t.replace(/\s+/g, '');
-    const type = b.startsWith('/9j/') ? 'jpeg' : b.startsWith('iVBOR') ? 'png' : b.startsWith('R0lG') ? 'gif'
-      : b.startsWith('UklG') ? 'webp' : b.startsWith('Qk') ? 'bmp' : null;
-    return type ? `data:image/${type};base64,${b}` : undefined;
-  }
-  return undefined;
+  if (typeof v !== 'string') return undefined;
+  return /^data:image\/(png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v) ? v : undefined;
 }
 
 export const scriptsLister = () => appeler<EtatScripts>('scripts_lister');
@@ -1319,3 +1312,6 @@ export const scriptReglagesEcrire = (id: string, valeurs: Record<string, unknown
 export const CLE_ECRIRE_DANS_FICHIER = '$ecrireDansFichier';
 /** Valeur d'un secret défini, renvoyée masquée par le backend. */
 export const SECRET_MASQUE = '••••';
+/** Clé réservée des réglages lus : liste des clés secrètes (champ toujours masqué, même quand le
+ *  secret n'est pas défini ou illisible). Jamais renvoyée au backend (qui l'ignorerait). */
+export const CLE_SECRETS = '$secrets';

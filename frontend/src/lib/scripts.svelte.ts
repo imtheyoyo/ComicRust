@@ -37,7 +37,10 @@ export class ExecutionScript {
   arretDemande = $state(false);
   apercu = $state<ApercuScript | null>(null);
   chargementApercu = $state(false);
+  /** Application des modifications en cours (le backend garde le créneau jusqu'au bilan). */
   application = $state(false);
+  /** Arrêt de l'application demandé (fait entre deux livres). */
+  arretApplication = $state(false);
   bilan = $state<BilanScript | null>(null);
   abandonne = $state(false);
   erreur = $state('');
@@ -261,10 +264,12 @@ class GestionScripts {
     void scriptVignettesVoulues(e.runId, e.choix.reqId, rangs).catch(() => {});
   }
 
+  /** Arrête le script en cours, ou l'application de ses modifications (entre deux livres). */
   async arreterScript() {
     const e = this.execution;
-    if (!e?.runId || !e.enCours) return;
-    e.arretDemande = true;
+    if (!e?.runId || (!e.enCours && !e.application)) return;
+    if (e.enCours) e.arretDemande = true;
+    else e.arretApplication = true;
     try {
       await scriptArreter(e.runId);
     } catch (err) {
@@ -288,8 +293,10 @@ class GestionScripts {
 
   async appliquer(cles: string[]) {
     const e = this.execution;
-    if (!e?.runId || !e.apercu) return;
+    if (!e?.runId || !e.apercu || e.application) return;
     e.application = true;
+    e.arretApplication = false;
+    e.progression = {}; // avancement de l'application (ComicInfo.xml…) à la place de celui du script
     try {
       e.bilan = await scriptAppliquer(e.runId, cles);
     } catch (err) {
@@ -301,12 +308,15 @@ class GestionScripts {
     }
   }
 
+  /** Abandonne l'aperçu (rien n'est appliqué) ; impossible pendant l'application. */
   abandonner() {
-    if (this.execution) this.execution.abandonne = true;
+    const e = this.execution;
+    if (e && !e.application && !e.bilan) e.abandonne = true;
   }
 
+  /** Ferme la fenêtre ; impossible tant que le script tourne ou que l'application n'a pas rendu son bilan. */
   fermerExecution() {
-    if (this.execution?.enCours) return;
+    if (this.execution?.enCours || this.execution?.application) return;
     this.execution = null;
     // executionEnCours du backend relu (sinon un état périmé bloquerait les lancements).
     void this.charger();

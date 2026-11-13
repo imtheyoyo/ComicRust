@@ -2,10 +2,11 @@
   // « Gérer les scripts… » (comme scripts_manager_window de la version egui) : Python trouvé ou
   // erreur lisible, avertissements de lecture des scripts, case « Exécuter les scripts
   // automatiques » (désactivée par défaut), Recharger, liste des scripts (nom, description, hooks,
-  // actif), configuration (hook ConfigScript) ou réglages enregistrés (secrets masqués), et
-  // journal des automatismes (événement scripts:auto).
+  // actif), configuration (hook ConfigScript) ou réglages enregistrés (secrets masqués : un
+  // réglage secret est toujours un champ mot de passe, même non défini, avec un bouton pour
+  // afficher la saisie), et journal des automatismes (événement scripts:auto).
   import {
-    messageErreur, scriptReglagesEcrire, scriptReglagesLire, SECRET_MASQUE, type HookScript, type InfoScript,
+    CLE_SECRETS, imageScriptSure, messageErreur, scriptReglagesEcrire, scriptReglagesLire, SECRET_MASQUE, type HookScript, type InfoScript,
   } from '../lib/api';
   import { modale } from '../lib/modale';
   import { scripts } from '../lib/scripts.svelte';
@@ -15,20 +16,38 @@
     BookOpened: 'Livre ouvert (auto)', BookClosed: 'Livre fermé (auto)', NewBooks: 'Nouveaux livres (auto)', Startup: 'Démarrage (auto)',
   };
 
-  /** Réglages en cours de modification : script, valeurs lues, valeurs saisies. */
-  let reglages = $state<{ script: InfoScript; lues: Record<string, unknown>; saisies: Record<string, unknown>; erreur: string; message: string; json: Record<string, string> } | null>(null);
+  /** Réglages en cours de modification : script, valeurs lues (sans la clé réservée des
+   *  secrets), clés secrètes, valeurs saisies. */
+  interface Reglages {
+    script: InfoScript; lues: Record<string, unknown>; secrets: Set<string>; saisies: Record<string, unknown>;
+    erreur: string; message: string; json: Record<string, string>;
+  }
+  let reglages = $state<Reglages | null>(null);
+  /** Secrets dont la saisie est affichée en clair (bouton œil ; le backend ne renvoie jamais la valeur). */
+  let visibles = $state<Set<string>>(new Set());
   let dialogue = $state<HTMLDialogElement>();
 
   const etat = $derived(scripts.etat);
 
+  /** Réglages rendus par le backend → état du formulaire (liste des clés secrètes retirée). */
+  function etatReglages(s: InfoScript, brutes: Record<string, unknown> | null | undefined, message = ''): Reglages {
+    const lues = { ...(brutes ?? {}) };
+    const liste = lues[CLE_SECRETS];
+    delete lues[CLE_SECRETS];
+    const secrets = new Set(Array.isArray(liste) ? liste.map((k) => String(k)) : []);
+    // Ancien contrat (sans liste) : un secret défini se reconnaît à sa valeur masquée.
+    for (const [k, v] of Object.entries(lues)) if (v === SECRET_MASQUE) secrets.add(k);
+    const json: Record<string, string> = {};
+    for (const [k, v] of Object.entries(lues)) if (!secrets.has(k) && v !== null && typeof v === 'object') json[k] = JSON.stringify(v, null, 1);
+    visibles = new Set();
+    return { script: s, lues, secrets, saisies: { ...lues }, erreur: '', message, json };
+  }
+
   async function ouvrirReglages(s: InfoScript) {
     try {
-      const lues = await scriptReglagesLire(s.id);
-      const json: Record<string, string> = {};
-      for (const [k, v] of Object.entries(lues)) if (v !== null && typeof v === 'object') json[k] = JSON.stringify(v, null, 1);
-      reglages = { script: s, lues, saisies: { ...lues }, erreur: '', message: '', json };
+      reglages = etatReglages(s, await scriptReglagesLire(s.id));
     } catch (e) {
-      reglages = { script: s, lues: {}, saisies: {}, erreur: messageErreur(e), message: '', json: {} };
+      reglages = { ...etatReglages(s, {}), erreur: messageErreur(e) };
     }
   }
 
@@ -44,10 +63,7 @@
     }
     try {
       // Le backend rend les réglages enregistrés (secrets masqués) : ils remplacent la saisie.
-      const lues = await scriptReglagesEcrire(r.script.id, valeurs);
-      const json: Record<string, string> = {};
-      for (const [k, v] of Object.entries(lues ?? {})) if (v !== null && typeof v === 'object') json[k] = JSON.stringify(v, null, 1);
-      reglages = { script: r.script, lues: lues ?? {}, saisies: { ...(lues ?? {}) }, erreur: '', message: 'Réglages enregistrés.', json };
+      reglages = etatReglages(r.script, await scriptReglagesEcrire(r.script.id, valeurs), 'Réglages enregistrés.');
     } catch (e) {
       r.erreur = messageErreur(e);
     }
@@ -70,7 +86,13 @@
     scripts.gestionOuverte = false;
     reglages = null;
   }
-  const estSecret = (k: string) => reglages?.lues[k] === SECRET_MASQUE;
+  const estSecret = (k: string) => !!reglages?.secrets.has(k);
+  function basculerVisible(k: string) {
+    const v = new Set(visibles);
+    if (v.has(k)) v.delete(k);
+    else v.add(k);
+    visibles = v;
+  }
 </script>
 
 <dialog bind:this={dialogue} class="gestion" aria-labelledby="titre-gestion-scripts" use:modale={{ peutFermer, fermer, ouvrirAuMontage: true }} data-testid="dialogue-scripts">
@@ -122,7 +144,7 @@
               <li class:inactif={!s.actif}>
                 <label class="case nom">
                   <input type="checkbox" checked={s.actif} onchange={(e) => void scripts.activer(s.id, e.currentTarget.checked)} aria-label="Activer {s.nom}" />
-                  {#if s.image}<img src={s.image} alt="" class="icone" />{/if}
+                  {#if imageScriptSure(s.image)}<img src={imageScriptSure(s.image)} alt="" class="icone" />{/if}
                   <strong>{s.nom}</strong>
                 </label>
                 {#if s.description}<p class="petit">{s.description}</p>{/if}
@@ -146,16 +168,24 @@
                       {@const v = r.saisies[k]}
                       {@const idc = `reglage-${k.replace(/[^\w-]/g, '_')}`}
                       <label for={idc}>{k}</label>
-                      {#if k in r.json}
+                      {#if estSecret(k)}
+                        <!-- Secret : toujours masqué (défini → « •••• », non défini ou illisible → vide). -->
+                        <span class="secret">
+                          <input id={idc} type={visibles.has(k) ? 'text' : 'password'} autocomplete="new-password" spellcheck="false" value={String(v ?? '')}
+                            title={r.lues[k] === SECRET_MASQUE ? 'Secret défini : laisser « •••• » pour le garder' : 'Secret non défini : saisir la valeur'}
+                            onfocus={(e) => { if (e.currentTarget.value === SECRET_MASQUE) e.currentTarget.select(); }}
+                            oninput={(e) => (r.saisies[k] = e.currentTarget.value)} data-secret="1" />
+                          <button type="button" class="mini oeil" aria-pressed={visibles.has(k)} aria-controls={idc}
+                            aria-label={visibles.has(k) ? `Masquer la saisie de ${k}` : `Afficher la saisie de ${k}`}
+                            title={visibles.has(k) ? 'Masquer la saisie' : 'Afficher la saisie (la valeur enregistrée n\'est jamais renvoyée)'}
+                            onclick={() => basculerVisible(k)} data-testid="oeil-{k}">{visibles.has(k) ? '🙈' : '👁'}</button>
+                        </span>
+                      {:else if k in r.json}
                         <textarea id={idc} rows="3" bind:value={r.json[k]}></textarea>
                       {:else if typeof r.lues[k] === 'boolean'}
                         <input id={idc} type="checkbox" checked={!!v} onchange={(e) => (r.saisies[k] = e.currentTarget.checked)} />
                       {:else if typeof r.lues[k] === 'number'}
                         <input id={idc} type="number" value={Number(v)} oninput={(e) => (r.saisies[k] = Number(e.currentTarget.value))} />
-                      {:else if estSecret(k)}
-                        <input id={idc} type="password" autocomplete="new-password" value={String(v ?? '')} title="Secret défini : laisser « •••• » pour le garder"
-                          onfocus={(e) => { if (e.currentTarget.value === SECRET_MASQUE) e.currentTarget.select(); }}
-                          oninput={(e) => (r.saisies[k] = e.currentTarget.value)} data-secret="1" />
                       {:else}
                         <input id={idc} type="text" spellcheck="false" value={String(v ?? '')} oninput={(e) => (r.saisies[k] = e.currentTarget.value)} />
                       {/if}
@@ -215,7 +245,9 @@
   }
   .reglages { display: grid; grid-template-columns: minmax(100px, max-content) minmax(0, 1fr); gap: 6px 10px; align-items: center; padding: 8px; background: var(--cr-fond); border-radius: var(--cr-rayon); }
   .reglages label { color: var(--cr-texte-discret); overflow-wrap: anywhere; }
-  .reglages input[type='password'], .reglages input[type='number'], .reglages textarea {
+  .secret { display: flex; gap: 4px; min-width: 0; }
+  .secret input { flex: 1; min-width: 0; }
+  .reglages input[type='password'], .reglages input[type='number'], .reglages textarea, .secret input {
     font: inherit; color: var(--cr-texte); background: var(--cr-fond-panneau); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); padding: 5px 8px;
   }
   .reglages input[type='checkbox'] { justify-self: start; accent-color: var(--cr-accent); }

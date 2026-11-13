@@ -3,7 +3,8 @@
   // (fraction, texte, détail, image), journal défilant coloré par genre, Arrêter ; questions
   // (QuestionScript : texte, choix, confirmation, message), formulaires et listes de choix dans leurs propres fenêtres ;
   // à la fin, aperçu des modifications (cases à cocher, conflits) puis Appliquer / Annuler et
-  // bilan. En lecture seule, l'aperçu reste visible mais Appliquer est désactivé avec le motif.
+  // bilan. Pendant l'application : « Application en cours… » et Arrêter (entre deux livres) ;
+  // ni Annuler ni Fermer (ni Échap) avant le bilan. En lecture seule, l'aperçu reste visible mais Appliquer est désactivé avec le motif.
   // Les fenêtres de question / formulaire / choix sont des <dialog> frères (pas enfants) : Échap
   // n'atteint ainsi que la fenêtre du dessus (voir lib/modale.ts).
   import { tick } from 'svelte';
@@ -93,15 +94,19 @@
   <h2 id="titre-execution">📜 {e.script.nom}</h2>
   <p class="discret petit">{HOOKS[e.hook] ?? e.hook}{e.hook === 'Books' ? ` (${e.ids.length} livre${e.ids.length > 1 ? 's' : ''})` : ''} — {e.script.fichier}</p>
 
-  {#if e.enCours || (!e.apercu && !e.bilan)}
+  {#if e.enCours || e.application || (!e.apercu && !e.bilan)}
     <div class="progression">
       {#if e.progression.image}<img class="image" src={e.progression.image} alt="" draggable="false" />{/if}
       <div class="textes">
-        <div class="barre-progression" class:indetermine={pourcent === null && e.enCours} role="progressbar" aria-label="Progression du script"
+        <div class="barre-progression" class:indetermine={pourcent === null && (e.enCours || e.application)} role="progressbar" aria-label="Progression du script"
           aria-valuemin="0" aria-valuemax="100" aria-valuenow={pourcent ?? undefined}>
-          <div style:width="{pourcent ?? (e.enCours ? 30 : 100)}%"></div>
+          <div style:width="{e.application ? 30 : (pourcent ?? (e.enCours ? 30 : 100))}%"></div>
         </div>
-        <span aria-live="polite" data-testid="progression-texte">{e.progression.texte ?? (e.enCours ? 'En cours…' : '')}{pourcent !== null && e.enCours ? ` (${pourcent} %)` : ''}</span>
+        {#if e.application}
+          <span aria-live="polite" data-testid="progression-texte">{e.progression.texte ?? 'Écriture des modifications cochées…'}</span>
+        {:else}
+          <span aria-live="polite" data-testid="progression-texte">{e.progression.texte ?? (e.enCours ? 'En cours…' : '')}{pourcent !== null && e.enCours ? ` (${pourcent} %)` : ''}</span>
+        {/if}
         {#if e.progression.detail}<span class="discret">{e.progression.detail}</span>{/if}
       </div>
     </div>
@@ -134,8 +139,8 @@
       {#each a.conflits as m, k (k)}<p class="conflit" role="alert">⚠ {m}</p>{/each}
       {#if a.lectureSeule}<p class="lecture-seule" role="note" data-testid="motif-lecture-seule">🔒 Lecture seule : {a.motif ?? 'la bibliothèque ne peut pas être modifiée.'}</p>{/if}
       <div class="ligne-outils">
-        <button class="mini" onclick={() => (cochees = new Set(a.lignes.map((l) => l.cle)))} data-testid="tout-cocher">Tout cocher</button>
-        <button class="mini" onclick={() => (cochees = new Set())} data-testid="tout-decocher">Tout décocher</button>
+        <button class="mini" disabled={e.application} onclick={() => (cochees = new Set(a.lignes.map((l) => l.cle)))} data-testid="tout-cocher">Tout cocher</button>
+        <button class="mini" disabled={e.application} onclick={() => (cochees = new Set())} data-testid="tout-decocher">Tout décocher</button>
         <span class="discret petit">{cochees.size} / {a.lignes.length} cochée(s)</span>
       </div>
       <div class="table-apercu">
@@ -144,7 +149,7 @@
           <tbody>
             {#each a.lignes as l (l.cle)}
               <tr class:conflit={!!l.conflit} class:decoche={!cochees.has(l.cle)} title={l.conflit ? `Conflit : ${l.conflit}` : undefined}>
-                <td><input type="checkbox" checked={cochees.has(l.cle)} onchange={(ev) => basculer(l.cle, ev.currentTarget.checked)} aria-label="Appliquer {l.libelle || l.champ} de {l.titre}" /></td>
+                <td><input type="checkbox" checked={cochees.has(l.cle)} disabled={e.application} onchange={(ev) => basculer(l.cle, ev.currentTarget.checked)} aria-label="Appliquer {l.libelle || l.champ} de {l.titre}" /></td>
                 <td class="titre">{l.titre}</td>
                 <td title={l.libelle && l.libelle !== l.champ ? l.champ : undefined}>{l.libelle || l.champ}</td>
                 <td class="valeur avant">{l.avant}</td>
@@ -173,11 +178,16 @@
     <span class="espace"></span>
     {#if e.enCours}
       {#if e.arretDemande}<span>Arrêt en cours…</span>{:else}<button onclick={() => void scripts.arreterScript()} title="Demande au script de s'arrêter (arrêt forcé après 3 s)" data-testid="arreter-script">⏹ Arrêter</button>{/if}
+    {:else if e.application}
+      <!-- Application en cours : seul l'arrêt est proposé (fait entre deux livres), jusqu'au bilan. -->
+      <span role="status" data-testid="application-en-cours">Application en cours…</span>
+      {#if e.arretApplication}<span data-testid="arret-application">Arrêt après le livre en cours…</span>{:else}<button onclick={() => void scripts.arreterScript()}
+        title="Arrête l'application entre deux livres (jamais au milieu d'un livre)" data-testid="arreter-application">⏹ Arrêter</button>{/if}
     {:else if e.apercu && !e.bilan && !e.abandonne}
       <button onclick={() => scripts.abandonner()} title="Abandonner ces modifications" data-testid="annuler-apercu">Annuler</button>
-      <button class="principal" disabled={e.apercu.lectureSeule || cochees.size === 0 || e.application}
+      <button class="principal" disabled={e.apercu.lectureSeule || cochees.size === 0}
         title={e.apercu.lectureSeule ? `Lecture seule : ${e.apercu.motif ?? ''}` : cochees.size === 0 ? 'Rien de coché' : 'Appliquer les modifications cochées'}
-        onclick={() => void scripts.appliquer([...cochees])} data-testid="appliquer-script">{e.application ? 'Application…' : `Appliquer (${cochees.size})`}</button>
+        onclick={() => void scripts.appliquer([...cochees])} data-testid="appliquer-script">Appliquer ({cochees.size})</button>
     {:else}
       <button class="principal" onclick={() => scripts.fermerExecution()} data-testid="fermer-script">Fermer</button>
     {/if}

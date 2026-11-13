@@ -9,6 +9,8 @@
 // - `?scripts=lectureSeule` : bibliothèque en lecture seule (aperçu visible, application refusée) ;
 // - `?scripts=sansPython` : Python introuvable (erreur lisible dans la gestion) ;
 // - `?scripts=vide` : aucun script.
+// L'application des modifications prend un peu de temps (250 ms par ligne) : l'état « application
+// en cours » (créneau occupé, Arrêter entre deux lignes) est ainsi visible et testable.
 // `window.__comicrustScripts` expose aux tests les appels reçus (réponses, vignettes, application…).
 import type {
   ApercuScript, BilanScript, ChooseSpecScript, DetailQuestionScript, EtatScripts, FormSpecScript, HookScript, InfoScript, LigneApercu,
@@ -31,15 +33,24 @@ export interface ContexteScripts {
 
 const PIEGE = '<img src=x onerror="window.__piege=1">';
 
-/** Image SVG factice (couverture d'album, image de progression). */
-function imageSvg(texte: string, teinte: number, l = 120, h = 170): string {
-  const echap = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${l}" height="${h}" viewBox="0 0 ${l} ${h}">` +
-    `<rect width="${l}" height="${h}" fill="hsl(${teinte} 55% 40%)"/>` +
-    `<circle cx="${l * 0.7}" cy="${h * 0.3}" r="${l / 4}" fill="hsl(${(teinte + 150) % 360} 70% 62%)" opacity=".85"/>` +
-    `<text x="8" y="${h - 12}" font-family="sans-serif" font-size="16" font-weight="700" fill="#fff">${echap(texte.slice(0, 14))}</text></svg>`;
-  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+/** Image PNG factice (couverture d'album, image de progression) en URL `data:image/png;base64`,
+ *  seule forme d'image acceptée par le front (comme celles du backend ; le SVG est refusé). */
+function imagePng(texte: string, teinte: number, l = 120, h = 170): string {
+  const c = document.createElement('canvas');
+  c.width = l;
+  c.height = h;
+  const g = c.getContext('2d');
+  if (!g) return '';
+  g.fillStyle = `hsl(${teinte} 55% 40%)`;
+  g.fillRect(0, 0, l, h);
+  g.fillStyle = `hsla(${(teinte + 150) % 360}, 70%, 62%, 0.85)`;
+  g.beginPath();
+  g.arc(l * 0.7, h * 0.3, l / 4, 0, 2 * Math.PI);
+  g.fill();
+  g.fillStyle = '#fff';
+  g.font = 'bold 16px sans-serif';
+  g.fillText(texte.slice(0, 14), 8, h - 12);
+  return c.toDataURL('image/png');
 }
 
 interface Execution {
@@ -56,6 +67,8 @@ interface Execution {
   inchanges: number;
   fini: boolean;
   applique: boolean;
+  /** Arrêt de l'application demandé (fait entre deux lignes). */
+  arretApplication: boolean;
   /** Choix ouvert : rangs dont la vignette a déjà été envoyée. */
   vignettes: Map<number, Set<number>>;
 }
@@ -85,7 +98,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     {
       id: 'bedetheque/bd2.py:scraper', nom: 'Bedetheque Scraper 2', fichier: 'bedetheque/bd2.py', hooks: ['Books', 'Editor'], actif: true,
       description: 'Remplit les fiches depuis bedetheque.com (série, album, auteurs, résumé).',
-      image: imageSvg('BD2', 30, 32, 32), reglages: 'BD2_CONFIG',
+      image: imagePng('BD2', 30, 32, 32), reglages: 'BD2_CONFIG',
     },
     {
       // #@Key : identifiant libre (opaque pour le front).
@@ -115,9 +128,18 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     if (!s) throw new Error(`script inconnu : ${id}`);
     return reglages[s.fichier];
   };
-  const masquer = (v: Record<string, unknown> | undefined) =>
-    Object.fromEntries(Object.entries(v ?? {}).map(([k, x]) => [k, secrets.has(k) ? (x ? '••••' : '') : x]));
-  const secrets = new Set(['cleApi']);
+  /** Comme le backend : secret défini → « •••• », non défini → vide ; clés secrètes listées dans
+   *  `$secrets` (le champ reste masqué même vide). */
+  const masquer = (v: Record<string, unknown> | undefined) => {
+    const m: Record<string, unknown> = Object.fromEntries(Object.entries(v ?? {}).map(([k, x]) => [k, secrets.has(k) ? (x ? '••••' : '') : x]));
+    if (v && Object.keys(v).length) {
+      for (const k of secrets) m[k] ??= '';
+      m['$secrets'] = [...secrets].sort();
+    }
+    return m;
+  };
+  /** cleApi : défini ; jeton : secret jamais défini (champ vide mais masqué). */
+  const secrets = new Set(['cleApi', 'jeton']);
 
   const execs = new Map<string, Execution>();
   let numero = 0;
@@ -277,14 +299,14 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     if (!editeur) {
       const oui = await confirmer(e, `Rechercher ${ids.length} album(s) sur bedetheque.com ?\n(une pause est faite entre deux albums)`);
       if (oui !== true) { journal(e, 'info', 'Abandon demandé par l\'utilisateur.'); terminer(e, 'annule'); return; }
-      let couverture = imageSvg(premier?.serie ?? 'BD', 210);
+      let couverture = imagePng(premier?.serie ?? 'BD', 210);
       for (;;) {
         // Formulaire dynamique : rouvert avec les valeurs saisies après « Tester la connexion ».
         options = (await formulaire(e, SPEC_OPTIONS(couverture, options ?? undefined))) as Record<string, unknown> | null;
         if (!options) { journal(e, 'info', 'Formulaire annulé.'); terminer(e, 'annule'); return; }
         if (options['$bouton'] !== 'tester') break;
         journal(e, 'info', 'Connexion à bedetheque.com : OK (simulée).');
-        couverture = imageSvg('Testé ✔', 120);
+        couverture = imagePng('Testé ✔', 120);
       }
       journal(e, 'sortie', `Options : ${JSON.stringify(options)}`);
     }
@@ -296,7 +318,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     const choisi = await choix(e, {
       title: 'Choisir l\'album', message: `Résultats pour « ${premier?.serie ?? 'Astérix'} » (${rows.length}). Double-clic pour choisir.`,
       columns: ['Album', 'Année', 'Éditeur', 'Pages'], rows, on_demand: rows.map((_, i) => i), filter: true, thumb_size: 72, layout: 'cards', default: 0,
-    }, (r) => imageSvg(`T${r + 1}`, (r * 37) % 360));
+    }, (r) => imagePng(`T${r + 1}`, (r * 37) % 360));
     if (choisi === null || choisi === undefined) { journal(e, 'info', 'Aucun album choisi.'); terminer(e, 'annule'); return; }
     const r = Array.isArray(choisi) ? Number(choisi[0]) : Number(choisi);
     const album = rows[r] ?? rows[0];
@@ -311,7 +333,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     }
     for (let i = 0; i < ids.length; i++) {
       const l = ctx.livre(ids[i]);
-      progression(e, { fraction: i / ids.length, texte: `Album ${i + 1} / ${ids.length}`, detail: l?.titre ?? ids[i], image: imageSvg(`T${i + 1}`, (i * 53) % 360) });
+      progression(e, { fraction: i / ids.length, texte: `Album ${i + 1} / ${ids.length}`, detail: l?.titre ?? ids[i], image: imagePng(`T${i + 1}`, (i * 53) % 360) });
       journal(e, 'sortie', `GET https://www.bedetheque.com/album-${1000 + i}.html (200)`);
       await attendre(e, 350);
       if (!l) continue;
@@ -393,7 +415,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     // Library : ids vide = toute la bibliothèque (le backend prend tous les livres).
     const e: Execution = {
       runId: `run${++numero}`, script: id, nom: s.nom, arret: false, attentes: new Map(), lignes: [], conflits: [], inchanges: 0,
-      fini: false, applique: false, vignettes: new Map(),
+      fini: false, applique: false, arretApplication: false, vignettes: new Map(),
     };
     execs.set(e.runId, e);
     interactif = e;
@@ -411,6 +433,46 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
       });
     }, 5);
     return e.runId;
+  }
+
+  /** Application (asynchrone, 250 ms par ligne) : le créneau interactif reste occupé jusqu'au
+   *  bilan (`executionEnCours`, lancement refusé) ; `script_arreter` l'arrête entre deux lignes. */
+  async function appliquer(e: Execution, liste: string[]): Promise<BilanScript> {
+    const motif = etat().motifLectureSeule;
+    if (motif) throw new Error(`Application refusée : ${motif}`);
+    if (e.applique) throw new Error('Modifications déjà appliquées.');
+    if (enApplication) throw new Error('application déjà en cours');
+    if (interactif && !interactif.fini && interactif !== e) throw new Error('Un autre script est en cours : attends sa fin avant d\'appliquer.');
+    const cles = new Set(liste);
+    tests.appliques.push([...cles]);
+    enApplication = e.runId;
+    e.arretApplication = false;
+    const b: BilanScript = { fiches: 0, renommages: 0, comicinfo: 0, erreurs: [], arrete: false, resume: '' };
+    try {
+      const choisies = e.lignes.filter((l) => cles.has(l.cle));
+      for (let i = 0; i < choisies.length; i++) {
+        if (e.arretApplication) {
+          b.arrete = true;
+          b.erreurs.push(`${choisies.length - i} opération(s) non faite(s) : arrêt demandé avant leur tour`);
+          break;
+        }
+        const l = choisies[i];
+        progression(e, { texte: `Ligne ${i + 1} / ${choisies.length} : ${l.titre}` });
+        await ctx.pause(250);
+        if (l.conflit) { b.erreurs.push(`${l.titre} : ${l.conflit}`); continue; }
+        if (l.genre === 'fiche') b.fiches++;
+        else if (l.genre === 'renommage') b.renommages++;
+        else b.comicinfo++;
+      }
+      e.applique = true;
+      b.resume = `${b.fiches} fiche(s) modifiée(s), ${b.renommages} renommage(s), ${b.comicinfo} ComicInfo.xml écrit(s)`
+        + (b.erreurs.length ? `, ${b.erreurs.length} problème(s)` : '') + (b.arrete ? ', arrêté' : '') + '.';
+    } finally {
+      enApplication = null;
+    }
+    journal(e, 'systeme', `Bilan : ${b.resume}`);
+    ctx.emettre('script:applique', { runId: e.runId, bilan: b });
+    return b;
   }
 
   function exec(args: Record<string, unknown>): Execution {
@@ -470,6 +532,8 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
       case 'script_arreter': {
         const e = exec(args);
         tests.arrets.push(e.runId);
+        // Pendant l'application : arrêt entre deux lignes (comme entre deux livres).
+        if (enApplication === e.runId) { e.arretApplication = true; return null; }
         if (e.fini) return null;
         e.arret = true;
         for (const r of e.attentes.values()) r(null);
@@ -483,27 +547,8 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
           : { lignes: e.lignes.map((l) => ({ ...l })), conflits: [...e.conflits], inchanges: e.inchanges, lectureSeule: !!motif, ...(motif ? { motif } : {}) };
         return a;
       }
-      case 'script_appliquer': {
-        const e = exec(args);
-        const motif = etat().motifLectureSeule;
-        if (motif) throw new Error(`Application refusée : ${motif}`);
-        if (e.applique) throw new Error('Modifications déjà appliquées.');
-        const cles = new Set((args.cles as string[]) ?? []);
-        tests.appliques.push([...cles]);
-        const b: BilanScript = { fiches: 0, renommages: 0, comicinfo: 0, erreurs: [], arrete: false, resume: '' };
-        for (const l of e.lignes) {
-          if (!cles.has(l.cle)) continue;
-          if (l.conflit) { b.erreurs.push(`${l.titre} : ${l.conflit}`); continue; }
-          if (l.genre === 'fiche') b.fiches++;
-          else if (l.genre === 'renommage') b.renommages++;
-          else b.comicinfo++;
-        }
-        e.applique = true;
-        b.resume = `${b.fiches} fiche(s) modifiée(s), ${b.renommages} renommage(s), ${b.comicinfo} ComicInfo.xml écrit(s)`
-          + (b.erreurs.length ? `, ${b.erreurs.length} erreur(s)` : '') + '.';
-        ctx.emettre('script:applique', { runId: e.runId, bilan: b });
-        return b;
-      }
+      case 'script_appliquer':
+        return appliquer(exec(args), (args.cles as string[]) ?? []);
       case 'script_reglages_lire':
         return masquer(reglagesDe(String(args.id)));
       case 'script_reglages_ecrire': {
@@ -513,7 +558,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
         reglagesDe(id);
         const fichier = scripts.find((x) => x.id === id)!.fichier;
         const v = (reglages[fichier] ??= {});
-        for (const [k, x] of Object.entries(valeurs)) if (!(secrets.has(k) && x === '••••')) v[k] = x;
+        for (const [k, x] of Object.entries(valeurs)) if (k !== '$secrets' && !(secrets.has(k) && x === '••••')) v[k] = x;
         return masquer(v);
       }
       default:
