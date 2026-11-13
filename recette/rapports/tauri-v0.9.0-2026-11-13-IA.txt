@@ -1,0 +1,39 @@
+Recette ComicRust tauri-v0.9.0 — exécution par l'IA (Claude) — 13/11/2026 20:52-21:25
+Demandée par Yoyo : « réaliser la recette en créant une copie de test dans mon dossier, et en utilisant les dossiers échantillons ».
+
+Montage
+- Copie de test : F:\Projet REA par Claude\REA ComicRack\ComicRust-Tauri RECETTE 0.9.0 (programmes 0.9.0 repris de la copie autonome, data\ neuf, bibliothèque autonome SQLite).
+- Livres de test : F:\Projet REA par Claude\REA ComicRack\Echantillons RECETTE 0.9.0 (copies de « Echantillons TESTS » ; « Blacksad 01 » et « Asterix 01 » = copies renommées, fiches remplies pour Bedetheque).
+- Lanceurs ajoutés dans _recette_IA : 10 (lancer la copie de test en MCP, port 47802 ; ferme la copie autonome), 11 (fermer la copie de test), 12 (relancer en « 0.8.1 simulée » pour U-01).
+- Pilotage : outils MCP de la copie (commandes IPC + écoute des événements des scripts).
+- Ta collection du NAS et ComicRack n'ont pas été touchés. La copie liée est en « Lecture et écriture » : aucun script n'y a été lancé.
+
+OK (17)
+- P-02 : Python trouvé (python\python.exe de la copie), 20 points d'entrée listés, aucun avertissement, automatismes décochés.
+- S-01 : « Nettoyer les fiches » sur 4 livres → aperçu de 8 lignes (résumé, année, série, numéro) ; rien appliqué sans « Appliquer ».
+- S-02 : 6 lignes cochées sur 8 appliquées (bilan « 3 fiche(s) modifiée(s) ») ; le livre décoché (Silver Surfer 03) est resté intact ; années relues en base (1961, 1963, 1965). [La vérification après relance n'a pas pu être faite : déconnexion du PC.]
+- S-03 : « Ranger les fichiers » sur 3 livres → 2 renommages proposés (« test v1 #2 (1963).cbz »…), 1 ignoré (sans série) ; appliqués ; le livre renommé s'ouvre (22 pages).
+- S-04 : relance → rien à renommer ; 3 livres de même fiche → noms « (2) », « (3) » proposés par le script ; fichier créé à la destination après l'aperçu → « renommage refusé — la destination existe déjà », fichier existant intact (pas d'écrasement).
+- S-07 : script personnel `scripts\recette_tags_test.py` (Tags = « test ») : apparaît après « Recharger », aperçu puis application, Tags relu = « test ».
+- A-01 : automatismes + « Nouveaux livres » activés, 11 CBZ ajoutés, analyse → l'automatisme s'exécute seul (« 11 fiche(s) modifiée(s) »), étiquette « à lire » posée, journal des automatismes alimenté.
+- B-01 : Bedetheque Scraper 2 sur « Blacksad 1 » : album trouvé, couverture affichée dans la progression, aperçu de 17 champs (scénariste Juan Díaz Canalès, dessinateur Juanjo Guarnido, ISBN 2-205-04965-8, genre Policier…), appliqué. [La fenêtre de choix n'est pas apparue : un seul résultat pour Blacksad et pour Astérix.]
+- B-04 : hook Editor (bouton Scripts de la fenêtre Infos) sur Astérix : champs proposés renvoyés (dessinateur Uderzo, genre Humour, résumé…), **rien enregistré** en base (scénariste toujours vide). Question « confirmation » du script (journal trop grand) correctement transmise.
+- B-05 : QuickScrape BD2 : formulaire (lien, cases « champs vides », « édition »), lien d'album Astérix → 11 champs (Goscinny, Uderzo…), appliqués. [Bouton « 👁 Aperçu du lien » non essayé.]
+- B-06 : « tester le site » : rapport ✔ sur les 20 champs (Blacksad – Quelque part entre les ombres), conclusion « Tout est trouvé : les motifs sont à jour ». « Copier le rapport » : sans erreur.
+- B-08 : data\bedetheque\motifs.json invalide → avertissement dans le journal (« motif ALBUM_EVAL invalide… valeur de secours gardée »), le script fonctionne ; fichier renommé ensuite en motifs.json.recette-invalide.
+- O-02 : Library Organizer en mode Simuler (profil Défaut, modèles saisis) : rapport « Déplacés (simulé) : 2 », chemins …\Rangement LO\Dargaud\Blacksad\Blacksad T1 - Quelque Part Entre Les Ombres.cbz ; aucun fichier n'a bougé. [Comparaison avec Library Organizer dans ComicRack : à faire par Yoyo.]
+- O-03 : mode Déplacer : aperçu des 2 déplacements, « Appliquer » → fichiers rangés, le livre s'ouvre.
+- O-04 : doublon à la destination → fenêtre « Fichier que vous déplacez / Fichier déjà présent », boutons « Déplacer, mais garder les deux » / « Ne pas déplacer » / « Annuler », mention « ComicRust n'écrase jamais un fichier » ; « Ne pas déplacer » → rien déplacé.
+- O-05 : « annuler le dernier rangement » → les 2 fichiers reviennent à leur place ; « supprimer les dossiers vides » propose les 3 dossiers vides sous le dossier de base (jamais le dossier de base ni au-dessus), confirmation → supprimés.
+
+NON CONCLUANT
+- S-05 : avec 21 livres, « Nettoyer » finit avant « Arrêter » ; à refaire sur une grande bibliothèque.
+- B-02 : 2 albums traités l'un après l'autre (Blacksad, Astérix) sans erreur ni « site bloqué » ; comparaison avec ComicRack non faite.
+
+NON FAITS PAR L'IA (à faire par Yoyo)
+- P-01 (installation par la mise à jour : tes deux copies répondent déjà « 0.9.0 » par le MCP), S-06 (clé Comic Vine), S-08 et R-01 (copie liée / ComicRack), S-09, A-02, A-03, B-03 (App.Config), B-07, O-01 (losettingsx.dat), U-01 (préparé — script modifié et lanceur 12 en place — interrompu par la déconnexion du PC), N-01 à N-04.
+
+REMARQUES
+- [m] Une copie dont data\comicrust-tauri.json indique « mode autonome » mais sans data\comicrust.db affiche seulement « base ComicRust introuvable », sans proposer l'assistant (cas d'une base supprimée à la main).
+- [outil] L'outil MCP `eval_js` ne répond plus (délai de 80 s dépassé) quand un script pose une question pendant l'appel ; l'appli, elle, continue normalement.
+- Le PC s'est déconnecté à 21:25 pendant U-01.
