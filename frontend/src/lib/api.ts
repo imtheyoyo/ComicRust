@@ -31,6 +31,9 @@ export interface EtatBiblio {
   nbLivres: number;
   premierDemarrage: boolean;
   source: SourceBase;
+  /** Mode autonome SQLite dont `data\comicrust.db` n'existe pas (avec `premierDemarrage`) : chemin
+   *  attendu ; l'assistant propose de créer une nouvelle base ou d'en choisir une autre. */
+  baseAbsente?: string;
 }
 
 /** Connexion MySQL saisie (formulaire). Le mot de passe ne revient jamais du backend. */

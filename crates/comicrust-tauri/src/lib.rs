@@ -47,6 +47,8 @@ mod tests_biblio;
 #[cfg(test)]
 mod tests_connexion;
 #[cfg(test)]
+mod tests_formulaires;
+#[cfg(test)]
 mod tests_listes;
 #[cfg(test)]
 mod tests_scripts;

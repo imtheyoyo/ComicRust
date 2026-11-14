@@ -36,6 +36,12 @@ pub struct EtatBiblio {
     pub premier_demarrage: bool,
     /// D'où viennent les livres : SQLite, MySQL (base de ComicRust ou de ComicRack) ou `ComicDb.xml`.
     pub source: SourceBase,
+    /// Mode autonome SQLite dont la base (`data\comicrust.db`) n'existe pas (copie du dossier
+    /// faite sans elle…) : chemin attendu. Avec `premier_demarrage` : le front propose l'assistant
+    /// (« Créer une nouvelle base » ou choisir une autre bibliothèque) au lieu du seul message
+    /// « base ComicRust introuvable » (tauri-v0.9.1). Rien n'est créé sans ce choix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_absente: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -417,14 +423,25 @@ impl Biblio {
                 nb_livres: 0,
                 premier_demarrage: true,
                 source: SourceBase::Sqlite,
+                base_absente: None,
             });
         };
+        if let Some(chemin) = base_autonome_absente(&self.data, &r) {
+            // Pas de base vide créée ici : l'assistant le proposera, sur choix explicite.
+            return Ok(EtatBiblio {
+                mode: Mode::Autonome,
+                nb_livres: 0,
+                premier_demarrage: true,
+                source: SourceBase::Sqlite,
+                base_absente: Some(chemin.display().to_string()),
+            });
+        }
         let (base, store, cr) = charger(&self.data, &r)?;
         let nb = base.len();
         let source = source_de(&store, &cr);
         self.installer(mode, base, store);
         self.verrou().comicrack = cr;
-        Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false, source })
+        Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false, source, base_absente: None })
     }
 
     /// Enregistre le choix du premier démarrage et ouvre la bibliothèque. Rien n'est écrit dans
@@ -511,7 +528,7 @@ impl Biblio {
         let source = source_de(&store, &cr);
         self.installer(mode, base, store);
         self.verrou().comicrack = cr;
-        Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false, source })
+        Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false, source, base_absente: None })
     }
 
     fn refuser_pendant_analyse(&self) -> Result<(), String> {
@@ -1056,6 +1073,20 @@ pub(crate) fn regroupement(g: Option<Groupe>) -> Regroupement {
 }
 
 /// Base de ComicRust choisie : MySQL si une connexion est enregistrée (`storeMysql`), sinon SQLite.
+/// Mode autonome **SQLite** dont le fichier `data\comicrust.db` est absent (rien du tout à cet
+/// emplacement) : chemin attendu. `None` dans tous les autres cas, où l'ouverture normale signale
+/// l'erreur sans rien proposer de créer : autre mode, base MySQL (même si sa connexion enregistrée
+/// est illisible ou incomplète : clé `storeMysql` présente dans les réglages), fichier présent,
+/// dossier ou autre chose à cet emplacement.
+pub(crate) fn base_autonome_absente(data: &Path, r: &Reglages) -> Option<PathBuf> {
+    if r.mode != Some(Mode::Autonome) || r.store_mysql.is_some() || reglages::mysql_mentionne(data) {
+        return None;
+    }
+    let StoreConfig::Sqlite(p) = config_autonome(data, r) else { return None };
+    // `symlink_metadata` : un lien cassé compte comme « quelque chose » (jamais remplacé).
+    p.symlink_metadata().is_err().then_some(p)
+}
+
 fn config_autonome(data: &Path, r: &Reglages) -> StoreConfig {
     if let Some(c) = &r.store_mysql {
         return StoreConfig::MySql(c.clone());

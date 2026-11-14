@@ -42,8 +42,19 @@
   let selectionListe = $state<Record<string, number>>({});
 
   const inactif = (c: ControleScript) => desactive || inactifs.has(c);
+  /** Contrôles « en bloc » (liste à cocher, liste éditable, tableau, texte multiligne) : libellé
+   *  au-dessus et toute la largeur, comme la version egui. Avant la tauri-v0.9.1, ils restaient
+   *  dans la colonne de droite de la grille : dans une colonne étroite (onglet « Données » de
+   *  « Configurer BD2 » : 2 colonnes et des libellés de 360 px), il ne leur restait que ~40 px et
+   *  la liste des champs était invisible. */
+  const enBloc = (c: ControleScript) =>
+    ['multichoice', 'list_edit', 'table'].includes(c.type) ||
+    (['text', 'textarea'].includes(c.type) && Math.min(100, c.rows ?? (c.type === 'textarea' ? 4 : 1)) > 1);
+  /** Sans colonne de libellé : conteneurs, textes fixes, cases (libellé à droite), contrôles en
+   *  bloc et contrôles sans libellé (comme `label_cell` de la version egui). */
   const pleineLargeur = (c: ControleScript) =>
-    ['label', 'separator', 'image', 'group', 'columns', 'tabs', 'button', 'checkbox'].includes(c.type);
+    ['label', 'separator', 'image', 'group', 'columns', 'tabs', 'button', 'checkbox'].includes(c.type) ||
+    enBloc(c) || !(c.label ?? '').trim();
 
   function fixer(cle: string | undefined, v: unknown) {
     if (cle) valeurs[cle] = v;
@@ -144,6 +155,20 @@
       <label class="libelle" class:off for={id} title={aide}>{c.label ?? ''}{c.required ? ' *' : ''}</label>
     {/if}
     <div class="controle" class:plein={pleineLargeur(c)} class:off data-cle={c.key || undefined} data-type={c.type}>
+      {#if enBloc(c) && (c.label ?? '').trim()}
+        <div class="entete">
+          {#if c.type === 'text' || c.type === 'textarea'}
+            <label class="titre-bloc" for={id} title={aide}>{c.label}{c.required ? ' *' : ''}</label>
+          {:else}
+            <span class="titre-bloc" id="{id}-titre" title={aide}>{c.label}{c.required ? ' *' : ''}</span>
+          {/if}
+          {#if c.type === 'multichoice'}
+            {@const n = choixNormaux(c.choices).length}
+            {@const coches = choixNormaux(c.choices).filter((x) => multiCoche(c, x.valeur)).length}
+            <span class="discret petit" data-testid="multi-compte">{coches}/{n}</span>
+          {/if}
+        </div>
+      {/if}
       {#if c.type === 'text' || c.type === 'textarea' || c.type === 'secret'}
         {@const groupes = groupesInsertion(c)}
         {@const lignes = Math.max(1, Math.min(100, c.rows ?? (c.type === 'textarea' ? 4 : 1)))}
@@ -225,12 +250,13 @@
         </div>
       {:else if c.type === 'multichoice'}
         {@const ch = choixNormaux(c.choices)}
-        <div {id} class="multi" role="group" aria-label={c.label ?? c.key} title={aide} style:max-height={styleTaille(c.height) ?? '180px'}>
+        <div {id} class="multi" role="group" aria-label={(c.label ?? '').trim() ? undefined : c.key} aria-labelledby={(c.label ?? '').trim() ? `${id}-titre` : undefined}
+          title={aide} style:max-height={styleTaille(c.height) ?? '180px'}>
           {#each ch as x, k (k)}
             <label class="case"><input type="checkbox" disabled={off} checked={multiCoche(c, x.valeur)} onchange={(e) => basculerMulti(c, x.valeur, e.currentTarget.checked)} /><span>{x.libelle}</span></label>
           {/each}
         </div>
-        {#if ch.length > 4}
+        {#if ch.length > 1}
           <div class="ligne petit">
             <button type="button" class="mini" disabled={off} onclick={() => fixer(c.key, ch.map((x) => x.valeur))}>Tout cocher</button>
             <button type="button" class="mini" disabled={off} onclick={() => fixer(c.key, [])}>Tout décocher</button>
@@ -257,7 +283,7 @@
         {@const cols = colonnesTable(c)}
         {@const lignes = Array.isArray(valeurs[c.key!]) ? (valeurs[c.key!] as unknown[][]) : []}
         <div class="table-defile" style:max-height={styleTaille(c.height) ?? '220px'}>
-          <table {id} aria-label={c.label ?? c.key}>
+          <table {id} aria-label={(c.label ?? '').trim() || c.key}>
             <thead><tr>{#each cols as col, k (k)}<th style:width={styleTaille(col.width)}>{col.title}</th>{/each}<th><span class="sr">Actions</span></th></tr></thead>
             <tbody>
               {#each lignes as ligne, r (r)}
@@ -351,7 +377,11 @@
 </div>
 
 <style>
-  .grille { display: grid; grid-template-columns: minmax(80px, var(--libelles)) minmax(0, 1fr); gap: 8px 12px; align-items: start; }
+  /* Colonne des libellés : `label_width` du script, mais jamais plus de 45 % de la place (grille
+     imbriquée dans une colonne ou un groupe étroit : le contrôle garde de quoi s'afficher). */
+  .grille { display: grid; grid-template-columns: minmax(min(80px, 30%), min(var(--libelles), 45%)) minmax(0, 1fr); gap: 8px 12px; align-items: start; }
+  .entete { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .titre-bloc { color: var(--cr-texte-discret); overflow-wrap: anywhere; }
   .libelle { padding-top: 6px; color: var(--cr-texte-discret); overflow-wrap: anywhere; }
   .controle { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .controle.plein { grid-column: 1 / -1; }
@@ -370,7 +400,9 @@
   .case input { accent-color: var(--cr-accent); }
   .radios { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
   .radios.horizontal { flex-direction: row; flex-wrap: wrap; gap: 14px; }
-  .multi { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; padding: 6px 8px; border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); }
+  .multi { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden; min-height: 60px; min-width: 160px; padding: 6px 8px; border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); }
+  .multi .case { align-items: flex-start; }
+  .multi .case span { overflow-wrap: anywhere; }
   .liste-edit { min-width: 220px; width: 100%; }
   .table-defile { overflow: auto; border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); }
   table { border-collapse: collapse; width: 100%; }

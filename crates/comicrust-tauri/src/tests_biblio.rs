@@ -115,7 +115,13 @@ fn autonome(data: &Path) -> Biblio {
     let etat = b.configurer(&ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None }).unwrap();
     assert_eq!(
         etat,
-        EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: false, source: SourceBase::Sqlite }
+        EtatBiblio {
+            mode: Mode::Autonome,
+            nb_livres: 0,
+            premier_demarrage: false,
+            source: SourceBase::Sqlite,
+            base_absente: None
+        }
     );
     b
 }
@@ -147,7 +153,13 @@ fn premier_demarrage_puis_choix_autonome_persistant() {
     let b = Biblio::nouvelle(d.path().to_path_buf());
     assert_eq!(
         b.ouvrir().unwrap(),
-        EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: true, source: SourceBase::Sqlite }
+        EtatBiblio {
+            mode: Mode::Autonome,
+            nb_livres: 0,
+            premier_demarrage: true,
+            source: SourceBase::Sqlite,
+            base_absente: None
+        }
     );
     assert!(b.lister(&requete("serie", SensTri::Asc, None, None)).is_err(), "rien d'ouvert");
     assert!(!d.path().join("comicrust.db").exists(), "rien n'est créé avant le choix");
@@ -159,12 +171,74 @@ fn premier_demarrage_puis_choix_autonome_persistant() {
     let b2 = Biblio::nouvelle(d.path().to_path_buf());
     assert_eq!(
         b2.ouvrir().unwrap(),
-        EtatBiblio { mode: Mode::Autonome, nb_livres: 0, premier_demarrage: false, source: SourceBase::Sqlite }
+        EtatBiblio {
+            mode: Mode::Autonome,
+            nb_livres: 0,
+            premier_demarrage: false,
+            source: SourceBase::Sqlite,
+            base_absente: None
+        }
     );
-    // Base supprimée : erreur claire, pas de base vide recréée en silence.
+    // Base supprimée : l'assistant est proposé (avec le chemin attendu), pas de base vide
+    // recréée en silence.
     std::fs::remove_file(d.path().join("comicrust.db")).unwrap();
-    let e = Biblio::nouvelle(d.path().to_path_buf()).ouvrir().unwrap_err();
-    assert!(e.contains("introuvable"), "{e}");
+    let e = Biblio::nouvelle(d.path().to_path_buf()).ouvrir().unwrap();
+    assert!(e.premier_demarrage);
+    assert_eq!(e.base_absente.as_deref(), Some(d.path().join("comicrust.db").display().to_string().as_str()));
+    assert!(!d.path().join("comicrust.db").exists(), "rien n'est créé avant le choix");
+}
+
+/// Copie autonome sans `data\comicrust.db` (tauri-v0.9.1) : assistant au lieu du seul message,
+/// base créée seulement sur choix explicite ; jamais de base vide à la place d'une base MySQL
+/// (même à la connexion illisible) ni par-dessus ce qui occupe déjà l'emplacement.
+#[test]
+fn copie_autonome_sans_base_propose_l_assistant() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("comicrust.db");
+    reglages::modifier(d.path(), |r| {
+        r.mode = Some(Mode::Autonome);
+        r.vue.tri = Some("titre".into());
+    })
+    .unwrap();
+    let b = Biblio::nouvelle(d.path().to_path_buf());
+    let e = b.ouvrir().unwrap();
+    assert_eq!(
+        e,
+        EtatBiblio {
+            mode: Mode::Autonome,
+            nb_livres: 0,
+            premier_demarrage: true,
+            source: SourceBase::Sqlite,
+            base_absente: Some(db.display().to_string()),
+        }
+    );
+    let json = serde_json::to_value(&e).unwrap();
+    assert_eq!(json["baseAbsente"], db.display().to_string());
+    assert!(!db.exists(), "ouvrir ne crée rien");
+    assert!(b.lister(&requete("serie", SensTri::Asc, None, None)).is_err(), "rien d'ouvert");
+    // « Créer une nouvelle base » = choix autonome de l'assistant : base créée, préférences gardées.
+    let e = b.configurer(&ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None }).unwrap();
+    assert!(!e.premier_demarrage && e.base_absente.is_none());
+    assert!(db.is_file());
+    assert_eq!(reglages::lire(d.path()).unwrap().vue.tri.as_deref(), Some("titre"));
+
+    // Un dossier (ou autre chose) à la place du fichier : erreur, rien de proposé ni d'écrasé.
+    std::fs::remove_file(&db).unwrap();
+    std::fs::create_dir(&db).unwrap();
+    let err = Biblio::nouvelle(d.path().to_path_buf()).ouvrir().unwrap_err();
+    assert!(err.contains("introuvable"), "{err}");
+    assert!(db.is_dir());
+    std::fs::remove_dir(&db).unwrap();
+
+    // Base MySQL enregistrée mais illisible (connexion incomplète, ignorée à la lecture) : pas
+    // d'assistant SQLite, l'erreur reste affichée ; aucun fichier créé.
+    let p = d.path().join(reglages::FICHIER_REGLAGES);
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    v["storeMysql"] = serde_json::json!({"host": "nas", "user": ""});
+    std::fs::write(&p, v.to_string()).unwrap();
+    assert!(reglages::lire(d.path()).unwrap().store_mysql.is_none());
+    assert!(Biblio::nouvelle(d.path().to_path_buf()).ouvrir().is_err());
+    assert!(!db.exists());
 }
 
 #[test]
@@ -309,7 +383,13 @@ fn mode_comicrack_avec_comicdb_xml_en_lecture_seule() {
     let etat = b.configurer(&choix(Some(format!("\"{}\"", xml.display())))).unwrap();
     assert_eq!(
         etat,
-        EtatBiblio { mode: Mode::Comicrack, nb_livres: 2, premier_demarrage: false, source: SourceBase::Xml }
+        EtatBiblio {
+            mode: Mode::Comicrack,
+            nb_livres: 2,
+            premier_demarrage: false,
+            source: SourceBase::Xml,
+            base_absente: None
+        }
     );
     assert!(!d.path().join("data").join("comicrust.db").exists(), "aucune base ComicRust créée en mode lié");
     let p = b.lister(&requete("serie", SensTri::Asc, None, None)).unwrap();
@@ -388,7 +468,13 @@ fn cinq_mille_livres_restent_fluides() {
 
 #[test]
 fn contrat_json_en_camel_case() {
-    let etat = EtatBiblio { mode: Mode::Comicrack, nb_livres: 3, premier_demarrage: false, source: SourceBase::Xml };
+    let etat = EtatBiblio {
+        mode: Mode::Comicrack,
+        nb_livres: 3,
+        premier_demarrage: false,
+        source: SourceBase::Xml,
+        base_absente: None,
+    };
     assert_eq!(
         serde_json::to_string(&etat).unwrap(),
         r#"{"mode":"comicrack","nbLivres":3,"premierDemarrage":false,"source":"xml"}"#

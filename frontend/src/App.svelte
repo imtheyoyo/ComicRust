@@ -22,6 +22,8 @@
 
   let etat = $state<EtatBiblio | null>(null);
   let erreur = $state('');
+  /** Bibliothèque qui ne s'ouvre pas : l'assistant est affiché pour en choisir une autre. */
+  let choisirAutre = $state(false);
   let section = $state<Section>('bibliotheque');
   let themeActif = $state('');
   let nbLivres = $state(0);
@@ -38,6 +40,24 @@
   let reglages = $state<DialogReglages>();
   let transfert = $state<DialogTransfert>();
 
+  /** Ouvre la bibliothèque enregistrée (démarrage, « Réessayer » après une erreur). */
+  async function ouvrir() {
+    erreur = '';
+    choisirAutre = false;
+    try {
+      etat = await ouvrirBibliotheque();
+      nbLivres = etat.nbLivres;
+      if (!etat.premierDemarrage) {
+        void listes.charger();
+        listes.demarrer();
+        // Scripts (tauri-v0.9.0) : liste et écoute des événements, jamais bloquant.
+        void scripts.demarrer();
+      }
+    } catch (e) {
+      erreur = messageErreur(e);
+    }
+  }
+
   onMount(() => {
     void (async () => {
       try {
@@ -49,14 +69,7 @@
         await connexion.demarrer();
         // Mise à jour : jamais bloquante (vérification automatique en arrière-plan, bandeau seul).
         void miseAJour.demarrer();
-        etat = await ouvrirBibliotheque();
-        nbLivres = etat.nbLivres;
-        if (!etat.premierDemarrage) {
-          void listes.charger();
-          listes.demarrer();
-          // Scripts (tauri-v0.9.0) : liste et écoute des événements, jamais bloquant.
-          void scripts.demarrer();
-        }
+        await ouvrir();
       } catch (e) {
         erreur = messageErreur(e);
       }
@@ -144,6 +157,8 @@
   }
 
   function pret(e: EtatBiblio) {
+    erreur = '';
+    choisirAutre = false;
     etat = e;
     nbLivres = e.nbLivres;
     void listes.charger();
@@ -180,12 +195,20 @@
   const listeAffichee = $derived(section === 'listes' ? listes.noeud(listes.courante) ?? null : null);
 </script>
 
-{#if erreur}
-  <p class="message erreur" role="alert">{erreur}</p>
+{#if erreur && choisirAutre}
+  <PremierDemarrage onpret={pret} probleme={erreur} onretour={() => void ouvrir()} />
+{:else if erreur}
+  <div class="message" data-testid="erreur-ouverture">
+    <p class="erreur" role="alert">{erreur}</p>
+    <p class="boutons-erreur">
+      <button type="button" onclick={() => void ouvrir()}>Réessayer</button>
+      <button type="button" class="principal" onclick={() => (choisirAutre = true)} data-testid="choisir-bibliotheque">Choisir une autre bibliothèque…</button>
+    </p>
+  </div>
 {:else if !etat}
   <p class="message">Ouverture de la bibliothèque…{dansTauri() ? '' : ' (mode simulé)'}</p>
 {:else if etat.premierDemarrage}
-  <PremierDemarrage onpret={pret} />
+  <PremierDemarrage onpret={pret} baseAbsente={etat.baseAbsente} />
 {:else}
   <div class="cadre">
   <BandeauMaj />
@@ -253,7 +276,9 @@
   .poignee-listes { flex: none; width: 5px; margin-left: -5px; position: relative; z-index: 1; cursor: col-resize; touch-action: none; }
   .poignee-listes:hover, .poignee-listes:focus-visible { background: var(--cr-accent); outline: none; }
   .message { padding: 40px; text-align: center; color: var(--cr-texte-discret); }
-  .erreur { color: var(--cr-erreur); }
+  .erreur { color: var(--cr-erreur); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .boutons-erreur { display: flex; justify-content: center; gap: 8px; }
+  .boutons-erreur .principal { background: var(--cr-accent); color: var(--cr-accent-texte); border-color: var(--cr-accent); font-weight: 600; }
   .bientot { flex: 1; display: grid; place-content: center; text-align: center; color: var(--cr-texte-discret); }
   .bientot h1 { color: var(--cr-texte); margin: 0 0 8px; }
 </style>

@@ -15,6 +15,7 @@
 import type {
   ApercuScript, BilanScript, ChooseSpecScript, DetailQuestionScript, EtatScripts, FormSpecScript, HookScript, InfoScript, LigneApercu,
 } from './api';
+import { SPEC_CONFIGURER_BD2 } from './simuleFormulairesReels';
 
 /** Libellés français des champs (comme `libelle` du backend). */
 const LIBELLES: Record<string, string> = {
@@ -104,6 +105,11 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
       // #@Key : identifiant libre (opaque pour le front).
       id: 'BD2_CONFIG', nom: 'Configurer BD2', fichier: 'bedetheque/bd2.py', hooks: ['ConfigScript'], actif: true,
       description: 'Options de Bedetheque Scraper 2.', reglages: 'BD2_CONFIG',
+    },
+    {
+      // Vraie fenêtre de réglages du script d'exemple (spec réelle du backend, tauri-v0.9.1).
+      id: 'bedetheque/bd2.py:ConfigureBD2', nom: 'Configurer BD2 (fenêtre complète)', fichier: 'bedetheque/bd2.py', hooks: ['Library'], actif: true,
+      description: 'Réglages de Bedetheque Scraper 2 (Préférences, Données, Logging) : formulaire réel du script d\'exemple.',
     },
     {
       id: 'rangement.py:ranger', nom: 'Rangement de la bibliothèque', fichier: 'rangement.py', hooks: ['Library'], actif: true,
@@ -383,6 +389,17 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     terminer(e, 'termine');
   }
 
+  /** « Configurer BD2 » réel : formulaire du script d'exemple. Les tests peuvent afficher un autre
+   *  formulaire réel à la place (`window.__comicrustFormulaireReel = spec` avant le lancement). */
+  async function configurerReel(e: Execution) {
+    const autre = (globalThis as { __comicrustFormulaireReel?: FormSpecScript }).__comicrustFormulaireReel;
+    const spec = autre ?? SPEC_CONFIGURER_BD2;
+    const r = (await formulaire(e, JSON.parse(JSON.stringify(spec)) as FormSpecScript)) as Record<string, unknown> | null;
+    if (!r) { journal(e, 'info', 'Réglages inchangés.'); terminer(e, 'annule'); return; }
+    journal(e, 'info', `Bouton : ${String(r['$bouton'] ?? '')} ; champs à récupérer : ${Array.isArray(r.Donnees) ? r.Donnees.length : 0}.`);
+    terminer(e, 'termine');
+  }
+
   async function rangement(e: Execution) {
     journal(e, 'systeme', 'rangement.py : ranger() sur toute la bibliothèque');
     for (let i = 1; i <= 8; i++) {
@@ -423,6 +440,7 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     const corps = id.startsWith('nettoyage') ? () => nettoyage(e, ids)
       : id === 'bedetheque/bd2.py:scraper' ? () => bedetheque(e, ids, editeur)
       : id === 'BD2_CONFIG' ? () => configurer(e)
+      : id === 'bedetheque/bd2.py:ConfigureBD2' ? () => configurerReel(e)
       : id.startsWith('rangement') ? () => rangement(e)
       : () => casse(e);
     // Démarrage après la réponse (comme le backend : les premiers événements peuvent la suivre de peu).

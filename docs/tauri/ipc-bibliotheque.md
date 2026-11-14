@@ -15,6 +15,9 @@ interface EtatBiblio {
   nbLivres: number;
   premierDemarrage: boolean; // true : le front affiche l'assistant, rien n'est encore ouvert
   source: 'sqlite' | 'mysql' | 'xml'; // d'où viennent les livres (étape 6) ; 'sqlite' au premier démarrage
+  baseAbsente?: string;    // tauri-v0.9.1 : mode autonome SQLite dont data\comicrust.db n'existe pas
+                           // (avec premierDemarrage:true) : chemin attendu ; l'assistant propose
+                           // « Créer une nouvelle base » ou une autre bibliothèque
 }
 
 interface ChoixPremierDemarrage {
@@ -137,7 +140,7 @@ temporaire renommé ensuite : chacune ne change que sa partie.
 |---|---|---|
 | `lire_preferences_vue` | – | `PreferencesVue` (`{}` si rien n'est enregistré). Erreur si `comicrust-tauri.json` est illisible (le front prend alors les valeurs par défaut). |
 | `enregistrer_preferences_vue` | `{preferences: PreferencesVue}` | `PreferencesVue` à jour. **Fusion** : seuls les champs fournis changent ; valeurs invalides ignorées. |
-| `ouvrir_bibliotheque` | – | `EtatBiblio`. Lit `data\comicrust-tauri.json` ; si un mode est choisi, ouvre la base (autonome : SQLite `data\comicrust.db` ; comicrack : MySQL du `ComicRack.ini` ou `ComicDb.xml`, **lecture seule**). Sans choix : `{mode:'autonome', nbLivres:0, premierDemarrage:true}`. Rappelable pour recharger. |
+| `ouvrir_bibliotheque` | – | `EtatBiblio`. Lit `data\comicrust-tauri.json` ; si un mode est choisi, ouvre la base (autonome : SQLite `data\comicrust.db` ; comicrack : MySQL du `ComicRack.ini` ou `ComicDb.xml`, **lecture seule**). Sans choix : `{mode:'autonome', nbLivres:0, premierDemarrage:true}`. Mode autonome SQLite sans `data\comicrust.db` (rien à cet emplacement, aucune base MySQL mentionnée dans les réglages) : idem avec `baseAbsente` (chemin attendu) ; **rien n'est créé** avant le choix dans l'assistant. Rappelable pour recharger. |
 | `configurer_premier_demarrage` | `{choix: ChoixPremierDemarrage}` | `EtatBiblio` (avec `premierDemarrage:false`). Autonome : crée la base. Comicrack : teste la connexion (erreur lisible si MySQL injoignable) ; rien n'est copié ni écrit dans ComicRack. |
 | `lister_livres` | `{requete: RequeteLivres}` | `PageLivres` |
 | `lister_piles` | `{requete: RequeteLivres}` | `PagePiles` : une pile par série, **dans l'ordre d'apparition de la série dans la vue** (même requête que `lister_livres` : recherche, liste, tri, groupe ; `debut`, `nombre` et `serie` sont ignorés). Réponse unique (pas de fenêtre). |

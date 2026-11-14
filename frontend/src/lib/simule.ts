@@ -215,12 +215,16 @@ async function simulerScan() {
 
 // `?mode=comicrack` : bibliothèque liée à ComicRack (lecture seule tant que « Lecture et écriture »
 // n'est pas cochée dans Réglages).
+// `?baseAbsente` : copie autonome sans data\comicrust.db (assistant avec « Créer une nouvelle base »).
+// `?erreurOuverture` : ouverture impossible (message d'erreur avec « Réessayer » / « Choisir… »).
 let etat: EtatBiblio = {
   mode: new URLSearchParams(location.search).get('mode') === 'comicrack' ? 'comicrack' : 'autonome',
   nbLivres: LIVRES.length,
-  premierDemarrage: new URLSearchParams(location.search).has('premier'),
+  premierDemarrage: new URLSearchParams(location.search).has('premier') || new URLSearchParams(location.search).has('baseAbsente'),
   source: 'sqlite',
+  ...(new URLSearchParams(location.search).has('baseAbsente') ? { baseAbsente: 'C:\\ComicRust\\data\\comicrust.db' } : {}),
 };
+let erreurOuverture = new URLSearchParams(location.search).has('erreurOuverture');
 // Connexions MySQL « enregistrées » (sans mot de passe : seulement `motDePasseDefini`).
 let connexionsSimulees: ConnexionsMysql = { store: 'sqlite' };
 // Préférences d'affichage : repli en mémoire (perdues au rechargement). `?prefs=<json>` simule un
@@ -390,6 +394,10 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     }
       return { ...simuleTests.prefs };
     case 'ouvrir_bibliotheque':
+      if (erreurOuverture) {
+        erreurOuverture = false; // « Réessayer » réussit
+        throw new Error('connexion à comicrust@nas:3306/comicrust impossible : délai dépassé');
+      }
       return etat;
     case 'configurer_premier_demarrage': {
       const choix = args.choix as { mode: EtatBiblio['mode'] };
