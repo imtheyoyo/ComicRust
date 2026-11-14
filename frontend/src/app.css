@@ -2,7 +2,7 @@
    variables --cr-* définies par le thème (data\themes\*.css). */
 :root {
   /* Replis des variables FACULTATIVES du contrat de thème (docs/tauri/themes.md) : un thème qui ne
-     les définit pas hérite de celles-ci. Cette feuille précède le thème ; une valeur `var(--cr-x)`
+     les définit pas hérite de celles-ci. Cette feuille précède le thème ; une valeur `var(--cr-…)`
      est résolue sur :root avec la valeur finale (celle du thème). */
   --cr-fond-lecteur: var(--cr-fond);
   --cr-fond-entete: var(--cr-fond-panneau);
