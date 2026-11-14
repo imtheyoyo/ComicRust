@@ -1,0 +1,15 @@
+Rapport de recette ComicRust tauri-v0.10.0 — 14/11/2026 21:33
+Résultat : 19 OK, 0 échec(s), 1 non testé(s) sur 20.
+Décision proposée : incomplète (1 bloquant(s) non testé(s)).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.10.0 / 0.10.0
+
+NON TESTÉS (1) : P-01*   (* = bloquant)
+
+A améliorer : 
+
+* Dans une liste de lecture : Tri 'Ordre de la liste', 'Empiler par série', il faut pouvoir déplacer les séries dans la liste de lecture.

@@ -80,8 +80,10 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 8 | 8 | 0 |
+| [M] majeurs | 9 | 9 | 0 |
+| [m] mineurs | 3 | 3 | 0 |
 
-**Décision :** ☐ GO ☐ NO-GO — Yoyo, le …
+Rapport de Yoyo du 14/11/2026 21:33 ([rapport](rapports/tauri-v0.10.0-2026-11-14.txt)) : 19 OK, 0 échec ; P-01 coché « non testé » mais la version 0.10.0 est notée dans les deux copies (installation confirmée). Demande : pouvoir déplacer les séries (piles) dans une liste de lecture triée « Ordre de la liste » + « Empiler par série ».
+
+**Décision :** en attente du GO de Yoyo.
