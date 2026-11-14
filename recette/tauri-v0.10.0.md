@@ -47,12 +47,12 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 ## 3. Rectangle avec « Empiler par série »
 
-- [ ] **P-R1 [B]** « Empiler par série » actif : glisser un rectangle dans les marges entre piles sélectionne les piles touchées (défilement automatique près des bords).
-- [ ] **P-R2 [B]** Clic droit sur plusieurs piles sélectionnées : « Modifier les infos », ajouter à une liste, etc. portent sur les livres de **toutes** les piles (le nombre affiché est juste).
-- [ ] **P-R3 [B]** Glisser les piles sélectionnées vers une liste : tous leurs livres sont ajoutés ; une pile hors sélection ne part que seule.
-- [ ] **P-R4 [M]** Maj/Ctrl + rectangle, Échap, clic dans le vide ; Maj/Ctrl + clic, Ctrl+A, Maj + flèches ; Ctrl+I et Suppr (liste de lecture) sur la sélection.
-- [ ] **P-R5 [M]** Entrée ou double-clic ouvre la pile courante ; refermer : on retrouve la pile ; après un scan ou un ajout de livres, la sélection reste sur les **mêmes séries**.
-- [ ] **P-R6 [m]** Détail : une pile → carte « série, N livres, M lus » ; plusieurs → « N piles sélectionnées » ; barre d'état « N piles · M livres ».
+- [ ] **PR-01 [B]** « Empiler par série » actif : glisser un rectangle dans les marges entre piles sélectionne les piles touchées (défilement automatique près des bords).
+- [ ] **PR-02 [B]** Clic droit sur plusieurs piles sélectionnées : « Modifier les infos », ajouter à une liste, etc. portent sur les livres de **toutes** les piles (le nombre affiché est juste).
+- [ ] **PR-03 [B]** Glisser les piles sélectionnées vers une liste : tous leurs livres sont ajoutés ; une pile hors sélection ne part que seule.
+- [ ] **PR-04 [M]** Maj/Ctrl + rectangle, Échap, clic dans le vide ; Maj/Ctrl + clic, Ctrl+A, Maj + flèches ; Ctrl+I et Suppr (liste de lecture) sur la sélection.
+- [ ] **PR-05 [M]** Entrée ou double-clic ouvre la pile courante ; refermer : on retrouve la pile ; après un scan ou un ajout de livres, la sélection reste sur les **mêmes séries**.
+- [ ] **PR-06 [m]** Détail : une pile → carte « série, N livres, M lus » ; plusieurs → « N piles sélectionnées » ; barre d'état « N piles · M livres ».
 
 ## 4. Non-régression
 
