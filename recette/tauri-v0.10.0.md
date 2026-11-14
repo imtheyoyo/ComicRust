@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.10.0 (pré-release de l'étape **thèmes**) |
 | Paquet | `ComicRust-Tauri-tauri-v0.10.0-windows-x64.zip` |
-| SHA-256 | `à renseigner après la publication` |
+| SHA-256 | `88bb1acb815508d52aa5e5e9565e6a103a779ef4c2da00cd7ef8705998cb5038` |
 | Contenu | thèmes (contrat `--cr-*`, choix/aperçu/import/export/rechargement, filtrage du CSS) ; sélection par rectangle avec les piles |
 | Origine | [recette tauri-v0.9.1](tauri-v0.9.1.md) : **GO** du 14/11/2026 ; remarque « rectangle avec Empiler par série » ([rapport](rapports/tauri-v0.9.1-2026-11-14.txt)) |
 
