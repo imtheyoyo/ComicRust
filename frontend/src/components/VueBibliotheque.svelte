@@ -62,8 +62,6 @@
   bib.empile = vueInitiale.empiler && vueInitiale.vue === 'grille';
   let vue = $state<'grille' | 'tableau'>(vueInitiale.vue);
   let empiler = $state(vueInitiale.empiler);
-  /** Pile sélectionnée (titre de la série) : un clic la sélectionne sans l'ouvrir. */
-  let pileSel = $state<string | null>(null);
   let zoom = $state(prefs.zoom ?? 150);
   let details = $state(prefs.details ?? true);
   const LARGEUR_MIN = 220;
@@ -72,16 +70,22 @@
   let largeurDetails = $state(prefs.largeurDetails ?? LARGEUR_DEFAUT);
   /** Sélection multiple (Ctrl+clic, Maj+clic, Ctrl+A, Maj+flèches) ; `sel.curseur` : livre courant. */
   const sel = new Selection();
-  /** Menu contextuel ouvert (position ; `pile` : menu d'une pile plutôt que des livres). */
-  let menu = $state<{ x: number; y: number; pile?: string } | null>(null);
-  /** Pile visée par le menu ouvert, retenue hors de l'état réactif : le menu se ferme
-   *  (`menu = null`) AVANT d'appeler l'action choisie. Lire `menu.pile` à ce moment-là levait une
-   *  erreur (menu nul) et aucune entrée du menu des livres ou des piles n'agissait (« Modifier les
-   *  infos » sans effet alors que Ctrl+I marchait). */
-  let pileMenu: string | undefined;
-  function ouvrirMenu(x: number, y: number, pile?: string) {
-    pileMenu = pile;
-    menu = { x, y, pile };
+  /** Sélection multiple des piles (vue empilée), par rang dans `bib.piles` ; `selPiles.curseur` :
+   *  pile courante. Un clic sélectionne la pile sans l'ouvrir. */
+  const selPiles = new Selection();
+  /** Séries des piles sélectionnées au moment d'ouvrir une pile : à la fermeture, les piles sont
+   *  rechargées (autres rangs possibles) et la sélection est retrouvée par titre. Hors état réactif. */
+  let memoPiles: { titres: string[]; courant: string } | null = null;
+  /** Menu contextuel ouvert (position ; `piles` : menu des piles sélectionnées plutôt que des livres). */
+  let menu = $state<{ x: number; y: number; piles?: boolean } | null>(null);
+  /** Piles visées par le menu ouvert (livres de toutes les piles sélectionnées, et la série quand il
+   *  n'y en a qu'une), retenues hors de l'état réactif : le menu se ferme (`menu = null`) AVANT
+   *  d'appeler l'action choisie. Lire `menu` à ce moment-là levait une erreur (menu nul) et aucune
+   *  entrée du menu n'agissait (« Modifier les infos » sans effet alors que Ctrl+I marchait). */
+  let pilesMenu: { ids: string[]; serie: string | null } | undefined;
+  function ouvrirMenu(x: number, y: number, piles = false) {
+    pilesMenu = piles ? { ids: idsPiles(), serie: nbPilesSel === 1 ? pileSelectionnee : null } : undefined;
+    menu = { x, y, piles };
     positionMenu = { x, y };
   }
   /** Dernière position du menu contextuel : le sous-menu « Scripts ▸ » s'ouvre au même endroit. */
@@ -144,8 +148,8 @@
     }
   }
   function choixMenu(id: string) {
-    const pile = pileMenu;
-    void (pile !== undefined ? actionPile(pile, id) : action(id));
+    const pm = pilesMenu;
+    void (pm ? actionPiles(id, pm) : action(id));
   }
   /** Fenêtres de l'édition (étape 3), sur les identifiants de la sélection au moment de l'ouverture. */
   let infosDe = $state<string[] | null>(null);
@@ -237,7 +241,10 @@
     const e = enPiles;
     untrack(() => {
       if (!bib.regler(e)) return;
-      sel.vider(); // la sélection de livres ne vaut plus quand la vue change de nature (piles ↔ livres)
+      // La sélection ne vaut plus quand la vue change de nature (piles ↔ livres).
+      sel.vider();
+      selPiles.vider();
+      memoPiles = null;
       if (!e && bib.params.serie !== undefined) changer({ serie: undefined });
       else void bib.reinitialiser(false);
     });
@@ -245,8 +252,29 @@
   const pileOuverte = $derived(enPiles && bib.params.serie !== undefined);
   /** Les piles (et non les livres) sont affichées. */
   const pilesAffichees = $derived(enPiles && !pileOuverte);
-  /** Pile sélectionnée si elle existe encore dans la vue (recherche, liste ou tri changés). */
-  const pileSelectionnee = $derived(enPiles && bib.piles.some((p) => p.serie === pileSel) ? pileSel : null);
+  /** Pile courante (série) si elle existe encore dans la vue. */
+  const pileSelectionnee = $derived(enPiles && selPiles.curseur >= 0 ? (bib.piles[selPiles.curseur]?.serie ?? null) : null);
+  const nbPilesSel = $derived(enPiles ? selPiles.nombre : 0);
+  /** Total des livres des piles sélectionnées. */
+  const nbLivresPilesSel = $derived(enPiles ? selPiles.indices().reduce((n, i) => n + (bib.piles[i]?.nbLivres ?? 0), 0) : 0);
+  /** Identifiants des livres de toutes les piles sélectionnées. */
+  const idsPiles = (): string[] => selPiles.indices().flatMap((i) => bib.piles[i]?.ids ?? []);
+
+  // Piles rechargées à la fermeture d'une pile : la sélection d'avant l'ouverture est retrouvée par
+  // titre de série (les rangs ont pu changer). Effet du parent : il passe avant celui de la grille.
+  $effect(() => {
+    const piles = bib.piles;
+    untrack(() => {
+      const m = memoPiles;
+      if (!m || bib.params.serie !== undefined) return;
+      memoPiles = null;
+      selPiles.vider();
+      const rang = (t: string) => piles.findIndex((p) => p.serie === t);
+      const ctrl = { ctrl: true, maj: false };
+      for (const t of m.titres) if (t !== m.courant && rang(t) >= 0) selPiles.cliquer(rang(t), ctrl);
+      if (rang(m.courant) >= 0) selPiles.cliquer(rang(m.courant), ctrl); // la courante en dernier : curseur
+    });
+  });
 
   // Listes modifiées (ajout, retrait, réordonnancement, critères…) : la liste affichée est relue
   // sans perdre le défilement.
@@ -268,6 +296,7 @@
   $effect(() => {
     if (bib.params.recherche === '' && !bib.params.liste) nbLivres = bib.total;
     sel.borner(bib.total);
+    selPiles.borner(bib.piles.length);
   });
 
   /** Vue complète d'une liste ou de la bibliothèque (tous les champs renseignés). */
@@ -276,10 +305,15 @@
     return a.tri === b.tri && a.sensTri === b.sensTri && a.groupe === b.groupe && a.vue === b.vue && a.empiler === b.empiler;
   }
 
-  /** Change la requête : sélection vidée, première page rechargée (promesse : chargement fini). */
-  function changer(patch: Partial<typeof bib.params>): Promise<void> {
+  /** Change la requête : sélection vidée, première page rechargée (promesse : chargement fini).
+   *  `garderPiles` : ouverture ou fermeture d'une pile, la sélection des piles est conservée. */
+  function changer(patch: Partial<typeof bib.params>, garderPiles = false): Promise<void> {
     Object.assign(bib.params, patch);
     sel.vider();
+    if (!garderPiles) {
+      selPiles.vider();
+      memoPiles = null;
+    }
     return bib.reinitialiser();
   }
 
@@ -326,8 +360,13 @@
    *  les flèches marchent tout de suite (sans cela, la grille des piles démontée laissait le focus
    *  sur <body> et il fallait cliquer un livre avant de naviguer). */
   async function ouvrirPile(serie: string) {
-    pileSel = serie;
-    await changer({ serie });
+    const rang = bib.piles.findIndex((p) => p.serie === serie);
+    if (rang >= 0) selPiles.cliquerDroit(rang); // la pile devient courante (sélection gardée si elle en fait partie)
+    memoPiles = {
+      titres: selPiles.indices().map((i) => bib.piles[i]?.serie).filter((t): t is string => t !== undefined),
+      courant: serie,
+    };
+    await changer({ serie }, true);
     if (bib.params.serie !== serie || bib.erreur) return; // autre requête entre-temps
     if (bib.total > 0 && sel.curseur < 0) sel.unique(0);
     await tick();
@@ -337,7 +376,7 @@
   /** Retour aux piles : la pile qui était ouverte reste sélectionnée, visible (GrillePiles la fait
    *  défiler) et la grille des piles reprend le focus. */
   async function fermerPile() {
-    await changer({ serie: undefined });
+    await changer({ serie: undefined }, true);
     if (bib.params.serie !== undefined) return;
     await tick();
     if (focusLibre()) document.querySelector<HTMLElement>('[data-testid="grille-piles"]')?.focus();
@@ -437,7 +476,7 @@
     // Ctrl+I : infos de la sélection (comme ComicRack et la version egui).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'i' && !fenetreOuverte()) {
       e.preventDefault();
-      if (pileSelectionnee !== null && !pileOuverte) void actionPile(pileSelectionnee, 'infos');
+      if (pilesAffichees && nbPilesSel > 0) void agirSurIds('infos', idsPiles());
       else void action('infos');
       return;
     }
@@ -452,7 +491,7 @@
       && (e.target as HTMLElement | null)?.closest('[data-testid="grille"], [data-testid="tableau"], [data-testid="grille-piles"]')) {
       e.preventDefault();
       if (pilesAffichees) {
-        if (pileSelectionnee !== null) void actionPile(pileSelectionnee, 'retirer');
+        if (nbPilesSel > 0) void agirSurIds('retirer', idsPiles());
       } else void action('retirer');
       return;
     }
@@ -479,6 +518,10 @@
 
   const livreSelectionne = $derived(sel.curseur >= 0 ? bib.livre(sel.curseur) : undefined);
   const nbSel = $derived(sel.nombre);
+  /** Résumé des piles sélectionnées pour le panneau de détails (undefined hors vue empilée). */
+  const resumePiles = $derived(pilesAffichees
+    ? { nbPiles: nbPilesSel, pile: nbPilesSel === 1 ? bib.piles[selPiles.curseur] : undefined }
+    : undefined);
 
   // ───── Édition (étape 3) : menu contextuel et fenêtres ─────
 
@@ -526,15 +569,16 @@
     return { id: 'scripts', libelle: '📜 Scripts ▸', separe: true, desactive: n === 0, aide: n === 0 ? 'Aucun script actif pour les livres' : 'Lancer un script sur ces livres' };
   }
 
-  /** Menu contextuel d'une pile : les actions portent sur tous ses livres. */
-  function entreesPile(serie: string): EntreeMenu[] {
-    const p = bib.piles.find((x) => x.serie === serie);
-    const n = p?.nbLivres ?? 0;
-    const quoi = n > 1 ? `les ${n.toLocaleString('fr-FR')} livres` : 'le livre';
+  /** Menu contextuel des piles : les actions portent sur les livres de TOUTES les piles sélectionnées. */
+  const entreesPiles = $derived.by<EntreeMenu[]>(() => {
+    const n = nbLivresPilesSel;
+    const np = nbPilesSel;
+    const f = (k: number) => k.toLocaleString('fr-FR');
+    const quoi = np > 1 ? `les ${f(n)} livres de ${f(np)} piles` : n > 1 ? `les ${f(n)} livres` : 'le livre';
     const raison = listes.raison;
     return [
-      { id: 'ouvrir', libelle: '📂 Ouvrir la pile', raccourci: 'Entrée' },
-      { id: 'infos', libelle: n > 1 ? `✏ Modifier les infos des ${n.toLocaleString('fr-FR')} livres…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: true },
+      ...(np === 1 ? [{ id: 'ouvrir', libelle: '📂 Ouvrir la pile', raccourci: 'Entrée' }] : []),
+      { id: 'infos', libelle: n > 1 ? `✏ Modifier les infos ${quoi.replace(/^les /, 'des ')}…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: np === 1 },
       { id: 'ecritureInfos', libelle: n > 1 ? 'Écrire les infos dans les fichiers…' : 'Écrire les infos dans le fichier', separe: true,
         aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
       { id: 'conversion', libelle: n > 1 ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ', aide: 'Seuls les CBR, CB7 et CBT se convertissent' },
@@ -542,17 +586,17 @@
       entreeScripts(),
       { id: 'ajouter', libelle: `➕ Ajouter ${quoi} à une liste…`, separe: true, desactive: !!raison, aide: raison },
       ...(liste?.type === 'lecture'
-        ? [{ id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' }]
+        ? [{ id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, raccourci: 'Suppr', desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' }]
         : []),
     ];
-  }
+  });
 
-  async function actionPile(serie: string, id: string) {
+  /** Action du menu des piles (`cible` : retenue à l'ouverture du menu, voir `pilesMenu`). */
+  async function actionPiles(id: string, cible: { ids: string[]; serie: string | null }) {
     erreurAction = '';
-    const p = bib.piles.find((x) => x.serie === serie);
-    if (!p) return;
-    if (id === 'ouvrir') void ouvrirPile(serie);
-    else await agirSurIds(id, p.ids);
+    if (id === 'ouvrir') {
+      if (cible.serie !== null) void ouvrirPile(cible.serie);
+    } else await agirSurIds(id, cible.ids);
   }
 
   /** Identifiants des livres sélectionnés (pages non chargées demandées au backend). */
@@ -619,7 +663,10 @@
       if (!liste) return;
       const idl = liste.id;
       const r = await listes.executer('Retrait de la liste', () => retirerLivresListe(idl, ids));
-      if (r) sel.vider();
+      if (r) {
+        sel.vider();
+        selPiles.vider();
+      }
       return;
     }
     if (id === 'scripts') {
@@ -785,15 +832,12 @@
     debut: () => listes.viderDepots(),
     groupeDe: () => null,
     deplacerGroupes: () => {},
-    contient: (i) => bib.piles[i] !== undefined && bib.piles[i].serie === pileSelectionnee,
-    choisir: (i) => {
-      if (bib.piles[i]) pileSel = bib.piles[i].serie;
-    },
+    // Glisser une pile de la sélection : toutes les piles sélectionnées partent ; hors sélection :
+    // seulement celle-là.
+    contient: (i) => selPiles.contient(i),
+    choisir: (i) => selPiles.unique(i),
     selectionPrete: () => Promise.resolve(),
-    indices: () => {
-      const i = bib.piles.findIndex((p) => p.serie === pileSelectionnee);
-      return i >= 0 ? [i] : [];
-    },
+    indices: () => selPiles.indices(),
     nombreLivres: (ind) => ind.reduce((n, i) => n + (bib.piles[i]?.nbLivres ?? 0), 0),
     series: () => 0,
     surListe: (id) => ({ refus: listes.depot(id), nom: listes.noeud(id)?.nom ?? '' }),
@@ -929,9 +973,8 @@
           : liste ? 'Aucun livre dans cette liste.'
           : 'La bibliothèque est vide : ajoutez un dossier surveillé, puis lancez un scan.'}</p>
       {:else if enPiles && !pileOuverte}
-        <GrillePiles piles={bib.piles} selection={pileSelectionnee} version={bib.version} {zoom}
-          onselection={(serie) => (pileSel = serie)} onouvrir={ouvrirPile}
-          onmenu={(serie, x, y) => ouvrirMenu(x, y, serie)}
+        <GrillePiles piles={bib.piles} sel={selPiles} version={bib.version} {zoom} onouvrir={ouvrirPile}
+          onmenu={(x, y) => ouvrirMenu(x, y, true)}
           onappui={(e, i) => glisserPile.appui(e, i)} />
       {:else if vue === 'grille'}
         <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => ouvrirMenu(x, y)} onouvrir={ouvrir}
@@ -956,8 +999,10 @@
         {@attach ecouteursPoignee}
         data-testid="poignee-details"
       ></div>
-      <PanneauDetails livre={pilesAffichees ? undefined : livreSelectionne} largeur={largeurDetails} onouvrir={() => ouvrir(sel.curseur)}
-        onmodifier={() => void action('infos')} nbSelection={pilesAffichees ? 0 : nbSel} rafraichir={fichesModifiees} />
+      <PanneauDetails livre={pilesAffichees ? undefined : livreSelectionne} largeur={largeurDetails}
+        onouvrir={() => (pilesAffichees ? (pileSelectionnee !== null && void ouvrirPile(pileSelectionnee)) : ouvrir(sel.curseur))}
+        onmodifier={() => (pilesAffichees ? void agirSurIds('infos', idsPiles()) : void action('infos'))}
+        nbSelection={pilesAffichees ? nbLivresPilesSel : nbSel} piles={resumePiles} rafraichir={fichesModifiees} />
     {/if}
   </div>
 
@@ -966,7 +1011,7 @@
       {#if bib.listeChargee !== (liste?.id ?? undefined)}Chargement…{:else}
         {bib.total.toLocaleString('fr-FR')} livre{bib.total > 1 ? 's' : ''}{liste ? ` dans « ${liste.nom} »` : ''}{bib.params.recherche ? ' (filtré)' : ''}
       {/if}
-      {#if pilesAffichees}· {bib.piles.length.toLocaleString('fr-FR')} pile{bib.piles.length > 1 ? 's' : ''}{#if pileSelectionnee !== null} · pile « {pileSelectionnee} »{/if}
+      {#if pilesAffichees}· {bib.piles.length.toLocaleString('fr-FR')} pile{bib.piles.length > 1 ? 's' : ''}{#if nbPilesSel === 1}{' '}· pile « {pileSelectionnee} » · {nbLivresPilesSel.toLocaleString('fr-FR')} livre{nbLivresPilesSel > 1 ? 's' : ''}{:else if nbPilesSel > 1}{' '}· {nbPilesSel.toLocaleString('fr-FR')} piles sélectionnées · {nbLivresPilesSel.toLocaleString('fr-FR')} livres{/if}
       {:else if nbSel > 1}· {nbSel.toLocaleString('fr-FR')} sélectionnés{:else if sel.curseur >= 0}· sélection {(sel.curseur + 1).toLocaleString('fr-FR')}{/if}
     </span>
     {#if erreurAction}<span class="alerte" role="alert">{erreurAction}</span>{/if}
@@ -1031,7 +1076,7 @@
 {/if}
 
 {#if menu}
-  <MenuContextuel x={menu.x} y={menu.y} entrees={menu.pile !== undefined ? entreesPile(menu.pile) : entreesMenu}
+  <MenuContextuel x={menu.x} y={menu.y} entrees={menu.piles ? entreesPiles : entreesMenu}
     onchoix={choixMenu} onfermer={() => (menu = null)} />
 {/if}
 {#if menuScripts}

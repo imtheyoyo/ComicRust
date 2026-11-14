@@ -1,28 +1,30 @@
 <script lang="ts">
   // Vue empilée par série (« 📚 Empiler par série ») : une pile par série, couvertures décalées,
-  // nombre de livres et barre de lecture. Un clic sélectionne la pile sans l'ouvrir ; double-clic ou
-  // Entrée l'ouvre ; glisser une pile vers une liste ajoute tous ses livres. Grille virtualisée
-  // comme GrilleCouvertures ; les piles viennent de lister_piles (une seule réponse).
+  // nombre de livres et barre de lecture. Sélection multiple comme la grille de couvertures (clic,
+  // Ctrl/Maj + clic, Maj + flèches, Ctrl+A, rectangle tracé dans le vide) ; double-clic ou Entrée
+  // ouvre la pile courante ; glisser des piles vers une liste ajoute tous leurs livres. Grille
+  // virtualisée comme GrilleCouvertures ; les piles viennent de lister_piles (une seule réponse).
   import { untrack } from 'svelte';
   import type { Pile } from '../lib/api';
   import { cibleClavier } from '../lib/navigation';
+  import { modificateurs, type Selection } from '../lib/selection.svelte';
+  import { RectangleSelection, touchesGrille } from '../lib/rectangleSelection.svelte';
 
   interface Props {
     piles: Pile[];
-    /** Série (titre de la pile) sélectionnée, ou null. */
-    selection: string | null;
+    /** Sélection multiple, par rang de pile (curseur = pile courante). */
+    sel: Selection;
     /** Incrémenté à chaque nouvelle requête : retour en haut. */
     version: number;
     /** Largeur visée d'une couverture, en pixels. */
     zoom: number;
-    onselection: (serie: string) => void;
     onouvrir: (serie: string) => void;
-    /** Clic droit (ou touche Menu) sur une pile, en coordonnées de la fenêtre. */
-    onmenu: (serie: string, x: number, y: number) => void;
+    /** Clic droit (ou touche Menu) : menu des piles sélectionnées, en coordonnées de la fenêtre. */
+    onmenu: (x: number, y: number) => void;
     /** Appui sur une pile (début possible d'un glisser vers une liste) ; `i` = rang de la pile. */
     onappui?: (e: PointerEvent, i: number) => void;
   }
-  let { piles, selection, version, zoom, onselection, onouvrir, onmenu, onappui }: Props = $props();
+  let { piles, sel, version, zoom, onouvrir, onmenu, onappui }: Props = $props();
 
   const MARGE = 16;
   const ESPACE = 16;
@@ -32,6 +34,7 @@
   const DECALAGE = 6;
 
   let zone = $state<HTMLDivElement>();
+  let piste = $state<HTMLDivElement>();
   let largeur = $state(800);
   let hauteur = $state(600);
   let haut = $state(0);
@@ -52,7 +55,8 @@
     return liste;
   });
 
-  const courant = $derived(selection === null ? -1 : piles.findIndex((p) => p.serie === selection));
+  /** Pile courante (curseur clavier), -1 si aucune. */
+  const courant = $derived(sel.curseur < piles.length ? sel.curseur : -1);
 
   // Nouvelle requête : retour en haut, puis la pile sélectionnée est rendue visible (retour d'une
   // pile ouverte par Échap ou « ← Piles » : on retrouve la pile qu'on vient de quitter).
@@ -67,6 +71,20 @@
     });
   });
 
+  // Rectangle de sélection tracé dans le vide, même géométrie que la grille de couvertures : les
+  // piles hors écran (absentes du DOM) sont comptées aussi.
+  const rectangle = new RectangleSelection({
+    sel: () => sel,
+    zone: () => zone ?? null,
+    piste: () => piste ?? null,
+    touches: (b, px, py) =>
+      touchesGrille(b, px, py, {
+        total: piles.length, colonnes, marge: MARGE, largeur: largeurCellule, espace: ESPACE,
+        hautCellule: hautCouverture + LEGENDE, hautLigne,
+      }),
+  });
+  $effect(() => () => rectangle.detruire());
+
   function afficher(i: number) {
     if (!zone) return;
     const haute = MARGE + Math.floor(i / colonnes) * hautLigne;
@@ -78,22 +96,32 @@
   const lus = (p: Pile) => `${p.nbLivres} livre${p.nbLivres > 1 ? 's' : ''}, ${p.nbLus} lu${p.nbLus > 1 ? 's' : ''}`;
 
   function clavier(e: KeyboardEvent) {
+    // Entrée : ouvre la pile courante (avec plusieurs piles sélectionnées, la courante).
     if (e.key === 'Enter' && courant >= 0) {
       e.preventDefault();
       onouvrir(piles[courant].serie);
       return;
     }
+    // Ctrl+A : toutes les piles de la vue.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      sel.tout(piles.length);
+      return;
+    }
+    // Touche « Menu » ou Maj+F10 : menu des piles sélectionnées.
     if ((e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && courant >= 0) {
       e.preventDefault();
       const r = zone?.querySelector(`[data-pile="${courant}"]`)?.getBoundingClientRect();
-      onmenu(piles[courant].serie, r ? r.left + 20 : 100, r ? r.top + 20 : 100);
+      sel.cliquerDroit(courant);
+      onmenu(r ? r.left + 20 : 100, r ? r.top + 20 : 100);
       return;
     }
     const lignesPage = Math.max(1, Math.floor(hauteur / hautLigne));
     const cible = cibleClavier(e.key, courant, piles.length, colonnes, lignesPage);
     if (cible === null) return;
     e.preventDefault();
-    onselection(piles[cible].serie);
+    // Maj+flèches : étend la sélection depuis l'ancre.
+    sel.deplacer(cible, modificateurs(e));
     afficher(cible);
   }
 </script>
@@ -106,13 +134,16 @@
   bind:clientHeight={hauteur}
   onscroll={() => (haut = zone!.scrollTop)}
   onkeydown={clavier}
+  onpointerdown={rectangle.appui}
   role="listbox"
   tabindex="0"
   aria-label="Piles de livres par série"
   aria-activedescendant={courant >= 0 ? `pile-${courant}` : undefined}
+  aria-multiselectable="true"
   data-testid="grille-piles"
 >
-  <div class="piste" style:height="{hautTotal}px">
+  <!-- Au moins toute la hauteur visible : le vide sous la dernière ligne fait partie de la piste. -->
+  <div class="piste" bind:this={piste} style:height="{hautTotal}px" style:min-height="{hauteur}px">
     {#each indices as i (i)}
       {@const p = piles[i]}
       {@const ligne = Math.floor(i / colonnes)}
@@ -123,16 +154,17 @@
       <div
         id="pile-{i}"
         class="cellule"
-        class:selectionne={p.serie === selection}
+        class:selectionne={sel.contient(i)}
+        class:courant={i === courant}
         data-pile={i}
         style:width="{largeurCellule}px"
         style:transform="translate({MARGE + col * (largeurCellule + ESPACE)}px, {MARGE + ligne * hautLigne}px)"
         role="option"
-        aria-selected={p.serie === selection}
+        aria-selected={sel.contient(i)}
         tabindex="-1"
         title="{p.serie} — {lus(p)}"
-        onclick={() => onselection(p.serie)}
-        oncontextmenu={(e) => { e.preventDefault(); onselection(p.serie); onmenu(p.serie, e.clientX, e.clientY); }}
+        onclick={(e) => sel.cliquer(i, modificateurs(e))}
+        oncontextmenu={(e) => { e.preventDefault(); sel.cliquerDroit(i); onmenu(e.clientX, e.clientY); }}
         ondblclick={() => onouvrir(p.serie)}
         onpointerdown={(e) => onappui?.(e, i)}
       >
@@ -159,6 +191,11 @@
         </div>
       </div>
     {/each}
+    {#if rectangle.boite}
+      {@const b = rectangle.boite}
+      <div class="rectangle" data-testid="rectangle-selection" style:left="{b.x1}px" style:top="{b.y1}px"
+        style:width="{b.x2 - b.x1}px" style:height="{b.y2 - b.y1}px"></div>
+    {/if}
   </div>
 </div>
 
@@ -166,6 +203,12 @@
   .zone { position: relative; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; outline: none; }
   .zone:focus-visible { box-shadow: inset 0 0 0 2px var(--cr-accent); }
   .piste { position: relative; width: 100%; }
+  /* Rectangle de sélection, aux couleurs du thème (repli : l'accent). */
+  .rectangle {
+    position: absolute; z-index: 3; pointer-events: none; border-radius: 2px;
+    border: 1px solid var(--cr-rectangle-bordure, var(--cr-accent));
+    background: var(--cr-rectangle-fond, color-mix(in srgb, var(--cr-accent) 22%, transparent));
+  }
   .cellule {
     position: absolute; top: 0; left: 0; cursor: pointer; user-select: none;
     border-radius: var(--cr-rayon); padding: 0; contain: layout paint;
@@ -187,7 +230,7 @@
     font-size: 12px; font-weight: 700;
   }
   /* Barre de lecture : part des livres lus de la série. */
-  .lecture { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgb(0 0 0 / 45%); }
+  .lecture { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: var(--cr-lecture-piste, rgb(0 0 0 / 45%)); }
   .lecture > span { display: block; height: 100%; background: var(--cr-accent); }
   .legende { height: 46px; padding: 4px 2px 0; overflow: hidden; }
   .titre { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -195,4 +238,5 @@
   .cellule:hover .devant { border-color: var(--cr-accent); }
   .cellule.selectionne .devant { outline: 3px solid var(--cr-accent); outline-offset: 1px; border-color: var(--cr-accent); }
   .cellule.selectionne .titre { color: var(--cr-accent); }
+  .cellule.courant:not(.selectionne) .devant { outline: 2px dashed var(--cr-accent); outline-offset: 1px; }
 </style>

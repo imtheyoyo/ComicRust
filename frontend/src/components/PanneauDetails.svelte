@@ -9,12 +9,18 @@
     onouvrir: () => void;
     /** Ouvre « Infos du livre » (Ctrl+I). */
     onmodifier?: () => void;
-    /** Nombre de livres sélectionnés (au-delà de 1 : rappel de la sélection multiple). */
+    /** Nombre de livres sélectionnés (au-delà de 1 : rappel de la sélection multiple). En vue
+     *  empilée : total des livres des piles sélectionnées. */
     nbSelection?: number;
+    /** Vue empilée par série : résumé des piles sélectionnées (remplace le détail d'un livre, qui
+     *  serait trompeur : une pile n'est pas un livre). `pile` : la pile quand il n'y en a qu'une. */
+    piles?: { nbPiles: number; pile?: { serie: string; nbLivres: number; nbLus: number; urlCouverture: string } };
     /** Incrémenté quand les fiches ont changé (édition) : le détail est relu. */
     rafraichir?: number;
   }
-  let { livre, largeur = 320, onouvrir, onmodifier, nbSelection = 0, rafraichir = 0 }: Props = $props();
+  let { livre, largeur = 320, onouvrir, onmodifier, nbSelection = 0, piles, rafraichir = 0 }: Props = $props();
+
+  const pluriel = (n: number, mot: string) => `${n.toLocaleString('fr-FR')} ${mot}${n > 1 ? 's' : ''}`;
 
   let detail = $state<LivreDetail | null>(null);
   let erreur = $state('');
@@ -92,7 +98,36 @@
 </script>
 
 <aside class="panneau" aria-label="Détails du livre" data-testid="details" style:width="{largeur}px">
-  {#if !livre}
+  {#if piles}
+    {#if piles.nbPiles === 0}
+      <p class="vide" data-testid="details-piles-vide">Sélectionnez une pile pour afficher ses détails.</p>
+    {:else if piles.pile}
+      {@const p = piles.pile}
+      <div class="couv"><img src={p.urlCouverture} alt="Couverture de la série {p.serie}" draggable="false" /></div>
+      <h2>{p.serie}</h2>
+      <div class="etat" data-testid="details-pile">
+        <span class="lecture">{pluriel(p.nbLivres, 'livre')}, {pluriel(p.nbLus, 'lu')}</span>
+        <div class="barre-lecture" role="progressbar" aria-label="Livres lus de la série" aria-valuemin="0"
+          aria-valuemax={p.nbLivres} aria-valuenow={p.nbLus}><div style:width="{p.nbLivres ? (p.nbLus / p.nbLivres) * 100 : 0}%"></div></div>
+      </div>
+      <div class="actions">
+        <button class="ouvrir" onclick={onouvrir} data-testid="details-ouvrir-pile">Ouvrir la pile</button>
+        {#if onmodifier}
+          <button onclick={onmodifier} title="Modifier les infos (Ctrl+I)" data-testid="details-modifier"
+            >✏ Modifier{nbSelection > 1 ? ` (${nbSelection})` : ''}</button>
+        {/if}
+      </div>
+    {:else}
+      <h2 data-testid="details-piles-multi">{pluriel(piles.nbPiles, 'pile')} sélectionnée{piles.nbPiles > 1 ? 's' : ''}</h2>
+      <p class="discret multi">{pluriel(nbSelection, 'livre')} au total</p>
+      <div class="actions">
+        {#if onmodifier}
+          <button onclick={onmodifier} title="Modifier les infos (Ctrl+I)" data-testid="details-modifier"
+            >✏ Modifier{nbSelection > 1 ? ` (${nbSelection})` : ''}</button>
+        {/if}
+      </div>
+    {/if}
+  {:else if !livre}
     <p class="vide">Sélectionnez un livre pour afficher ses détails.</p>
   {:else}
     <div class="couv"><img src={livre.urlCouverture} alt="Couverture de {livre.titre}" draggable="false" /></div>
