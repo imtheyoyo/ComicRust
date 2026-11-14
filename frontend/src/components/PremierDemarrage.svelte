@@ -1,6 +1,9 @@
 <script lang="ts">
   // Écran de premier démarrage : bibliothèque autonome (base SQLite ou MySQL) ou liée à une
   // installation ComicRack (ComicRack.ini, ou paramètres MySQL saisis à la main).
+  // Aussi affiché (tauri-v0.9.1) quand la base de la copie autonome est introuvable (`baseAbsente` :
+  // dossier data copié sans comicrust.db) ou quand la bibliothèque ne s'ouvre pas (`probleme`) :
+  // l'utilisateur crée une nouvelle base ou en choisit une autre ; rien n'est créé sans son clic.
   import {
     configurerMysql, configurerPremierDemarrage, type EtatBiblio, type ModeBiblio, type TypeStore, messageErreur,
   } from '../lib/api';
@@ -8,8 +11,14 @@
 
   interface Props {
     onpret: (etat: EtatBiblio) => void;
+    /** Chemin de la base SQLite attendue mais absente (copie autonome sans data\comicrust.db). */
+    baseAbsente?: string;
+    /** Erreur d'ouverture de la bibliothèque enregistrée (l'utilisateur en choisit une autre). */
+    probleme?: string;
+    /** Retour à l'écran précédent (erreur d'ouverture : « Réessayer »). */
+    onretour?: () => void;
   }
-  let { onpret }: Props = $props();
+  let { onpret, baseAbsente, probleme, onretour }: Props = $props();
 
   let mode = $state<ModeBiblio>('autonome');
   let cheminIni = $state('');
@@ -49,8 +58,27 @@
 
 <main class="ecran">
   <form class="carte" onsubmit={(e) => { e.preventDefault(); void valider(); }} data-testid="premier-demarrage">
-    <h1>Bienvenue dans ComicRust</h1>
-    <p class="discret">Choisissez comment ComicRust doit gérer votre bibliothèque. Ce choix est modifiable plus tard.</p>
+    {#if baseAbsente}
+      <h1>Base ComicRust introuvable</h1>
+      <div class="alerte" role="status" data-testid="base-absente">
+        <p>La base de cette copie autonome n'existe pas :</p>
+        <p><code>{baseAbsente}</code></p>
+        <p class="discret">Le dossier <code>data</code> a peut-être été copié sans elle, ou elle a été déplacée.
+          Remettez le fichier <code>comicrust.db</code> à sa place puis relancez ComicRust, ou bien
+          <strong>créez une nouvelle base vide</strong> (vos réglages sont gardés), ou choisissez une autre bibliothèque ci-dessous.</p>
+      </div>
+    {:else if probleme}
+      <h1>Choisir une bibliothèque</h1>
+      <div class="alerte" role="status" data-testid="probleme-ouverture">
+        <p>La bibliothèque enregistrée ne s'ouvre pas :</p>
+        <p class="detail">{probleme}</p>
+        <p class="discret">Choisissez la bibliothèque à utiliser. Rien n'est supprimé ni écrasé : une base SQLite existante est
+          ouverte telle quelle, une nouvelle n'est créée que si elle n'existe pas.</p>
+      </div>
+    {:else}
+      <h1>Bienvenue dans ComicRust</h1>
+      <p class="discret">Choisissez comment ComicRust doit gérer votre bibliothèque. Ce choix est modifiable plus tard.</p>
+    {/if}
 
     <fieldset>
       <legend class="sr">Mode de bibliothèque</legend>
@@ -96,7 +124,12 @@
     {/if}
 
     {#if erreur}<p class="erreur" role="alert">{erreur}</p>{/if}
-    <button class="principal" type="submit" disabled={!valide || occupe}>{occupe ? 'Ouverture…' : 'Continuer'}</button>
+    <div class="actions">
+      {#if onretour}<button type="button" onclick={onretour} disabled={occupe}>Réessayer</button>{/if}
+      <button class="principal" type="submit" disabled={!valide || occupe} data-testid="premier-valider">
+        {occupe ? 'Ouverture…' : baseAbsente && mode === 'autonome' && store === 'sqlite' ? 'Créer une nouvelle base' : 'Continuer'}
+      </button>
+    </div>
   </form>
 </main>
 
@@ -107,6 +140,10 @@
     border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); box-shadow: var(--cr-ombre);
   }
   h1 { margin: 0; font-size: 22px; }
+  .alerte { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--cr-accent); border-radius: var(--cr-rayon); background: var(--cr-fond); }
+  .alerte p { margin: 0; overflow-wrap: anywhere; }
+  .alerte .detail { white-space: pre-wrap; color: var(--cr-erreur); }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; }
   .discret { margin: 0; color: var(--cr-texte-discret); }
   fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 10px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

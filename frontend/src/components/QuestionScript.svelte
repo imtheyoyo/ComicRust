@@ -89,14 +89,15 @@
 </dialog>
 
 <style>
-  .question { width: min(480px, calc(100vw - 32px)); }
+  .question { width: min(560px, calc(100vw - 32px)); }
   .question:not([open]) { display: none; }
   form { display: flex; flex-direction: column; gap: 8px; }
   h2 { margin: 0; overflow-wrap: anywhere; }
   p { margin: 0; }
   .discret { color: var(--cr-texte-discret); }
   .petit { font-size: 12px; }
-  .texte-question { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow-y: auto; }
+  /* Aide longue (réglages de « Ranger les fichiers ») : jusqu’à 60 % de la hauteur. */
+  .texte-question { white-space: pre-wrap; overflow-wrap: anywhere; max-height: min(60vh, 520px); overflow-y: auto; }
   .saisie {
     font: inherit; color: var(--cr-texte); background: var(--cr-fond); border: 1px solid var(--cr-bordure);
     border-radius: var(--cr-rayon); padding: 5px 8px; width: 100%; box-sizing: border-box;

@@ -536,6 +536,16 @@ pub fn lire(data: &Path) -> Result<Reglages, String> {
     }
 }
 
+/// Vrai si le fichier de réglages mentionne une base MySQL pour le mode autonome (clé
+/// `storeMysql`, même illisible ou incomplète — donc ignorée par [`lire`]) : on ne propose alors
+/// jamais de créer une base SQLite à la place.
+pub fn mysql_mentionne(data: &Path) -> bool {
+    std::fs::read_to_string(chemin_reglages(data))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).ok())
+        .is_some_and(|v| v.get("storeMysql").is_some_and(|m| !m.is_null()))
+}
+
 /// Écrit les réglages (fichier temporaire puis renommage : jamais à moitié écrit).
 pub fn ecrire(data: &Path, r: &Reglages) -> Result<(), String> {
     let p = chemin_reglages(data);

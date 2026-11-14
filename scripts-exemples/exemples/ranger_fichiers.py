@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Renommer et ranger les fichiers selon un modèle (script d'exemple fourni avec ComicRust).
 
-Réglages (bouton « Réglages » du script) :
+Réglages (bouton « Réglages » du script), trois questions ; la première rappelle les champs
+utilisables et la syntaxe ci-dessous avec un exemple, la deuxième montre le nom obtenu sur le
+premier livre de la bibliothèque (ou sur un livre d'exemple) :
 
 - **modèle de nom**, même syntaxe que la fenêtre « Renommer » de ComicRust (et que le
   format d'export de ComicRack) : ``{series}[ v{volume}][ #{number}][ ({year})]``
@@ -59,18 +61,94 @@ def _reglage(nom):
 #@Name Ranger les fichiers : réglages
 #@Hook ConfigScript
 #@Key ranger-fichiers-reglages
-#@Description Modèle de nom, dossier racine et sous-dossiers.
+#@Description Modèle de nom (avec l'aide des champs utilisables et un aperçu), dossier racine et
+#@Description sous-dossiers.
 def reglages():
+    # Trois questions simples (comicrust.ask / ask_choice) : comprises par les deux versions de
+    # ComicRust (egui et Tauri) ; l'aide et l'aperçu sont dans le texte des questions.
     s = comicrust.settings()
-    modele = comicrust.ask(
-        "Modèle de nom (ex. {series}[ v{volume}][ #{number:000}][ ({year})]) :", _reglage("modele"))
+    livre = _livre_apercu()
+    modele = comicrust.ask(AIDE_MODELE % (_nom_obtenu(MODELE_DEFAUT, _LivreExemple()), _nom_livre(livre)),
+                           _reglage("modele"))
     s["modele"] = (modele or "").strip() or MODELE_DEFAUT
+    nom = _nom_obtenu(s["modele"], livre)
     s["racine"] = (comicrust.ask(
-        "Dossier racine (vide = garder le dossier actuel de chaque fichier) :",
-        _reglage("racine")) or "").strip()
-    choix = comicrust.ask_choice("Sous-dossiers :", SOUS_DOSSIERS, _reglage("sous_dossiers"))
+        "Aperçu du nom avec ce modèle :\n  %s\n  → %s\n\n"
+        "Dossier racine où ranger les fichiers (vide = garder le dossier actuel de chaque fichier) :"
+        % (_nom_livre(livre), nom), _reglage("racine")) or "").strip()
+    serie = nettoyer_nom(valeur_champ(livre, "series")) or "Sans série"
+    editeur = nettoyer_nom(valeur_champ(livre, "publisher")) or "Éditeur inconnu"
+    choix = comicrust.ask_choice(
+        "Sous-dossiers ajoutés devant le nom :\n"
+        "  aucun : %s\n  série : %s\\%s\n  éditeur/série : %s\\%s\\%s" % (nom, serie, nom, editeur, serie, nom),
+        SOUS_DOSSIERS, _reglage("sous_dossiers"))
     s["sous_dossiers"] = choix if choix in SOUS_DOSSIERS else "aucun"
     s.save()
+
+
+# Aide du modèle de nom (première question des réglages) : jetons, crochets, exemple. Les deux
+# « %s » : nom obtenu avec le modèle par défaut sur le livre d'exemple, puis livre de l'aperçu.
+AIDE_MODELE = (
+    "Modèle du nom de fichier (sans l'extension).\n"
+    "\n"
+    "Champs utilisables, entre accolades :\n"
+    "  {series} série · {volume} volume · {number} numéro · {year} année\n"
+    "  {month} mois · {title} titre · {publisher} éditeur · {imprint} collection\n"
+    "  {writer} scénariste · {format} format · {language} langue (code)\n"
+    "  {filename} nom actuel du fichier ; tout autre champ par son nom ComicRack\n"
+    "  (série, numéro, volume, année vides : devinés depuis le nom du fichier).\n"
+    "\n"
+    "Syntaxe :\n"
+    "  {number:000} : numéro complété par des zéros (7 → 007) ;\n"
+    "  [ … ] : partie facultative, omise si un champ qu'elle contient est vide :\n"
+    "    [ v{volume}] écrit « v2 » seulement si le volume est rempli ;\n"
+    "  / : sous-dossier ({publisher}/{series}/{series} #{number:000}) ;\n"
+    "  \\x : caractère x tel quel (\\[ pour un crochet).\n"
+    "\n"
+    "Exemple : {series}[ v{volume}][ #{number}][ ({year})]\n"
+    "  → %s\n"
+    "\n"
+    "Après OK : aperçu du nom obtenu sur %s."
+)
+
+
+class _LivreExemple(object):
+    """Livre fictif pour l'exemple de l'aide (et l'aperçu si la bibliothèque est vide)."""
+
+    file = "Blacksad - T01 - Quelque part entre les ombres.cbz"
+    _champs = {"Series": "Blacksad", "Volume": 1, "Number": "1", "Year": 2000, "Title": "Quelque part entre les ombres",
+               "Publisher": "Dargaud"}
+
+    def to_dict(self):
+        return dict(self._champs)
+
+
+def _livre_apercu():
+    """Premier livre de la bibliothèque pour l'aperçu du nom ; livre d'exemple si la bibliothèque
+    est vide ou si ComicRust ne la fournit pas ici."""
+    try:
+        for b in comicrust.library_books():
+            if b.file:
+                return b
+    except Exception:  # ScriptError (bibliothèque non fournie), lecture impossible : exemple
+        pass
+    return _LivreExemple()
+
+
+def _nom_livre(book):
+    """Désignation du livre de l'aperçu (nom du fichier, ou livre d'exemple)."""
+    if isinstance(book, _LivreExemple):
+        return "un livre d'exemple (%s)" % book.file
+    return "« %s »" % re.split(r"[/\\]", str(book.file))[-1]
+
+
+def _nom_obtenu(modele, book):
+    """Nom (dossiers compris, extension du fichier) que le modèle donne pour ``book``."""
+    morceaux = chemin_relatif(modele or MODELE_DEFAUT, book)
+    if not morceaux:
+        return "(nom vide : un champ du modèle manque pour ce livre)"
+    ext = os.path.splitext(str(book.file or ""))[1]
+    return "\\".join(morceaux) + ext
 
 
 # ---------------------------------------------------------------------------------------
