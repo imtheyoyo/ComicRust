@@ -41,6 +41,11 @@
   let champFichier = $state<HTMLInputElement>();
   let ouvert = $state(false);
 
+  /** Donne le focus au bouton par défaut (« Annuler », le choix sûr) à l'ouverture d'une confirmation. */
+  function focusDefaut(noeud: HTMLElement) {
+    noeud.querySelector<HTMLButtonElement>('button')?.focus();
+  }
+
   const themeChoisi = $derived(themes.find((t) => t.id === choix));
   /** Avertissements du thème choisi (@import, url(http…) ignorés…). */
   const avertissements = $derived(themeChoisi?.avertissements ?? []);
@@ -61,18 +66,24 @@
     try {
       themes = await listerThemes();
       const avant = themeApplique();
-      const id = await rechargerThemeCourant();
-      if (id !== avant) {
-        // Le thème affiché a disparu : repli sur le thème par défaut (enregistré aussi si c'était lui).
-        choix = id;
-        if (themePersiste() === id) onTheme(id);
-        messageInfo = 'Le thème affiché n\'existe plus : retour au thème par défaut.';
+      try {
+        const id = await rechargerThemeCourant();
+        if (avant !== null && id !== avant) {
+          // Le thème affiché a disparu (« introuvable ») : retour au thème par défaut, SANS l'enregistrer.
+          choix = id;
+          onTheme(id);
+          messageInfo = 'Le thème affiché n\'existe plus : retour au thème par défaut (votre choix enregistré est inchangé).';
+        }
+        if (choix === themeApplique()) invalide = false;
+        erreur = '';
+      } catch (e) {
+        // Fichier refusé (CSS invalide…) : l'affichage reste sur le dernier thème valide, on le signale.
+        if (choix === themeApplique()) invalide = true;
+        erreur = `Le thème « ${themes.find((t) => t.id === themeApplique())?.nom ?? themeApplique()} » est inutilisable : ${messageTheme(e)} L'affichage reste sur le dernier thème valide.`;
       }
-      invalide = false;
       if (!themes.some((t) => t.id === choix)) choix = THEME_DEFAUT;
       info = await infos();
       if (mode === 'comicrack') ecritureComicrack = (await lireReglagesEdition()).ecritureComicrack;
-      erreur = '';
     } catch (e) {
       erreur = messageTheme(e);
     }
@@ -111,7 +122,15 @@
 
   async function valider() {
     try {
-      onTheme(await appliquerTheme(choix, { persister: true }));
+      const id = await appliquerTheme(choix, { persister: true });
+      if (id !== choix) {
+        // Thème disparu entre-temps : le repli est affiché mais jamais enregistré à la place du choix.
+        onTheme(id);
+        invalide = true;
+        erreur = `Le thème « ${themes.find((t) => t.id === choix)?.nom ?? choix} » n'existe plus : rien n'a été enregistré.`;
+        return;
+      }
+      onTheme(id);
       fermerModale(dialogue);
     } catch (e) {
       invalide = true;
@@ -135,10 +154,20 @@
     try {
       if (fichier.size > 1024 * 1024) throw new Error('fichier trop volumineux pour un thème (1 Mo maximum).');
       const css = await fichier.text();
+      const avant = choix;
       const t = await importerTheme(fichier.name.replace(/\.css$/i, ''), css);
       themes = await listerThemes();
       await selectionner(t.id);
-      if (invalide) return;
+      if (invalide) {
+        // Thème inutilisable : on ne le laisse pas dans la liste, et on revient au choix précédent.
+        const raison = erreur;
+        try { await supprimerTheme(t.id); } catch { /* il restera listé : l'erreur ci-dessous le signale */ }
+        themes = await listerThemes();
+        if (themes.some((x) => x.id === avant)) await selectionner(avant);
+        else await selectionner(THEME_DEFAUT);
+        erreur = `Import refusé : ${raison}`;
+        return;
+      }
       messageInfo = `Thème « ${t.nom} » importé${t.avertissements.length ? ' avec avertissements (voir ci-dessous)' : ''}. Cliquez sur OK pour l'adopter.`;
     } catch (err) {
       erreur = `Import refusé : ${messageErreur(err)}`;
@@ -235,7 +264,7 @@
           </span>
           <span class="nom-theme">{t.nom}</span>
           {#if !t.livre}<span class="badge">perso</span>{/if}
-          {#if t.avertissements.length}<span class="attention" title="Ce thème contient des constructions ignorées" aria-label="avertissements">⚠</span>{/if}
+          {#if t.avertissements.length}<span class="attention" role="img" title="Ce thème contient des constructions ignorées" aria-label="avertissements">⚠</span>{/if}
         </label>
       {/each}
     </div>
@@ -256,7 +285,7 @@
       <button type="button" onclick={() => (confirmation = 'reinitialiser')} data-testid="theme-reinitialiser">Réinitialiser les thèmes livrés</button>
     </div>
     {#if confirmation === 'supprimer' && themeChoisi}
-      <div class="avertissement" role="alertdialog" aria-label="Confirmer la suppression" data-testid="confirmer-suppression-theme">
+      <div class="avertissement" role="alertdialog" aria-label="Confirmer la suppression" use:focusDefaut data-testid="confirmer-suppression-theme">
         <p>Supprimer définitivement le thème « {themeChoisi.nom} » ?</p>
         <div class="boutons">
           <button type="button" onclick={() => (confirmation = null)}>Annuler</button>
@@ -264,7 +293,7 @@
         </div>
       </div>
     {:else if confirmation === 'reinitialiser'}
-      <div class="avertissement" role="alertdialog" aria-label="Confirmer la réinitialisation" data-testid="confirmer-reinit-themes">
+      <div class="avertissement" role="alertdialog" aria-label="Confirmer la réinitialisation" use:focusDefaut data-testid="confirmer-reinit-themes">
         <p>Recopier les thèmes livrés ? Vos modifications de ces fichiers sont conservées dans des copies « .css.avant » ; vos thèmes personnels ne sont pas touchés.</p>
         <div class="boutons">
           <button type="button" onclick={() => (confirmation = null)}>Annuler</button>
@@ -296,7 +325,7 @@
         Sans effet pour une bibliothèque ComicDb.xml (fiches toujours en lecture seule).
       </p>
       {#if confirmerEcriture}
-        <div class="avertissement" role="alertdialog" aria-label="Avertissement" data-testid="avertissement-ecriture">
+        <div class="avertissement" role="alertdialog" aria-label="Avertissement" use:focusDefaut data-testid="avertissement-ecriture">
           <p><strong>⚠ ComicRust va écrire dans la base de ComicRack.</strong></p>
           <p>Faites d'abord une sauvegarde de la base (MySQL). Une fiche modifiée entre-temps dans ComicRack n'est jamais écrasée
             (conflit signalé), mais évitez de modifier les mêmes livres dans les deux programmes en même temps.</p>

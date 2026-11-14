@@ -17,6 +17,12 @@ for (const [chemin, css] of Object.entries(LIVRES)) {
   fichiers.set(id, { id, css, livre: true });
 }
 
+/** Thèmes que `charger_theme` refuse (erreur du backend autre que « introuvable »), pour les tests :
+ *  `?themesRefuses=id1,id2` au chargement, ou modifiable ensuite via `__comicrustSimule.themesRefuses`. */
+export const themesRefuses = new Set<string>(
+  (new URLSearchParams(location.search).get('themesRefuses') ?? '').split(',').filter(Boolean),
+);
+
 const nomDe = (f: Fichier) => /@nom:\s*(.+?)\s*\*\//.exec(f.css)?.[1] ?? f.id;
 
 /** Valeur d'une variable --cr-* déclarée dans le CSS (première occurrence), ou `null`. */
@@ -65,6 +71,8 @@ export function creerThemesSimules() {
         case 'charger_theme': {
           const f = fichiers.get(String(args.id));
           if (!f) throw new Error(`thème introuvable : ${String(args.id)}`);
+          // Comme le backend face à un fichier modifié à la main (parenthèse non fermée…) : refus.
+          if (themesRefuses.has(f.id)) throw new Error(`thème « ${f.id} » refusé : parenthèse non fermée.`);
           const r: ThemeCharge = { css: f.css, avertissements: avertissementsDe(f.css) };
           return r;
         }

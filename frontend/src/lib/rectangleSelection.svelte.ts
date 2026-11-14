@@ -73,7 +73,11 @@ export class RectangleSelection {
     this.py = e.clientY;
     window.addEventListener('pointermove', this.bouger);
     window.addEventListener('pointerup', this.lacher);
-    window.addEventListener('pointercancel', this.lacher);
+    window.addEventListener('pointercancel', this.interrompre);
+    // Perte du focus (Alt+Tab, fenêtre d'une autre application) ou du capteur pendant le geste : on
+    // termine proprement, sinon `depart` resterait posé et le prochain appui serait ignoré.
+    window.addEventListener('blur', this.interrompre);
+    window.addEventListener('lostpointercapture', this.interrompre);
     window.addEventListener('keydown', this.clavier, true);
   };
 
@@ -129,6 +133,12 @@ export class RectangleSelection {
     if (d && !avaitGlisse && d.mode === 'remplacer') this.ctx.sel().vider();
   };
 
+  /** Geste interrompu (pointercancel, blur, lostpointercapture) : fin sans « simple clic » ; la
+   *  sélection obtenue jusque-là est gardée. */
+  private interrompre = () => {
+    if (this.depart) this.terminer();
+  };
+
   private clavier = (e: KeyboardEvent) => {
     if (e.key !== 'Escape' || !this.depart) return;
     // Échap : retour à la sélection d'avant le geste (et rien d'autre : pas de fermeture de pile).
@@ -146,7 +156,9 @@ export class RectangleSelection {
     document.body.classList.remove('rectangle-selection');
     window.removeEventListener('pointermove', this.bouger);
     window.removeEventListener('pointerup', this.lacher);
-    window.removeEventListener('pointercancel', this.lacher);
+    window.removeEventListener('pointercancel', this.interrompre);
+    window.removeEventListener('blur', this.interrompre);
+    window.removeEventListener('lostpointercapture', this.interrompre);
     window.removeEventListener('keydown', this.clavier, true);
   }
 
