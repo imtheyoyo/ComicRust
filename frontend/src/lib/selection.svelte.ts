@@ -30,6 +30,35 @@ function retirer(liste: Intervalle[], i: number): Intervalle[] {
   return res;
 }
 
+/** Différence symétrique de deux listes d'intervalles normalisées (Ctrl+rectangle : bascule). */
+function basculer(a: Intervalle[], b: Intervalle[]): Intervalle[] {
+  // Balayage des bornes : un index est gardé s'il est couvert par une seule des deux listes.
+  const bornes: Array<[number, number]> = [];
+  for (const [x, y] of [...a, ...b]) bornes.push([x, 1], [y + 1, -1]);
+  bornes.sort((p, q) => p[0] - q[0]);
+  const res: Intervalle[] = [];
+  let couverture = 0;
+  let debut = 0;
+  for (let k = 0; k < bornes.length; ) {
+    const pos = bornes[k][0];
+    const avant = couverture;
+    while (k < bornes.length && bornes[k][0] === pos) couverture += bornes[k++][1];
+    if (avant !== 1 && couverture === 1) debut = pos;
+    else if (avant === 1 && couverture !== 1 && pos - 1 >= debut) res.push([debut, pos - 1]);
+  }
+  return normaliser(res);
+}
+
+/** État de la sélection mis de côté (rectangle de sélection annulé par Échap). */
+export interface Instantane {
+  curseur: number;
+  ancre: number;
+  intervalles: Intervalle[];
+}
+
+/** Effet d'un rectangle de sélection sur la sélection d'avant le geste. */
+export type ModeRectangle = 'remplacer' | 'ajouter' | 'basculer';
+
 /** Modificateurs d'un clic ou d'une touche. */
 export interface Modificateurs {
   ctrl: boolean;
@@ -126,6 +155,33 @@ export class Selection {
     this.intervalles = [[0, total - 1]];
     if (this.curseur < 0) this.curseur = 0;
     this.ancre = this.curseur;
+  }
+
+  /** Copie de la sélection (début d'un rectangle de sélection). */
+  instantane(): Instantane {
+    return { curseur: this.curseur, ancre: this.ancre, intervalles: this.intervalles.map(([a, b]) => [a, b] as Intervalle) };
+  }
+
+  /** Rétablit une sélection mise de côté (Échap pendant le rectangle). */
+  restaurer(s: Instantane): void {
+    this.curseur = s.curseur;
+    this.ancre = s.ancre;
+    this.intervalles = s.intervalles.map(([a, b]) => [a, b] as Intervalle);
+  }
+
+  /** Rectangle de sélection : `touches` (intervalles des livres touchés) combinés à la sélection
+   *  d'avant le geste `base` (remplacer : sans modificateur ; ajouter : Maj ; basculer : Ctrl).
+   *  `dernier` : dernier livre touché, qui devient le livre courant (-1 : curseur inchangé). */
+  rectangle(touches: Intervalle[], base: Instantane, mode: ModeRectangle, dernier: number): void {
+    const t = normaliser(touches.map(([a, b]) => [a, b] as Intervalle));
+    this.intervalles = mode === 'remplacer' ? t : mode === 'ajouter' ? normaliser([...base.intervalles, ...t]) : basculer(base.intervalles, t);
+    if (dernier >= 0) {
+      this.curseur = dernier;
+      this.ancre = dernier;
+    } else {
+      this.curseur = mode === 'remplacer' ? -1 : base.curseur;
+      this.ancre = mode === 'remplacer' ? -1 : base.ancre;
+    }
   }
 
   /** Total de la vue réduit : retire ce qui dépasse. */

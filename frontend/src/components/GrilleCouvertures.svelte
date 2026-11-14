@@ -4,6 +4,7 @@
   import type { Bibliotheque } from '../lib/bibliotheque.svelte';
   import { cibleClavier } from '../lib/navigation';
   import { modificateurs, type Modificateurs, type Selection } from '../lib/selection.svelte';
+  import { RectangleSelection, touchesGrille } from '../lib/rectangleSelection.svelte';
 
   interface Props {
     bib: Bibliotheque;
@@ -27,6 +28,7 @@
   const SURPLUS = 2; // lignes rendues hors écran
 
   let zone = $state<HTMLDivElement>();
+  let piste = $state<HTMLDivElement>();
   let largeur = $state(800);
   let hauteur = $state(600);
   let haut = $state(0);
@@ -57,6 +59,20 @@
     bib.version;
     if (zone) zone.scrollTop = 0;
   });
+
+  // Rectangle de sélection tracé dans le vide (intersection calculée sur la géométrie de la grille :
+  // les livres hors écran, absents du DOM, sont sélectionnés aussi).
+  const rectangle = new RectangleSelection({
+    sel: () => sel,
+    zone: () => zone ?? null,
+    piste: () => piste ?? null,
+    touches: (b, px, py) =>
+      touchesGrille(b, px, py, {
+        total: bib.total, colonnes, marge: MARGE, largeur: largeurCellule, espace: ESPACE,
+        hautCellule: hautCouverture + LEGENDE, hautLigne,
+      }),
+  });
+  $effect(() => () => rectangle.detruire());
 
   function afficher(i: number) {
     if (!zone) return;
@@ -105,6 +121,7 @@
   bind:clientHeight={hauteur}
   onscroll={() => (haut = zone!.scrollTop)}
   onkeydown={clavier}
+  onpointerdown={rectangle.appui}
   role="listbox"
   tabindex="0"
   aria-label="Couvertures des livres"
@@ -112,7 +129,8 @@
   aria-multiselectable="true"
   data-testid="grille"
 >
-  <div class="piste" style:height="{hautTotal}px">
+  <!-- Au moins toute la hauteur visible : le vide sous la dernière ligne fait partie de la piste. -->
+  <div class="piste" bind:this={piste} style:height="{hautTotal}px" style:min-height="{hauteur}px">
     {#each indices as i (i)}
       {@const l = bib.livre(i)}
       {@const ligne = Math.floor(i / colonnes)}
@@ -158,6 +176,11 @@
         </div>
       </div>
     {/each}
+    {#if rectangle.boite}
+      {@const b = rectangle.boite}
+      <div class="rectangle" data-testid="rectangle-selection" style:left="{b.x1}px" style:top="{b.y1}px"
+        style:width="{b.x2 - b.x1}px" style:height="{b.y2 - b.y1}px"></div>
+    {/if}
   </div>
 </div>
 
@@ -165,6 +188,11 @@
   .zone { position: relative; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; outline: none; }
   .zone:focus-visible { box-shadow: inset 0 0 0 2px var(--cr-accent); }
   .piste { position: relative; width: 100%; }
+  /* Rectangle de sélection, aux couleurs du thème. */
+  .rectangle {
+    position: absolute; z-index: 3; pointer-events: none; border: 1px solid var(--cr-accent);
+    background: color-mix(in srgb, var(--cr-accent) 22%, transparent); border-radius: 2px;
+  }
   .cellule {
     position: absolute; top: 0; left: 0; cursor: pointer; user-select: none;
     border-radius: var(--cr-rayon); padding: 0; contain: layout paint;

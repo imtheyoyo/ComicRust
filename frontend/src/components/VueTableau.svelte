@@ -4,6 +4,7 @@
   import type { Bibliotheque } from '../lib/bibliotheque.svelte';
   import { cibleClavier } from '../lib/navigation';
   import { modificateurs, type Modificateurs, type Selection } from '../lib/selection.svelte';
+  import { RectangleSelection, touchesLignes } from '../lib/rectangleSelection.svelte';
 
   interface Props {
     bib: Bibliotheque;
@@ -39,6 +40,7 @@
   ]);
 
   let zone = $state<HTMLDivElement>();
+  let piste = $state<HTMLDivElement>();
   let hauteur = $state(600);
   let haut = $state(0);
 
@@ -57,6 +59,17 @@
     bib.version;
     if (zone) zone.scrollTop = 0;
   });
+
+  // Rectangle de sélection : les lignes occupent toute la largeur, il part donc du vide sous la
+  // dernière ligne (vue courte). Lignes touchées calculées par leur rang (vue virtualisée).
+  const rectangle = new RectangleSelection({
+    sel: () => sel,
+    zone: () => zone ?? null,
+    piste: () => piste ?? null,
+    touches: (b, _px, py) => touchesLignes(b, py, bib.total, HAUT_LIGNE),
+    margeHaut: () => HAUT_ENTETE,
+  });
+  $effect(() => () => rectangle.detruire());
 
   function afficher(i: number) {
     if (!zone) return;
@@ -106,6 +119,7 @@
   bind:clientHeight={hauteur}
   onscroll={() => (haut = zone!.scrollTop)}
   onkeydown={clavier}
+  onpointerdown={rectangle.appui}
   role="grid"
   class:avec-rang={avecRang}
   tabindex="0"
@@ -125,7 +139,8 @@
       {/if}
     {/each}
   </div>
-  <div class="piste" style:height="{bib.total * HAUT_LIGNE}px">
+  <!-- La piste occupe au moins toute la hauteur visible : le vide sous les lignes en fait partie. -->
+  <div class="piste" bind:this={piste} style:height="{bib.total * HAUT_LIGNE}px" style:min-height="{Math.max(0, hauteur - HAUT_ENTETE)}px">
     {#each indices as i (i)}
       {@const l = bib.livre(i)}
       <!-- Le clavier est géré par la zone du tableau. -->
@@ -170,6 +185,11 @@
         {/if}
       </div>
     {/each}
+    {#if rectangle.boite}
+      {@const b = rectangle.boite}
+      <div class="rectangle" data-testid="rectangle-selection" style:left="{b.x1}px" style:top="{b.y1}px"
+        style:width="{b.x2 - b.x1}px" style:height="{b.y2 - b.y1}px"></div>
+    {/if}
   </div>
 </div>
 
@@ -190,6 +210,11 @@
   .ch { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; white-space: nowrap; }
   button.ch:hover { color: var(--cr-texte); }
   .piste { position: relative; }
+  /* Rectangle de sélection, aux couleurs du thème. */
+  .rectangle {
+    position: absolute; z-index: 1; pointer-events: none; border: 1px solid var(--cr-accent);
+    background: color-mix(in srgb, var(--cr-accent) 22%, transparent); border-radius: 2px;
+  }
   .ligne { position: absolute; top: 0; left: 0; right: 0; contain: layout paint style; cursor: pointer; user-select: none; border-bottom: 1px solid var(--cr-bordure); }
   .ligne:hover { background: var(--cr-fond-survol); }
   .ligne.selectionne { background: var(--cr-accent); color: var(--cr-accent-texte); }

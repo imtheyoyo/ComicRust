@@ -47,3 +47,6 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
   border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon);
 }
 .barre-progression > div { height: 100%; background: var(--cr-accent); transition: width 0.12s linear; }
+
+/* Rectangle de sélection en cours (bibliothèque) : pas de sélection de texte. */
+body.rectangle-selection, body.rectangle-selection * { user-select: none !important; }
