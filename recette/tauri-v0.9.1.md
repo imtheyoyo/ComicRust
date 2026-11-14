@@ -75,4 +75,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Rapport de Yoyo du 14/11/2026 12:33 ([rapport](rapports/tauri-v0.9.1-2026-11-14.txt)) : 12 OK, 0 échec, 0 non testé ; une remarque (rectangle avec les piles).
 
-**Décision :** ☐ GO ☐ NO-GO — Yoyo, le …
+**Décision : GO** confirmé par Yoyo le 14/11/2026 ; remarque « rectangle avec Empiler par série » traitée en tauri-v0.10.0.
