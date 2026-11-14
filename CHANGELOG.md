@@ -5,6 +5,31 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.10.0] — 2026-11-14
+
+Étape 8 de la feuille de route : **thèmes**. Reprend aussi la remarque de la recette tauri-v0.9.1
+(sélection par rectangle avec « Empiler par série »).
+
+### Nouveautés
+- **Thèmes** : contrat de variables `--cr-*` documenté ([`docs/tauri/themes.md`](docs/tauri/themes.md)),
+  appliqué à **toutes** les vues ; trois thèmes livrés complets (Moderne clair, Moderne sombre, Classique,
+  contrastes vérifiés) ; un thème perso est un simple fichier `.css` dans `data\themes`, sans recompiler.
+- **Réglages ▸ Thème** : liste avec pastilles de couleurs, **aperçu en direct** (OK enregistre, Annuler
+  restaure), « Recharger » (aussi au retour sur la fenêtre), **Importer un thème…**, **Copier le CSS**,
+  « Ouvrir le dossier des thèmes », Supprimer (thèmes perso), « Réinitialiser les thèmes livrés »
+  (l'ancien fichier est gardé en `.css.avant`), « Thème par défaut ».
+- **Sécurité des thèmes** : le CSS est assaini avant application (`@import`, `@font-face`, `url()`
+  externes… retirés et signalés ; fichier suspect refusé) ; un thème invalide ne casse jamais l'application.
+- **Sélection par rectangle avec « Empiler par série »** : le rectangle sélectionne plusieurs piles ;
+  Maj/Ctrl + clic, Ctrl+A ; le menu clic droit, Ctrl+I, Suppr et le glisser vers une liste portent sur tous
+  les livres des piles sélectionnées ; le Détail montre une carte de série.
+
+### Changements visibles
+- Bordures des thèmes Moderne légèrement plus marquées (contraste) ; Classique suit les gris de la version egui.
+
+### Recette
+[`recette/tauri-v0.10.0.md`](recette/tauri-v0.10.0.md).
+
 ## [tauri-v0.9.1] — 2026-11-14
 
 Version corrective suite à la recette tauri-v0.9.0 (GO du 14/11/2026) : remarques de Yoyo.
