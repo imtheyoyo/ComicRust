@@ -95,7 +95,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
 | (Yoyo) | [M] | Configuration de Bedetheque, section « Données » : la liste des champs n'est pas visible | tauri-v0.9.1 |
-| (Yoyo) | [M] | Sélection de plusieurs livres à la souris qui ne fonctionne pas | tauri-v0.9.1 |
+| (Yoyo) | [M] | Sélection de plusieurs livres par un rectangle tracé à la souris : absente | tauri-v0.9.1 |
 | (Yoyo) | [m] | « Ranger les fichiers » : pas d'aide sur les champs utilisables ({series}, {volume}…) | tauri-v0.9.1 |
 | (IA) | [m] | Copie autonome sans `comicrust.db` : « base introuvable » sans retour à l'assistant | tauri-v0.9.1 |
 | (relecture) | [M] | Pendant l'application d'un aperçu, un second script pouvait être lancé et la fenêtre fermée (« rien n'a été appliqué » affiché à tort) | **Corrigé** : « Application en cours… », Arrêter (entre deux livres), lancement refusé jusqu'au bilan |
@@ -112,4 +112,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Recette faite en deux parties complémentaires : par l'IA sur une copie de test et des échantillons ([rapport IA](rapports/tauri-v0.9.0-2026-11-13-IA.txt) : P-02, S-01 à S-04, S-07, A-01, B-01, B-02, B-04 à B-06, B-08, O-02 à O-05, U-01, N-03 OK ; S-06 partiel), puis par Yoyo ([rapport](rapports/tauri-v0.9.0-2026-11-14.txt) : les 14 autres OK, dont S-06, S-08, R-01, S-09, A-02, A-03, B-03, B-07, O-01, N-01, N-02, N-04 ; P-01 0.9.0 / 0.9.0). **33 tests OK sur 33, aucun échec.**
 
-**Décision :** GO proposé (tous les tests OK ; remarques de Yoyo notées dans « Anomalies » pour la tauri-v0.9.1) — en attente de la confirmation de Yoyo.
+**Décision : GO** confirmé par Yoyo le 14/11/2026 ; remarques corrigées en tauri-v0.9.1.
