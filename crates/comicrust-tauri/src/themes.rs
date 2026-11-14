@@ -819,7 +819,8 @@ mod tests {
             let r = valider_css(css);
             assert!(r.erreurs.is_empty(), "{id} : {:?}", r.erreurs);
             assert!(r.avertissements.is_empty(), "{id} : {:?}", r.avertissements);
-            assert_eq!(r.css_assaini, *css, "{id} : le filtrage ne doit rien changer");
+            // Sous Windows, git peut livrer les fichiers en CRLF : le filtrage les normalise en LF.
+            assert_eq!(r.css_assaini, css.replace("\r\n", "\n"), "{id} : le filtrage ne doit rien changer");
             // Toutes les variables du contrat (obligatoires et facultatives) et color-scheme.
             for v in CONTRAT {
                 assert!(css.contains(&format!("{}:", v.nom)), "{id} : variable {} absente", v.nom);
