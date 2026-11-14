@@ -66,6 +66,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 - Pas de « Enregistrer sous » pour l'export : le CSS est copié dans le presse-papiers ; le dossier des thèmes s'ouvre pour récupérer le fichier.
 - Rechargement à la demande (bouton, ouverture des Réglages, retour sur la fenêtre), pas de surveillance continue du dossier.
 - `attr()` avec `type(<url>)` n'est pas filtré : seule la politique de sécurité de la fenêtre le bloque.
+- La sélection de **livres** (grille) reste repérée par rang : après un rechargement de la liste (scan), elle peut viser d'autres livres (la sélection des piles, elle, suit les séries).
 - Reprises : pas de « Changer de connexion » dans Réglages ; piles non réordonnables par glisser ; scripts : pas de bouton « Parcourir… ».
 
 ## Anomalies
