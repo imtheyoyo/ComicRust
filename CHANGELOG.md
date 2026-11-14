@@ -5,6 +5,27 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.9.1] — 2026-11-14
+
+Version corrective suite à la recette tauri-v0.9.0 (GO du 14/11/2026) : remarques de Yoyo.
+
+### Nouveautés
+- **Sélection par rectangle** : cliquer dans le vide de la grille (ou d'une pile ouverte, ou sous les
+  lignes du tableau) puis glisser entoure plusieurs livres ; Maj ajoute, Ctrl bascule, Échap annule ;
+  défilement automatique près des bords. Un simple clic dans le vide vide la sélection.
+
+### Corrections
+- **Formulaires des scripts** : la liste des champs de l'onglet « Données » de « Configurer BD2 »
+  était écrasée (libellés trop larges dans les colonnes). Les listes à cocher, listes, tableaux et textes
+  multilignes prennent toute la largeur, avec « Tout cocher / Tout décocher ».
+- **« Ranger les fichiers »** : les réglages expliquent les champs utilisables (`{series}`, `{volume}`,
+  `{number:000}`, `[ v{volume}]`…) et montrent le nom obtenu sur un livre.
+- Copie autonome dont la base `comicrust.db` a disparu : l'écran propose « Créer une nouvelle base » (ou
+  « Réessayer » / « Choisir une autre bibliothèque… ») au lieu d'un message sans issue.
+
+### Recette
+[`recette/tauri-v0.9.1.md`](recette/tauri-v0.9.1.md).
+
 ## [tauri-v0.9.0] — 2026-11-13
 
 Étape « scripts Python » de la version Tauri (même moteur et mêmes scripts que la version egui).
