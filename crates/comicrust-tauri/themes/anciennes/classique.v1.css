@@ -1,0 +1,18 @@
+/* @nom: Classique */
+/* Thème ComicRust : variables CSS uniquement. Copiez ce fichier sous un autre nom pour créer
+   le vôtre ; il apparaît au prochain affichage de la liste des thèmes (sans recompiler). */
+:root {
+  color-scheme: light;
+  --cr-fond: #ece9d8;
+  --cr-fond-panneau: #f7f6ee;
+  --cr-fond-survol: #cfe0f7;
+  --cr-texte: #000000;
+  --cr-texte-discret: #4d4d4d;
+  --cr-bordure: #aca899;
+  --cr-accent: #0a246a;
+  --cr-accent-texte: #ffffff;
+  --cr-erreur: #b00000;
+  --cr-rayon: 2px;
+  --cr-police: Tahoma, 'Segoe UI', sans-serif;
+  --cr-ombre: none;
+}

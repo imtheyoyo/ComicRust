@@ -1,18 +1,65 @@
 /* @nom: Classique */
-/* Thème ComicRust : variables CSS uniquement. Copiez ce fichier sous un autre nom pour créer
-   le vôtre ; il apparaît au prochain affichage de la liste des thèmes (sans recompiler). */
+/* @contrat: 2 */
+/* Thème ComicRust : variables CSS uniquement (contrat décrit dans docs/tauri/themes.md).
+   Couleurs alignées sur le style « Classique » clair de la version egui (crates/comicrust/src/ui/theme.rs,
+   gris d'egui et accent orange), légèrement assombries là où le contraste WCAG l'exigeait.
+   Copiez ce fichier sous un autre nom pour créer le vôtre, ou utilisez « Importer » dans les réglages ;
+   il apparaît dans la liste des thèmes sans recompiler. Les variables marquées (facultatif) ont un
+   repli : on peut les supprimer. Garde-fou : texte/fond, texte discret/fond et texte d'accent/accent
+   restent à 4,5:1 au moins, bordure/fond à 3:1 au moins (vérifié par les tests). */
 :root {
+  /* Thème clair : contrôles et barres de défilement natifs en clair. */
   color-scheme: light;
-  --cr-fond: #ece9d8;
-  --cr-fond-panneau: #f7f6ee;
-  --cr-fond-survol: #cfe0f7;
-  --cr-texte: #000000;
-  --cr-texte-discret: #4d4d4d;
-  --cr-bordure: #aca899;
-  --cr-accent: #0a246a;
+
+  /* Fond général de la fenêtre (gris des panneaux d'egui). */
+  --cr-fond: #f8f8f8;
+  /* Panneaux, cartes, fenêtres de dialogue et menus (fond des champs d'egui). */
+  --cr-fond-panneau: #ffffff;
+  /* Survol d'une ligne ou d'un bouton. */
+  --cr-fond-survol: #dcdcdc;
+  /* Texte courant. */
+  --cr-texte: #3c3c3c;
+  /* Texte secondaire : légendes, aides, valeurs inactives. */
+  --cr-texte-discret: #5a5a5a;
+  /* Contours des champs, séparateurs, cadres (3:1 sur le fond). */
+  --cr-bordure: #8c8c8c;
+  /* Couleur d'accent : orange du style Classique (#d66e28), assombri pour porter du texte blanc à 4,5:1. */
+  --cr-accent: #b85a14;
+  /* Texte posé sur l'accent (blanc, comme `on_accent` d'egui). */
   --cr-accent-texte: #ffffff;
-  --cr-erreur: #b00000;
+  /* Erreurs et actions destructrices (rouge d'egui, mode clair). */
+  --cr-erreur: #be1e1e;
+  /* Rayon des angles : à peine arrondi, comme egui classique. */
   --cr-rayon: 2px;
+  /* Police de l'interface. */
   --cr-police: Tahoma, 'Segoe UI', sans-serif;
+  /* Ombre des cartes et menus : aucune. */
   --cr-ombre: none;
+
+  /* (facultatif) Fond de la zone de lecture des pages. */
+  --cr-fond-lecteur: #e0e0e0;
+  /* (facultatif) Fond des en-têtes de tableau et de panneau. */
+  --cr-fond-entete: #efefef;
+  /* (facultatif) Fond d'un élément sélectionné (bleu de sélection d'egui). */
+  --cr-fond-selection: #90d1ff;
+  /* (facultatif) Texte posé sur une image ou un fond sombre (badges sur couvertures). */
+  --cr-texte-inverse: #ffffff;
+  /* (facultatif) Anneau de focus clavier. */
+  --cr-focus: #0069b4;
+  /* (facultatif) Accent au survol d'un bouton principal. */
+  --cr-accent-survol: #9c4a0e;
+  /* (facultatif) Succès : opération réussie, fichier présent (vert d'egui, mode clair). */
+  --cr-succes: #148228;
+  /* (facultatif) Avertissement : attention, valeur à vérifier. */
+  --cr-avertissement: #aa5a00;
+  /* (facultatif) Étoiles de la note. */
+  --cr-etoile: #d9930a;
+  /* (facultatif) Fond du rectangle de sélection (glisser sur la grille). */
+  --cr-rectangle-fond: rgba(0, 105, 180, 0.18);
+  /* (facultatif) Contour du rectangle de sélection. */
+  --cr-rectangle-bordure: #0069b4;
+  /* (facultatif) Piste vide des barres de lecture et de progression. */
+  --cr-lecture-piste: #d0d0d0;
+  /* (facultatif) Ombre marquée des fenêtres flottantes et du lecteur. */
+  --cr-ombre-forte: 0 2px 8px rgba(0, 0, 0, 0.35);
 }

@@ -1,0 +1,18 @@
+/* @nom: Moderne sombre */
+/* Thème ComicRust : variables CSS uniquement. Copiez ce fichier sous un autre nom pour créer
+   le vôtre ; il apparaît au prochain affichage de la liste des thèmes (sans recompiler). */
+:root {
+  color-scheme: dark;
+  --cr-fond: #14171d;
+  --cr-fond-panneau: #1d222b;
+  --cr-fond-survol: #283040;
+  --cr-texte: #e6e9ef;
+  --cr-texte-discret: #98a1b3;
+  --cr-bordure: #323a49;
+  --cr-accent: #5b8cff;
+  --cr-accent-texte: #0b1020;
+  --cr-erreur: #ff6b6b;
+  --cr-rayon: 10px;
+  --cr-police: system-ui, 'Segoe UI Variable', 'Segoe UI', sans-serif;
+  --cr-ombre: 0 2px 12px rgba(0, 0, 0, 0.45);
+}

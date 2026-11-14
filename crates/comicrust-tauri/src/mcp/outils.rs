@@ -19,6 +19,7 @@ pub const SCRIPT: &str = include_str!("inject.js");
 const COMMANDES_LECTURE: &[&str] = &[
     "infos",
     "lister_themes",
+    "exporter_theme",
     "lire_preferences_vue",
     "lister_livres",
     "detail_livre",

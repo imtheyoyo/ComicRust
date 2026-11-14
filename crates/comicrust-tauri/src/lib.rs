@@ -39,6 +39,7 @@ pub mod reglages;
 pub mod scripts;
 pub mod surveillance;
 pub mod themes;
+pub mod themes_css;
 pub mod transfert;
 pub mod tri;
 

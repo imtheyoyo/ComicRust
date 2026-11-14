@@ -1,18 +1,63 @@
 /* @nom: Moderne sombre */
-/* Thème ComicRust : variables CSS uniquement. Copiez ce fichier sous un autre nom pour créer
-   le vôtre ; il apparaît au prochain affichage de la liste des thèmes (sans recompiler). */
+/* @contrat: 2 */
+/* Thème ComicRust : variables CSS uniquement (contrat décrit dans docs/tauri/themes.md).
+   Copiez ce fichier sous un autre nom pour créer le vôtre, ou utilisez « Importer » dans les réglages ;
+   il apparaît dans la liste des thèmes sans recompiler. Les variables marquées (facultatif) ont un
+   repli : on peut les supprimer. Garde-fou : texte/fond, texte discret/fond et texte d'accent/accent
+   restent à 4,5:1 au moins, bordure/fond à 3:1 au moins (vérifié par les tests). */
 :root {
+  /* Thème sombre : contrôles et barres de défilement natifs en sombre. */
   color-scheme: dark;
+
+  /* Fond général de la fenêtre. */
   --cr-fond: #14171d;
+  /* Panneaux, cartes, fenêtres de dialogue et menus. */
   --cr-fond-panneau: #1d222b;
+  /* Survol d'une ligne ou d'un bouton. */
   --cr-fond-survol: #283040;
+  /* Texte courant. */
   --cr-texte: #e6e9ef;
+  /* Texte secondaire : légendes, aides, valeurs inactives. */
   --cr-texte-discret: #98a1b3;
-  --cr-bordure: #323a49;
+  /* Contours des champs, séparateurs, cadres (3:1 sur le fond). */
+  --cr-bordure: #5b6578;
+  /* Couleur d'accent : sélection, boutons principaux, liens, barres de progression. */
   --cr-accent: #5b8cff;
+  /* Texte posé sur l'accent (boutons principaux, pastilles). */
   --cr-accent-texte: #0b1020;
+  /* Erreurs et actions destructrices. */
   --cr-erreur: #ff6b6b;
+  /* Rayon des angles (boutons, champs, cartes). */
   --cr-rayon: 10px;
+  /* Police de l'interface. */
   --cr-police: system-ui, 'Segoe UI Variable', 'Segoe UI', sans-serif;
+  /* Ombre douce des cartes et menus (« none » pour aucune). */
   --cr-ombre: 0 2px 12px rgba(0, 0, 0, 0.45);
+
+  /* (facultatif) Fond de la zone de lecture des pages. */
+  --cr-fond-lecteur: #0c0e12;
+  /* (facultatif) Fond des en-têtes de tableau et de panneau. */
+  --cr-fond-entete: #191d25;
+  /* (facultatif) Fond d'un élément sélectionné. */
+  --cr-fond-selection: #25375e;
+  /* (facultatif) Texte posé sur une image ou un fond sombre (badges sur couvertures). */
+  --cr-texte-inverse: #ffffff;
+  /* (facultatif) Anneau de focus clavier. */
+  --cr-focus: #8fb0ff;
+  /* (facultatif) Accent au survol d'un bouton principal. */
+  --cr-accent-survol: #7aa0ff;
+  /* (facultatif) Succès : opération réussie, fichier présent. */
+  --cr-succes: #5fd08a;
+  /* (facultatif) Avertissement : attention, valeur à vérifier. */
+  --cr-avertissement: #f2b05e;
+  /* (facultatif) Étoiles de la note. */
+  --cr-etoile: #f2b01e;
+  /* (facultatif) Fond du rectangle de sélection (glisser sur la grille). */
+  --cr-rectangle-fond: rgba(91, 140, 255, 0.22);
+  /* (facultatif) Contour du rectangle de sélection. */
+  --cr-rectangle-bordure: #5b8cff;
+  /* (facultatif) Piste vide des barres de lecture et de progression. */
+  --cr-lecture-piste: #323a49;
+  /* (facultatif) Ombre marquée des fenêtres flottantes et du lecteur. */
+  --cr-ombre-forte: 0 8px 28px rgba(0, 0, 0, 0.6);
 }

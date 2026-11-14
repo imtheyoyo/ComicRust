@@ -42,16 +42,46 @@ fn infos(data: tauri::State<'_, DossierData>) -> InfosApplication {
 /// Thèmes disponibles dans `data\themes` (les thèmes livrés manquants sont recopiés d'abord,
 /// pour qu'un fichier supprimé par erreur revienne).
 #[tauri::command]
-fn lister_themes(data: tauri::State<'_, DossierData>) -> Result<Vec<themes::Theme>, String> {
+fn lister_themes(data: tauri::State<'_, DossierData>) -> Result<Vec<themes::ThemeInfo>, String> {
     let dossier = portable::dossier_themes(&data.0);
     themes::installer_themes_livres(&dossier).map_err(|e| e.to_string())?;
     themes::lister_themes(&dossier).map_err(|e| e.to_string())
 }
 
-/// Contenu CSS d'un thème (le front l'injecte dans la page).
+/// CSS assaini d'un thème et ses avertissements (le front injecte le CSS dans la page).
 #[tauri::command]
-fn charger_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<String, String> {
+fn charger_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<themes::ThemeCharge, String> {
     themes::charger_theme(&portable::dossier_themes(&data.0), &id).map_err(|e| e.to_string())
+}
+
+/// Importe un thème (CSS validé et assaini) sous un identifiant libre ; n'écrase jamais un fichier.
+#[tauri::command]
+fn importer_theme(data: tauri::State<'_, DossierData>, nom: String, css: String) -> Result<themes::ThemeInfo, String> {
+    themes::importer_theme(&portable::dossier_themes(&data.0), &nom, &css).map_err(|e| e.to_string())
+}
+
+/// CSS assaini d'un thème, avec un en-tête de commentaire, pour l'exporter.
+#[tauri::command]
+fn exporter_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<String, String> {
+    themes::exporter_theme(&portable::dossier_themes(&data.0), &id).map_err(|e| e.to_string())
+}
+
+/// Supprime un thème (refusé pour un thème livré).
+#[tauri::command]
+fn supprimer_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<(), String> {
+    themes::supprimer_theme(&portable::dossier_themes(&data.0), &id).map_err(|e| e.to_string())
+}
+
+/// Recopie les thèmes livrés ; un fichier différent est conservé en `<id>.css.avant`.
+#[tauri::command]
+fn reinitialiser_themes_livres(data: tauri::State<'_, DossierData>) -> Result<Vec<String>, String> {
+    themes::reinitialiser_themes_livres(&portable::dossier_themes(&data.0)).map_err(|e| e.to_string())
+}
+
+/// Ouvre `data\themes` dans l'explorateur de fichiers.
+#[tauri::command]
+fn reveler_dossier_themes(data: tauri::State<'_, DossierData>) -> Result<(), String> {
+    themes::reveler_dossier(&portable::dossier_themes(&data.0))
 }
 
 /// Préférences d'affichage mémorisées dans `data\comicrust-tauri.json` (section `vue`).
@@ -938,6 +968,11 @@ pub fn run() {
             infos,
             lister_themes,
             charger_theme,
+            importer_theme,
+            exporter_theme,
+            supprimer_theme,
+            reinitialiser_themes_livres,
+            reveler_dossier_themes,
             lire_preferences_vue,
             enregistrer_preferences_vue,
             ouvrir_bibliotheque,
