@@ -65,6 +65,8 @@ obfusquée… : message « thème refusé : … »). Les constructions interdite
 ### `importer_theme(nom, css) -> ThemeInfo`
 
 - Valide et assainit `css` (mêmes règles que le chargement). Si `erreurs` : promesse rejetée, rien n'est écrit.
+  Un CSS sans règle `:root` est aussi refusé (« aucune règle :root… »), ainsi qu'un id non ASCII.
+- `lister_themes`, `charger_theme` et `importer_theme` s'exécutent hors du fil principal (`command(async)`).
 - L'id est dérivé de `nom` (minuscules, accents retirés, suites de caractères non alphanumériques → `-`),
   `mon-theme` si le résultat est vide. S'il est pris (livré ou non, ou nom réservé Windows), le backend essaie
   `<id>-2`, `<id>-3`… : **un fichier existant n'est jamais écrasé**.
@@ -79,7 +81,7 @@ en téléchargement / copie ; il ne touche pas au disque.
 
 ### `supprimer_theme(id) -> void`
 
-Refusé pour un thème livré (message : « un thème livré ne se supprime pas : utilisez Réinitialiser »).
+Refusé pour un thème livré, casse ignorée (`Classique` comme `classique`) (message : « un thème livré ne se supprime pas : utilisez Réinitialiser »).
 Introuvable : erreur. Si le thème supprimé était le thème actif, le front retombe sur `moderne-clair`
 (défaut) et réenregistre le réglage.
 

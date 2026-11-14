@@ -5,8 +5,11 @@
 //!
 //! # Principe
 //!
-//! 1. Refus immédiat : octet NUL, plus de 1 Mo, `</style` ou `<script` (sortie de l'élément `<style>`).
-//! 2. Les caractères de contrôle (hors saut de ligne, retour chariot, tabulation) sont ôtés.
+//! 1. Refus immédiat : octet NUL, plus de 1 Mo.
+//! 2. Les fins de ligne sont normalisées comme le fait la spécification CSS (`\r\n`, `\r` et `\f`
+//!    deviennent `\n`), puis les caractères de contrôle (hors saut de ligne et tabulation) et le BOM
+//!    sont ôtés ; **ensuite seulement** `</style` et `<script` sont refusés (sortie de l'élément
+//!    `<style>`), pour qu'un caractère invisible ne puisse pas les masquer.
 //! 3. Le texte est découpé en **unités** (un en-tête `sélecteur {`, une déclaration `propriété: valeur;`
 //!    ou une accolade fermante) par un balayage qui connaît chaînes, commentaires, parenthèses et
 //!    échappements, comme un navigateur.
@@ -79,18 +82,19 @@ fn est_caractere_ident(c: char) -> bool {
 }
 
 impl Jeton {
-    /// Nombre d'occurrences dans `s` (déjà en minuscules ASCII).
-    fn compter(&self, s: &str) -> usize {
+    /// Nombre d'occurrences dans `s` (déjà en minuscules ASCII) pour une unité de genre `genre`.
+    /// Une propriété n'est comptée qu'en **position de déclaration** (début de l'unité) : le sélecteur
+    /// `.behavior:hover {` n'est pas la propriété `behavior:`.
+    fn compter(&self, s: &str, genre: Genre) -> usize {
         match self.forme {
             Forme::Texte => s.matches(self.cherche).count(),
-            Forme::Propriete => s
-                .match_indices(self.cherche)
-                .filter(|(i, _)| {
-                    let avant = s[..*i].chars().next_back();
-                    let apres = s[i + self.cherche.len()..].trim_start();
-                    avant.is_none_or(|c| !est_caractere_ident(c)) && apres.starts_with(':')
-                })
-                .count(),
+            Forme::Propriete => {
+                if genre != Genre::Declaration {
+                    return 0;
+                }
+                let Some(reste) = s.trim_start().strip_prefix(self.cherche) else { return 0 };
+                usize::from(reste.trim_start().starts_with(':'))
+            }
         }
     }
 }
@@ -149,9 +153,16 @@ impl Constructeur {
     }
 }
 
+/// Prétraitement de la spécification CSS : `\r\n`, `\r` et `\f` deviennent `\n`. Le navigateur
+/// fait cela avant toute analyse ; le filtre doit voir exactement le même texte.
+fn normaliser_sauts(texte: &str) -> String {
+    texte.replace("\r\n", "\n").replace(['\r', '\x0c'], "\n")
+}
+
 /// Découpe le CSS en unités. Erreur (texte du motif) si le texte est ambigu : commentaire, chaîne
 /// ou parenthèse non terminés.
 fn decouper(texte: &str) -> Result<Vec<Unite>, String> {
+    let texte = normaliser_sauts(texte);
     let c: Vec<char> = texte.chars().collect();
     let mut lignes = Vec::with_capacity(c.len());
     let mut l = 1usize;
@@ -326,14 +337,14 @@ fn evaluer(u: &Unite) -> Verdict {
     let p = u.propre.to_ascii_lowercase();
     let d = decoder_echappements(&u.propre).to_ascii_lowercase();
     for j in JETONS {
-        if j.compter(&d) > j.compter(&p) {
+        if j.compter(&d, u.genre) > j.compter(&p, u.genre) {
             return Verdict::Rejeter(format!(
                 "construction interdite masquée par une échappement CSS (« {} », ligne {})",
                 j.cherche, u.ligne
             ));
         }
     }
-    if let Some(j) = JETONS.iter().filter(|j| j.cherche != "url(").find(|j| j.compter(&p) > 0) {
+    if let Some(j) = JETONS.iter().filter(|j| j.cherche != "url(").find(|j| j.compter(&p, u.genre) > 0) {
         return Verdict::Supprimer(j.message);
     }
     if p.contains("url(") {
@@ -360,7 +371,15 @@ fn assainir(texte: &str) -> Result<(String, Vec<String>), String> {
             continue;
         }
         match evaluer(&u) {
-            Verdict::Garder { propre } => sortie.push_str(if propre { &u.propre } else { &u.brut }),
+            Verdict::Garder { propre: true } => {
+                // Les commentaires (inertes) restent, devant le texte : ils ne migrent ainsi pas
+                // d'une passe à l'autre et le résultat reste stable.
+                for c in &u.commentaires {
+                    sortie.push_str(c);
+                }
+                sortie.push_str(&u.propre);
+            }
+            Verdict::Garder { propre: false } => sortie.push_str(&u.brut),
             Verdict::Supprimer(message) => {
                 avertissements.push(format!("ligne {} : {message}", u.ligne));
                 // Les commentaires (inertes) sont conservés : `@nom` et `@contrat` en tête de fichier.
@@ -399,6 +418,15 @@ pub fn declarations(css: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Vrai si le CSS contient une règle dont le sélecteur cite `:root` (là où vivent les variables).
+pub fn a_regle_root(css: &str) -> bool {
+    decouper(css)
+        .map(|unites| {
+            unites.iter().any(|u| u.genre == Genre::Entete && u.propre.to_ascii_lowercase().contains(":root"))
+        })
+        .unwrap_or(false)
+}
+
 /// Les variables `--cr-*` définies par le CSS, dans l'ordre (la dernière définition l'emporte pour
 /// le navigateur : [`valeur_variable`]).
 pub fn variables_cr(css: &str) -> Vec<(String, String)> {
@@ -421,17 +449,21 @@ pub fn valider_css(css: &str) -> Rapport {
     if css.contains('\0') {
         r.erreurs.push("le fichier contient un octet NUL".to_string());
     }
-    let bas = css.to_ascii_lowercase();
-    if bas.contains("</style") || bas.contains("<script") {
-        r.erreurs.push("balise HTML (</style ou <script) interdite dans un thème".to_string());
-    }
     if !r.erreurs.is_empty() {
         return r;
     }
 
-    let nettoye: String = css.chars().filter(|&c| !(c.is_control() && !matches!(c, '\n' | '\r' | '\t'))).collect();
-    let nettoye = nettoye.replace('\u{feff}', "");
-    if nettoye.len() != css.len() {
+    // Fins de ligne comme la spec CSS, puis retrait des contrôles et du BOM, puis seulement le
+    // contrôle des balises HTML (`</sty\u{feff}le>` ne doit pas passer).
+    let normalise = normaliser_sauts(css);
+    let nettoye: String =
+        normalise.chars().filter(|&c| !(c.is_control() && c != '\n' && c != '\t') && c != '\u{feff}').collect();
+    let bas = nettoye.to_ascii_lowercase();
+    if bas.contains("</style") || bas.contains("<script") {
+        r.erreurs.push("balise HTML (</style ou <script) interdite dans un thème".to_string());
+        return r;
+    }
+    if nettoye.len() != normalise.len() {
         r.avertissements.push("caractères de contrôle supprimés".to_string());
     }
 
@@ -877,5 +909,79 @@ mod tests {
         assert_eq!(valeur_variable(&v, "--cr-fond"), Some("#000 !important"));
         assert_eq!(valeur_variable(&v, "--cr-accent"), Some("red"));
         assert_eq!(valeur_variable(&v, "--cr-texte"), None);
+    }
+
+    // ───── Relecture indépendante : CRLF, balises masquées, faux positifs ─────
+
+    #[test]
+    fn crlf_dans_une_chaine_n_ouvre_pas_un_faux_commentaire() {
+        // `\` + CRLF = continuation de chaîne : le `/*` est dans la chaîne, pas un commentaire.
+        for saut in ["\r\n", "\r", "\x0c", "\n"] {
+            for cible in ["url(http://evil/x)", "@import 'http://evil/x.css'"] {
+                let css = format!("a {{ content: \"x\\{saut} /* \" ; background: {cible} ; /* */ }}");
+                let r = avec(&css);
+                assert!(r.erreurs.is_empty(), "{saut:?} {cible} : {:?}", r.erreurs);
+                let bas = r.css_assaini.to_ascii_lowercase();
+                assert!(!bas.contains("evil"), "{saut:?} {cible} : {}", r.css_assaini);
+            }
+        }
+    }
+
+    #[test]
+    fn crlf_font_face_et_import_apres_faux_commentaire() {
+        let r =
+            avec("a { content: 'x\\\r\n /*'; }\r\n@font-face { src: url(http://evil/f.woff); }\r\n/* */ b { c: d }");
+        assert!(!r.css_assaini.contains("evil"), "{}", r.css_assaini);
+        assert!(!r.css_assaini.contains("@font-face"), "{}", r.css_assaini);
+        let r = avec("a { content: 'x\\\r\n /*'; }\r\n@import 'http://evil/x.css';\r\n/* */");
+        assert!(!r.css_assaini.contains("evil"), "{}", r.css_assaini);
+    }
+
+    #[test]
+    fn crlf_dans_un_commentaire_et_normalisation_generale() {
+        let r = avec("/* a\r\nb\rc\x0cd */\r\na { b: c }\r\n");
+        assert!(r.erreurs.is_empty(), "{:?}", r.erreurs);
+        assert!(!r.css_assaini.contains('\r') && !r.css_assaini.contains('\x0c'), "{:?}", r.css_assaini);
+        // Une URL coupée par un CR seul dans une chaîne reste vue comme une chaîne continue.
+        let r = avec("a { content: \"\\\r\"; background: url(http://evil/x); }");
+        assert!(!r.css_assaini.contains("evil"), "{}", r.css_assaini);
+        // `declarations` voit le même texte normalisé.
+        assert_eq!(declarations("a { b: \"x\\\r\n\"; c: d }").len(), 2);
+    }
+
+    #[test]
+    fn balise_masquee_par_un_caractere_invisible_refusee() {
+        assert!(!avec("/* </sty\u{feff}le> */").erreurs.is_empty());
+        assert!(!avec("/* </sty\u{1}le> */").erreurs.is_empty());
+        assert!(!avec("/* <scr\u{7f}ipt> */").erreurs.is_empty());
+    }
+
+    #[test]
+    fn behavior_selecteur_n_est_pas_la_propriete() {
+        let r = avec(".behavior:hover { color: red; }\n.a .behavior:focus, b { x: y }");
+        assert!(r.erreurs.is_empty(), "{:?}", r.erreurs);
+        assert!(r.css_assaini.contains(".behavior:hover"), "{}", r.css_assaini);
+        assert!(r.css_assaini.contains(".a .behavior:focus"), "{}", r.css_assaini);
+        // La vraie propriété reste supprimée, y compris échappée (rejet) ou avec commentaire.
+        let r = avec("a { behavior: url(x.htc); color: red }");
+        assert!(!r.css_assaini.contains("behavior"), "{}", r.css_assaini);
+        assert!(r.css_assaini.contains("color: red"));
+        assert!(!avec("a { be\\68 avior: x }").erreurs.is_empty());
+    }
+
+    #[test]
+    fn commentaire_d_une_unite_supprimee_ne_migre_pas() {
+        let r = avec(".a{ background:url(x) /*c*/; background:url(data:image/png;base64,AAAA); }");
+        assert!(r.erreurs.is_empty(), "{:?}", r.erreurs);
+        assert!(r.css_assaini.contains("data:image/png"), "{}", r.css_assaini);
+        assert!(!r.css_assaini.contains("url(x)"), "{}", r.css_assaini);
+    }
+
+    #[test]
+    fn a_regle_root_detecte_la_regle() {
+        assert!(a_regle_root(&base()));
+        assert!(a_regle_root("html, :root { --cr-x: 1 }"));
+        assert!(!a_regle_root("a { color: red }"));
+        assert!(!a_regle_root("/* :root */ a { b: c }"));
     }
 }

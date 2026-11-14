@@ -98,7 +98,7 @@ depuis un thème.
 | --- | --- |
 | `@import`, `@namespace` | instruction supprimée |
 | `@font-face` | bloc entier supprimé (y compris imbriqué dans `@media`) |
-| `behavior:`, `-moz-binding:` | déclaration supprimée (`scroll-behavior:` reste valide) |
+| `behavior:`, `-moz-binding:` | déclaration supprimée (seulement en position de propriété : `scroll-behavior:` et le sélecteur `.behavior:hover` restent valides) |
 | `expression(`, `image-set(`, `image(`, `src(`, `cross-fade(` (préfixes `-webkit-` compris) | déclaration supprimée |
 | toute `url(...)` | déclaration supprimée, **sauf** une image `data:` (voir ci-dessous) |
 
@@ -108,8 +108,11 @@ supprimé : `data:image/svg+xml` (SVG : jamais), `data:text/html`, `http:`, `htt
 relatifs, `javascript:`, `#id`…
 
 Détail de la normalisation avant détection : commentaires retirés (`ur/**/l(` devient `url(` et est supprimé),
-échappements décodés, casse ignorée, espaces et sauts de ligne internes tolérés. Les caractères de contrôle
-(hors saut de ligne, retour chariot, tabulation) et le BOM sont ôtés.
+échappements décodés, casse ignorée, espaces et sauts de ligne internes tolérés. Les fins de ligne sont
+d'abord normalisées comme le fait la spécification CSS (`\r\n`, `\r` et `\f` deviennent `\n`, y compris après
+un `\` dans une chaîne : continuation de ligne). Puis les caractères de contrôle (hors saut de ligne et
+tabulation) et le BOM sont ôtés ; **ensuite seulement** `</style` et `<script` sont refusés.
+Un CSS sans règle `:root` est refusé à l'import.
 
 Les commentaires sont conservés : `@nom` et `@contrat` en tête de fichier survivent même si l'instruction qui
 les suivait est retirée.
