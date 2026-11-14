@@ -190,8 +190,8 @@
   .piste { position: relative; width: 100%; }
   /* Rectangle de sélection, aux couleurs du thème. */
   .rectangle {
-    position: absolute; z-index: 3; pointer-events: none; border: 1px solid var(--cr-accent);
-    background: color-mix(in srgb, var(--cr-accent) 22%, transparent); border-radius: 2px;
+    position: absolute; z-index: 3; pointer-events: none; border: 1px solid var(--cr-rectangle-bordure);
+    background: var(--cr-rectangle-fond); border-radius: 2px;
   }
   .cellule {
     position: absolute; top: 0; left: 0; cursor: pointer; user-select: none;

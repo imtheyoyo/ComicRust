@@ -1,5 +1,23 @@
 /* Styles de structure uniquement : toutes les couleurs, polices et rayons viennent des
    variables --cr-* définies par le thème (data\themes\*.css). */
+:root {
+  /* Replis des variables FACULTATIVES du contrat de thème (docs/tauri/themes.md) : un thème qui ne
+     les définit pas hérite de celles-ci. Cette feuille précède le thème ; une valeur `var(--cr-x)`
+     est résolue sur :root avec la valeur finale (celle du thème). */
+  --cr-fond-lecteur: var(--cr-fond);
+  --cr-fond-entete: var(--cr-fond-panneau);
+  --cr-fond-selection: color-mix(in srgb, var(--cr-accent) 15%, transparent);
+  --cr-texte-inverse: var(--cr-accent-texte);
+  --cr-focus: var(--cr-accent);
+  --cr-accent-survol: color-mix(in srgb, var(--cr-accent) 85%, var(--cr-texte));
+  --cr-succes: #2e7d32;
+  --cr-avertissement: #b26a00;
+  --cr-etoile: #f2b01e;
+  --cr-rectangle-fond: color-mix(in srgb, var(--cr-accent) 20%, transparent);
+  --cr-rectangle-bordure: var(--cr-accent);
+  --cr-lecture-piste: rgb(0 0 0 / 45%);
+  --cr-ombre-forte: 0 8px 32px rgb(0 0 0 / 0.4);
+}
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
@@ -7,10 +25,13 @@ body {
   color: var(--cr-texte, #1d2330);
   font-family: var(--cr-police, system-ui, sans-serif);
   font-size: 14px;
+  /* Cases, boutons radio, curseurs, barres de progression natifs : couleur d'accent du thème. */
+  accent-color: var(--cr-accent);
 }
 
 /* Éléments communs (boutons, champs, boîtes de dialogue), uniquement via les variables --cr-*. */
-button, select, input[type='search'], input[type='text'] {
+button, select, textarea, input[type='search'], input[type='text'], input[type='password'], input[type='number'],
+input[type='url'], input[type='email'], input[type='date'] {
   font: inherit;
   color: var(--cr-texte);
   background: var(--cr-fond-panneau);
@@ -30,7 +51,7 @@ select[size] option:checked, select[multiple] option:checked {
   color: var(--cr-accent-texte, #fff);
   background: var(--cr-accent) linear-gradient(0deg, var(--cr-accent), var(--cr-accent));
 }
-button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 1px; }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--cr-focus); outline-offset: 1px; }
 dialog {
   color: var(--cr-texte);
   background: var(--cr-fond-panneau);

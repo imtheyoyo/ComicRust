@@ -873,7 +873,7 @@
      scrollIntoView ni focus ne peut le décaler (repli hidden + garde-fou cadreFixe). */
   .lecteur {
     position: fixed; inset: 0; z-index: 50; overflow: hidden; overflow: clip; outline: none;
-    background: var(--cr-fond-lecteur, var(--cr-fond)); color: var(--cr-texte);
+    background: var(--cr-fond-lecteur); color: var(--cr-texte);
   }
   .lecteur.sans-curseur .scene { cursor: none; }
   .message { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--cr-texte-discret); margin: 0; }
@@ -882,7 +882,7 @@
     position: absolute; z-index: 3; left: 50%; top: 50%; transform: translate(-50%, -50%);
     display: grid; gap: 8px; min-width: min(420px, calc(100vw - 32px)); padding: 18px 20px;
     background: var(--cr-fond-panneau); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon);
-    box-shadow: 0 8px 32px rgb(0 0 0 / 0.4);
+    box-shadow: var(--cr-ombre-forte);
   }
   .reprise h2 { margin: 0; font-size: 18px; }
   .reprise p { margin: 0; }
