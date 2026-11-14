@@ -5,7 +5,7 @@
   import {
     ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, deplacerGroupesListe, deplacerLivresListe, ecouter,
     dansTauri, groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
-    type BibliothequeModifiee, type ClefTri, type Groupe, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
+    type BibliothequeModifiee, type ClefTri, type Groupe, type Pile, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
   } from '../lib/api';
   import { GlisserLivres } from '../lib/glisserLivres.svelte';
   import { DEPOSER_SUR_LECTURE, TRIER_POUR_REORDONNER, glypheListe, type EtatListes } from '../lib/listes.svelte';
@@ -72,7 +72,7 @@
   const sel = new Selection();
   /** Sélection multiple des piles (vue empilée), par rang dans `bib.piles` ; `selPiles.curseur` :
    *  pile courante. Un clic sélectionne la pile sans l'ouvrir. */
-  const selPiles = new Selection();
+  const selPiles = new Selection(true);
   /** Séries des piles sélectionnées au moment d'ouvrir une pile : à la fermeture, les piles sont
    *  rechargées (autres rangs possibles) et la sélection est retrouvée par titre. Hors état réactif. */
   let memoPiles: { titres: string[]; courant: string } | null = null;
@@ -260,19 +260,37 @@
   /** Identifiants des livres de toutes les piles sélectionnées. */
   const idsPiles = (): string[] => selPiles.indices().flatMap((i) => bib.piles[i]?.ids ?? []);
 
-  // Piles rechargées à la fermeture d'une pile : la sélection d'avant l'ouverture est retrouvée par
-  // titre de série (les rangs ont pu changer). Effet du parent : il passe avant celui de la grille.
+  // Piles remplacées (fin de scan, listes modifiées, lecteur fermé, fermeture d'une pile…) : les rangs
+  // de la sélection ne valent plus. Elle est retrouvée PAR TITRE de série : celle retenue à l'ouverture
+  // d'une pile (`memoPiles`) ou, sinon, celle lue dans les piles précédentes (`pilesRef`). Effet du
+  // parent : il passe avant celui de la grille.
+  let pilesRef: Pile[] = untrack(() => bib.piles);
   $effect(() => {
     const piles = bib.piles;
     untrack(() => {
-      const m = memoPiles;
-      if (!m || bib.params.serie !== undefined) return;
-      memoPiles = null;
+      const anciennes = pilesRef;
+      pilesRef = piles;
+      if (anciennes === piles) return;
+      let titres: string[];
+      let courant: string | null;
+      if (memoPiles && bib.params.serie === undefined) {
+        ({ titres, courant } = memoPiles);
+        memoPiles = null;
+      } else if (bib.params.serie !== undefined) {
+        return; // pile ouverte : les piles ne sont pas rechargées, rien ne bouge
+      } else {
+        titres = selPiles.indices().map((i) => anciennes[i]?.serie).filter((t): t is string => t !== undefined);
+        courant = anciennes[selPiles.curseur]?.serie ?? null;
+      }
+      const rangs = new Map(piles.map((p, i) => [p.serie, i] as const));
       selPiles.vider();
-      const rang = (t: string) => piles.findIndex((p) => p.serie === t);
       const ctrl = { ctrl: true, maj: false };
-      for (const t of m.titres) if (t !== m.courant && rang(t) >= 0) selPiles.cliquer(rang(t), ctrl);
-      if (rang(m.courant) >= 0) selPiles.cliquer(rang(m.courant), ctrl); // la courante en dernier : curseur
+      for (const t of titres) {
+        const r = rangs.get(t);
+        if (t !== courant && r !== undefined) selPiles.cliquer(r, ctrl);
+      }
+      const rc = courant === null ? undefined : rangs.get(courant);
+      if (rc !== undefined) selPiles.cliquer(rc, ctrl); // la courante en dernier : curseur
     });
   });
 
@@ -827,9 +845,16 @@
     ajouter: (idListe, indices) => void ajouterA(idListe, indices),
     deplacer,
   });
+  /** Piles figées au début du glisser (voir `debut`). */
+  let pilesGlissees: Pile[] = [];
   // Glisser une pile vers une liste : tous ses livres sont ajoutés (pas de réordonnancement de piles).
   const glisserPile = new GlisserLivres({
-    debut: () => listes.viderDepots(),
+    debut: () => {
+      listes.viderDepots();
+      // Les piles glissées sont figées ici : si bib.piles est remplacé pendant le geste (fin de scan…),
+      // le dépôt ne doit pas relire des rangs périmés.
+      pilesGlissees = selPiles.indices().flatMap((i) => (bib.piles[i] ? [bib.piles[i]] : []));
+    },
     groupeDe: () => null,
     deplacerGroupes: () => {},
     // Glisser une pile de la sélection : toutes les piles sélectionnées partent ; hors sélection :
@@ -844,7 +869,7 @@
     refusReordonner: () => 'Dépose la pile sur une liste de lecture, dans le panneau des listes.',
     horizontal: () => true,
     zone: () => document.querySelector<HTMLElement>('[data-testid="grille-piles"]'),
-    ajouter: (idListe, ind) => void ajouterIdsA(idListe, ind.flatMap((i) => bib.piles[i]?.ids ?? [])),
+    ajouter: (idListe) => void ajouterIdsA(idListe, pilesGlissees.flatMap((p) => p.ids)),
     deplacer: () => {},
   });
   $effect(() => {

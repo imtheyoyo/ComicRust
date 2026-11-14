@@ -77,6 +77,19 @@ export class Selection {
   /** Point de départ des sélections Maj+clic / Maj+flèches. */
   private ancre = -1;
 
+  /** Le livre courant doit toujours faire partie de la sélection (piles : Détails, « Ouvrir la pile » et
+   *  barre d'état s'appuient sur lui). Quand un Ctrl+clic ou un rectangle en mode « basculer » le
+   *  retire, il est recalé sur le dernier élément sélectionné, ou -1 si la sélection est vide. */
+  constructor(private curseurSelectionne = false) {}
+
+  /** Recale le curseur sur un élément réellement sélectionné (si demandé à la construction). */
+  private recaler(): void {
+    if (!this.curseurSelectionne || this.curseur < 0 || this.contient(this.curseur)) return;
+    const dernier = this.intervalles[this.intervalles.length - 1];
+    this.curseur = dernier ? dernier[1] : -1;
+    this.ancre = this.curseur;
+  }
+
   get nombre(): number {
     let n = 0;
     for (const [a, b] of this.intervalles) n += b - a + 1;
@@ -122,6 +135,7 @@ export class Selection {
       this.intervalles = this.contient(i) ? retirer(this.intervalles, i) : normaliser([...this.intervalles, [i, i]]);
       this.curseur = i;
       this.ancre = i;
+      this.recaler();
       return;
     }
     this.unique(i);
@@ -182,6 +196,7 @@ export class Selection {
       this.curseur = mode === 'remplacer' ? -1 : base.curseur;
       this.ancre = mode === 'remplacer' ? -1 : base.ancre;
     }
+    this.recaler();
   }
 
   /** Total de la vue réduit : retire ce qui dépasse. */
@@ -191,6 +206,7 @@ export class Selection {
     if (dernier && dernier[1] >= total) {
       this.intervalles = normaliser(this.intervalles.map(([a, b]) => [a, Math.min(b, total - 1)] as Intervalle));
     }
+    this.recaler();
   }
 
   private etendre(i: number, ajouter: boolean): void {

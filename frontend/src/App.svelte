@@ -18,7 +18,7 @@
   import { miseAJour } from './lib/maj.svelte';
   import { scripts } from './lib/scripts.svelte';
   import { chargerPreferences, enregistrerPreference } from './lib/prefs';
-  import { appliquerTheme, themeMemorise } from './lib/theme';
+  import { appliquerTheme, messageTheme, themeMemorise } from './lib/theme';
 
   let etat = $state<EtatBiblio | null>(null);
   let erreur = $state('');
@@ -26,6 +26,8 @@
   let choisirAutre = $state(false);
   let section = $state<Section>('bibliotheque');
   let themeActif = $state('');
+  /** Avertissement discret : le thème choisi n'a pas pu être appliqué (le démarrage continue). */
+  let avertissementTheme = $state('');
   let nbLivres = $state(0);
   let rafraichir = $state(0);
   // Colonne des listes (barre latérale) : largeur réglable, mémorisée (section vue des préférences).
@@ -64,7 +66,14 @@
         // Préférences d'affichage d'abord : le thème et le premier lister_livres en dépendent.
         const prefs = await chargerPreferences();
         if (typeof prefs.largeurListes === 'number') largeurListes = borneListes(prefs.largeurListes);
-        themeActif = await appliquerTheme(themeMemorise());
+        // Un thème inutilisable ne doit jamais empêcher le démarrage : on garde les replis d'app.css.
+        try {
+          const voulu = themeMemorise();
+          themeActif = await appliquerTheme(voulu);
+          if (themeActif !== voulu) avertissementTheme = `Le thème « ${voulu} » est indisponible : le thème par défaut est affiché (votre choix est conservé).`;
+        } catch (e) {
+          avertissementTheme = `Thème non appliqué : ${messageTheme(e)} Les couleurs de secours sont utilisées ; corrigez le thème dans les Réglages.`;
+        }
         await scan.demarrer(() => rafraichir++);
         await connexion.demarrer();
         // Mise à jour : jamais bloquante (vérification automatique en arrière-plan, bandeau seul).
@@ -211,6 +220,12 @@
   <PremierDemarrage onpret={pret} baseAbsente={etat.baseAbsente} />
 {:else}
   <div class="cadre">
+  {#if avertissementTheme}
+    <div class="avis-theme" role="status" data-testid="avertissement-theme">
+      <span>{avertissementTheme}</span>
+      <button type="button" onclick={() => (avertissementTheme = '')} aria-label="Fermer l'avertissement">×</button>
+    </div>
+  {/if}
   <BandeauMaj />
   <BandeauBase />
   <div class="appli">
@@ -272,6 +287,8 @@
 
 <style>
   .cadre { height: 100vh; display: flex; flex-direction: column; }
+  .avis-theme { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: 12px; color: var(--cr-texte-discret); border-bottom: 1px solid var(--cr-bordure); }
+  .avis-theme button { border: none; background: none; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; }
   .appli { flex: 1; min-height: 0; display: flex; }
   .poignee-listes { flex: none; width: 5px; margin-left: -5px; position: relative; z-index: 1; cursor: col-resize; touch-action: none; }
   .poignee-listes:hover, .poignee-listes:focus-visible { background: var(--cr-accent); outline: none; }

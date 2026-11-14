@@ -81,31 +81,48 @@ export interface OptionsTheme {
   persister?: boolean;
 }
 
+/** Jeton de séquence : seule la dernière application DEMANDÉE a le droit de modifier l'affichage
+ *  (une réponse tardive d'un aperçu précédent est ignorée). */
+let sequence = 0;
+
+/** Le backend signale un thème absent par « thème introuvable » ; toute autre erreur (CSS refusé…) ne
+ *  justifie pas de changer de thème. */
+function estIntrouvable(e: unknown): boolean {
+  return !(e instanceof ErreurThemeInvalide) && /introuvable/i.test(messageErreur(e));
+}
+
 /** Charge le CSS du thème depuis data\themes et le substitue au précédent.
- *  - thème disparu (ou, au démarrage, CSS inutilisable) : repli sur « Moderne clair » ;
- *  - CSS invalide alors qu'un thème valide est déjà affiché : l'erreur est renvoyée et le thème
- *    affiché ne change pas.
+ *  - thème disparu (« introuvable ») ou, au tout premier affichage, thème inutilisable : repli sur
+ *    « Moderne clair », JAMAIS enregistré dans les préférences ;
+ *  - toute autre erreur (CSS refusé par le backend ou le navigateur) alors qu'un thème est déjà affiché :
+ *    l'erreur est renvoyée et l'affichage ne change pas ;
+ *  - si deux demandes se chevauchent, seule la dernière modifie l'affichage (l'autre renvoie le thème
+ *    alors affiché, sans rien enregistrer).
  *  Renvoie l'identifiant réellement appliqué. */
 export async function appliquerTheme(id: string, opts: OptionsTheme = {}): Promise<string> {
   const persister = opts.persister ?? true;
+  const mien = ++sequence;
+  const perime = () => mien !== sequence;
   let choisi = id;
   let reponse;
   try {
     reponse = await chargerTheme(id);
+    if (perime()) return idApplique ?? id;
     if (reponse.css !== cssApplique || id !== idApplique) injecterCss(reponse.css);
   } catch (e) {
-    const invalide = e instanceof ErreurThemeInvalide;
-    // Thème invalide mais un thème valide est déjà à l'écran : on le garde et on signale l'erreur.
-    if (id === THEME_DEFAUT || (invalide && feuille)) throw e;
-    // Thème supprimé / illisible (ou premier affichage) : retour au thème par défaut.
+    if (perime()) return idApplique ?? id;
+    // Rien de valide à l'écran : on tente le thème par défaut ; sinon seul « introuvable » y ramène.
+    if (id === THEME_DEFAUT || !(estIntrouvable(e) || !feuille)) throw e;
     choisi = THEME_DEFAUT;
     reponse = await chargerTheme(THEME_DEFAUT);
+    if (perime()) return idApplique ?? id;
     injecterCss(reponse.css);
   }
   cssApplique = reponse.css;
   avertissementsCourants = reponse.avertissements;
   idApplique = choisi;
-  if (persister) {
+  // Un repli n'est jamais enregistré : le choix de l'utilisateur reste celui des préférences.
+  if (persister && choisi === id) {
     idPersiste = choisi;
     enregistrerPreference({ theme: choisi });
   }
@@ -123,16 +140,9 @@ export function restaurerTheme(): Promise<string> {
 }
 
 /** Relit le fichier du thème affiché (modifié à la main, ou thème supprimé) et le réapplique.
- *  Si le thème affiché est le thème enregistré, un repli éventuel est enregistré aussi. */
-export async function rechargerThemeCourant(): Promise<string> {
-  const id = idApplique ?? themeMemorise();
-  const enregistre = id === themePersiste();
-  const choisi = await appliquerTheme(id, { persister: false });
-  if (enregistre && choisi !== id) {
-    idPersiste = choisi;
-    enregistrerPreference({ theme: choisi });
-  }
-  return choisi;
+ *  Un éventuel repli n'est jamais enregistré. */
+export function rechargerThemeCourant(): Promise<string> {
+  return appliquerTheme(idApplique ?? themeMemorise(), { persister: false });
 }
 
 /** Message lisible d'une erreur de thème. */

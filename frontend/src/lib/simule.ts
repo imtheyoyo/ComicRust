@@ -11,7 +11,7 @@ import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
 import { creerMajSimulee } from './simuleMaj';
 import { creerScriptsSimules } from './simuleScripts';
-import { COMMANDES_THEMES, creerThemesSimules } from './simuleThemes';
+import { COMMANDES_THEMES, creerThemesSimules, themesRefuses } from './simuleThemes';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -235,7 +235,14 @@ const simuleTests: {
   prefs: PreferencesVue; requetes: RequeteLivres[]; avancements: Avancement[]; ouverts: string[]; fermes: string[];
   /** Commandes d'édition reçues (étape 3), pour vérifier ce que le front envoie. */
   edition: Array<{ commande: string; args: Record<string, unknown> }>;
-} = { prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [], edition: [] };
+  /** Piles absentes de `lister_piles` (simule des séries qui disparaissent : les rangs des piles suivantes
+   *  se décalent, pour vérifier que la sélection est retrouvée par titre). */
+  pilesMasquees: Set<string>;
+  /** Thèmes refusés par `charger_theme` (voir simuleThemes). */
+  themesRefuses: Set<string>;
+  /** Émet un événement du backend simulé (ex. `scan-termine`). */
+  emettre: (nom: string, charge: unknown) => void;
+} = { prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [], edition: [], pilesMasquees: new Set(), themesRefuses, emettre: (n, c) => emettre(n, c) };
 try {
   const brut = new URLSearchParams(location.search).get('prefs');
   if (brut) simuleTests.prefs = JSON.parse(brut) as PreferencesVue;
@@ -434,6 +441,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       const piles = new Map<string, Pile>();
       for (const l of liste) {
         const t = titrePile(l);
+        if (simuleTests.pilesMasquees.has(t)) continue;
         let p = piles.get(t);
         if (!p) piles.set(t, (p = { serie: t, nbLivres: 0, nbLus: 0, ids: [], urlCouverture: l.urlCouverture }));
         p.nbLivres++;
