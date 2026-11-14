@@ -41,7 +41,7 @@ fn infos(data: tauri::State<'_, DossierData>) -> InfosApplication {
 
 /// Thèmes disponibles dans `data\themes` (les thèmes livrés manquants sont recopiés d'abord,
 /// pour qu'un fichier supprimé par erreur revienne).
-#[tauri::command]
+#[tauri::command(async)]
 fn lister_themes(data: tauri::State<'_, DossierData>) -> Result<Vec<themes::ThemeInfo>, String> {
     let dossier = portable::dossier_themes(&data.0);
     themes::installer_themes_livres(&dossier).map_err(|e| e.to_string())?;
@@ -49,13 +49,13 @@ fn lister_themes(data: tauri::State<'_, DossierData>) -> Result<Vec<themes::Them
 }
 
 /// CSS assaini d'un thème et ses avertissements (le front injecte le CSS dans la page).
-#[tauri::command]
+#[tauri::command(async)]
 fn charger_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<themes::ThemeCharge, String> {
     themes::charger_theme(&portable::dossier_themes(&data.0), &id).map_err(|e| e.to_string())
 }
 
 /// Importe un thème (CSS validé et assaini) sous un identifiant libre ; n'écrase jamais un fichier.
-#[tauri::command]
+#[tauri::command(async)]
 fn importer_theme(data: tauri::State<'_, DossierData>, nom: String, css: String) -> Result<themes::ThemeInfo, String> {
     themes::importer_theme(&portable::dossier_themes(&data.0), &nom, &css).map_err(|e| e.to_string())
 }

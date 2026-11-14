@@ -182,12 +182,12 @@ fn nom_reserve_windows(id: &str) -> bool {
 pub fn id_valide(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         && !nom_reserve_windows(id)
 }
 
 fn est_livre(id: &str) -> bool {
-    THEMES_LIVRES.iter().any(|(l, _)| *l == id)
+    THEMES_LIVRES.iter().any(|(l, _)| l.eq_ignore_ascii_case(id))
 }
 
 /// Texte comparable : fins de ligne unifiées, espaces de fin de ligne et BOM ignorés.
@@ -396,7 +396,16 @@ fn identifiant_libre(dossier: &Path, base: &str) -> String {
 /// Nom affichable sans risque dans un commentaire CSS : pas de contrôle, pas de `/*` ni `*/`.
 fn nom_sur(nom: &str) -> String {
     let n: String = nom.chars().filter(|c| !c.is_control()).collect();
-    n.replace("*/", "").replace("/*", "").trim().chars().take(80).collect::<String>().trim().to_string()
+    // `*` et `/` sont ôtés un à un : retirer `*/` puis `/*` pouvait en recréer (`**//`).
+    n.chars()
+        .filter(|c| !matches!(c, '*' | '/'))
+        .collect::<String>()
+        .trim()
+        .chars()
+        .take(80)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Importe un thème : valide et assainit `css`, choisit un identifiant libre dérivé de `nom`
@@ -405,6 +414,11 @@ pub fn importer_theme(dossier: &Path, nom: &str, css: &str) -> Result<ThemeInfo,
     let rapport = valider_css(css);
     if !rapport.erreurs.is_empty() {
         return Err(ErreurTheme::Refuse(rapport.erreurs.join(" ; ")));
+    }
+    if !crate::themes_css::a_regle_root(&rapport.css_assaini) {
+        return Err(ErreurTheme::Refuse(
+            "aucune règle :root : les variables --cr-* doivent être définies dans `:root { … }`".to_string(),
+        ));
     }
     std::fs::create_dir_all(dossier)?;
     let nom = nom_sur(nom);
@@ -517,7 +531,7 @@ mod tests {
     #[test]
     fn identifiants() {
         assert!(id_valide("moderne-clair"));
-        assert!(id_valide("Mon_thème2"));
+        assert!(id_valide("Mon_theme2") && !id_valide("Mon_thème2"));
         for mauvais in ["", "..", "a/b", "a\\b", "x.css", "C:", "../secret"] {
             assert!(!id_valide(mauvais), "{mauvais}");
         }
