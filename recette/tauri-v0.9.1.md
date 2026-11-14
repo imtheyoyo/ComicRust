@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.9.1 (pré-release corrective) |
 | Paquet | `ComicRust-Tauri-tauri-v0.9.1-windows-x64.zip` |
-| SHA-256 | à renseigner à la publication |
+| SHA-256 | `17a9ef24254e0e55f842da7a1763535b6387c18d75380cd50fa5c1679fccbb72` |
 | Contenu | sélection par rectangle ; onglet « Données » de Configurer BD2 lisible ; aide de « Ranger les fichiers » ; base absente → assistant |
 | Origine | [recette tauri-v0.9.0](tauri-v0.9.0.md) : **GO** du 14/11/2026 ; remarques de Yoyo ([rapport](rapports/tauri-v0.9.0-2026-11-14.txt)) |
 
