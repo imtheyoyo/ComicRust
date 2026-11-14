@@ -86,4 +86,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Rapport de Yoyo du 14/11/2026 21:33 ([rapport](rapports/tauri-v0.10.0-2026-11-14.txt)) : 19 OK, 0 échec ; P-01 coché « non testé » mais la version 0.10.0 est notée dans les deux copies (installation confirmée). Demande : pouvoir déplacer les séries (piles) dans une liste de lecture triée « Ordre de la liste » + « Empiler par série ».
 
-**Décision :** en attente du GO de Yoyo.
+**Décision : GO** confirmé par Yoyo le 14/11/2026 ; réordonnancement des piles dans une liste de lecture intégré à l'audit de parité (tauri-v0.11.0).
