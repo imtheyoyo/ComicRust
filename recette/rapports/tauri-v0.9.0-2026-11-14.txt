@@ -1,0 +1,17 @@
+Rapport de recette ComicRust tauri-v0.9.0 — 14/11/2026 06:10
+Résultat : 14 OK, 0 échec(s), 19 non testé(s) sur 33.
+Décision proposée : incomplète (7 bloquant(s) non testé(s)).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.9.0 /  0.9.0
+
+NON TESTÉS (19) : P-02*, S-01*, S-02*, S-03*, S-04, S-07, A-01, B-01*, B-02, B-04, B-05, B-06, B-08, O-02*, O-03*, O-04, O-05, U-01, N-03   (* = bloquant)
+
+Constaté :
+
+* Script Bedetheque, configuration, section Données, la liste des champs n'est pas visible.
+* La sélection de plusieurs livres avec la souris ne fonctionne pas.
+* Dans le script 'Ranger les fichiers', il manque de l'aide pour les champs à utiliser {series}, {volume}, etc.
