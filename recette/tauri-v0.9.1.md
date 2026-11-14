@@ -63,14 +63,16 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
-| | | | |
+| (remarque) | [m] | Demande : sélection par rectangle aussi quand « Empiler par série » est activé (piles fermées) — limite connue de cette version | à décider (tauri-v0.9.2) |
 
 ## Bilan
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 6 | 6 | 0 |
+| [M] majeurs | 4 | 4 | 0 |
+| [m] mineurs | 2 | 2 | 0 |
+
+Rapport de Yoyo du 14/11/2026 12:33 ([rapport](rapports/tauri-v0.9.1-2026-11-14.txt)) : 12 OK, 0 échec, 0 non testé ; une remarque (rectangle avec les piles).
 
 **Décision :** ☐ GO ☐ NO-GO — Yoyo, le …

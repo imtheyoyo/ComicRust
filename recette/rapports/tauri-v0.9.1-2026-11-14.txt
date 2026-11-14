@@ -1,0 +1,13 @@
+Rapport de recette ComicRust tauri-v0.9.1 — 14/11/2026 12:33
+Résultat : 12 OK, 0 échec(s), 0 non testé(s) sur 12.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.9.1 / 0.9.1
+
+Remarque :
+
+* Il faut : Sélection par rectangle lorsque 'Empiler par série' est activé.
