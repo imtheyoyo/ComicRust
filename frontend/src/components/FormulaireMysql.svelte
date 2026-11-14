@@ -102,6 +102,6 @@
   }
   .secondaire:hover:not(:disabled) { background: var(--cr-fond-survol); }
   .secondaire:disabled { opacity: 0.5; cursor: default; }
-  .ok { color: var(--cr-succes, var(--cr-texte)); }
+  .ok { color: var(--cr-succes); }
   .echec { color: var(--cr-erreur); white-space: pre-line; }
 </style>

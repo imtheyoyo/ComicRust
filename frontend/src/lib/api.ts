@@ -1,6 +1,6 @@
 // Couche unique d'appel des commandes Tauri. Le front n'a aucune logique métier : il affiche ce que
 // renvoient les commandes (crates/comicrust-tauri/src/app.rs). Les structures sont en camelCase
-// (serde `rename_all = "camelCase"`), sauf `InfosApplication` et `Theme` (étape 0, snake_case).
+// (serde `rename_all = "camelCase"`), sauf `InfosApplication` (étape 0, snake_case).
 //
 // Hors de la fenêtre Tauri (navigateur, `npm run dev`), tous les appels sont routés vers
 // `simule.ts` (MODE SIMULÉ : 5 000 livres factices) afin de développer et tester sans le backend.
@@ -15,10 +15,28 @@ export interface InfosApplication {
   dossier_webview: string;
 }
 
-export interface Theme {
+/** Les trois couleurs de la pastille d'aperçu d'un thème (lues dans son fichier CSS), ou `null`. */
+export interface CouleursTheme {
+  fond: string;
+  accent: string;
+  texte: string;
+}
+
+/** Un thème de data\themes (étape 8 ; structures en camelCase, voir docs/tauri/ipc-themes.md). */
+export interface ThemeInfo {
   id: string;
   nom: string;
+  /** Thème livré avec ComicRust (non supprimable) ; sinon thème personnel. */
   livre: boolean;
+  couleurs: CouleursTheme | null;
+  /** Constructions du CSS ignorées ou suspectes (@import, url(http…), etc.). */
+  avertissements: string[];
+}
+
+/** Résultat de `charger_theme`. */
+export interface ThemeCharge {
+  css: string;
+  avertissements: string[];
 }
 
 export type ModeBiblio = 'autonome' | 'comicrack';
@@ -852,8 +870,16 @@ export interface ProgressionTransfert { phase: string; fait: number; total: numb
 // ───────────────────────────── Commandes ─────────────────────────────
 
 export const infos = () => appeler<InfosApplication>('infos');
-export const listerThemes = () => appeler<Theme[]>('lister_themes');
-export const chargerTheme = (id: string) => appeler<string>('charger_theme', { id });
+export const listerThemes = () => appeler<ThemeInfo[]>('lister_themes');
+export const chargerTheme = (id: string) => appeler<ThemeCharge>('charger_theme', { id });
+/** Importe un CSS sous un id libre (jamais d'écrasement) ; rejette avec un message si le CSS est refusé. */
+export const importerTheme = (nom: string, css: string) => appeler<ThemeInfo>('importer_theme', { nom, css });
+export const exporterTheme = (id: string) => appeler<string>('exporter_theme', { id });
+/** Supprime un thème personnel (refusé pour un thème livré). */
+export const supprimerTheme = (id: string) => appeler<void>('supprimer_theme', { id });
+/** Recopie les thèmes livrés ; l'ancien fichier devient `<id>.css.avant`. Renvoie les ids recopiés. */
+export const reinitialiserThemesLivres = () => appeler<string[]>('reinitialiser_themes_livres');
+export const revelerDossierThemes = () => appeler<void>('reveler_dossier_themes');
 
 export const lirePreferencesVue = () => appeler<PreferencesVue>('lire_preferences_vue');
 /** Fusionne les champs fournis ; renvoie l'ensemble à jour. */

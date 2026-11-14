@@ -155,7 +155,7 @@
   /* Étoiles : grises (variable de bordure du thème) sous une étoile jaune rognée à la note. */
   .etoiles { display: inline-flex; font-size: 20px; line-height: 1; }
   .etoile { position: relative; display: inline-block; color: var(--cr-bordure); }
-  .pleine { position: absolute; left: 0; top: 0; overflow: hidden; white-space: nowrap; color: var(--cr-etoile, #f2b01e); }
+  .pleine { position: absolute; left: 0; top: 0; overflow: hidden; white-space: nowrap; color: var(--cr-etoile); }
   .manquant, .erreur { color: var(--cr-erreur); }
   .actions { display: flex; justify-content: center; gap: 8px; margin: 0 0 14px; }
   .multi { text-align: center; font-size: 12px; margin: -6px 0 12px; }

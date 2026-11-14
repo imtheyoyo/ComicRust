@@ -3,7 +3,7 @@
 // latence et les événements de scan. Rien de ceci n'est utilisé dans la fenêtre Tauri.
 import type {
   PreferencesVue, ClefTri, ChoixMysql, ConnexionsMysql, EtatBiblio, ParametresMysql, LivreDetail, LivreOuvert, LivreResume, PageInfo, RequeteLivres,
-  ReponseLivres, ReponsePiles, Pile, Theme,
+  ReponseLivres, ReponsePiles, Pile,
 } from './api';
 import { creerEditionSimulee } from './simuleEdition';
 import { creerBaseSimulee } from './simuleBase';
@@ -11,6 +11,7 @@ import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
 import { creerMajSimulee } from './simuleMaj';
 import { creerScriptsSimules } from './simuleScripts';
+import { COMMANDES_THEMES, creerThemesSimules } from './simuleThemes';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -291,10 +292,8 @@ function pagesSimulees(l: LivreInterne): PageInfo[] {
 
 let dossiers = ['D:\\BD\\Marvel', 'D:\\BD\\Franco-belge', '\\\\NAS\\comics\\Image'];
 
-const THEMES = import.meta.glob('../../../crates/comicrust-tauri/themes/*.css', {
-  query: '?raw', import: 'default',
-}) as Record<string, () => Promise<string>>;
-const idTheme = (chemin: string) => chemin.split('/').pop()!.replace(/\.css$/, '');
+// Thèmes (étape 8) : voir simuleThemes.ts.
+const themesSimules = creerThemesSimules();
 
 // Surveillance de la base et hors ligne (étape 6) : voir simuleBase.ts.
 const base = creerBaseSimulee(emettre, () => etat.mode);
@@ -356,6 +355,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
   await pause(LATENCE_MS);
   const rm = maj.appeler(commande, args);
   if (rm !== undefined) return rm;
+  if (COMMANDES_THEMES.includes(commande)) return themesSimules.appeler(commande, args);
   if (commande.startsWith('script')) {
     const rs = scriptsSimules.appeler(commande, args);
     if (rs !== undefined) return rs;
@@ -366,19 +366,6 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
         version: '0.0.0-simule', dossier_data: '(mode simulé) data', dossier_themes: '(mode simulé) data/themes',
         dossier_webview: '(mode simulé) data/webview2',
       };
-    case 'lister_themes': {
-      const themes: Theme[] = [];
-      for (const [chemin, charger] of Object.entries(THEMES)) {
-        const css = await charger();
-        themes.push({ id: idTheme(chemin), nom: /@nom:\s*(.+?)\s*\*\//.exec(css)?.[1] ?? idTheme(chemin), livre: true });
-      }
-      return themes;
-    }
-    case 'charger_theme': {
-      const entree = Object.entries(THEMES).find(([c]) => idTheme(c) === args.id);
-      if (!entree) throw new Error(`thème introuvable : ${String(args.id)}`);
-      return entree[1]();
-    }
     case 'lire_preferences_vue':
       return { ...simuleTests.prefs };
     case 'enregistrer_preferences_vue':

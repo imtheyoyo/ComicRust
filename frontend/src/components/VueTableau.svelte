@@ -212,8 +212,8 @@
   .piste { position: relative; }
   /* Rectangle de sélection, aux couleurs du thème. */
   .rectangle {
-    position: absolute; z-index: 1; pointer-events: none; border: 1px solid var(--cr-accent);
-    background: color-mix(in srgb, var(--cr-accent) 22%, transparent); border-radius: 2px;
+    position: absolute; z-index: 1; pointer-events: none; border: 1px solid var(--cr-rectangle-bordure);
+    background: var(--cr-rectangle-fond); border-radius: 2px;
   }
   .ligne { position: absolute; top: 0; left: 0; right: 0; contain: layout paint style; cursor: pointer; user-select: none; border-bottom: 1px solid var(--cr-bordure); }
   .ligne:hover { background: var(--cr-fond-survol); }
