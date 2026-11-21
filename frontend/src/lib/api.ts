@@ -158,6 +158,8 @@ export interface LivreResume {
   urlCouverture: string;
   /** Avec `liste` : rang du livre dans la liste (1 = premier), colonne « # ». */
   rang?: number;
+  /** Fichier introuvable (livres manquants) : badge sur la couverture, indicateur du tableau. */
+  manquant?: boolean;
 }
 
 export interface ReponseLivres {
@@ -443,7 +445,7 @@ export interface ProgressionEdition { operation: Operation; fait: number; total:
  *  docs/tauri/ipc-surveillance.md ; absent : opération d'édition de ComicRust. */
 export interface BibliothequeModifiee {
   ids: string[];
-  origine?: 'externe';
+  origine?: 'externe' | 'manquants';
   ajoutes?: number;
   modifies?: number;
   supprimes?: number;
@@ -1422,3 +1424,77 @@ export const classerChemin = (chemin: string) => appeler<GenreChemin>('classer_c
 export const lirePlantage = () => appeler<RapportPlantage | null>('lire_plantage');
 /** Le rapport a été vu : le backend supprime `data\plantage.txt`. */
 export const acquitterPlantage = () => appeler<void>('acquitter_plantage');
+
+// ───────────────────────────── Livres manquants (lot L3, docs/tauri/ipc-manquants.md) ─────────────────────────────
+
+export interface VolumeSignale { racine: string; livres: number }
+export interface BlocageManquants { racine: string; livres: number; disparus: number }
+export interface BilanVerification {
+  resume: string;
+  manquants: number;
+  presents: number;
+  injoignables: VolumeSignale[];
+  bloques: BlocageManquants[];
+  indetermines: number;
+  interrompu: boolean;
+  concluant: boolean;
+  avertissement?: string;
+}
+export interface EtatManquants {
+  nbManquants: number;
+  verification?: { fait: number; total: number };
+  recherche?: { dossier: string; fichiers: number; comparaison: boolean };
+  derniere?: BilanVerification;
+  /** Fiches non modifiables (lecture seule, base injoignable) : raison ; absent : modifiables. */
+  raisonLectureSeule?: string;
+}
+export type EtatFichier = 'present' | 'introuvable' | 'volumeInjoignable';
+export interface SondeLivre {
+  id: string;
+  titre: string;
+  fichier: string;
+  etat: EtatFichier;
+  racine?: string;
+  avertissement?: string;
+}
+export interface PropositionManquant {
+  id: string;
+  legende: string;
+  ancien: string;
+  nouveau: string;
+  correspondance: string;
+  sure: boolean;
+  autres: number;
+  doublon?: string;
+  coche: boolean;
+}
+export interface ResultatRecherche {
+  dossier: string;
+  propositions: PropositionManquant[];
+  nonRetrouves: number;
+  fichiersExamines: number;
+  erreurs: string[];
+  interrompu: boolean;
+  info?: string;
+}
+export interface DemandeRelocalisation { id: string; ancien: string; nouveau: string }
+export interface BilanOperationManquants { nb: number; info: string; erreur?: string }
+export interface PreparationRetrait {
+  ids: string[];
+  legendes: string[];
+  autres: number;
+  bilan: BilanVerification;
+  confirmationRequise: boolean;
+  comicrack: boolean;
+}
+
+export const etatManquants = () => appeler<EtatManquants>('etat_manquants');
+export const verifierManquants = () => appeler<BilanVerification>('verifier_manquants');
+export const arreterManquants = () => appeler<void>('arreter_manquants');
+export const sonderLivre = (id: string) => appeler<SondeLivre>('sonder_livre', { id });
+export const proposerFichier = (id: string, chemin: string) => appeler<PropositionManquant>('proposer_fichier', { id, chemin });
+export const chercherManquants = (ids: string[], dossier: string) => appeler<ResultatRecherche>('chercher_manquants', { ids, dossier });
+export const appliquerRelocalisations = (demandes: DemandeRelocalisation[]) =>
+  appeler<BilanOperationManquants>('appliquer_relocalisations', { demandes });
+export const preparerRetrait = (ids: string[]) => appeler<PreparationRetrait>('preparer_retrait', { ids });
+export const retirerLivres = (ids: string[], confirme: boolean) => appeler<BilanOperationManquants>('retirer_livres', { ids, confirme });

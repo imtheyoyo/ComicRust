@@ -25,6 +25,8 @@
   import PanneauDetails from './PanneauDetails.svelte';
   import VueTableau from './VueTableau.svelte';
   import { scripts } from '../lib/scripts.svelte';
+  import { ID_MANQUANTS, manquants } from '../lib/manquants.svelte';
+  import BandeauManquants from './BandeauManquants.svelte';
 
   interface Props {
     scan: SuiviScan;
@@ -199,6 +201,14 @@
     // est ouvert, pour tester ce chemin (recette tauri-v0.7.3, C-05) sans interface dédiée.
     const essais = (globalThis as { __comicrustSimule?: { ouvrirALaPlace?: (i: number) => Promise<void> } }).__comicrustSimule;
     if (!dansTauri() && essais) essais.ouvrirALaPlace = (i) => ouvrir(i);
+    // « Réessayer » de la fenêtre « Disque inaccessible » : le livre s'ouvre si le disque répond.
+    manquants.surRouvrir = (id) => {
+      const n = ++ouverture;
+      void (async () => {
+        if (livreLu && lecteur) await lecteur.terminer();
+        if (n === ouverture) livreLu = { id };
+      })();
+    };
     return () => {
       clearTimeout(minuterie);
       desabonner?.();
@@ -362,6 +372,8 @@
     if (!l) return;
     const n = ++ouverture;
     sel.unique(i);
+    // Livres manquants : le fichier est examiné avant l'ouverture (fenêtre « Fichier introuvable »).
+    if (!(await manquants.peutOuvrir(l.id)) || n !== ouverture) return;
     if (livreLu && lecteur) await lecteur.terminer();
     if (n === ouverture) livreLu = { id: l.id };
   }
@@ -520,6 +532,16 @@
       } else void action('retirer');
       return;
     }
+    // Suppr ailleurs que dans une liste de lecture : « Retirer de la bibliothèque » (avec confirmation,
+    // les fichiers ne sont jamais supprimés), comme la version egui.
+    if (e.key === 'Delete' && !saisieTexte && !fenetreOuverte() && liste?.type !== 'lecture'
+      && (e.target as HTMLElement | null)?.closest('[data-testid="grille"], [data-testid="tableau"], [data-testid="grille-piles"]')) {
+      e.preventDefault();
+      if (pilesAffichees) {
+        if (nbPilesSel > 0) void agirSurIds('retirerBib', idsPiles());
+      } else void action('retirerBib');
+      return;
+    }
     if ((e.key === '/' && !saisieTexte) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) {
       e.preventDefault();
       champRecherche?.focus();
@@ -585,8 +607,24 @@
         aide: plusieurs ? 'Un seul livre à la fois' : 'Montre le fichier dans l\'Explorateur de Windows' },
       entreeScripts(),
       ...entreesListes,
+      ...entreesManquants(),
     ];
   });
+
+  /** Entrées « livres manquants » du menu contextuel (lot L3) : désactivées si les fiches ne sont pas
+   *  modifiables (lecture seule, hors ligne) ; « Retrouver » seulement pour un livre manquant. */
+  function entreesManquants(): EntreeMenu[] {
+    const raison = manquants.raison;
+    const plusieurs = nbSel > 1;
+    return [
+      ...(livreSelectionne?.manquant && !plusieurs
+        ? [{ id: 'retrouver', libelle: '📂 Retrouver le fichier…', separe: true, desactive: !!raison, aide: raison }]
+        : []),
+      { id: 'chercherDossier', libelle: '🔍 Rechercher les fichiers manquants dans un dossier…', separe: !(livreSelectionne?.manquant && !plusieurs), desactive: !!raison, aide: raison },
+      { id: 'retirerBib', libelle: plusieurs ? `🗑 Retirer les ${nbSel.toLocaleString('fr-FR')} livres de la bibliothèque…` : '🗑 Retirer de la bibliothèque…', raccourci: liste?.type === 'lecture' ? undefined : 'Suppr',
+        desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' },
+    ];
+  }
 
   /** Entrée « 📜 Scripts ▸ » du menu contextuel : ouvre la liste des scripts du hook Books. */
   function entreeScripts(): EntreeMenu {
@@ -743,6 +781,20 @@
       }
       return;
     }
+    if (id === 'retrouver') {
+      const l = livreSelectionne;
+      if (l) manquants.demanderRetrouver(l.id, [l.serie, l.numero ? `#${l.numero}` : '', l.titre].filter(Boolean).join(' '));
+      return;
+    }
+    if (id === 'chercherDossier') {
+      // Sélection : ses livres manquants (un seul livre : celui-là) ; sinon (vue des manquants) tous.
+      manquants.demanderDossier(liste?.id === ID_MANQUANTS && nbSel === 0 ? [] : ids);
+      return;
+    }
+    if (id === 'retirerBib') {
+      void manquants.demanderRetrait(ids);
+      return;
+    }
     if (id === 'scripts') {
       menuScripts = {
         x: positionMenu.x, y: positionMenu.y, ids,
@@ -759,6 +811,17 @@
       } catch (e) {
         erreurAction = `Ouvrir le dossier : ${messageErreur(e)}`;
       }
+    }
+  }
+
+  /** Bandeau de la vue des manquants, « Retirer… » : la sélection, à défaut tous les livres affichés. */
+  async function retirerTousManquants() {
+    try {
+      const ids = nbSel > 0 ? await idsSelection()
+        : (await bib.livresDe(Array.from({ length: bib.total }, (_, k) => k))).map((l) => l.id);
+      if (ids.length) void manquants.demanderRetrait(ids);
+    } catch (e) {
+      erreurAction = messageErreur(e);
     }
   }
 
@@ -967,7 +1030,7 @@
     }
   }
 
-  const nomListe = $derived(liste ? `${glypheListe(liste)} ${liste.nom}` : '');
+  const nomListe = $derived(liste ? `${liste.id === ID_MANQUANTS ? '⚠' : glypheListe(liste)} ${liste.nom}` : '');
 
   async function fenetreFermee() {
     infosDe = null;
@@ -1039,6 +1102,10 @@
     <button onclick={ouvrirMenuScripts} aria-haspopup="menu" aria-expanded={!!menuScripts && !menuScripts.ids} title="Scripts Python (bibliothèque, livres sélectionnés, gestion)" data-testid="menu-scripts">📜 Scripts ▾</button>
   </header>
 
+  {#if liste?.id === ID_MANQUANTS}
+    <BandeauManquants onretirer={() => void retirerTousManquants()} />
+  {/if}
+
   <div class="corps">
     <div class="liste">
       {#if pileOuverte && !bib.erreur}
@@ -1053,6 +1120,7 @@
       {:else if bib.total === 0 && bib.version > 0}
         <p class="vide">{bib.params.recherche ? 'Aucun livre ne correspond à la recherche.'
           : liste?.type === 'lecture' ? 'Liste vide : glisse des livres de la bibliothèque sur son nom, dans le panneau des listes.'
+          : liste?.id === ID_MANQUANTS ? 'Aucun livre manquant : tous les fichiers de la bibliothèque sont présents.'
           : liste?.inconnu ? `ComicRust ne connaît pas encore le contenu de cette liste : ${liste.inconnu}.`
           : liste ? 'Aucun livre dans cette liste.'
           : 'La bibliothèque est vide : ajoutez un dossier surveillé, puis lancez un scan.'}</p>

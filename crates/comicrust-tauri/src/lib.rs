@@ -13,6 +13,8 @@
 //! - l'édition ([`edition`] : infos des livres, ComicInfo.xml, conversion en CBZ, renommage),
 //! - les listes ComicRack ([`listes`] : arbre, gestion, livres des listes de lecture ;
 //!   [`listes_criteres`] : éditeur de listes intelligentes ; [`listes_cbl`] : import / export `.cbl`),
+//! - les livres manquants ([`manquants`] : vérification des fichiers, liste « Livres manquants »,
+//!   retrouver le fichier, chercher dans un dossier, retirer de la bibliothèque),
 //! - le transfert de la bibliothèque ComicRack vers la base de ComicRust ([`transfert`]),
 //! - la surveillance de la base et l'état hors ligne ([`surveillance`]),
 //! - les scripts Python ([`scripts`] : hôte de scripts du cœur, aperçu, application, automatismes),
@@ -34,6 +36,7 @@ pub mod listes;
 pub mod listes_cbl;
 pub mod listes_criteres;
 pub mod maj;
+pub mod manquants;
 pub mod pages_livre;
 pub mod plantage;
 pub mod portable;
@@ -91,6 +94,7 @@ pub mod app;
 #[cfg(feature = "app")]
 mod cmd_scan;
 mod cmd_fenetre;
+mod cmd_manquants;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 // Logique de la passerelle MCP stdio (testable sans WebView2, donc aussi hors fonction `mcp`).

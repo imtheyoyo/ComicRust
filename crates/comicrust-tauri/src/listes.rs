@@ -485,6 +485,10 @@ impl Biblio {
 
     /// Livres d'une liste (dans l'ordre de la liste) et version des listes.
     pub(crate) fn membres_liste(&self, id: &str) -> Result<(Members, u64), String> {
+        // Liste virtuelle « Livres manquants » (module `manquants`) : pas une liste de ComicRack.
+        if id.eq_ignore_ascii_case(crate::manquants::ID_LISTE_MANQUANTS) {
+            return self.membres_manquants();
+        }
         self.rafraichir_listes(false);
         let (items, version) = self.listes_lues();
         let l = ComicList::find(&items, id).ok_or_else(|| format!("liste introuvable : {id}"))?;

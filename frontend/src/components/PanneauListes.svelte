@@ -13,6 +13,7 @@
   } from '../lib/api';
   import { glypheListe, infobulleListe, type EtatListes, type LigneArbre } from '../lib/listes.svelte';
   import { modale } from '../lib/modale';
+  import { ID_MANQUANTS, manquants } from '../lib/manquants.svelte';
   import { enregistrerVueListe } from '../lib/prefs';
   import EditeurListeIntelligente from './EditeurListeIntelligente.svelte';
   import MenuContextuel, { type EntreeMenu } from './MenuContextuel.svelte';
@@ -530,6 +531,14 @@
     </div>
   {/if}
 
+  <!-- Liste virtuelle (lot L3) : toujours présente (discrète à 0) pour pouvoir lancer la vérification. -->
+  <button type="button" class="entree-manquants" class:courante={manquants.affiche} class:aucun={manquants.nombre === 0}
+    aria-current={manquants.affiche ? 'true' : undefined} title="Livres dont le fichier est introuvable" onclick={() => onafficher(ID_MANQUANTS)} data-testid="liste-manquants">
+    <span class="glyphe" aria-hidden="true">⚠</span>
+    <span class="nom">Livres manquants</span>
+    <span class="compte" data-testid="compte-manquants">{manquants.nombre.toLocaleString('fr-FR')}</span>
+  </button>
+
   {#if listes.info}
     <p class="info" class:erreur={listes.info.erreur} role={listes.info.erreur ? 'alert' : 'status'} data-testid="listes-info">
       <span>{listes.info.erreur ? '⚠ ' : ''}{listes.info.texte}</span>
@@ -695,6 +704,15 @@
   .plus { padding: 0 8px; line-height: 22px; }
   .lecture-seule { margin: 0 4px 6px; padding: 6px 8px; font-size: 12px; border-radius: var(--cr-rayon); background: var(--cr-fond-survol); color: var(--cr-texte-discret); }
   .lecture-seule.comicrack { color: var(--cr-erreur); border: 1px solid var(--cr-erreur); }
+  .entree-manquants {
+    flex: none; display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 4px; padding: 4px 6px; text-align: left;
+    background: none; border: 1px solid transparent; border-radius: var(--cr-rayon);
+  }
+  .entree-manquants:hover { background: var(--cr-fond-survol); }
+  .entree-manquants.aucun:not(.courante) { color: var(--cr-texte-discret); }
+  .entree-manquants.courante { background: var(--cr-accent); color: var(--cr-accent-texte); }
+  .entree-manquants .nom { flex: 1; }
+  .entree-manquants.courante .compte { color: inherit; }
   .arbre { flex: 1; min-height: 60px; overflow: auto; outline: none; padding: 2px 0; border-radius: var(--cr-rayon); }
   .arbre:focus-visible { box-shadow: inset 0 0 0 2px var(--cr-accent); }
   .ligne {

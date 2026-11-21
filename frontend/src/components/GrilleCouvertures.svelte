@@ -157,6 +157,7 @@
           {#if l}
             <img src={l.urlCouverture} alt="" loading="lazy" decoding="async" draggable="false" />
             {#if l.lu}<span class="lu" title="Lu">✓</span>{/if}
+            {#if l.manquant}<span class="manquant" title="Fichier introuvable" data-testid="badge-manquant">⚠ manquant</span>{/if}
             {#if bib.debutGroupe(i)}
               <!-- En-tête du groupe : clic = toute la série (ou tout l'éditeur) ; on peut la glisser aussitôt. -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -213,6 +214,11 @@
   .lu {
     position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px; border-radius: 50%;
     background: var(--cr-accent); color: var(--cr-accent-texte); font-size: 12px; line-height: 20px; text-align: center;
+  }
+  .lu:has(~ .manquant) { bottom: 28px; }
+  .manquant {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 6px; text-align: center; font-size: 11px; font-weight: 600;
+    background: color-mix(in srgb, var(--cr-erreur) 88%, black); color: #fff;
   }
   .groupe {
     position: absolute; left: 6px; top: 6px; max-width: calc(100% - 12px); padding: 1px 7px;
