@@ -1225,9 +1225,7 @@ fn piles_refus() {
     let mut c: CriteresListe = b.lire_criteres(None).unwrap().criteres;
     c.nom = "Intelligente".into();
     let intel = b.enregistrer_criteres(None, &c, None, None, None).unwrap().creee.unwrap();
-    let err = b
-        .deplacer_piles_liste(&intel, &requete(Some(&intel), "ordre", None), &s(&["Warlock"]), 0)
-        .unwrap_err();
+    let err = b.deplacer_piles_liste(&intel, &requete(Some(&intel), "ordre", None), &s(&["Warlock"]), 0).unwrap_err();
     assert!(err.contains("n'est pas une liste de lecture"), "{err}");
     assert_eq!(ordre_liste(&b, &l), avant, "rien d'écrit");
 
