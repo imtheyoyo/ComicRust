@@ -188,6 +188,7 @@
    *  le scan des dossiers tient la base à jour. */
   async function demarrerManquants(mode: string) {
     manquants.surModification = () => void listes.charger();
+    manquants.surRetour = () => choisirListe(null);
     await manquants.demarrer(mode === 'comicrack');
   }
 

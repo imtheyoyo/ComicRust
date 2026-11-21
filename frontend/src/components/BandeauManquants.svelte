@@ -16,7 +16,7 @@
 
 <div class="bandeau" data-testid="bandeau-manquants">
   <div class="ligne">
-    <button type="button" onclick={() => manquants.masquer()} data-testid="manquants-toute">✖ Toute la bibliothèque</button>
+    <button type="button" onclick={() => manquants.retourBibliotheque()} data-testid="manquants-toute">✖ Toute la bibliothèque</button>
     <button type="button" onclick={() => void manquants.verifier()} disabled={!!v} data-testid="manquants-verifier">🔄 Vérifier à nouveau</button>
     <button type="button" onclick={() => manquants.demanderDossier([])} disabled={!!manquants.raison || manquants.nombre === 0} title={manquants.raison} data-testid="manquants-dossier">🔍 Rechercher dans un dossier…</button>
     <button type="button" onclick={onretirer} disabled={!!manquants.raison || manquants.nombre === 0} title={manquants.raison ?? 'Retire les fiches (jamais les fichiers) : la sélection, ou tous les livres affichés'} data-testid="manquants-retirer">🗑 Retirer…</button>

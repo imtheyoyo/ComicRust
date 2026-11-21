@@ -971,7 +971,7 @@
     }
   }
 
-  const nomListe = $derived(liste ? `${glypheListe(liste)} ${liste.nom}` : '');
+  const nomListe = $derived(liste ? `${liste.id === ID_MANQUANTS ? '⚠' : glypheListe(liste)} ${liste.nom}` : '');
 
   async function fenetreFermee() {
     infosDe = null;

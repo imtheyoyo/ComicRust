@@ -158,7 +158,7 @@
       {/if}
       {#if f.prep.confirmationRequise}
         <label class="confirme"><input type="checkbox" bind:checked={f.confirme} data-testid="retrait-confirme" />
-          Je confirme le retrait de {f.ids.length.toLocaleString('fr-FR')} livres, dont des fichiers encore présents.</label>
+          Je confirme le retrait de {f.ids.length.toLocaleString('fr-FR')} livre{f.ids.length > 1 ? 's' : ''} (fichiers encore présents ou non vérifiables, ou retrait important).</label>
       {/if}
       {#if f.erreur}<p class="erreur" role="alert">{f.erreur}</p>{/if}
       <div class="pied">

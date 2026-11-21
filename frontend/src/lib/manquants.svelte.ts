@@ -75,6 +75,8 @@ class Manquants {
   info = $state('');
   /** Branché par l'application : relire les listes (comptes) après une modification de fiches. */
   surModification: () => void = () => {};
+  /** Branché par l'application : quitte la vue des manquants (retour à toute la bibliothèque). */
+  surRetour: () => void = () => {};
   /** Branché par la vue : rouvre le livre `id` (bouton « Réessayer » du volume injoignable). */
   surRouvrir: (id: string) => void = () => {};
 
@@ -132,6 +134,11 @@ class Manquants {
 
   masquer(): void {
     this.affiche = false;
+  }
+
+  /** « Toute la bibliothèque » : l'application revient à la vue de la bibliothèque. */
+  retourBibliotheque(): void {
+    this.surRetour();
   }
 
   /** « Vérifier les fichiers » : avancement relu toutes les 400 ms, bilan dans l'état. */
