@@ -17,7 +17,7 @@ use comicrust_core::store::{new_book_id, Store, StoreConfig, SQLITE_FILE_NAME};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -261,6 +261,74 @@ pub enum EvenementScan {
     Progression { fait: usize, total: usize },
     Termine { ajoutes: usize, mis_a_jour: usize, manquants: usize },
     Erreur { message: String },
+    /// Bilan détaillé de l'analyse, émis juste avant `Termine` (`scan-bilan`).
+    Bilan(BilanScan),
+}
+
+/// Nombre maximal d'erreurs détaillées dans le bilan (le total exact reste donné).
+pub const MAX_ERREURS_BILAN: usize = 500;
+
+/// Un fichier ou dossier que l'analyse n'a pas pu lire.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ErreurFichier {
+    pub chemin: String,
+    pub message: String,
+}
+
+/// Bilan d'une analyse (fenêtre « Analyse des dossiers » de la version egui, `scan_window`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BilanScan {
+    /// Résumé d'une ligne (`ScanReport::summary`).
+    pub resume: String,
+    /// Nombre de dossiers analysés.
+    pub dossiers: usize,
+    /// Nombre de fichiers de BD trouvés.
+    pub fichiers: usize,
+    /// L'analyse a été arrêtée par l'utilisateur (le bilan est alors partiel).
+    pub arretee: bool,
+    /// Erreurs et avertissements (au plus [`MAX_ERREURS_BILAN`]).
+    pub erreurs: Vec<ErreurFichier>,
+    /// Nombre total d'erreurs (peut dépasser `erreurs.len()`).
+    pub erreurs_total: usize,
+    /// Texte prêt à copier (bouton « Copier le bilan »).
+    pub texte: String,
+}
+
+impl BilanScan {
+    /// Bilan d'un rapport du cœur.
+    pub fn depuis_rapport(r: &comicrust_core::scanner::ScanReport, dossiers: usize) -> Self {
+        let erreurs: Vec<ErreurFichier> = r
+            .errors
+            .iter()
+            .take(MAX_ERREURS_BILAN)
+            .map(|(p, m)| ErreurFichier { chemin: p.display().to_string(), message: m.clone() })
+            .collect();
+        let mut b = BilanScan {
+            resume: r.summary(),
+            dossiers,
+            fichiers: r.files_seen,
+            arretee: r.cancelled,
+            erreurs,
+            erreurs_total: r.errors.len(),
+            texte: String::new(),
+        };
+        b.texte = b.texte_copiable(env!("CARGO_PKG_VERSION"));
+        b
+    }
+
+    /// Texte du bilan (format du bouton « Copier le bilan » de la version egui).
+    pub fn texte_copiable(&self, version: &str) -> String {
+        let mut t = format!("ComicRust v{version} — analyse des dossiers\n{}\n", self.resume);
+        t.push_str(&format!("{} dossier(s) analysé(s).\n", self.dossiers));
+        for e in &self.erreurs {
+            t.push_str(&format!("- {} : {}\n", e.chemin, e.message));
+        }
+        if self.erreurs_total > self.erreurs.len() {
+            t.push_str(&format!("… et {} autre(s) erreur(s) non détaillée(s).\n", self.erreurs_total - self.erreurs.len()));
+        }
+        t
+    }
 }
 
 impl EvenementScan {
@@ -273,6 +341,7 @@ impl EvenementScan {
                 ("scan-termine", json!({"ajoutes": ajoutes, "misAJour": mis_a_jour, "manquants": manquants}))
             }
             EvenementScan::Erreur { message } => ("scan-erreur", json!({"message": message})),
+            EvenementScan::Bilan(b) => ("scan-bilan", json!(b)),
         }
     }
 }
@@ -311,6 +380,8 @@ struct Interne {
     contenu: u64,
     vue: Option<(CleVue, Arc<Vue>)>,
     scan_en_cours: bool,
+    /// Drapeau d'arrêt de l'analyse en cours (`None` : pas d'analyse) ; voir [`Biblio::arreter_scan`].
+    annulation_scan: Option<Arc<AtomicBool>>,
     /// Une opération d'édition (fiches, fichiers, renommage) est en cours : l'analyse et le
     /// changement de bibliothèque attendent sa fin (sinon un fichier renommé pendant l'analyse
     /// serait ajouté comme un nouveau livre, et la bibliothèque rechargée écraserait les fiches
@@ -364,7 +435,9 @@ struct GardeScan(Arc<Mutex<Interne>>);
 
 impl Drop for GardeScan {
     fn drop(&mut self) {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).scan_en_cours = false;
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.scan_en_cours = false;
+        g.annulation_scan = None;
     }
 }
 
@@ -814,6 +887,15 @@ impl Biblio {
     /// (environ 5 fois par seconde) puis `Termine` ou `Erreur`. La bibliothèque affichée est
     /// rechargée avant `Termine`.
     pub fn lancer_scan(&self, sortie: Arc<dyn Fn(EvenementScan) + Send + Sync>) -> Result<(), String> {
+        self.lancer_scan_avec(sortie, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Comme [`Biblio::lancer_scan`], avec le drapeau d'arrêt donné (les tests le lèvent d'avance).
+    pub(crate) fn lancer_scan_avec(
+        &self,
+        sortie: Arc<dyn Fn(EvenementScan) + Send + Sync>,
+        annule: Arc<AtomicBool>,
+    ) -> Result<(), String> {
         let (cfg, base, generation) = {
             let mut g = self.verrou();
             let cfg = match (g.mode, &g.store) {
@@ -833,6 +915,7 @@ impl Biblio {
             }
             let base = g.base.clone().ok_or("aucune bibliothèque ouverte")?;
             g.scan_en_cours = true;
+            g.annulation_scan = Some(annule.clone());
             (cfg, base, g.generation)
         };
         // À partir d'ici, toute sortie (erreur, panique du fil) remet l'indicateur à faux.
@@ -847,7 +930,7 @@ impl Biblio {
         };
         let me = self.clone();
         let lancement = std::thread::Builder::new().name("comicrust-analyse".into()).spawn(move || {
-            let resultat = me.analyser(&cfg, &dossiers, &base, generation, &*sortie);
+            let resultat = me.analyser(&cfg, &dossiers, &base, generation, &annule, &*sortie);
             // Libéré avant l'événement final : le front peut relancer aussitôt.
             drop(garde);
             sortie(match resultat {
@@ -861,6 +944,48 @@ impl Biblio {
         Ok(())
     }
 
+    /// Demande l'arrêt de l'analyse en cours (« Arrêter l'analyse »). L'analyse s'arrête au plus
+    /// tôt, enregistre ce qu'elle a déjà lu, recharge la bibliothèque puis émet `scan-bilan`
+    /// (`arretee` vrai) et `scan-termine`. Renvoie faux s'il n'y a pas d'analyse en cours.
+    pub fn arreter_scan(&self) -> bool {
+        match &self.verrou().annulation_scan {
+            Some(a) => {
+                a.store(true, Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Pourquoi l'analyse automatique du démarrage n'a pas lieu (`None` : elle peut avoir lieu).
+    /// Jamais en mode lié à ComicRack (lecture seule : pas d'analyse), jamais hors ligne, ni sans
+    /// dossier surveillé, ni si l'utilisateur l'a désactivée (réglage `analyse.auDemarrage`, activé
+    /// par défaut comme `scan_after_load` de la version egui).
+    pub fn motif_pas_d_analyse_auto(&self) -> Option<&'static str> {
+        if self.verrou().mode != Some(Mode::Autonome) {
+            return Some("bibliothèque non autonome (lecture seule)");
+        }
+        if !reglages::lire_reglages_analyse(&self.data).map(|r| r.au_demarrage).unwrap_or(true) {
+            return Some("désactivée dans les réglages");
+        }
+        if self.connexion.message_hors_ligne().is_some() {
+            return Some("base hors ligne");
+        }
+        if self.dossiers().map(|d| d.is_empty()).unwrap_or(true) {
+            return Some("aucun dossier à analyser");
+        }
+        None
+    }
+
+    /// Analyse du démarrage : lance l'analyse si [`Biblio::motif_pas_d_analyse_auto`] n'y
+    /// s'oppose pas. Renvoie vrai si elle a été lancée.
+    pub fn lancer_scan_auto(&self, sortie: Arc<dyn Fn(EvenementScan) + Send + Sync>) -> Result<bool, String> {
+        if self.motif_pas_d_analyse_auto().is_some() {
+            return Ok(false);
+        }
+        self.lancer_scan(sortie).map(|()| true)
+    }
+
     /// Corps de l'analyse (dans son fil) : parcours + enregistrement, puis rechargement.
     fn analyser(
         &self,
@@ -868,17 +993,17 @@ impl Biblio {
         dossiers: &[PathBuf],
         base: &Arc<ComicDatabase>,
         generation: u64,
+        annule: &AtomicBool,
         sortie: &(dyn Fn(EvenementScan) + Send + Sync),
     ) -> Result<EvenementScan, String> {
         let progression = ScanProgress::default();
-        let annule = AtomicBool::new(false);
         let rapport = std::thread::scope(|s| {
             let travail = s.spawn(|| -> Result<_, String> {
                 let mut store = Store::open_existing(cfg).map_err(|e| e.to_string())?;
                 // Enregistré au fil de l'eau (lots de 200) ; seules les colonnes venant des
                 // fichiers sont écrites (voir `Store::scan_into`).
                 let (rapport, _) = store
-                    .scan_into(dossiers, &base.books, &progression, &annule, new_book_id)
+                    .scan_into(dossiers, &base.books, &progression, annule, new_book_id)
                     .map_err(|e| e.to_string())?;
                 Ok(rapport)
             });
@@ -906,6 +1031,7 @@ impl Biblio {
             g.ajoutes = rapport.added.iter().map(|b| b.id.clone()).collect();
         }
         self.negatif.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        sortie(EvenementScan::Bilan(BilanScan::depuis_rapport(&rapport, dossiers.len())));
         Ok(EvenementScan::Termine {
             ajoutes: rapport.added.len(),
             mis_a_jour: rapport.updated.len(),

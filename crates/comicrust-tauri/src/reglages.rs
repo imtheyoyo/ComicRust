@@ -58,6 +58,9 @@ pub struct Reglages {
     /// valeurs secrètes chiffrées par `comicrust_core::secret`). Lecture tolérante.
     #[serde(skip_serializing_if = "ReglagesScripts::est_vide")]
     pub scripts: ReglagesScripts,
+    /// Analyse des dossiers au démarrage et suivi des modifications faites dans ComicRack.
+    #[serde(skip_serializing_if = "ReglagesAnalyse::est_vide")]
+    pub analyse: ReglagesAnalyse,
 }
 
 /// Réglages des scripts Python (section `scripts`, `docs/tauri/ipc-scripts.md`) :
@@ -147,6 +150,67 @@ impl ReglagesMaj {
 impl<'de> Deserialize<'de> for ReglagesMaj {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         Ok(Self::depuis_json(&Value::deserialize(d)?))
+    }
+}
+
+/// Réglages de l'analyse et du suivi (section `analyse`, `docs/tauri/ipc-scan.md`) :
+/// - `auDemarrage` : analyser les dossiers dès que la bibliothèque est chargée (absent = **oui**,
+///   comme `scan_after_load = true` de la version egui) ; jamais en mode lié ni hors ligne ;
+/// - `suivreComicrack` : suivre les modifications faites dans ComicRack (absent = **oui**,
+///   `auto_refresh` de la version egui). Sans effet sur la base de ComicRust (toujours suivie).
+///
+/// Lecture tolérante (champ invalide ignoré).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReglagesAnalyse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub au_demarrage: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suivre_comicrack: Option<bool>,
+}
+
+impl ReglagesAnalyse {
+    pub fn est_vide(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Depuis du JSON quelconque (champ invalide ignoré).
+    pub fn depuis_json(v: &Value) -> Self {
+        let Some(o) = v.as_object() else { return Self::default() };
+        Self {
+            au_demarrage: o.get("auDemarrage").and_then(Value::as_bool),
+            suivre_comicrack: o.get("suivreComicrack").and_then(Value::as_bool),
+        }
+    }
+
+    /// Les champs présents dans `m` remplacent les nôtres.
+    pub fn fusionner(&mut self, m: ReglagesAnalyse) {
+        if m.au_demarrage.is_some() {
+            self.au_demarrage = m.au_demarrage;
+        }
+        if m.suivre_comicrack.is_some() {
+            self.suivre_comicrack = m.suivre_comicrack;
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ReglagesAnalyse {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::depuis_json(&Value::deserialize(d)?))
+    }
+}
+
+/// Réglages de l'analyse avec leurs valeurs par défaut appliquées (ce que voit le front).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReglagesAnalyseComplets {
+    pub au_demarrage: bool,
+    pub suivre_comicrack: bool,
+}
+
+impl From<&ReglagesAnalyse> for ReglagesAnalyseComplets {
+    fn from(r: &ReglagesAnalyse) -> Self {
+        Self { au_demarrage: r.au_demarrage.unwrap_or(true), suivre_comicrack: r.suivre_comicrack.unwrap_or(true) }
     }
 }
 
@@ -584,6 +648,19 @@ pub fn enregistrer_reglages_edition(data: &Path, m: ReglagesEdition) -> Result<R
     })
 }
 
+/// Réglages de l'analyse et du suivi (valeurs par défaut : tout activé, comme la version egui).
+pub fn lire_reglages_analyse(data: &Path) -> Result<ReglagesAnalyseComplets, String> {
+    Ok((&lire(data)?.analyse).into())
+}
+
+/// Fusionne `m` dans les réglages de l'analyse ; renvoie l'ensemble à jour.
+pub fn enregistrer_reglages_analyse(data: &Path, m: ReglagesAnalyse) -> Result<ReglagesAnalyseComplets, String> {
+    modifier(data, |r| {
+        r.analyse.fusionner(m);
+        (&r.analyse).into()
+    })
+}
+
 /// Fusionne `m` dans les préférences enregistrées ; renvoie les préférences à jour.
 pub fn enregistrer_preferences_vue(data: &Path, m: PreferencesVue) -> Result<PreferencesVue, String> {
     modifier(data, |r| {
@@ -655,6 +732,7 @@ mod tests {
                 actives: Default::default(),
                 valeurs: [("a.py".to_string(), serde_json::json!({"n": 3}))].into(),
             },
+            analyse: ReglagesAnalyse { au_demarrage: Some(false), suivre_comicrack: None },
         };
         ecrire(d.path(), &r).unwrap();
         assert_eq!(lire(d.path()).unwrap(), r);
@@ -937,5 +1015,53 @@ mod tests {
         let p = PreferencesVue::depuis_json(&json);
         assert_eq!(p.lecteur, None);
         assert_eq!(p.tri.as_deref(), Some("titre"));
+    }
+
+    #[test]
+    fn analyse_options_par_defaut_activees() {
+        let d = tempfile::tempdir().unwrap();
+        let r = lire_reglages_analyse(d.path()).unwrap();
+        assert!(r.au_demarrage && r.suivre_comicrack, "analyse au démarrage et suivi activés par défaut");
+        // Rien d'écrit tant que l'utilisateur n'a rien choisi.
+        assert!(!chemin_reglages(d.path()).exists());
+    }
+
+    #[test]
+    fn analyse_options_fusion_et_persistance() {
+        let d = tempfile::tempdir().unwrap();
+        enregistrer_preferences_vue(d.path(), PreferencesVue { tri: Some("titre".into()), ..Default::default() })
+            .unwrap();
+        let r =
+            enregistrer_reglages_analyse(d.path(), ReglagesAnalyse { au_demarrage: Some(false), ..Default::default() })
+                .unwrap();
+        assert!(!r.au_demarrage && r.suivre_comicrack);
+        let r = enregistrer_reglages_analyse(
+            d.path(),
+            ReglagesAnalyse { suivre_comicrack: Some(false), ..Default::default() },
+        )
+        .unwrap();
+        assert!(!r.au_demarrage && !r.suivre_comicrack, "le second enregistrement garde le premier choix");
+        // Les autres sections ne sont pas perdues, et le choix survit à une relecture.
+        let relu = lire(d.path()).unwrap();
+        assert_eq!(relu.vue.tri.as_deref(), Some("titre"));
+        assert_eq!(relu.analyse, ReglagesAnalyse { au_demarrage: Some(false), suivre_comicrack: Some(false) });
+        enregistrer_reglages_analyse(
+            d.path(),
+            ReglagesAnalyse { au_demarrage: Some(true), suivre_comicrack: Some(true) },
+        )
+        .unwrap();
+        assert!(lire_reglages_analyse(d.path()).unwrap().au_demarrage);
+    }
+
+    #[test]
+    fn analyse_lecture_tolerante() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(chemin_reglages(d.path()), r#"{"analyse": {"auDemarrage": "oui", "suivreComicrack": false}}"#)
+            .unwrap();
+        let r = lire_reglages_analyse(d.path()).unwrap();
+        assert!(r.au_demarrage, "valeur invalide ignorée : défaut");
+        assert!(!r.suivre_comicrack);
+        std::fs::write(chemin_reglages(d.path()), r#"{"analyse": 3}"#).unwrap();
+        assert!(lire_reglages_analyse(d.path()).unwrap().au_demarrage);
     }
 }

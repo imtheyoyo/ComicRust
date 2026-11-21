@@ -154,13 +154,13 @@ impl Connexion {
         verrou(&self.hors_ligne).as_ref().map_or(0, |h| h.essais)
     }
 
-    fn passer_hors_ligne(&self, message: String) {
+    pub(crate) fn passer_hors_ligne(&self, message: String) {
         let mut g = verrou(&self.hors_ligne);
         let essais = g.as_ref().map_or(0, |h| h.essais) + 1;
         *g = Some(HorsLigne { message, essais });
     }
 
-    fn revenir_en_ligne(&self) {
+    pub(crate) fn revenir_en_ligne(&self) {
         *verrou(&self.hors_ligne) = None;
     }
 
@@ -220,7 +220,7 @@ enum Veilleur {
 pub struct Sondeur {
     biblio: Biblio,
     /// (génération de la base, source) pour lesquelles `veilleur` a été créé.
-    cle: Option<(u64, SourceBiblio)>,
+    cle: Option<(u64, SourceBiblio, bool)>,
     veilleur: Option<Veilleur>,
     /// Dernier état émis ou lu (pour n'émettre que les transitions).
     dernier: Option<EtatBase>,
@@ -245,12 +245,16 @@ impl Sondeur {
         if inst.occupe {
             return evenements;
         }
-        let cle = (inst.generation, inst.source.clone());
+        // Option « Suivre les modifications faites dans ComicRack » (`auto_refresh` d'egui) :
+        // relue à chaque sondage, un changement prend effet au sondage suivant.
+        let suivre = self.biblio.suivre_comicrack();
+        let cle = (inst.generation, inst.source.clone(), suivre);
         if self.cle.as_ref() != Some(&cle) {
             self.veilleur = match &inst.source {
-                SourceBiblio::ComicrackMysql(cfg) => {
+                SourceBiblio::ComicrackMysql(cfg) if suivre => {
                     Some(Veilleur::Mysql(Box::new(Watcher::new(cfg.clone(), &inst.base))))
                 }
+                SourceBiblio::ComicrackMysql(_) => None,
                 SourceBiblio::Autonome(cfg) => {
                     Some(Veilleur::Autonome(Box::new(StoreWatcher::new(cfg.clone(), &inst.base))))
                 }
