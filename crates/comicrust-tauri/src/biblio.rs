@@ -1061,10 +1061,10 @@ impl Biblio {
     }
 }
 
-#[path = "biblio_surveillance.rs"]
-mod surveillance_biblio;
 #[path = "biblio_manquants.rs"]
 mod manquants_biblio;
+#[path = "biblio_surveillance.rs"]
+mod surveillance_biblio;
 
 // ───────────────────────────── Fonctions utilitaires ─────────────────────────────
 

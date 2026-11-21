@@ -282,10 +282,9 @@ impl EvenementManquants {
     /// `origine: "manquants"` les distingue.
     pub fn pour_le_front(&self) -> (&'static str, serde_json::Value) {
         match self {
-            EvenementManquants::Modifiee { ids, retires } => (
-                "bibliotheque-modifiee",
-                serde_json::json!({"ids": ids, "origine": "manquants", "supprimes": retires}),
-            ),
+            EvenementManquants::Modifiee { ids, retires } => {
+                ("bibliotheque-modifiee", serde_json::json!({"ids": ids, "origine": "manquants", "supprimes": retires}))
+            }
         }
     }
 }
@@ -591,7 +590,11 @@ impl Manquants {
         }
     }
 
-    fn occuper(&self, genre: Genre, dossier: Option<String>) -> Result<(Occupation, Arc<Progress>, Arc<AtomicBool>), String> {
+    fn occuper(
+        &self,
+        genre: Genre,
+        dossier: Option<String>,
+    ) -> Result<(Occupation, Arc<Progress>, Arc<AtomicBool>), String> {
         let mut g = self.verrou();
         let t = Travail::nouveau();
         let (p, a) = (t.progression.clone(), t.annule.clone());
@@ -618,9 +621,7 @@ impl Manquants {
     /// `<WatchFolders>` du `ComicDb.xml` de ComicRack. Vide si illisible.
     fn dossiers_surveilles(&self) -> Vec<PathBuf> {
         match self.biblio.source_listes() {
-            Ok(Source::Store(cfg)) => {
-                Store::open_existing(&cfg).and_then(|mut s| s.folders()).unwrap_or_default()
-            }
+            Ok(Source::Store(cfg)) => Store::open_existing(&cfg).and_then(|mut s| s.folders()).unwrap_or_default(),
             Ok(Source::ComicDb(p)) => std::fs::read_to_string(p)
                 .ok()
                 .map(|xml| read_watch_folders(xml.trim_start_matches('\u{feff}')))
@@ -666,11 +667,7 @@ impl Manquants {
         // Marqués (vrai ou faux) avant : seuls ceux-là sont à remettre à zéro dans la base.
         let retours: Vec<String> = {
             let base = self.biblio.base().ok()?;
-            presents
-                .iter()
-                .filter(|id| matches!(base.get(id).map(|b| b.missing), Some(Some(_))))
-                .cloned()
-                .collect()
+            presents.iter().filter(|id| matches!(base.get(id).map(|b| b.missing), Some(Some(_)))).cloned().collect()
         };
         let marques: Vec<_> = manquants
             .iter()
@@ -740,20 +737,14 @@ impl Manquants {
             let deja = matches!((m, fiche.missing), (true, Some(true)) | (false, None | Some(false)));
             if !deja {
                 let vus: HashMap<String, String> = [(fiche.id.to_ascii_lowercase(), fichier.clone())].into();
-                let (manquants, retours) = if m { (vec![fiche.id.clone()], vec![]) } else { (vec![], vec![fiche.id.clone()]) };
+                let (manquants, retours) =
+                    if m { (vec![fiche.id.clone()], vec![]) } else { (vec![], vec![fiche.id.clone()]) };
                 let modifies = self.biblio.marquer_manquants(&[(fiche.id.clone(), fichier.clone(), m)]);
                 avertissement = self.enregistrer_marques(manquants, retours, &vus);
                 self.signaler(modifies, 0);
             }
         }
-        Ok(SondeLivre {
-            id: fiche.id.clone(),
-            titre: fiche.caption(),
-            fichier,
-            etat,
-            racine,
-            avertissement,
-        })
+        Ok(SondeLivre { id: fiche.id.clone(), titre: fiche.caption(), fichier, etat, racine, avertissement })
     }
 
     // ───────────── Retrouver le fichier ─────────────
@@ -878,13 +869,18 @@ impl Manquants {
         Ok(BilanOperation { nb: n, info, erreur: None })
     }
 
-    fn relocaliser_comicrack(&self, cfg: &DbConfig, livres: &[(LibraryBook, PathBuf)]) -> Result<Vec<LibraryBook>, String> {
+    fn relocaliser_comicrack(
+        &self,
+        cfg: &DbConfig,
+        livres: &[(LibraryBook, PathBuf)],
+    ) -> Result<Vec<LibraryBook>, String> {
         let mut editions = Vec::new();
         for (b, chemin) in livres {
             let f = etat_fichier(chemin).map_err(|e| format!("{} : {e}", chemin.display()))?;
             editions.push(BookEdit::new(&b.id).file(&f).remove("Missing"));
         }
-        let rapport = db::update_books(cfg, &editions).map_err(|e| format!("base ComicRack inaccessible, fiches non modifiées : {e}"))?;
+        let rapport = db::update_books(cfg, &editions)
+            .map_err(|e| format!("base ComicRack inaccessible, fiches non modifiées : {e}"))?;
         self.biblio.signaler_rapport_comicrack(&rapport);
         if let Some((id, m)) = rapport.failed.first() {
             return Err(format!("{id} : {m}"));
@@ -953,7 +949,8 @@ impl Manquants {
         let retires = self.biblio.retirer_fiches_memoire(&tous);
         self.signaler(tous, retires);
         let k = retrait.supprimes.len();
-        let mut info = format!("{k} livre{} retiré{} de la bibliothèque (fichiers non touchés).", pluriel(k), pluriel(k));
+        let mut info =
+            format!("{k} livre{} retiré{} de la bibliothèque (fichiers non touchés).", pluriel(k), pluriel(k));
         if let Some(e) = &retrait.erreur {
             info.push_str(&format!(" Retrait incomplet : {e}"));
         }
@@ -980,7 +977,8 @@ fn supprimer(cible: &Cible, ids: &[String]) -> Result<Retrait, String> {
             Ok(Retrait { supprimes, absents, erreur: None })
         }
         Cible::Comicrack(cfg) => {
-            let r = db::delete_books(cfg, ids).map_err(|e| format!("base ComicRack inaccessible, fiches non retirées : {e}"))?;
+            let r = db::delete_books(cfg, ids)
+                .map_err(|e| format!("base ComicRack inaccessible, fiches non retirées : {e}"))?;
             let erreur = r.failed.first().map(|(id, e)| {
                 format!("{} fiche(s) supprimée(s), {} en erreur (ex. {id} : {e})", r.deleted.len(), r.failed.len())
             });

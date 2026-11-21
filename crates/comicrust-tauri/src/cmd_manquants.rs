@@ -6,8 +6,8 @@
 //! principal (un NAS éteint ne fige jamais la fenêtre).
 
 use crate::manquants::{
-    BilanOperation, BilanVerification, DemandeRelocalisation, EtatManquants, Manquants, PreparationRetrait, Proposition,
-    ResultatRecherche, SondeLivre,
+    BilanOperation, BilanVerification, DemandeRelocalisation, EtatManquants, Manquants, PreparationRetrait,
+    Proposition, ResultatRecherche, SondeLivre,
 };
 
 /// État léger : nombre de livres manquants, avancement de la vérification ou de la recherche en
@@ -66,7 +66,10 @@ pub fn appliquer_relocalisations(
 
 /// Fenêtre « Retirer de la bibliothèque » : légendes et vérification des fichiers.
 #[tauri::command(async)]
-pub fn preparer_retrait(manquants: tauri::State<'_, Manquants>, ids: Vec<String>) -> Result<PreparationRetrait, String> {
+pub fn preparer_retrait(
+    manquants: tauri::State<'_, Manquants>,
+    ids: Vec<String>,
+) -> Result<PreparationRetrait, String> {
     manquants.preparer_retrait(&ids)
 }
 

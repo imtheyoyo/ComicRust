@@ -167,7 +167,12 @@ fn fichier_deplace_marque_manquant_et_enregistre_dans_la_base() {
     // Enregistré dans la base de ComicRust (comme l'analyse des dossiers).
     assert_eq!(b.manquant_en_base(&id), Some(true));
     // La vue a été invalidée : un événement a été émis pour rafraîchir l'affichage.
-    assert!(b.evenements.lock().unwrap().iter().any(|e| matches!(e, EvenementManquants::Modifiee { ids, .. } if ids == &[id.clone()])));
+    assert!(b
+        .evenements
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| matches!(e, EvenementManquants::Modifiee { ids, .. } if ids == std::slice::from_ref(&id))));
 
     // Le fichier revient : le livre n'est plus manquant, partout.
     std::fs::rename(b.bd.parent().unwrap().join("ailleurs").join("Thanos 02.cbz"), &ancien).unwrap();
@@ -262,7 +267,10 @@ fn fichier_deplace_retrouve_par_nom_dans_un_dossier() {
     b.service.verifier().unwrap();
     assert_eq!(b.service.compter(), 1);
 
-    let r = b.service.chercher(std::slice::from_ref(&id), &format!("\"{}\"", b.bd.parent().unwrap().join("range").display())).unwrap();
+    let r = b
+        .service
+        .chercher(std::slice::from_ref(&id), &format!("\"{}\"", b.bd.parent().unwrap().join("range").display()))
+        .unwrap();
     assert_eq!(r.propositions.len(), 1, "{r:?}");
     let p = &r.propositions[0];
     assert_eq!((p.id.as_str(), p.coche, p.sure, p.autres), (id.as_str(), true, true, 0));
@@ -300,7 +308,7 @@ fn recherche_sans_resultat_et_livres_non_manquants_ignores() {
     let vide = b.bd.parent().unwrap().join("vide");
     std::fs::create_dir_all(&vide).unwrap();
     let id = b.id_de("Thanos 01.cbz");
-    let r = b.service.chercher(&[id.clone()], &vide.to_string_lossy()).unwrap();
+    let r = b.service.chercher(std::slice::from_ref(&id), &vide.to_string_lossy()).unwrap();
     assert!(r.propositions.is_empty());
     assert!(r.info.as_deref().unwrap().starts_with("Aucun fichier retrouvé dans"), "{:?}", r.info);
     // Plusieurs livres dont aucun n'est manquant : rien à chercher.
@@ -337,8 +345,16 @@ fn fichier_choisi_a_la_main_nom_taille_et_doublon() {
 
     // Chemins invalides.
     assert!(b.service.proposer_fichier(&id, "").unwrap_err().contains("vide"));
-    assert!(b.service.proposer_fichier(&id, &format!("{}/rien.cbz", b.bd.display())).unwrap_err().starts_with("fichier introuvable"));
-    assert!(b.service.proposer_fichier(&id, &b.bd.to_string_lossy()).unwrap_err().starts_with("ce n'est pas un fichier"));
+    assert!(b
+        .service
+        .proposer_fichier(&id, &format!("{}/rien.cbz", b.bd.display()))
+        .unwrap_err()
+        .starts_with("fichier introuvable"));
+    assert!(b
+        .service
+        .proposer_fichier(&id, &b.bd.to_string_lossy())
+        .unwrap_err()
+        .starts_with("ce n'est pas un fichier"));
     assert!(b.service.proposer_fichier("inconnu", &ancien.to_string_lossy()).unwrap_err().contains("introuvable"));
 }
 
@@ -370,7 +386,7 @@ fn retirer_un_livre_manquant_ne_touche_jamais_les_fichiers() {
     b.service.verifier().unwrap();
 
     let prep = b.service.preparer_retrait(std::slice::from_ref(&id)).unwrap();
-    assert_eq!(prep.ids, [id.clone()]);
+    assert_eq!(prep.ids, std::slice::from_ref(&id));
     assert_eq!((prep.autres, prep.legendes.len()), (0, 1));
     assert!(!prep.confirmation_requise, "fichier bien disparu, volume sûr, un seul livre");
     assert!(!prep.comicrack);
@@ -475,7 +491,10 @@ fn comicdb_xml_en_lecture_seule_rien_n_est_ecrit() {
     let nouveau = d.path().join("ailleurs.cbz");
     cbz_de_test(&nouveau, [10, 20, 30, 255], 2, None);
     assert_eq!(service.proposer_fichier(&id, &nouveau.to_string_lossy()).unwrap_err(), LECTURE_SEULE_XML);
-    assert_eq!(service.chercher(std::slice::from_ref(&id), &d.path().to_string_lossy()).unwrap_err(), LECTURE_SEULE_XML);
+    assert_eq!(
+        service.chercher(std::slice::from_ref(&id), &d.path().to_string_lossy()).unwrap_err(),
+        LECTURE_SEULE_XML
+    );
     let demande = DemandeRelocalisation {
         id: id.clone(),
         ancien: fichier.to_string_lossy().into_owned(),
@@ -499,7 +518,6 @@ fn mysql_comicrack_sans_ecriture_est_en_lecture_seule() {
         user: "u".into(),
         password: "mot-de-passe-factice".into(),
         database: "b".into(),
-        ..Default::default()
     });
     let (service, _) = service(&biblio);
     assert_eq!(service.raison_lecture_seule().as_deref(), Some(LECTURE_SEULE_MYSQL));
