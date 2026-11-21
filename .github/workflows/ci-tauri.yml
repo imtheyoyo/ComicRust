@@ -59,6 +59,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "tests (mcp) en échec" }
       - name: Compilation de l'exécutable
         run: cargo build --locked -p comicrust-tauri --features app,custom-protocol
+      # Livré dans le zip Tauri (release-tauri.yml) : doit compiler.
+      - name: Compilation de comicrust-cli
+        shell: pwsh
+        run: |
+          cargo build --locked -p comicrust-cli
+          if ($LASTEXITCODE -ne 0) { throw "compilation de comicrust-cli en échec" }
       # Variante pilotable par une IA (docs/MCP-tauri.md), dans un dossier de compilation séparé.
       - name: Compilation de la variante MCP
         shell: pwsh

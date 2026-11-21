@@ -125,6 +125,39 @@ fn data_intact(app: &Path) {
     assert_eq!(std::fs::read(app.join("data/themes/perso.css")).unwrap(), b"theme");
 }
 
+/// `comicrust-cli.exe` (livré dans le zip depuis l'étape 10) est géré comme les autres exe :
+/// l'ancien devient `.old`, le nouveau est copié, `data\` reste intact ; absent de l'ancienne
+/// installation, il est simplement ajouté.
+#[test]
+fn comicrust_cli_exe_remplace_comme_les_autres_exe() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = installation(tmp.path());
+    std::fs::write(app.join("comicrust-cli.exe"), b"cli ancien").unwrap();
+    let zip_path = tmp.path().join("maj.zip");
+    std::fs::write(
+        &zip_path,
+        zip_of(&[("ComicRust-Tauri.exe", b"exe 2"), ("comicrust-cli.exe", b"cli 2"), ("LISEZMOI.txt", b"lisez-moi")]),
+    )
+    .unwrap();
+    let extrait = tmp.path().join("extrait");
+    let files = extract(&zip_path, &extrait).unwrap();
+    assert!(contient_exe_principal(&files));
+    apply(&extrait, &files, &app).unwrap();
+    assert_eq!(std::fs::read(app.join("comicrust-cli.exe")).unwrap(), b"cli 2");
+    assert_eq!(std::fs::read(app.join("comicrust-cli.exe.old")).unwrap(), b"cli ancien");
+    assert_eq!(std::fs::read(app.join("LISEZMOI.txt")).unwrap(), b"lisez-moi");
+    data_intact(&app);
+    cleanup(&app);
+    assert!(!app.join("comicrust-cli.exe.old").exists() && app.join("comicrust-cli.exe").exists());
+
+    // Installation sans CLI (version précédente) : ajouté, aucun `.old`.
+    let tmp2 = tempfile::tempdir().unwrap();
+    let app2 = installation(tmp2.path());
+    apply(&extrait, &files, &app2).unwrap();
+    assert_eq!(std::fs::read(app2.join("comicrust-cli.exe")).unwrap(), b"cli 2");
+    assert!(!app2.join("comicrust-cli.exe.old").exists());
+}
+
 #[test]
 fn extraction_et_remplacement_gardent_data_et_renomment_en_old() {
     let tmp = tempfile::tempdir().unwrap();

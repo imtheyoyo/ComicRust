@@ -101,6 +101,10 @@ jobs:
         # custom-protocol : le front compilé (frontend/dist) est embarqué dans l'exécutable.
         run: cargo build --release --locked --target $env:TARGET -p comicrust-tauri --features app,custom-protocol
 
+      # Outil en ligne de commande, livré à côté de l'exécutable (parité avec la version egui).
+      - name: Compilation release (comicrust-cli)
+        run: cargo build --release --locked --target $env:TARGET -p comicrust-cli
+
       # Variante pilotable par une IA pour les tests (docs/MCP-tauri.md), compilée à part pour
       # que ComicRust-Tauri.exe reste inchangé.
       - name: Compilation release (variante MCP)
@@ -114,10 +118,11 @@ jobs:
           $name = "ComicRust-Tauri-$tag-windows-x64"
           $out = "target/$env:TARGET/release"
           New-Item -ItemType Directory -Force "$name/licences" | Out-Null
-          Copy-Item "$out/ComicRust-Tauri.exe", "pdfium/bin/pdfium.dll" $name
+          Copy-Item "$out/ComicRust-Tauri.exe", "$out/comicrust-cli.exe", "pdfium/bin/pdfium.dll" $name
           Copy-Item "target-mcp/$env:TARGET/release/ComicRust-Tauri.exe" "$name/ComicRust-Tauri-mcp.exe"
           Copy-Item docs/MCP-tauri.md $name
-          Copy-Item README.md $name
+          # README propre à la version Tauri (README.md à la racine du dépôt est celui d'egui).
+          Copy-Item README-Tauri.md "$name/README.md"
           Copy-Item "recette/$tag.md" "$name/RECETTE.md"
           Copy-Item pdfium/LICENSE "$name/licences/PDFium-LICENSE.txt"
           Copy-Item licences/* "$name/licences/"
@@ -144,6 +149,20 @@ jobs:
         run: |
           $name = "${{ steps.pkg.outputs.name }}"
           $py = (Resolve-Path "$name/python/python.exe").Path
+          # Outil en ligne de commande du paquet : l'aide (code de sortie non nul, c'est normal)
+          # puis `info` et `render` sur un CBZ minimal fabriqué avec le Python du paquet.
+          $cli = (Resolve-Path "$name/comicrust-cli.exe").Path
+          $ErrorActionPreference = "Continue"
+          $aide = (& $cli --help 2>&1 | Out-String)
+          $ErrorActionPreference = "Stop"
+          if ($aide -notmatch "usage") { throw "comicrust-cli --help : aide absente ($aide)" }
+          $cbz = Join-Path $env:RUNNER_TEMP "essai-cli.cbz"
+          & $py -I -c "import zipfile, base64, sys; png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='); z = zipfile.ZipFile(sys.argv[1], 'w'); z.writestr('001.png', png); z.close()" $cbz
+          if ($LASTEXITCODE -ne 0) { throw "fabrication du CBZ d'essai en échec" }
+          & $cli info $cbz
+          if ($LASTEXITCODE -ne 0) { throw "comicrust-cli info en échec" }
+          & $cli render $cbz 1 (Join-Path $env:RUNNER_TEMP "essai-cli.png")
+          if ($LASTEXITCODE -ne 0) { throw "comicrust-cli render en échec" }
           # Modules natifs de la distribution (SSL, SQLite…).
           & $py -I -c "import ssl, json, urllib.request, sqlite3, zipfile, lzma, bz2, ctypes; print(ssl.OPENSSL_VERSION, '- SQLite', sqlite3.sqlite_version)"
           if ($LASTEXITCODE -ne 0) { throw "Python embarqué : modules natifs indisponibles" }

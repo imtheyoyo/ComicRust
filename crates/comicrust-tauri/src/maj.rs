@@ -11,7 +11,7 @@
 //!    `data\maj\`, renommé à la fin) et de son `.zip.sha256`, contrôle de l'empreinte.
 //! 3. **Installation** : extraction (chemins relatifs uniquement, `../` refusé), le paquet doit
 //!    contenir `ComicRust-Tauri.exe`. Windows interdit d'écraser un exe en cours d'exécution mais
-//!    permet de le **renommer** : chaque fichier remplacé (les deux exe, `pdfium.dll`, les `.md`,
+//!    permet de le **renommer** : chaque fichier remplacé (les exe dont `comicrust-cli.exe`, `pdfium.dll`, les `.md`,
 //!    `licences\`, `python\`) devient `nom.old`, noté dans `data\maj\anciens.txt` et supprimé au
 //!    lancement suivant (seuls ceux-là). Aucun fichier du paquet n'est écrit sous `data\`
 //!    (réglages, thèmes, profil WebView2) ; seul le manifeste des scripts livrés
