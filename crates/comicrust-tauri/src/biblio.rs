@@ -258,9 +258,18 @@ pub struct LivreDetail {
 /// Événements de l'analyse, transmis au front par `app.rs`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvenementScan {
-    Progression { fait: usize, total: usize },
-    Termine { ajoutes: usize, mis_a_jour: usize, manquants: usize },
-    Erreur { message: String },
+    Progression {
+        fait: usize,
+        total: usize,
+    },
+    Termine {
+        ajoutes: usize,
+        mis_a_jour: usize,
+        manquants: usize,
+    },
+    Erreur {
+        message: String,
+    },
     /// Bilan détaillé de l'analyse, émis juste avant `Termine` (`scan-bilan`).
     Bilan(BilanScan),
 }
@@ -325,7 +334,10 @@ impl BilanScan {
             t.push_str(&format!("- {} : {}\n", e.chemin, e.message));
         }
         if self.erreurs_total > self.erreurs.len() {
-            t.push_str(&format!("… et {} autre(s) erreur(s) non détaillée(s).\n", self.erreurs_total - self.erreurs.len()));
+            t.push_str(&format!(
+                "… et {} autre(s) erreur(s) non détaillée(s).\n",
+                self.erreurs_total - self.erreurs.len()
+            ));
         }
         t
     }

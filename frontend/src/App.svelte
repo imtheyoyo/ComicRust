@@ -54,6 +54,8 @@
         listes.demarrer();
         // Scripts (tauri-v0.9.0) : liste et écoute des événements, jamais bloquant.
         void scripts.demarrer();
+        // Analyse des dossiers au démarrage (réglage « Analyse et suivi », activée par défaut).
+        void scan.lancerAuto();
       }
     } catch (e) {
       erreur = messageErreur(e);
@@ -173,6 +175,7 @@
     void listes.charger();
     listes.demarrer();
     void scripts.demarrer();
+    void scan.lancerAuto();
   }
 
   /** Le backend a rouvert la bibliothèque (transfert terminé : bascule en autonome ou rechargement). */
@@ -183,6 +186,7 @@
     listes.courante = null;
     void listes.charger();
     rafraichir++;
+    void scan.lancerAuto();
   }
 
   /** « Rechercher une mise à jour… » (Réglages) : fenêtre « Mise à jour » et recherche manuelle. */

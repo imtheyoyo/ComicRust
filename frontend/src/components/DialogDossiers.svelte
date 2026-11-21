@@ -59,6 +59,30 @@
     });
 
   const pourcent = $derived(scan.total > 0 ? Math.round((scan.fait / scan.total) * 100) : 0);
+
+  /** Résultat de « Copier le bilan » : message discret, ou erreur si le presse-papiers est refusé. */
+  let copie = $state('');
+  async function copierBilan() {
+    const texte = scan.bilan?.texte;
+    if (!texte) return;
+    copie = '';
+    try {
+      await navigator.clipboard.writeText(texte);
+      copie = 'Bilan copié dans le presse-papiers.';
+    } catch {
+      // Repli : champ temporaire sélectionné (presse-papiers asynchrone refusé par la WebView).
+      const zone = document.createElement('textarea');
+      zone.value = texte;
+      zone.setAttribute('readonly', '');
+      zone.style.position = 'fixed';
+      zone.style.opacity = '0';
+      document.body.appendChild(zone);
+      zone.select();
+      const ok = document.execCommand('copy');
+      zone.remove();
+      copie = ok ? 'Bilan copié dans le presse-papiers.' : 'Copie impossible : sélectionnez le texte du bilan à la main.';
+    }
+  }
 </script>
 
 <dialog bind:this={dialogue} use:modale={{ peutFermer: () => !nouveau.trim() }} aria-labelledby="titre-dossiers" data-testid="dialogue-dossiers">
@@ -87,16 +111,42 @@
       {scan.enCours ? 'Scan en cours…' : 'Lancer le scan'}
     </button>
     {#if scan.enCours}
+      <button onclick={() => void scan.arreterAnalyse()} disabled={scan.arretDemande} data-testid="arreter-analyse">
+        {scan.arretDemande ? 'Arrêt en cours…' : 'Arrêter l\'analyse'}
+      </button>
       <div class="barre-progression" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pourcent} aria-label="Progression du scan">
         <div style:width="{pourcent}%"></div>
       </div>
       <span class="discret">{scan.fait.toLocaleString('fr-FR')} / {scan.total.toLocaleString('fr-FR')} fichiers</span>
     {:else if scan.resultat}
-      <span class="discret">
-        Dernier scan : {scan.resultat.ajoutes} ajoutés, {scan.resultat.misAJour} mis à jour, {scan.resultat.manquants} manquants.
+      <span class="discret" data-testid="dernier-scan">
+        {scan.arretee ? 'Analyse arrêtée' : 'Dernier scan'} : {scan.resultat.ajoutes} ajoutés, {scan.resultat.misAJour} mis à jour, {scan.resultat.manquants} manquants.
       </span>
     {/if}
   </div>
+
+  {#if !scan.enCours && scan.bilan}
+    <section class="bilan" aria-labelledby="titre-bilan" data-testid="bilan-scan">
+      <h3 id="titre-bilan">Bilan de l'analyse</h3>
+      <p class="discret" data-testid="bilan-resume">{scan.bilan.resume}</p>
+      <p class="discret">{scan.bilan.dossiers} dossier{scan.bilan.dossiers > 1 ? 's' : ''} analysé{scan.bilan.dossiers > 1 ? 's' : ''}.</p>
+      {#if scan.bilan.erreurs.length > 0}
+        <p class="titre-erreurs">Erreurs et avertissements ({scan.bilan.erreursTotal.toLocaleString('fr-FR')})</p>
+        <ul class="erreurs" data-testid="bilan-erreurs">
+          {#each scan.bilan.erreurs as e, i (i)}
+            <li><code title={e.chemin}>{e.chemin}</code><span>{e.message}</span></li>
+          {/each}
+        </ul>
+        {#if scan.bilan.erreursTotal > scan.bilan.erreurs.length}
+          <p class="discret">… et {(scan.bilan.erreursTotal - scan.bilan.erreurs.length).toLocaleString('fr-FR')} autre(s) non détaillée(s).</p>
+        {/if}
+      {:else}
+        <p class="discret">Aucune erreur.</p>
+      {/if}
+      <button onclick={() => void copierBilan()} data-testid="copier-bilan">📋 Copier le bilan</button>
+      {#if copie}<p class="discret" role="status">{copie}</p>{/if}
+    </section>
+  {/if}
 
   {#if scan.erreur}<p class="erreur" role="alert">Échec du scan : {scan.erreur}</p>{/if}
   {#if erreur}<p class="erreur" role="alert">{erreur}</p>{/if}
@@ -113,6 +163,13 @@
   .scan { display: grid; gap: 8px; justify-items: start; margin-bottom: 14px; }
   .scan .barre-progression { width: 100%; }
   .discret { color: var(--cr-texte-discret); margin: 0; }
+  .bilan { display: grid; gap: 6px; justify-items: start; margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); }
+  .bilan h3 { margin: 0; font-size: 14px; }
+  .titre-erreurs { margin: 4px 0 0; font-weight: 600; }
+  .erreurs { list-style: none; margin: 0; padding: 0; width: 100%; max-height: 220px; overflow-y: auto; display: grid; gap: 4px; }
+  .erreurs li { display: grid; gap: 1px; padding: 4px 8px; border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); font-size: 12px; }
+  .erreurs li code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .erreurs li span { color: var(--cr-erreur); }
   .erreur { color: var(--cr-erreur); }
   .pied { display: flex; justify-content: flex-end; margin: 0; }
 </style>

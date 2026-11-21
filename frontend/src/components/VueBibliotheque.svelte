@@ -1046,11 +1046,12 @@
         Scan {scan.fait.toLocaleString('fr-FR')} / {scan.total.toLocaleString('fr-FR')}
         <span class="barre-progression petite" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={scan.total ? Math.round((scan.fait / scan.total) * 100) : 0} aria-label="Progression du scan"
           ><span style:width="{scan.total ? (scan.fait / scan.total) * 100 : 0}%"></span></span>
+        <button class="arret-scan" onclick={() => void scan.arreterAnalyse()} disabled={scan.arretDemande} data-testid="barre-arreter-analyse">{scan.arretDemande ? 'Arrêt…' : 'Arrêter'}</button>
       </span>
     {:else if scan.erreur}
       <span class="alerte">Échec du scan : {scan.erreur}</span>
     {:else if scan.resultat}
-      <span>Scan terminé : {scan.resultat.ajoutes} ajoutés, {scan.resultat.misAJour} mis à jour, {scan.resultat.manquants} manquants</span>
+      <span data-testid="etat-scan">{scan.arretee ? 'Scan arrêté' : 'Scan terminé'} : {scan.resultat.ajoutes} ajoutés, {scan.resultat.misAJour} mis à jour, {scan.resultat.manquants} manquants{#if scan.bilan && scan.bilan.erreursTotal > 0}{' '}· {scan.bilan.erreursTotal.toLocaleString('fr-FR')} erreur{scan.bilan.erreursTotal > 1 ? 's' : ''} (voir Dossiers){/if}</span>
     {/if}
   </footer>
 </div>
@@ -1169,6 +1170,7 @@
   }
   .alerte { color: var(--cr-erreur); }
   .scan { display: flex; align-items: center; gap: 8px; }
+  .arret-scan { padding: 0 8px; font-size: 12px; }
   .petite { display: inline-block; width: 140px; height: 8px; overflow: hidden; background: var(--cr-fond-survol); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); }
   .petite > span { display: block; height: 100%; background: var(--cr-accent); }
 </style>

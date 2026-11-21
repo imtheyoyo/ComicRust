@@ -39,7 +39,7 @@ pub fn lancer_scan_auto(
 
 /// Réglages « Analyse et suivi » (valeurs par défaut appliquées).
 #[tauri::command]
-pub fn lire_reglages_analyse(biblio: tauri::State<'_, Biblio>) ->Result<ReglagesAnalyseComplets, String> {
+pub fn lire_reglages_analyse(biblio: tauri::State<'_, Biblio>) -> Result<ReglagesAnalyseComplets, String> {
     reglages::lire_reglages_analyse(biblio.data())
 }
 

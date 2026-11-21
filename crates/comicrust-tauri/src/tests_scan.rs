@@ -253,12 +253,18 @@ fn option_suivre_comicrack_dans_la_surveillance() {
     assert!(b.suivre_comicrack());
     // Base de ComicRust : toujours surveillée, quelle que soit l'option.
     assert!(b.etat_base().surveillee);
-    reglages::enregistrer_reglages_analyse(&data, ReglagesAnalyse { suivre_comicrack: Some(false), ..Default::default() })
-        .unwrap();
+    reglages::enregistrer_reglages_analyse(
+        &data,
+        ReglagesAnalyse { suivre_comicrack: Some(false), ..Default::default() },
+    )
+    .unwrap();
     assert!(!b.suivre_comicrack());
     assert!(b.etat_base().surveillee, "l'option ne concerne pas la base de ComicRust");
-    reglages::enregistrer_reglages_analyse(&data, ReglagesAnalyse { suivre_comicrack: Some(true), ..Default::default() })
-        .unwrap();
+    reglages::enregistrer_reglages_analyse(
+        &data,
+        ReglagesAnalyse { suivre_comicrack: Some(true), ..Default::default() },
+    )
+    .unwrap();
     assert!(b.suivre_comicrack());
 }
 
