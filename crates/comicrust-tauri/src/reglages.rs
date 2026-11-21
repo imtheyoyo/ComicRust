@@ -439,6 +439,10 @@ pub struct PreferencesVue {
     /// disparu est remplacé par le thème par défaut côté front.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    /// Panneau des listes affiché (barre latérale ; absent = affiché). Masqué, la barre latérale se
+    /// réduit à une colonne de boutons (lot L7).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listes_visibles: Option<bool>,
     /// Réglages du lecteur (sous-objet `lecteur`, remplacé en entier à chaque enregistrement).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lecteur: Option<PreferencesLecteur>,
@@ -598,6 +602,7 @@ impl PreferencesVue {
             largeur_details: borne("largeurDetails", LARGEUR_DETAILS),
             largeur_listes: borne("largeurListes", LARGEUR_LISTES),
             theme: o.get("theme").and_then(Value::as_str).filter(|s| id_theme_valide(s)).map(str::to_string),
+            listes_visibles: o.get("listesVisibles").and_then(Value::as_bool),
             lecteur: o.get("lecteur").and_then(PreferencesLecteur::depuis_json),
             listes: o.get("listes").and_then(listes_depuis_json),
         }
@@ -608,7 +613,7 @@ impl PreferencesVue {
         macro_rules! prendre {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
-        prendre!(tri, sens_tri, groupe, vue, empiler, zoom, details, largeur_details, largeur_listes, theme, lecteur);
+        prendre!(tri, sens_tri, groupe, vue, empiler, zoom, details, largeur_details, largeur_listes, theme, listes_visibles, lecteur);
         // Vues des listes : fusion liste par liste (`null` efface), jamais d'entrée `null` gardée.
         if let Some(patch) = m.listes {
             let mut listes = self.listes.take().unwrap_or_default();
@@ -963,6 +968,7 @@ mod tests {
             largeur_details: Some(400),
             largeur_listes: Some(310),
             theme: Some("moderne-sombre".into()),
+            listes_visibles: Some(false),
             lecteur: None,
             listes: None,
         };
