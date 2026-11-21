@@ -7,6 +7,8 @@
     enregistrerReglagesEdition, exporterTheme, importerTheme, infos, lireReglagesEdition, listerThemes, messageErreur,
     reinitialiserThemesLivres, revelerDossierThemes, supprimerTheme, type InfosApplication, type ModeBiblio, type ThemeInfo,
   } from '../lib/api';
+  import { enregistrerReglagesAnalyse, lireReglagesAnalyse, type ChoixReprise, type ReglagesAnalyse } from '../lib/api';
+  import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
   import {
     appliquerTheme, apercuTheme, messageTheme, rechargerThemeCourant, restaurerTheme, THEME_DEFAUT, themeApplique, themePersiste,
   } from '../lib/theme';
@@ -41,6 +43,35 @@
   let champFichier = $state<HTMLInputElement>();
   let ouvert = $state(false);
 
+  // ── Bloc « Analyse et suivi » (lot « Scan et dossiers ») : s'applique tout de suite, sans OK ──
+  let analyse = $state<ReglagesAnalyse>({ auDemarrage: true, suivreComicrack: true });
+  let reprise = $state<ChoixReprise>('demander');
+  let erreurAnalyse = $state('');
+  async function chargerAnalyse() {
+    reprise = reglagesLecteur().reprise ?? 'demander';
+    erreurAnalyse = '';
+    try {
+      analyse = await lireReglagesAnalyse();
+    } catch (e) {
+      erreurAnalyse = messageErreur(e);
+    }
+  }
+  async function changerAnalyse(patch: Partial<ReglagesAnalyse>) {
+    erreurAnalyse = '';
+    const avant = analyse;
+    analyse = { ...analyse, ...patch };
+    try {
+      analyse = await enregistrerReglagesAnalyse(patch);
+    } catch (e) {
+      analyse = avant;
+      erreurAnalyse = messageErreur(e);
+    }
+  }
+  function changerReprise(v: ChoixReprise) {
+    reprise = v;
+    enregistrerReglagesLecteur({ reprise: v });
+  }
+
   /** Donne le focus au bouton par défaut (« Annuler », le choix sûr) à l'ouverture d'une confirmation. */
   function focusDefaut(noeud: HTMLElement) {
     noeud.querySelector<HTMLButtonElement>('button')?.focus();
@@ -58,6 +89,7 @@
     confirmation = null;
     ouvert = true;
     dialogue?.showModal();
+    void chargerAnalyse();
     await actualiser();
   }
 
@@ -338,6 +370,29 @@
       {#if enregistre}<p class="ok" role="status">{enregistre}</p>{/if}
     </fieldset>
   {/if}
+  <fieldset class="comicrack" data-testid="reglage-analyse">
+    <legend>Analyse et suivi</legend>
+    <label class="case">
+      <input type="checkbox" checked={analyse.auDemarrage} onchange={(e) => void changerAnalyse({ auDemarrage: e.currentTarget.checked })} data-testid="analyse-au-demarrage" />
+      Analyser les dossiers au démarrage
+    </label>
+    <p class="discret petit">Recherche les livres ajoutés, modifiés ou déplacés dès que la bibliothèque est chargée. Jamais en lecture seule (bibliothèque liée à ComicRack) ni hors ligne ; « Dossiers » reste disponible pour lancer l'analyse à la main.</p>
+    <label class="case">
+      <input type="checkbox" checked={analyse.suivreComicrack} onchange={(e) => void changerAnalyse({ suivreComicrack: e.currentTarget.checked })} data-testid="suivre-comicrack" />
+      Suivre les modifications faites dans ComicRack
+    </label>
+    <p class="discret petit">Bibliothèque liée à la base MySQL de ComicRack : les modifications faites dans ComicRack apparaissent en quelques secondes. Désactivé, la bibliothèque n'est plus sondée (et l'état « hors ligne » n'est plus surveillé). La base de ComicRust est toujours suivie.</p>
+    <label class="ligne-reprise">
+      Reprise de lecture
+      <select value={reprise} onchange={(e) => changerReprise(e.currentTarget.value as ChoixReprise)} data-testid="reprise-lecture">
+        <option value="demander">Demander</option>
+        <option value="comicrack">ComicRack</option>
+        <option value="comicrust">ComicRust</option>
+      </select>
+    </label>
+    <p class="discret petit">Quand la bibliothèque et ce poste n'ont pas retenu la même page : demander à chaque fois, ou toujours reprendre à la page de ComicRack ou de ComicRust.</p>
+    {#if erreurAnalyse}<p class="erreur" role="alert">{erreurAnalyse}</p>{/if}
+  </fieldset>
   {#if ontransfert}
     <fieldset class="comicrack" data-testid="reglage-transfert">
       <legend>Passer de ComicRack à ComicRust</legend>
@@ -384,6 +439,7 @@
   .case input { margin-top: 3px; accent-color: var(--cr-accent); }
   .petit { font-size: 12px; margin: 6px 0 0 24px; }
   .petit.transfert { margin: 0 0 8px; }
+  .ligne-reprise { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
   .avertissement { margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--cr-erreur); border-radius: var(--cr-rayon); }
   .avertissement p { margin: 0 0 6px; }
   .avertissement strong { color: var(--cr-erreur); }

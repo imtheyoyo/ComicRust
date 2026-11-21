@@ -1352,3 +1352,44 @@ export const deplacerPilesListe = (id: string, requete: RequeteLivres, series: s
 /** « Monter / Descendre la pile » : décale la pile `serie` d'un cran. */
 export const decalerPileListe = (id: string, requete: RequeteLivres, serie: string, haut: boolean) =>
   appeler<ResultatListes>('decaler_pile_liste', { id, requete, serie, haut });
+
+// ───────────────────────────── Analyse et suivi (lot « Scan et dossiers », docs/tauri/ipc-scan.md) ─────────────────────────────
+
+/** Fichier ou dossier que l'analyse n'a pas pu lire. */
+export interface ErreurFichierScan {
+  chemin: string;
+  message: string;
+}
+
+/** Bilan d'une analyse (événement `scan-bilan`, émis juste avant `scan-termine`). */
+export interface BilanScan {
+  /** Résumé d'une ligne. */
+  resume: string;
+  /** Nombre de dossiers analysés. */
+  dossiers: number;
+  /** Nombre de fichiers de BD trouvés. */
+  fichiers: number;
+  /** Analyse arrêtée par l'utilisateur (bilan partiel). */
+  arretee: boolean;
+  /** Erreurs détaillées (500 au plus) ; le total exact est `erreursTotal`. */
+  erreurs: ErreurFichierScan[];
+  erreursTotal: number;
+  /** Texte prêt à copier. */
+  texte: string;
+}
+
+/** Section `analyse` de data\comicrust-tauri.json (valeurs par défaut appliquées : tout activé). */
+export interface ReglagesAnalyse {
+  /** Analyser les dossiers au chargement de la bibliothèque (jamais en mode lié ni hors ligne). */
+  auDemarrage: boolean;
+  /** Suivre les modifications faites dans ComicRack (base MySQL de ComicRack). */
+  suivreComicrack: boolean;
+}
+
+/** « Arrêter l'analyse » : vrai si une analyse était en cours (bilan partiel puis `scan-termine`). */
+export const arreterScan = () => appeler<boolean>('arreter_scan');
+/** Analyse du démarrage ; faux (sans erreur) si elle n'a pas lieu (réglage, mode lié, hors ligne, sans dossier). */
+export const lancerScanAuto = () => appeler<boolean>('lancer_scan_auto');
+export const lireReglagesAnalyse = () => appeler<ReglagesAnalyse>('lire_reglages_analyse');
+export const enregistrerReglagesAnalyse = (reglages: Partial<ReglagesAnalyse>) =>
+  appeler<ReglagesAnalyse>('enregistrer_reglages_analyse', { reglages });

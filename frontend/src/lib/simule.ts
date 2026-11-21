@@ -10,6 +10,7 @@ import { creerBaseSimulee } from './simuleBase';
 import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
 import { creerMajSimulee } from './simuleMaj';
+import { creerScanSimule } from './simuleScan';
 import { creerScriptsSimules } from './simuleScripts';
 import { COMMANDES_THEMES, creerThemesSimules, themesRefuses } from './simuleThemes';
 
@@ -198,19 +199,7 @@ export function ecouterSimule(nom: string, rappel: (c: unknown) => void): () => 
   return () => bus.removeEventListener(nom, f);
 }
 
-let scanEnCours = false;
-async function simulerScan() {
-  if (scanEnCours) return;
-  scanEnCours = true;
-  const total = 1240;
-  for (let fait = 0; fait <= total; fait += 31) {
-    emettre('scan-progression', { fait: Math.min(fait, total), total });
-    await pause(60);
-  }
-  emettre('scan-progression', { fait: total, total });
-  scanEnCours = false;
-  emettre('scan-termine', { ajoutes: 12, misAJour: 34, manquants: 3 });
-}
+// Analyse des dossiers, arrêt, bilan, analyse du démarrage et réglages : voir simuleScan.ts.
 
 // ───────────── État simulé ─────────────
 
@@ -304,6 +293,9 @@ const themesSimules = creerThemesSimules();
 
 // Surveillance de la base et hors ligne (étape 6) : voir simuleBase.ts.
 const base = creerBaseSimulee(emettre, () => etat.mode);
+
+// Analyse des dossiers (lot « Scan et dossiers ») : voir simuleScan.ts.
+const scanSimule = creerScanSimule({ emettre, pause, mode: () => etat.mode, horsLigne: base.motif, dossiers: () => dossiers });
 
 // Édition (étape 3) : voir simuleEdition.ts.
 const edition = creerEditionSimulee({
@@ -534,8 +526,11 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       dossiers = dossiers.filter((d) => d !== args.chemin);
       return dossiers.slice();
     case 'lancer_scan':
-      void simulerScan();
-      return null;
+    case 'arreter_scan':
+    case 'lancer_scan_auto':
+    case 'lire_reglages_analyse':
+    case 'enregistrer_reglages_analyse':
+      return scanSimule.appeler(commande, args);
     case 'apercu_transfert':
     case 'lancer_transfert':
     case 'annuler_transfert':

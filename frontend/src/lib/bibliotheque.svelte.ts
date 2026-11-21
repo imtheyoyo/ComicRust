@@ -2,8 +2,8 @@
 // Aucune logique métier : recherche, tri et groupement sont faits par le backend (lister_livres).
 import { SvelteMap } from 'svelte/reactivity';
 import {
-  ecouter, listerLivres, listerPiles, messageErreur, type ClefTri, type ErreurScan, type Groupe, type LivreResume,
-  type Pile, type ProgressionScan, type ResultatScan, type SensTri,
+  arreterScan, ecouter, lancerScanAuto, listerLivres, listerPiles, messageErreur, type BilanScan, type ClefTri,
+  type ErreurScan, type Groupe, type LivreResume, type Pile, type ProgressionScan, type ResultatScan, type SensTri,
 } from './api';
 
 export const TAILLE_PAGE = 200;
@@ -198,22 +198,41 @@ export class SuiviScan {
   total = $state(0);
   resultat = $state<ResultatScan | null>(null);
   erreur = $state('');
+  /** Bilan de la dernière analyse terminée (erreurs, dossiers, texte à copier), `null` avant la première. */
+  bilan = $state<BilanScan | null>(null);
+  /** « Arrêter l'analyse » demandé : l'analyse s'arrête au plus tôt (état « arrêt en cours »). */
+  arretDemande = $state(false);
+  /** La dernière analyse a été arrêtée par l'utilisateur (état « arrêtée »). */
+  get arretee(): boolean {
+    return !this.enCours && !!this.bilan?.arretee;
+  }
+  /** Nombre d'événements reçus (détecte un événement arrivé avant la réponse d'une commande). */
+  private evenements = 0;
   private desabonner: Array<() => void> = [];
 
   async demarrer(surTermine: () => void, surErreur: () => void = surTermine): Promise<void> {
     this.desabonner.push(
       await ecouter<ProgressionScan>('scan-progression', (p) => {
+        this.evenements++;
         this.enCours = true;
         this.fait = p.fait;
         this.total = p.total;
       }),
+      await ecouter<BilanScan>('scan-bilan', (b) => {
+        this.evenements++;
+        this.bilan = b;
+      }),
       await ecouter<ResultatScan>('scan-termine', (r) => {
+        this.evenements++;
         this.enCours = false;
+        this.arretDemande = false;
         this.resultat = r;
         surTermine();
       }),
       await ecouter<ErreurScan>('scan-erreur', (e) => {
+        this.evenements++;
         this.enCours = false;
+        this.arretDemande = false;
         this.erreur = e?.message || 'Erreur inconnue.';
         surErreur(); // le scan a pu ajouter des livres avant d'échouer : on recharge la liste
       }),
@@ -223,10 +242,38 @@ export class SuiviScan {
   /** À appeler juste après `lancer_scan()` pour afficher la barre sans attendre le 1er événement. */
   annoncer(): void {
     this.enCours = true;
+    this.arretDemande = false;
     this.fait = 0;
     this.total = 0;
     this.resultat = null;
+    this.bilan = null;
     this.erreur = '';
+  }
+
+  /** Analyse du chargement de la bibliothèque (réglage « Analyser les dossiers au démarrage »).
+   *  Le backend décide : rien si mode lié, hors ligne, sans dossier ou désactivée. Jamais bloquant. */
+  async lancerAuto(): Promise<void> {
+    if (this.enCours) return;
+    const avant = this.evenements;
+    try {
+      const lance = await lancerScanAuto();
+      // Un événement a pu arriver avant la réponse (petite bibliothèque) : ne pas ré-annoncer.
+      if (lance && this.evenements === avant) this.annoncer();
+    } catch (e) {
+      this.erreur = messageErreur(e);
+    }
+  }
+
+  /** « Arrêter l'analyse » : le bilan partiel arrive ensuite (`scan-bilan` puis `scan-termine`). */
+  async arreterAnalyse(): Promise<void> {
+    if (!this.enCours || this.arretDemande) return;
+    this.arretDemande = true;
+    try {
+      if (!(await arreterScan())) this.arretDemande = false; // déjà terminée
+    } catch (e) {
+      this.arretDemande = false;
+      this.erreur = messageErreur(e);
+    }
   }
 
   arreter(): void {

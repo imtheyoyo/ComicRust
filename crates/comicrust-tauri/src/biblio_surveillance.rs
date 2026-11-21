@@ -27,6 +27,13 @@ impl Biblio {
         self.connexion.message_hors_ligne().map(|_| MOTIF_HORS_LIGNE.to_string())
     }
 
+    /// Option « Suivre les modifications faites dans ComicRack » (réglage `analyse.suivreComicrack`,
+    /// activée par défaut comme `auto_refresh` d'egui). Ne concerne que la base MySQL de
+    /// ComicRack : la base de ComicRust est toujours surveillée.
+    pub fn suivre_comicrack(&self) -> bool {
+        reglages::lire_reglages_analyse(&self.data).map(|r| r.suivre_comicrack).unwrap_or(true)
+    }
+
     /// État de la connexion, tel que `etat_base` et `base-etat` le donnent.
     pub fn etat_base(&self) -> EtatBase {
         let source = match self.source() {
@@ -38,7 +45,11 @@ impl Biblio {
         let message = self.connexion.message_hors_ligne();
         EtatBase {
             source,
-            surveillee: matches!(source, SourceBase::ComicrackMysql | SourceBase::Comicrust),
+            surveillee: match source {
+                SourceBase::ComicrackMysql => self.suivre_comicrack(),
+                SourceBase::Comicrust => true,
+                _ => false,
+            },
             en_ligne: message.is_none(),
             message,
             essais: self.connexion.essais(),

@@ -52,6 +52,8 @@ mod tests_formulaires;
 #[cfg(test)]
 mod tests_listes;
 #[cfg(test)]
+mod tests_scan;
+#[cfg(test)]
 mod tests_scripts;
 #[cfg(test)]
 mod tests_transfert;
@@ -84,6 +86,8 @@ pub fn infos_application(data: &Path) -> InfosApplication {
 
 #[cfg(feature = "app")]
 pub mod app;
+#[cfg(feature = "app")]
+mod cmd_scan;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 // Logique de la passerelle MCP stdio (testable sans WebView2, donc aussi hors fonction `mcp`).
