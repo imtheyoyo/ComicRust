@@ -17,6 +17,7 @@ use crate::listes::{
 use crate::listes_cbl::{ExportCbl, ImportCbl, RapportCbl};
 use crate::listes_criteres::{self, Apercu, CatalogueCriteres, Critere, CriteresListe, EditeurListe};
 use crate::maj::{self, EtatMaj, Maj};
+use crate::manquants::Manquants;
 use crate::pages_livre::{OperationPages, PageLivre, PagesLivre};
 use crate::reglages::{self, PreferencesVue, ReglagesEdition, ReglagesEditionComplets};
 use crate::scripts::apercu::{Apercu as ApercuScript, Bilan as BilanScript};
@@ -1063,7 +1064,16 @@ pub fn run() {
             script_appliquer,
             script_hook_editeur,
             script_reglages_lire,
-            script_reglages_ecrire
+            script_reglages_ecrire,
+            crate::cmd_manquants::etat_manquants,
+            crate::cmd_manquants::verifier_manquants,
+            crate::cmd_manquants::arreter_manquants,
+            crate::cmd_manquants::sonder_livre,
+            crate::cmd_manquants::proposer_fichier,
+            crate::cmd_manquants::chercher_manquants,
+            crate::cmd_manquants::appliquer_relocalisations,
+            crate::cmd_manquants::preparer_retrait,
+            crate::cmd_manquants::retirer_livres
         ])
         .setup(move |app| {
             // Thèmes livrés disponibles dès le premier lancement.
@@ -1092,6 +1102,16 @@ pub fn run() {
                 Arc::new(move |evenement| {
                     let (nom, charge) = evenement.pour_le_front();
                     let _ = emetteur_scripts.emit(nom, charge);
+                }),
+            ));
+            // Livres manquants : état géré avant la fenêtre (commandes `*_manquants`, `sonder_livre`…) ;
+            // événement `bibliotheque-modifiee` (origine `manquants`) pour rafraîchir les vues.
+            let emetteur_manquants = app.handle().clone();
+            app.manage(Manquants::nouveau(
+                app.state::<Biblio>().inner().clone(),
+                Arc::new(move |evenement| {
+                    let (nom, charge) = evenement.pour_le_front();
+                    let _ = emetteur_manquants.emit(nom, charge);
                 }),
             ));
             // Fenêtre créée ici (et non dans tauri.conf.json) pour fixer le profil WebView2

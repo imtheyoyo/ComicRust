@@ -105,6 +105,9 @@ pub struct LivreResume {
     /// Avec une liste : rang du livre dans la liste (1 = premier), colonne « # ».
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rang: Option<usize>,
+    /// Fichier introuvable (livres manquants) : badge sur la couverture, indicateur du tableau.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub manquant: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1060,6 +1063,8 @@ impl Biblio {
 
 #[path = "biblio_surveillance.rs"]
 mod surveillance_biblio;
+#[path = "biblio_manquants.rs"]
+mod manquants_biblio;
 
 // ───────────────────────────── Fonctions utilitaires ─────────────────────────────
 
@@ -1270,6 +1275,7 @@ fn resume(b: &LibraryBook) -> LivreResume {
         lu: b.read_percent() == Some(100),
         url_couverture: url_couverture(&b.id),
         rang: None,
+        manquant: crate::manquants::est_manquant(b),
     }
 }
 
@@ -1358,7 +1364,8 @@ fn detail(b: &LibraryBook) -> LivreDetail {
         derniere_lecture: non_vide(&b.opened).filter(|d| !d.starts_with("0001-01-01")),
         fichier_present: false, // calculé par `Biblio::detail` (avec délai)
         fichier,
-        manquant: b.missing.unwrap_or(false),
+        // Même règle que le badge de la liste (`LivreResume::manquant`) : le livre a un fichier.
+        manquant: crate::manquants::est_manquant(b),
         url_couverture: url_couverture(&b.id),
     }
 }
