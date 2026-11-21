@@ -17,6 +17,8 @@
   import { EtatListes } from './lib/listes.svelte';
   import { miseAJour } from './lib/maj.svelte';
   import { scripts } from './lib/scripts.svelte';
+  import { ID_MANQUANTS, NOEUD_MANQUANTS, manquants } from './lib/manquants.svelte';
+  import DialogManquants from './components/DialogManquants.svelte';
   import { chargerPreferences, enregistrerPreference } from './lib/prefs';
   import { appliquerTheme, messageTheme, themeMemorise } from './lib/theme';
 
@@ -54,6 +56,7 @@
         listes.demarrer();
         // Scripts (tauri-v0.9.0) : liste et écoute des événements, jamais bloquant.
         void scripts.demarrer();
+        void demarrerManquants(etat.mode);
       }
     } catch (e) {
       erreur = messageErreur(e);
@@ -74,7 +77,10 @@
         } catch (e) {
           avertissementTheme = `Thème non appliqué : ${messageTheme(e)} Les couleurs de secours sont utilisées ; corrigez le thème dans les Réglages.`;
         }
-        await scan.demarrer(() => rafraichir++);
+        await scan.demarrer(() => {
+          rafraichir++;
+          void manquants.rafraichir();
+        });
         await connexion.demarrer();
         // Mise à jour : jamais bloquante (vérification automatique en arrière-plan, bandeau seul).
         void miseAJour.demarrer();
@@ -99,7 +105,7 @@
     // Modification faite hors de ComicRust (ComicRack, autre poste) : les comptes des listes changent.
     let desabonnerBase: (() => void) | undefined;
     void ecouter<BibliothequeModifiee>('bibliotheque-modifiee', (m) => {
-      if (m.origine === 'externe') void listes.charger();
+      if (m.origine === 'externe' || m.origine === 'manquants') void listes.charger();
     }).then((f) => (desabonnerBase = f));
     return () => {
       desabonnerBase?.();
@@ -108,6 +114,7 @@
       miseAJour.arreter();
       listes.arreter();
       scripts.arreter();
+      manquants.arreter();
     };
   });
 
@@ -173,16 +180,27 @@
     void listes.charger();
     listes.demarrer();
     void scripts.demarrer();
+    void demarrerManquants(e.mode);
+  }
+
+  /** Livres manquants (lot L3) : suivi du compteur ; en mode ComicRack, vérification automatique à
+   *  l'ouverture (la marque n'y est jamais écrite dans la base : elle vit en mémoire). En mode autonome,
+   *  le scan des dossiers tient la base à jour. */
+  async function demarrerManquants(mode: string) {
+    manquants.surModification = () => void listes.charger();
+    await manquants.demarrer(mode === 'comicrack');
   }
 
   /** Le backend a rouvert la bibliothèque (transfert terminé : bascule en autonome ou rechargement). */
   function bibliothequeRouverte(e: EtatBiblio) {
     etat = e;
     nbLivres = e.nbLivres;
+    manquants.masquer();
     section = 'bibliotheque';
     listes.courante = null;
     void listes.charger();
     rafraichir++;
+    void demarrerManquants(e.mode);
   }
 
   /** « Rechercher une mise à jour… » (Réglages) : fenêtre « Mise à jour » et recherche manuelle. */
@@ -192,16 +210,25 @@
   }
 
   function choisirSection(s: Section) {
+    manquants.masquer();
     section = s;
     if (s !== 'listes') listes.courante = null;
   }
 
   function choisirListe(id: string | null) {
+    // Liste virtuelle « Livres manquants » : aucune liste de l'arbre n'est courante.
+    if (id === ID_MANQUANTS) {
+      manquants.afficher();
+      listes.courante = null;
+      section = 'listes';
+      return;
+    }
+    manquants.masquer();
     listes.courante = id || null;
     section = id ? 'listes' : 'bibliotheque';
   }
 
-  const listeAffichee = $derived(section === 'listes' ? listes.noeud(listes.courante) ?? null : null);
+  const listeAffichee = $derived(manquants.affiche ? NOEUD_MANQUANTS : section === 'listes' ? listes.noeud(listes.courante) ?? null : null);
 </script>
 
 {#if erreur && choisirAutre}
@@ -272,6 +299,7 @@
   <DialogDossiers bind:this={dossiers} {scan} />
   <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} onmaj={rechercherMaj} />
   <DialogTransfert bind:this={transfert} onbibliotheque={bibliothequeRouverte} />
+  <DialogManquants />
   {#if scripts.gestionOuverte}
     <DialogScripts />
   {/if}

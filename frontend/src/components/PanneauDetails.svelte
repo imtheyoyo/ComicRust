@@ -1,6 +1,7 @@
 <script lang="ts">
   // Panneau de détails du livre sélectionné : résumé immédiat, puis détail complet (detail_livre).
   import { detailLivre, type LivreDetail, type LivreResume, messageErreur } from '../lib/api';
+  import { manquants } from '../lib/manquants.svelte';
 
   interface Props {
     livre: LivreResume | undefined;
@@ -140,7 +141,8 @@
       {:else}
         <span class="lecture" class:lu={livre.lu}>{livre.lu ? 'Lu' : 'Non lu'}</span>
       {/if}
-      {#if detail && (detail.manquant || !detail.fichierPresent)}<span class="manquant">Fichier manquant</span>{/if}
+      {#if detail?.manquant}<span class="manquant" data-testid="details-manquant">⚠ Fichier manquant</span>
+      {:else if detail && !detail.fichierPresent}<span class="discret" title="Le fichier ne répond pas pour l'instant (disque ou partage débranché ?) : le livre n'est pas marqué manquant" data-testid="details-inaccessible">Fichier inaccessible</span>{/if}
       {#if note > 0}
         <span class="etoiles" role="img" aria-label={texteNote} title={texteNote} data-testid="details-note">
           {#each [1, 2, 3, 4, 5] as rang (rang)}
@@ -169,6 +171,15 @@
       </dl>
       {#if detail.resume}<p class="resume">{detail.resume}</p>{/if}
       {#if detail.fichier}<p class="chemin" title={detail.fichier}>{detail.fichier}</p>{/if}
+      {#if detail.manquant}
+        <div class="bloc-manquant" role="status" data-testid="details-bloc-manquant">
+          <p>Ce fichier est introuvable : déplacé, renommé ou supprimé.</p>
+          <div class="actions">
+            <button onclick={() => manquants.demanderRetrouver(livre.id, livre.titre)} disabled={!!manquants.raison} title={manquants.raison} data-testid="details-retrouver">Retrouver le fichier…</button>
+            <button onclick={() => void manquants.demanderRetrait([livre.id])} disabled={!!manquants.raison} title={manquants.raison} data-testid="details-retirer">Retirer…</button>
+          </div>
+        </div>
+      {/if}
     {/if}
   {/if}
 </aside>
@@ -192,6 +203,8 @@
   .etoile { position: relative; display: inline-block; color: var(--cr-bordure); }
   .pleine { position: absolute; left: 0; top: 0; overflow: hidden; white-space: nowrap; color: var(--cr-etoile); }
   .manquant, .erreur { color: var(--cr-erreur); }
+  .bloc-manquant { border: 1px solid var(--cr-erreur); border-radius: var(--cr-rayon); padding: 6px 8px; margin: 8px 0; }
+  .bloc-manquant p { margin: 0 0 6px; }
   .actions { display: flex; justify-content: center; gap: 8px; margin: 0 0 14px; }
   .multi { text-align: center; font-size: 12px; margin: -6px 0 12px; }
   .ouvrir {

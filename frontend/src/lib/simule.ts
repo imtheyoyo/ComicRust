@@ -11,6 +11,7 @@ import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
 import { creerMajSimulee } from './simuleMaj';
 import { creerScriptsSimules } from './simuleScripts';
+import { creerManquantsSimules } from './simuleManquants';
 import { COMMANDES_THEMES, creerThemesSimules, themesRefuses } from './simuleThemes';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
@@ -134,11 +135,11 @@ let ordre: LivreInterne[] = LIVRES;
 
 function ordonner(q: RequeteLivres): LivreInterne[] {
   // Étape 5 : livres d'une liste (contenu recalculé à chaque requête : les listes changent).
-  const membres = q.liste ? listes.livresDe(q.liste) : null;
+  const membres = q.liste === '@manquants' ? mq.membres() : q.liste ? listes.livresDe(q.liste) : null;
   const k = JSON.stringify([q.recherche ?? '', q.tri, q.sensTri, q.groupe ?? 'aucun']);
   if (!membres && k === ordreCle) return ordre;
   const position = new Map((membres ?? []).map((id, i) => [id, i]));
-  const base = membres ? membres.map((id) => LIVRES[Number(id) - 1]).filter(Boolean) : LIVRES;
+  const base = membres ? membres.map((id) => LIVRES[Number(id) - 1]).filter((l) => l && !mq.retire(l.id)) : mq.nbRetires() ? LIVRES.filter((l) => !mq.retire(l.id)) : LIVRES;
   const mot = (q.recherche ?? '').trim().toLowerCase();
   const liste = mot
     ? base.filter((l) => {
@@ -185,6 +186,7 @@ function ordonnerPile(q: RequeteLivres): LivreInterne[] {
 const resume = (l: LivreInterne): LivreResume => ({
   id: l.id, titre: l.titre, serie: l.serie, numero: l.numero, editeur: l.editeur,
   annee: l.annee, pages: l.pages, lu: l.lu, urlCouverture: l.urlCouverture,
+  ...(mq.est(l.id) ? { manquant: true } : {}),
 });
 
 // ───────────── Événements simulés ─────────────
@@ -358,6 +360,21 @@ const scriptsSimules = creerScriptsSimules({
   },
 });
 
+// Livres manquants (lot L3) : voir simuleManquants.ts.
+const mq = creerManquantsSimules({
+  livres: LIVRES,
+  lectureSeule: () => {
+    const h = base.motif();
+    if (h) return h;
+    if (etat.mode !== 'comicrack') return undefined;
+    const r = edition('lire_reglages_edition', {}) as { ecritureComicrack: boolean };
+    return r.ecritureComicrack ? undefined : 'Bibliothèque ComicRack en lecture seule (cocher « Lecture et écriture » dans Réglages).';
+  },
+  emettre,
+  pause,
+  invalider: () => { ordreCle = ''; },
+});
+
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
   const rm = maj.appeler(commande, args);
@@ -367,6 +384,8 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
     const rs = scriptsSimules.appeler(commande, args);
     if (rs !== undefined) return rs;
   }
+  const rq = mq.appeler(commande, args);
+  if (rq !== undefined) return rq;
   switch (commande) {
     case 'infos':
       return {
@@ -427,7 +446,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       simuleTests.requetes.push(q);
       const liste = ordonnerPile(q);
       // Étape 5 : rang du livre dans la liste affichée (colonne « # »).
-      const rangs = q.liste ? new Map(listes.livresDe(q.liste).map((id, i) => [id, i + 1])) : null;
+      const rangs = q.liste && q.liste !== '@manquants' ? new Map(listes.livresDe(q.liste).map((id, i) => [id, i + 1])) : null;
       const rep: ReponseLivres = {
         total: liste.length,
         livres: liste.slice(q.debut, q.debut + q.nombre).map((l) => (rangs ? { ...resume(l), rang: rangs.get(l.id) } : resume(l))),
@@ -456,7 +475,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       if (!l) throw new Error('Livre introuvable.');
       // Comme `fusionner_lecture` : la page affichée est la plus loin vue, pas la page courante.
       const loin = Math.max(l.pageMax ?? 0, l.pageCourante);
-      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: !l.fichierPresent, progression: l.lu ? 100 : Math.round((loin / Math.max(1, l.pages - 1)) * 100), pageCourante: loin, pageLue: loin > 0 ? loin + 1 : undefined, sourceLecture: l.lu || loin > 0 ? (Number(l.id) % 5 === 0 ? 'comicrust' : 'comicrack') : undefined };
+      const d: LivreDetail = { ...l, tailleFichier: l.pages * 310_000, langue: 'fr', format: 'CBZ', manquant: mq.est(l.id), fichierPresent: l.fichierPresent && !mq.injoignable(l.id), progression: l.lu ? 100 : Math.round((loin / Math.max(1, l.pages - 1)) * 100), pageCourante: loin, pageLue: loin > 0 ? loin + 1 : undefined, sourceLecture: l.lu || loin > 0 ? (Number(l.id) % 5 === 0 ? 'comicrust' : 'comicrack') : undefined };
       if (l.lu) d.pageLue = l.pages;
       if (l.lu && l.enRelecture && l.pageCourante + 1 < l.pages) {
         const page = l.pageCourante + 1;

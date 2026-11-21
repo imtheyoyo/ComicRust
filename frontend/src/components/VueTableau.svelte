@@ -26,7 +26,8 @@
   const SURPLUS = 6;
 
   /** Liste affichée : colonne « # » (rang dans la liste, tri « ordre »). */
-  const avecRang = $derived(!!bib.params.liste);
+  // La liste virtuelle « Livres manquants » n'a pas d'ordre propre : pas de colonne « # ».
+  const avecRang = $derived(!!bib.params.liste && bib.params.liste !== '@manquants');
   const colonnes = $derived<Array<{ clef: ClefTri | null; titre: string; classe?: string }>>([
     ...(avecRang ? [{ clef: 'ordre' as ClefTri, titre: '#', classe: 'num' }] : []),
     { clef: null, titre: '' },
@@ -165,7 +166,7 @@
         {#if l}
           {#if avecRang}<span class="cellule num discret">{l.rang ?? ''}</span>{/if}
           <span class="mini"><img src={l.urlCouverture} alt="" loading="lazy" decoding="async" draggable="false" /></span>
-          <span class="cellule" title={l.titre}>{l.titre}</span>
+          <span class="cellule" class:manquant={l.manquant} title={l.manquant ? `${l.titre} — fichier introuvable` : l.titre}>{#if l.manquant}<span class="alerte-manquant" data-testid="indicateur-manquant" aria-label="Fichier introuvable">⚠ </span>{/if}{l.titre}</span>
           {#if bib.debutGroupe(i) && bib.params.groupe === 'serie'}
             <!-- En-tête de la série (vue groupée) : clic = toute la série ; on peut la glisser aussitôt. -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -194,6 +195,8 @@
 </div>
 
 <style>
+  .alerte-manquant { color: var(--cr-erreur); font-weight: 700; }
+  .cellule.manquant { color: var(--cr-texte-discret); }
   .zone { position: relative; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; outline: none; }
   .zone:focus-visible { box-shadow: inset 0 0 0 2px var(--cr-accent); }
   .entete, .ligne {

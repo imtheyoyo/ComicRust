@@ -797,10 +797,14 @@ impl Manquants {
         let base = self.biblio.base()?;
         let mut vus = HashSet::new();
         let ids: Vec<&String> = ids.iter().filter(|i| vus.insert(i.to_ascii_lowercase())).collect();
-        let voulus: Vec<Wanted> = ids
-            .iter()
-            .filter_map(|id| base.get(id))
-            .filter(|b| ids.len() == 1 || est_manquant(b))
+        // Aucun identifiant : tous les livres manquants de la bibliothèque.
+        let candidats: Vec<&LibraryBook> = if ids.is_empty() {
+            base.books.iter().filter(|b| est_manquant(b)).collect()
+        } else {
+            ids.iter().filter_map(|id| base.get(id)).filter(|b| ids.len() == 1 || est_manquant(b)).collect()
+        };
+        let voulus: Vec<Wanted> = candidats
+            .into_iter()
             .filter_map(|b| Some(Wanted { id: b.id.clone(), file: b.file.clone()?, size: b.file_size }))
             .collect();
         let affiche = dossier.display().to_string();
