@@ -27,6 +27,7 @@ pub mod biblio;
 pub mod connexion;
 pub mod couvertures;
 pub mod edition;
+pub mod fenetre;
 pub mod lecteur;
 pub mod liberation;
 pub mod listes;
@@ -34,6 +35,7 @@ pub mod listes_cbl;
 pub mod listes_criteres;
 pub mod maj;
 pub mod pages_livre;
+pub mod plantage;
 pub mod portable;
 pub mod reglages;
 pub mod scripts;
@@ -88,6 +90,7 @@ pub fn infos_application(data: &Path) -> InfosApplication {
 pub mod app;
 #[cfg(feature = "app")]
 mod cmd_scan;
+mod cmd_fenetre;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 // Logique de la passerelle MCP stdio (testable sans WebView2, donc aussi hors fonction `mcp`).

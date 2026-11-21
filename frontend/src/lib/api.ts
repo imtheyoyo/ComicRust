@@ -1393,3 +1393,32 @@ export const lancerScanAuto = () => appeler<boolean>('lancer_scan_auto');
 export const lireReglagesAnalyse = () => appeler<ReglagesAnalyse>('lire_reglages_analyse');
 export const enregistrerReglagesAnalyse = (reglages: Partial<ReglagesAnalyse>) =>
   appeler<ReglagesAnalyse>('enregistrer_reglages_analyse', { reglages });
+
+// ───────────────────────────── Fenêtre et lancement (lot L2) ─────────────────────────────
+// Contrat : docs/tauri/ipc-fenetre.md. Logique dans lib/fenetre.ts.
+
+/** Nature d'un chemin reçu en argument de ligne de commande ou déposé sur la fenêtre. */
+export type GenreChemin = 'livre' | 'dossier' | 'liste' | 'absent';
+
+/** Chemin passé en argument au lancement (rendu une seule fois par le backend). */
+export interface LancementInitial {
+  chemin: string;
+  genre: GenreChemin;
+}
+
+/** Rapport de plantage de la session précédente (`data\plantage.txt`). */
+export interface RapportPlantage {
+  /** Texte complet, à copier dans le rapport de recette. */
+  texte: string;
+  /** Version, date, fil et message (premières lignes). */
+  resume: string;
+  fichier: string;
+}
+
+/** Titre de la fenêtre : « <titre> — ComicRust » ; `null` : « ComicRust ». */
+export const definirTitreFenetre = (titre: string | null) => appeler<void>('definir_titre_fenetre', { titre });
+export const lancementInitial = () => appeler<LancementInitial | null>('lancement_initial');
+export const classerChemin = (chemin: string) => appeler<GenreChemin>('classer_chemin', { chemin });
+export const lirePlantage = () => appeler<RapportPlantage | null>('lire_plantage');
+/** Le rapport a été vu : le backend supprime `data\plantage.txt`. */
+export const acquitterPlantage = () => appeler<void>('acquitter_plantage');

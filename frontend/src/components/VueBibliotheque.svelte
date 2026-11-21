@@ -15,6 +15,7 @@
   import { Selection } from '../lib/selection.svelte';
   import DialogInfos from './DialogInfos.svelte';
   import { fermerModale, modale } from '../lib/modale';
+  import { enregistrerOuvreur } from '../lib/fenetre';
   import DialogOperation from './DialogOperation.svelte';
   import DialogRenommer from './DialogRenommer.svelte';
   import GrilleCouvertures from './GrilleCouvertures.svelte';
@@ -400,16 +401,22 @@
     if (focusLibre()) document.querySelector<HTMLElement>('[data-testid="grille-piles"]')?.focus();
   }
 
+  /** Lit un fichier ou un dossier hors bibliothèque (séance en cours terminée d'abord). */
+  async function ouvrirChemin(chemin: string) {
+    const n = ++ouverture;
+    if (livreLu && lecteur) await lecteur.terminer();
+    if (n === ouverture) livreLu = { chemin };
+  }
+
   function ouvrirFichier() {
     const chemin = cheminFichier.trim();
     if (!chemin) return;
     fermerModale(dialogueFichier);
-    const n = ++ouverture;
-    void (async () => {
-      if (livreLu && lecteur) await lecteur.terminer();
-      if (n === ouverture) livreLu = { chemin };
-    })();
+    void ouvrirChemin(chemin);
   }
+
+  // Ctrl+O, fichier déposé ou passé en argument (lib/fenetre.ts) : cette vue porte le lecteur.
+  onMount(() => enregistrerOuvreur({ ouvrirChemin, saisirChemin: () => dialogueFichier?.showModal() }));
 
   /** Séance de lecture terminée (rappel `onlecturefinie` du lecteur, appelé APRÈS l'enregistrement
    *  de l'avancement et la fermeture du livre côté backend, quel que soit le chemin : ✖, Échap,
