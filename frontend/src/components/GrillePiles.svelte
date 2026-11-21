@@ -2,7 +2,8 @@
   // Vue empilée par série (« 📚 Empiler par série ») : une pile par série, couvertures décalées,
   // nombre de livres et barre de lecture. Sélection multiple comme la grille de couvertures (clic,
   // Ctrl/Maj + clic, Maj + flèches, Ctrl+A, rectangle tracé dans le vide) ; double-clic ou Entrée
-  // ouvre la pile courante ; glisser des piles vers une liste ajoute tous leurs livres. Grille
+  // ouvre la pile courante ; glisser des piles vers une liste ajoute tous leurs livres, et entre deux
+  // piles (liste de lecture triée dans l'ordre de la liste) les réordonne ; Alt+↑/↓ les monte / descend. Grille
   // virtualisée comme GrilleCouvertures ; les piles viennent de lister_piles (une seule réponse).
   import { untrack } from 'svelte';
   import type { Pile } from '../lib/api';
@@ -23,8 +24,10 @@
     onmenu: (x: number, y: number) => void;
     /** Appui sur une pile (début possible d'un glisser vers une liste) ; `i` = rang de la pile. */
     onappui?: (e: PointerEvent, i: number) => void;
+    /** Alt+↑ / Alt+↓ : monte ou descend la pile courante dans la liste de lecture (`haut` : monter). */
+    ondecaler?: (haut: boolean) => void;
   }
-  let { piles, sel, version, zoom, onouvrir, onmenu, onappui }: Props = $props();
+  let { piles, sel, version, zoom, onouvrir, onmenu, onappui, ondecaler }: Props = $props();
 
   const MARGE = 16;
   const ESPACE = 16;
@@ -100,6 +103,12 @@
     if (e.key === 'Enter' && courant >= 0) {
       e.preventDefault();
       onouvrir(piles[courant].serie);
+      return;
+    }
+    // Alt+↑ / Alt+↓ : monter / descendre la pile courante (alternative clavier au glisser).
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      ondecaler?.(e.key === 'ArrowUp');
       return;
     }
     // Ctrl+A : toutes les piles de la vue.

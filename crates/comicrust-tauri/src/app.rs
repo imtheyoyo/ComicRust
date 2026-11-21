@@ -417,6 +417,28 @@ fn decaler_groupe_liste(
 }
 
 #[tauri::command(async)]
+fn deplacer_piles_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    requete: RequeteLivres,
+    series: Vec<String>,
+    insertion: usize,
+) -> Result<ResultatListes, String> {
+    biblio.deplacer_piles_liste(&id, &requete, &series, insertion)
+}
+
+#[tauri::command(async)]
+fn decaler_pile_liste(
+    biblio: tauri::State<'_, Biblio>,
+    id: String,
+    requete: RequeteLivres,
+    serie: String,
+    haut: bool,
+) -> Result<ResultatListes, String> {
+    biblio.decaler_pile_liste(&id, &requete, &serie, haut)
+}
+
+#[tauri::command(async)]
 fn groupes_vue(biblio: tauri::State<'_, Biblio>, requete: RequeteLivres) -> Result<Vec<GroupeVue>, String> {
     biblio.groupes_vue(&requete)
 }
@@ -1033,6 +1055,8 @@ pub fn run() {
             deplacer_livres_liste,
             deplacer_groupes_liste,
             decaler_groupe_liste,
+            deplacer_piles_liste,
+            decaler_pile_liste,
             groupes_vue,
             catalogue_criteres,
             nouveau_critere,

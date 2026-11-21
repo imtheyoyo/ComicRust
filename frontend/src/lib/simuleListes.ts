@@ -440,6 +440,19 @@ export function creerListesSimulees(ctx: ContexteListes) {
     return res;
   }
 
+  /** Piles de la vue (une par série, ordre de première apparition), comme `piles_de` du backend. */
+  function piles(q: RequeteLivres): Array<GroupeVue & { ids: string[] }> {
+    const res = new Map<string, GroupeVue & { ids: string[] }>();
+    for (const x of ctx.vue({ ...q, serie: undefined })) {
+      const t = ctx.titreGroupe(x, 'serie');
+      const p = res.get(t) ?? { titre: t, nombre: 0, ids: [] };
+      p.nombre++;
+      p.ids.push(x.id);
+      res.set(t, p);
+    }
+    return [...res.values()];
+  }
+
   function listesDepart(id?: string): ListeDepart[] {
     const exclus = new Set<string>();
     if (id) {
@@ -687,6 +700,33 @@ export function creerListesSimulees(ctx: ContexteListes) {
         const j = k + (a.haut ? -1 : 2);
         if ((a.haut && k === 0) || (!a.haut && k === gs.length - 1)) return resultat('');
         placer(l, new Set(gs[k].ids), j < gs.length ? gs[j].ids[0] : null);
+        return resultat(`✔ Réordonnancement de « ${l.nom} »`);
+      }
+      case 'deplacer_piles_liste': {
+        verifierEcriture();
+        const l = exiger(id).l;
+        vueListe(id, a.requete as RequeteLivres);
+        const ps = piles(a.requete as RequeteLivres);
+        const choisies = new Set(a.series as string[]);
+        const ens = new Set(ps.filter((g) => choisies.has(g.titre)).flatMap((g) => g.ids));
+        if (!ens.size) throw new Error("aucune des piles demandées n'est affichée");
+        // Repère : premier livre de la première pile non déplacée à partir de la frontière.
+        let k = Number(a.insertion);
+        while (k < ps.length && choisies.has(ps[k].titre)) k++;
+        const avant = l.ids!.join();
+        placer(l, ens, k < ps.length ? ps[k].ids[0] : null);
+        return resultat(l.ids!.join() === avant ? '' : `✔ Réordonnancement de « ${l.nom} »`);
+      }
+      case 'decaler_pile_liste': {
+        verifierEcriture();
+        const l = exiger(id).l;
+        vueListe(id, a.requete as RequeteLivres);
+        const ps = piles(a.requete as RequeteLivres);
+        const k = ps.findIndex((g) => g.titre === a.serie);
+        if (k < 0) throw new Error(`pile « ${a.serie} » non affichée`);
+        if ((a.haut && k === 0) || (!a.haut && k === ps.length - 1)) return resultat('');
+        const j = k + (a.haut ? -1 : 2);
+        placer(l, new Set(ps[k].ids), j < ps.length ? ps[j].ids[0] : null);
         return resultat(`✔ Réordonnancement de « ${l.nom} »`);
       }
       case 'catalogue_criteres': {

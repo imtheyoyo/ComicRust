@@ -1344,3 +1344,11 @@ export const SECRET_MASQUE = '••••';
 /** Clé réservée des réglages lus : liste des clés secrètes (champ toujours masqué, même quand le
  *  secret n'est pas défini ou illisible). Jamais renvoyée au backend (qui l'ignorerait). */
 export const CLE_SECRETS = '$secrets';
+
+// ───── Piles réordonnables (lot L1) : liste de lecture triée « Ordre de la liste », vue empilée ─────
+/** Déplace des piles (séries) en bloc à la frontière `insertion` entre piles (0 : avant la première). */
+export const deplacerPilesListe = (id: string, requete: RequeteLivres, series: string[], insertion: number) =>
+  appeler<ResultatListes>('deplacer_piles_liste', { id, requete, series, insertion });
+/** « Monter / Descendre la pile » : décale la pile `serie` d'un cran. */
+export const decalerPileListe = (id: string, requete: RequeteLivres, serie: string, haut: boolean) =>
+  appeler<ResultatListes>('decaler_pile_liste', { id, requete, serie, haut });

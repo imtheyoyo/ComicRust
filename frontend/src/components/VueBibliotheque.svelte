@@ -3,7 +3,7 @@
   // virtualisés, panneau de détails et barre d'état. Les données viennent de lister_livres.
   import { onMount, tick, untrack } from 'svelte';
   import {
-    ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, deplacerGroupesListe, deplacerLivresListe, ecouter,
+    ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, decalerPileListe, deplacerGroupesListe, deplacerLivresListe, deplacerPilesListe, ecouter,
     dansTauri, groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
     type BibliothequeModifiee, type ClefTri, type Groupe, type Pile, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
   } from '../lib/api';
@@ -594,6 +594,7 @@
     const f = (k: number) => k.toLocaleString('fr-FR');
     const quoi = np > 1 ? `les ${f(n)} livres de ${f(np)} piles` : n > 1 ? `les ${f(n)} livres` : 'le livre';
     const raison = listes.raison;
+    const refusPile = refusDecalerPile();
     return [
       ...(np === 1 ? [{ id: 'ouvrir', libelle: '📂 Ouvrir la pile', raccourci: 'Entrée' }] : []),
       { id: 'infos', libelle: n > 1 ? `✏ Modifier les infos ${quoi.replace(/^les /, 'des ')}…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: np === 1 },
@@ -604,7 +605,11 @@
       entreeScripts(),
       { id: 'ajouter', libelle: `➕ Ajouter ${quoi} à une liste…`, separe: true, desactive: !!raison, aide: raison },
       ...(liste?.type === 'lecture'
-        ? [{ id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, raccourci: 'Suppr', desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' }]
+        ? [
+            { id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, raccourci: 'Suppr', desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' },
+            { id: 'monter-pile', libelle: '⬆ Monter la pile', raccourci: 'Alt+↑', desactive: !!refusPile, aide: refusPile ?? undefined },
+            { id: 'descendre-pile', libelle: '⬇ Descendre la pile', raccourci: 'Alt+↓', desactive: !!refusPile, aide: refusPile ?? undefined },
+          ]
         : []),
     ];
   });
@@ -614,7 +619,51 @@
     erreurAction = '';
     if (id === 'ouvrir') {
       if (cible.serie !== null) void ouvrirPile(cible.serie);
+    } else if (id === 'monter-pile' || id === 'descendre-pile') {
+      if (cible.serie !== null) await decalerPile(cible.serie, id === 'monter-pile');
     } else await agirSurIds(id, cible.ids);
+  }
+
+  /** Raison pour laquelle « Monter / Descendre la pile » est indisponible (null : possible). */
+  function refusDecalerPile(): string | null {
+    return refusReordonner() ?? (nbPilesSel === 1 ? null : 'Sélectionne une seule pile');
+  }
+
+  /** Monte ou descend la pile `serie` d'un cran dans la liste de lecture ; la pile reste sélectionnée
+   *  (retrouvée par titre quand les piles sont rechargées). */
+  async function decalerPile(serie: string, haut: boolean) {
+    if (!liste) return;
+    const idl = liste.id;
+    const req = requete();
+    try {
+      await listes.executer('Réordonnancement de la liste', () => decalerPileListe(idl, req, serie, haut));
+    } catch (e) {
+      erreurAction = messageErreur(e);
+    }
+  }
+
+  /** Alt+↑ / Alt+↓ dans la grille des piles : pile courante, ou la raison du refus dans une liste. */
+  function decalerPileClavier(haut: boolean) {
+    if (liste?.type !== 'lecture') return;
+    const refus = refusDecalerPile();
+    if (refus) erreurAction = refus;
+    else if (pileSelectionnee !== null) void decalerPile(pileSelectionnee, haut);
+  }
+
+  /** Piles déposées à la frontière `insertion` entre piles : les piles saisies au début du glisser. */
+  function deplacerPiles(insertion: number) {
+    if (!liste) return;
+    const idl = liste.id;
+    const req = requete();
+    const series = pilesGlissees.map((p) => p.serie);
+    if (!series.length) return;
+    void (async () => {
+      try {
+        await listes.executer('Réordonnancement de la liste', () => deplacerPilesListe(idl, req, series, insertion));
+      } catch (e) {
+        erreurAction = messageErreur(e);
+      }
+    })();
   }
 
   /** Identifiants des livres sélectionnés (pages non chargées demandées au backend). */
@@ -847,16 +896,19 @@
   });
   /** Piles figées au début du glisser (voir `debut`). */
   let pilesGlissees: Pile[] = [];
-  // Glisser une pile vers une liste : tous ses livres sont ajoutés (pas de réordonnancement de piles).
+  // Glisser une pile : vers une liste du panneau, tous ses livres sont ajoutés ; entre deux piles
+  // (liste de lecture triée dans l'ordre de la liste), les piles sélectionnées sont réordonnées.
   const glisserPile = new GlisserLivres({
+    cellule: 'pile',
     debut: () => {
       listes.viderDepots();
       // Les piles glissées sont figées ici : si bib.piles est remplacé pendant le geste (fin de scan…),
       // le dépôt ne doit pas relire des rangs périmés.
       pilesGlissees = selPiles.indices().flatMap((i) => (bib.piles[i] ? [bib.piles[i]] : []));
     },
-    groupeDe: () => null,
-    deplacerGroupes: () => {},
+    // Chaque pile est un groupe d'un seul élément.
+    groupeDe: (i) => ({ rang: i, debut: i, fin: i }),
+    deplacerGroupes: deplacerPiles,
     // Glisser une pile de la sélection : toutes les piles sélectionnées partent ; hors sélection :
     // seulement celle-là.
     contient: (i) => selPiles.contient(i),
@@ -864,9 +916,9 @@
     selectionPrete: () => Promise.resolve(),
     indices: () => selPiles.indices(),
     nombreLivres: (ind) => ind.reduce((n, i) => n + (bib.piles[i]?.nbLivres ?? 0), 0),
-    series: () => 0,
+    series: (ind) => ind.length,
     surListe: (id) => ({ refus: listes.depot(id), nom: listes.noeud(id)?.nom ?? '' }),
-    refusReordonner: () => 'Dépose la pile sur une liste de lecture, dans le panneau des listes.',
+    refusReordonner: () => (liste?.type === 'lecture' ? refusReordonner() : 'Dépose la pile sur une liste de lecture, dans le panneau des listes.'),
     horizontal: () => true,
     zone: () => document.querySelector<HTMLElement>('[data-testid="grille-piles"]'),
     ajouter: (idListe) => void ajouterIdsA(idListe, pilesGlissees.flatMap((p) => p.ids)),
@@ -1000,7 +1052,7 @@
       {:else if enPiles && !pileOuverte}
         <GrillePiles piles={bib.piles} sel={selPiles} version={bib.version} {zoom} onouvrir={ouvrirPile}
           onmenu={(x, y) => ouvrirMenu(x, y, true)}
-          onappui={(e, i) => glisserPile.appui(e, i)} />
+          onappui={(e, i) => glisserPile.appui(e, i)} ondecaler={decalerPileClavier} />
       {:else if vue === 'grille'}
         <GrilleCouvertures {bib} {sel} {zoom} onmenu={(_, x, y) => ouvrirMenu(x, y)} onouvrir={ouvrir}
           onappui={(e, i, g) => glisser.appui(e, i, g)} ongroupe={cliquerGroupe} />
