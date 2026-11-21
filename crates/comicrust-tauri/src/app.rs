@@ -23,7 +23,8 @@ use crate::scripts::apercu::{Apercu as ApercuScript, Bilan as BilanScript};
 use crate::scripts::{self, ConfigScripts, EtatScripts, Scripts};
 use crate::surveillance::{self, EtatBase, Surveillance};
 use crate::transfert::{ApercuTransfert, DemandeTransfert, ResumeTransfert, Transfert};
-use crate::{infos_application, portable, themes, InfosApplication};
+use crate::cmd_fenetre::{self, EtatFenetre};
+use crate::{fenetre, infos_application, plantage, portable, themes, InfosApplication};
 use comicrust_core::scripting::Hook;
 use serde_json::{Map, Value};
 use std::path::PathBuf;
@@ -913,6 +914,14 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+    // Rapport de plantage (`data\plantage.txt`, montré au lancement suivant) et ligne de commande
+    // (`ComicRust.exe [fichier | dossier | liste.cbl]`, docs/tauri/ipc-fenetre.md).
+    plantage::installer(data.clone());
+    // Recette : vérifier le rapport de plantage (même variable que la version egui).
+    if std::env::var_os("COMICRUST_SIMULER_PLANTAGE").is_some() {
+        panic!("plantage simulé (COMICRUST_SIMULER_PLANTAGE)");
+    }
+    let initial = fenetre::analyser_arguments(std::env::args_os().skip(1)).chemin.map(|p| fenetre::rendre_absolu(&p));
     // Mise à jour précédente : suppression des `.old` notés dans `data\maj\anciens.txt` et des
     // téléchargements, avant la création de la fenêtre.
     let dossier_app = portable::exe_dir();
@@ -933,7 +942,10 @@ pub fn run() {
         .manage(Transfert::nouveau(bibliotheque.clone()))
         .manage(lecteur)
         .manage(bibliotheque)
+        .manage(EtatFenetre::nouveau(data.clone(), initial))
         .manage(DossierData(data))
+        // Géométrie de la fenêtre mémorisée (redimensionnement, déplacement, fermeture).
+        .on_window_event(|fen, evenement| cmd_fenetre::evenement_fenetre(fen, evenement))
         // Couvertures : `cr-couv://localhost/<id>` (Windows : `http://cr-couv.localhost/<id>`), servies
         // depuis le cache `data\couvertures` par les fils de `Biblio::pool` (jamais le fil principal :
         // la première lecture d'une archive sur le NAS peut durer). 404 si illisible.
@@ -1063,7 +1075,12 @@ pub fn run() {
             script_appliquer,
             script_hook_editeur,
             script_reglages_lire,
-            script_reglages_ecrire
+            script_reglages_ecrire,
+            cmd_fenetre::definir_titre_fenetre,
+            cmd_fenetre::lancement_initial,
+            cmd_fenetre::classer_chemin,
+            cmd_fenetre::lire_plantage,
+            cmd_fenetre::acquitter_plantage
         ])
         .setup(move |app| {
             // Thèmes livrés disponibles dès le premier lancement.
@@ -1102,11 +1119,14 @@ pub fn run() {
                 .title("ComicRust")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(800.0, 500.0)
-                .data_directory(profil);
+                .data_directory(profil)
+                // Montrée par `restaurer_et_afficher` une fois repositionnée (taille mémorisée).
+                .visible(false);
             // Pilotage MCP : script de la page (journal de la console dès le chargement).
             #[cfg(feature = "mcp")]
             let fenetre = if crate::mcp::actif() { fenetre.initialization_script(crate::mcp::SCRIPT) } else { fenetre };
-            fenetre.build()?;
+            let principale = fenetre.build()?;
+            cmd_fenetre::restaurer_et_afficher(&principale, &app.state::<EtatFenetre>());
             // Surveillance de la base : modifications extérieures et état en ligne / hors ligne.
             let emetteur = app.handle().clone();
             app.manage(Surveillance::demarrer(

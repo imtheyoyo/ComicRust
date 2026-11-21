@@ -58,6 +58,70 @@ pub struct Reglages {
     /// valeurs secrètes chiffrées par `comicrust_core::secret`). Lecture tolérante.
     #[serde(skip_serializing_if = "ReglagesScripts::est_vide")]
     pub scripts: ReglagesScripts,
+    /// Taille, position et état maximisé de la fenêtre principale (restaurés au démarrage).
+    #[serde(skip_serializing_if = "ReglagesFenetre::est_vide")]
+    pub fenetre: ReglagesFenetre,
+}
+
+/// Géométrie mémorisée de la fenêtre principale (section `fenetre`, `docs/tauri/ipc-fenetre.md`).
+///
+/// Unités : pixels physiques. `x` et `y` : coin haut-gauche de la fenêtre (peut être négatif sur un
+/// écran à gauche ou au-dessus de l'écran principal) ; `largeur` et `hauteur` : zone de contenu.
+/// Ce sont toujours la taille et la position « normales » (non maximisées) : `maximisee` dit si la
+/// fenêtre doit être rouverte maximisée. Lecture tolérante : un champ invalide est ignoré.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReglagesFenetre {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub largeur: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hauteur: Option<u32>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub maximisee: bool,
+}
+
+/// Bornes de lecture d'une coordonnée ou d'une dimension (au-delà : valeur absurde, ignorée).
+const COORD_MAX: i64 = 100_000;
+const DIM_MAX: u64 = 20_000;
+
+impl ReglagesFenetre {
+    pub fn est_vide(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Depuis du JSON quelconque (champ invalide ou hors bornes ignoré).
+    pub fn depuis_json(v: &Value) -> Self {
+        let Some(o) = v.as_object() else { return Self::default() };
+        let coord = |c: &str| o.get(c).and_then(Value::as_i64).filter(|n| n.abs() <= COORD_MAX).and_then(|n| i32::try_from(n).ok());
+        let dim = |c: &str| o.get(c).and_then(Value::as_u64).filter(|n| (1..=DIM_MAX).contains(n)).and_then(|n| u32::try_from(n).ok());
+        Self {
+            x: coord("x"),
+            y: coord("y"),
+            largeur: dim("largeur"),
+            hauteur: dim("hauteur"),
+            maximisee: o.get("maximisee").and_then(Value::as_bool).unwrap_or(false),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ReglagesFenetre {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::depuis_json(&Value::deserialize(d)?))
+    }
+}
+
+/// Géométrie de la fenêtre enregistrée (vide si rien n'a encore été mémorisé).
+pub fn lire_fenetre(data: &Path) -> Result<ReglagesFenetre, String> {
+    Ok(lire(data)?.fenetre)
+}
+
+/// Enregistre la géométrie de la fenêtre sans toucher au reste des réglages.
+pub fn enregistrer_fenetre(data: &Path, f: ReglagesFenetre) -> Result<(), String> {
+    modifier(data, |r| r.fenetre = f)
 }
 
 /// Réglages des scripts Python (section `scripts`, `docs/tauri/ipc-scripts.md`) :
@@ -619,6 +683,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn section_fenetre_aller_retour_et_tolerance() {
+        let f = ReglagesFenetre { x: Some(-1920), y: Some(40), largeur: Some(1280), hauteur: Some(800), maximisee: true };
+        let r = Reglages { fenetre: f, ..Default::default() };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["fenetre"], serde_json::json!({"x": -1920, "y": 40, "largeur": 1280, "hauteur": 800, "maximisee": true}));
+        assert_eq!(serde_json::from_value::<Reglages>(json).unwrap().fenetre, f);
+        // Section absente du fichier quand elle est vide (fichiers existants inchangés).
+        assert!(serde_json::to_value(Reglages::default()).unwrap().get("fenetre").is_none());
+        // Lecture tolérante : champs invalides ou absurdes ignorés, le reste gardé.
+        let t = ReglagesFenetre::depuis_json(&serde_json::json!({"x": "a", "y": 5, "largeur": 0, "hauteur": 900, "maximisee": "oui"}));
+        assert_eq!(t, ReglagesFenetre { x: None, y: Some(5), largeur: None, hauteur: Some(900), maximisee: false });
+        assert!(ReglagesFenetre::depuis_json(&serde_json::json!([1, 2])).est_vide());
+        assert_eq!(ReglagesFenetre::depuis_json(&serde_json::json!({"largeur": 99999999})).largeur, None);
+    }
+
+    #[test]
+    fn enregistrer_fenetre_garde_le_reste() {
+        let d = tempfile::tempdir().unwrap();
+        modifier(d.path(), |r| r.mode = Some(Mode::Autonome)).unwrap();
+        let f = ReglagesFenetre { x: Some(10), y: Some(20), largeur: Some(1000), hauteur: Some(700), maximisee: false };
+        enregistrer_fenetre(d.path(), f).unwrap();
+        assert_eq!(lire_fenetre(d.path()).unwrap(), f);
+        assert_eq!(lire(d.path()).unwrap().mode, Some(Mode::Autonome));
+    }
+
+    #[test]
     fn oublier_les_vues_de_listes_supprimees() {
         let d = tempfile::tempdir().unwrap();
         let patch = serde_json::json!({ "listes": {
@@ -649,6 +739,7 @@ mod tests {
             vue: PreferencesVue::default(),
             edition: ReglagesEdition::default(),
             maj: ReglagesMaj::default(),
+            fenetre: ReglagesFenetre::default(),
             scripts: ReglagesScripts {
                 auto: Some(true),
                 desactives: ["a.py:f".to_string()].into(),
