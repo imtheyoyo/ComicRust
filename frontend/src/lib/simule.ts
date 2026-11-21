@@ -12,6 +12,7 @@ import { creerTransfertSimule } from './simuleTransfert';
 import { creerMajSimulee } from './simuleMaj';
 import { creerScriptsSimules } from './simuleScripts';
 import { COMMANDES_THEMES, creerThemesSimules, themesRefuses } from './simuleThemes';
+import { COMMANDES_FENETRE, creerFenetreSimulee } from './simuleFenetre';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -344,6 +345,9 @@ const transfert = creerTransfertSimule({
 // Mise à jour (tauri-v0.8.0) : voir simuleMaj.ts.
 const maj = creerMajSimulee({ emettre, pause });
 
+// Fenêtre et lancement (lot L2) : voir simuleFenetre.ts.
+const fenetreSimulee = creerFenetreSimulee();
+
 // Scripts Python (tauri-v0.9.0) : voir simuleScripts.ts.
 const scriptsSimules = creerScriptsSimules({
   emettre,
@@ -363,6 +367,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
   const rm = maj.appeler(commande, args);
   if (rm !== undefined) return rm;
   if (COMMANDES_THEMES.includes(commande)) return themesSimules.appeler(commande, args);
+  if (COMMANDES_FENETRE.includes(commande)) return fenetreSimulee.appeler(commande, args);
   if (commande.startsWith('script')) {
     const rs = scriptsSimules.appeler(commande, args);
     if (rs !== undefined) return rs;

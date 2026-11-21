@@ -15,6 +15,7 @@
     pagesVisibles, planche, positionDe, precedente, suivante, type ContexteNavigation, type Dimensions,
   } from '../lib/lecteur';
   import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
+  import { definirLivreOuvert, pleinEcranFenetreActif, signalerLecteur } from '../lib/fenetre';
 
   interface Props {
     /** Livre de la bibliothèque (`{id}` = LivreResume.id) ou fichier hors bibliothèque (`{chemin}`). */
@@ -328,7 +329,8 @@
   }
 
   // ── Plein écran ──
-  let pleinEcranActif = $state(false);
+  // Départ : plein écran déjà décidé dans la bibliothèque (F11) → Échap en sort d'abord.
+  let pleinEcranActif = $state(pleinEcranFenetreActif());
   async function basculerPleinEcran() {
     const voulu = !pleinEcranActif;
     try {
@@ -590,7 +592,11 @@
   }
 
   // ── Ouverture ──
+  // Titre de la fenêtre : « <livre> — ComicRust » (lib/fenetre.ts), retiré à la fermeture du lecteur.
+  $effect(() => definirLivreOuvert(livre?.titre ?? null));
+
   onMount(() => {
+    signalerLecteur(true);
     racine?.focus();
     montrerBarres();
     let vivant = true;
@@ -622,6 +628,8 @@
     document.addEventListener('fullscreenchange', pleinEcranDoc);
     return () => {
       vivant = false;
+      signalerLecteur(false);
+      definirLivreOuvert(null);
       // Lecteur démonté sans passer par `fermer` (autre livre ouvert à sa place, vue quittée) :
       // même fin de séance (enregistrement puis rafraîchissement du Détail).
       void terminer();

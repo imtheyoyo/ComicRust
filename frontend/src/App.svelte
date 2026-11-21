@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import DepotFichiers from './components/DepotFichiers.svelte';
+  import DialogPlantage from './components/DialogPlantage.svelte';
+  import { gererClavierFenetre, suivrePleinEcran } from './lib/fenetre';
   import BarreLaterale, { type Section } from './components/BarreLaterale.svelte';
   import BandeauBase from './components/BandeauBase.svelte';
   import BandeauMaj from './components/BandeauMaj.svelte';
@@ -101,7 +104,10 @@
     void ecouter<BibliothequeModifiee>('bibliotheque-modifiee', (m) => {
       if (m.origine === 'externe') void listes.charger();
     }).then((f) => (desabonnerBase = f));
+    // Plein écran de la fenêtre suivi (F11 et Échap de la bibliothèque : lib/fenetre.ts).
+    const arreterPleinEcran = suivrePleinEcran();
     return () => {
+      arreterPleinEcran();
       desabonnerBase?.();
       scan.arreter();
       connexion.arreter();
@@ -201,9 +207,18 @@
     section = id ? 'listes' : 'bibliotheque';
   }
 
+  /** Fichier reçu de l'extérieur (argument, dépôt) : la vue qui porte le lecteur doit être affichée. */
+  async function versBibliotheque() {
+    if (section === 'bibliotheque' || listeAffichee) return;
+    choisirSection('bibliotheque');
+    await tick();
+  }
+
   const listeAffichee = $derived(section === 'listes' ? listes.noeud(listes.courante) ?? null : null);
 </script>
 
+<!-- F11, Échap (sortie du plein écran) et Ctrl+O hors lecteur ; phase de capture : avant les touches de la vue. -->
+<svelte:window onkeydowncapture={gererClavierFenetre} />
 {#if erreur && choisirAutre}
   <PremierDemarrage onpret={pret} probleme={erreur} onretour={() => void ouvrir()} />
 {:else if erreur}
@@ -269,6 +284,7 @@
     {/if}
   </div>
   </div>
+  <DepotFichiers {listes} {scan} {versBibliotheque} />
   <DialogDossiers bind:this={dossiers} {scan} />
   <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} onmaj={rechercherMaj} />
   <DialogTransfert bind:this={transfert} onbibliotheque={bibliothequeRouverte} />
@@ -284,6 +300,8 @@
 {#if miseAJour.fenetre}
   <DialogMaj />
 {/if}
+<!-- Rapport de plantage de la session précédente (data\plantage.txt) : montré dans tous les états. -->
+<DialogPlantage />
 
 <style>
   .cadre { height: 100vh; display: flex; flex-direction: column; }

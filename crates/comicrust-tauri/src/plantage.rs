@@ -97,7 +97,13 @@ mod tests {
 
     #[test]
     fn format_du_rapport() {
-        let t = formater_rapport("0.11.0", "2026-11-21 10:00:00", "main", "panicked at src/x.rs:1:1:\nboum", "pile 1\npile 2");
+        let t = formater_rapport(
+            "0.11.0",
+            "2026-11-21 10:00:00",
+            "main",
+            "panicked at src/x.rs:1:1:\nboum",
+            "pile 1\npile 2",
+        );
         assert_eq!(
             t,
             "ComicRust-Tauri v0.11.0 — 2026-11-21 10:00:00\nFil : main\npanicked at src/x.rs:1:1:\nboum\n\npile 1\npile 2\n"

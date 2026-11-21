@@ -5,6 +5,7 @@
 use crate::biblio::{
     self, Biblio, ChoixPremierDemarrage, EtatBiblio, LivreDetail, PageLivres, PagePiles, RequeteLivres,
 };
+use crate::cmd_fenetre::{self, EtatFenetre};
 use crate::edition::{
     self, BilanOperation, ChampFiche, ChampModifie, DemandeModification, DemandeRenommage, Edition, ErreurChamp,
     EvenementEdition, FicheEdition, ModeleNom, Proposition, ResultatRenommage,
@@ -23,7 +24,6 @@ use crate::scripts::apercu::{Apercu as ApercuScript, Bilan as BilanScript};
 use crate::scripts::{self, ConfigScripts, EtatScripts, Scripts};
 use crate::surveillance::{self, EtatBase, Surveillance};
 use crate::transfert::{ApercuTransfert, DemandeTransfert, ResumeTransfert, Transfert};
-use crate::cmd_fenetre::{self, EtatFenetre};
 use crate::{fenetre, infos_application, plantage, portable, themes, InfosApplication};
 use comicrust_core::scripting::Hook;
 use serde_json::{Map, Value};

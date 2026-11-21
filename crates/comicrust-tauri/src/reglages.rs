@@ -96,8 +96,12 @@ impl ReglagesFenetre {
     /// Depuis du JSON quelconque (champ invalide ou hors bornes ignoré).
     pub fn depuis_json(v: &Value) -> Self {
         let Some(o) = v.as_object() else { return Self::default() };
-        let coord = |c: &str| o.get(c).and_then(Value::as_i64).filter(|n| n.abs() <= COORD_MAX).and_then(|n| i32::try_from(n).ok());
-        let dim = |c: &str| o.get(c).and_then(Value::as_u64).filter(|n| (1..=DIM_MAX).contains(n)).and_then(|n| u32::try_from(n).ok());
+        let coord = |c: &str| {
+            o.get(c).and_then(Value::as_i64).filter(|n| n.abs() <= COORD_MAX).and_then(|n| i32::try_from(n).ok())
+        };
+        let dim = |c: &str| {
+            o.get(c).and_then(Value::as_u64).filter(|n| (1..=DIM_MAX).contains(n)).and_then(|n| u32::try_from(n).ok())
+        };
         Self {
             x: coord("x"),
             y: coord("y"),
@@ -684,15 +688,21 @@ mod tests {
 
     #[test]
     fn section_fenetre_aller_retour_et_tolerance() {
-        let f = ReglagesFenetre { x: Some(-1920), y: Some(40), largeur: Some(1280), hauteur: Some(800), maximisee: true };
+        let f =
+            ReglagesFenetre { x: Some(-1920), y: Some(40), largeur: Some(1280), hauteur: Some(800), maximisee: true };
         let r = Reglages { fenetre: f, ..Default::default() };
         let json = serde_json::to_value(&r).unwrap();
-        assert_eq!(json["fenetre"], serde_json::json!({"x": -1920, "y": 40, "largeur": 1280, "hauteur": 800, "maximisee": true}));
+        assert_eq!(
+            json["fenetre"],
+            serde_json::json!({"x": -1920, "y": 40, "largeur": 1280, "hauteur": 800, "maximisee": true})
+        );
         assert_eq!(serde_json::from_value::<Reglages>(json).unwrap().fenetre, f);
         // Section absente du fichier quand elle est vide (fichiers existants inchangés).
         assert!(serde_json::to_value(Reglages::default()).unwrap().get("fenetre").is_none());
         // Lecture tolérante : champs invalides ou absurdes ignorés, le reste gardé.
-        let t = ReglagesFenetre::depuis_json(&serde_json::json!({"x": "a", "y": 5, "largeur": 0, "hauteur": 900, "maximisee": "oui"}));
+        let t = ReglagesFenetre::depuis_json(
+            &serde_json::json!({"x": "a", "y": 5, "largeur": 0, "hauteur": 900, "maximisee": "oui"}),
+        );
         assert_eq!(t, ReglagesFenetre { x: None, y: Some(5), largeur: None, hauteur: Some(900), maximisee: false });
         assert!(ReglagesFenetre::depuis_json(&serde_json::json!([1, 2])).est_vide());
         assert_eq!(ReglagesFenetre::depuis_json(&serde_json::json!({"largeur": 99999999})).largeur, None);

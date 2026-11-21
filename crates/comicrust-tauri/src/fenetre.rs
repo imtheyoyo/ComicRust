@@ -72,7 +72,13 @@ pub struct Restauration {
 
 impl Geometrie {
     fn en_reglages(self, maximisee: bool) -> ReglagesFenetre {
-        ReglagesFenetre { x: Some(self.x), y: Some(self.y), largeur: Some(self.largeur), hauteur: Some(self.hauteur), maximisee }
+        ReglagesFenetre {
+            x: Some(self.x),
+            y: Some(self.y),
+            largeur: Some(self.largeur),
+            hauteur: Some(self.hauteur),
+            maximisee,
+        }
     }
 }
 
@@ -89,10 +95,11 @@ fn recouvrement_titre(g: &Geometrie, e: &Ecran) -> (i64, i64) {
 /// recouvre un écran d'au moins 100 px de large et 16 px de haut. Sans liste d'écrans (système qui
 /// n'en dit rien), on fait confiance à la position mémorisée.
 pub fn position_valide(g: &Geometrie, ecrans: &[Ecran]) -> bool {
-    ecrans.is_empty() || ecrans.iter().any(|e| {
-        let (l, h) = recouvrement_titre(g, e);
-        l >= RECOUVREMENT_LARGEUR && h >= RECOUVREMENT_HAUTEUR
-    })
+    ecrans.is_empty()
+        || ecrans.iter().any(|e| {
+            let (l, h) = recouvrement_titre(g, e);
+            l >= RECOUVREMENT_LARGEUR && h >= RECOUVREMENT_HAUTEUR
+        })
 }
 
 /// Décide de l'ouverture à partir des réglages : `None` = rien de mémorisé (ouverture par défaut).
@@ -141,7 +148,12 @@ impl Suivi {
 
     /// Prend en compte l'état de la fenêtre. Renvoie les réglages à écrire si l'état a changé et
     /// qu'au moins [`INTERVALLE_SAUVEGARDE`] s'est écoulé depuis la dernière écriture.
-    pub fn observer(&mut self, normale: Option<Geometrie>, maximisee: bool, maintenant: Instant) -> Option<ReglagesFenetre> {
+    pub fn observer(
+        &mut self,
+        normale: Option<Geometrie>,
+        maximisee: bool,
+        maintenant: Instant,
+    ) -> Option<ReglagesFenetre> {
         match normale {
             Some(g) => self.courant = g.en_reglages(maximisee),
             None => self.courant.maximisee = maximisee,
@@ -313,7 +325,8 @@ mod tests {
         let r = restaurer(&reg(0, 0, 8000, 8000, false), &ecrans).unwrap();
         assert_eq!((r.largeur, r.hauteur), (1920, 1080));
         // Position absente : centrée. Seul « maximisée » connu : ouverture par défaut maximisée.
-        let r = restaurer(&ReglagesFenetre { largeur: Some(900), hauteur: Some(600), ..Default::default() }, &ecrans).unwrap();
+        let r = restaurer(&ReglagesFenetre { largeur: Some(900), hauteur: Some(600), ..Default::default() }, &ecrans)
+            .unwrap();
         assert_eq!(r.placement, Placement::Centrer);
         let r = restaurer(&ReglagesFenetre { maximisee: true, ..Default::default() }, &ecrans).unwrap();
         assert_eq!((r.largeur, r.hauteur, r.maximisee), (LARGEUR_DEFAUT, HAUTEUR_DEFAUT, true));
@@ -331,7 +344,10 @@ mod tests {
             assert_eq!(s.observer(Some(g(900 + i as u32)), false, t0 + Duration::from_millis(i * 20)), None);
         }
         // Après l'intervalle : la dernière géométrie.
-        assert_eq!(s.observer(Some(g(1000)), false, t0 + Duration::from_millis(1100)), Some(reg(10, 10, 1000, 600, false)));
+        assert_eq!(
+            s.observer(Some(g(1000)), false, t0 + Duration::from_millis(1100)),
+            Some(reg(10, 10, 1000, 600, false))
+        );
         // Même état : pas d'écriture.
         assert_eq!(s.observer(Some(g(1000)), false, t0 + Duration::from_secs(5)), None);
         // Maximisée : la géométrie normale est gardée, seul l'indicateur change.
