@@ -928,7 +928,7 @@
       bind:this={champRecherche}
       class="recherche"
       type="search"
-      placeholder="Rechercher (titre, série, éditeur)…  /"
+      placeholder="Rechercher (série, titre, auteurs, résumé…)  /"
       aria-label="Rechercher dans la bibliothèque"
       value={saisie}
       oninput={(e) => recherche(e.currentTarget.value)}

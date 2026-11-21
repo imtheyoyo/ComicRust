@@ -261,11 +261,6 @@
         <h1>Listes</h1>
         <p>Choisis une liste dans le panneau de gauche.</p>
       </main>
-    {:else}
-      <main class="bientot">
-        <h1>Séries</h1>
-        <p>La navigation par séries arrivera dans une prochaine étape.</p>
-      </main>
     {/if}
   </div>
   </div>

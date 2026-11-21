@@ -3,7 +3,7 @@
   import type { EtatListes } from '../lib/listes.svelte';
   import PanneauListes from './PanneauListes.svelte';
 
-  export type Section = 'bibliotheque' | 'series' | 'listes';
+  export type Section = 'bibliotheque' | 'listes';
 
   interface Props {
     section: Section;
@@ -24,7 +24,6 @@
   // « Listes » n'est plus une entrée : l'arbre des listes occupe le milieu du panneau.
   const entrees: Array<{ id: Section; titre: string; glyphe: string }> = [
     { id: 'bibliotheque', titre: 'Bibliothèque', glyphe: '▦' },
-    { id: 'series', titre: 'Séries', glyphe: '❏' },
   ];
 </script>
 

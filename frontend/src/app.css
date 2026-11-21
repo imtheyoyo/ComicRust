@@ -71,3 +71,25 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 
 /* Rectangle de sélection en cours (bibliothèque) : pas de sélection de texte. */
 body.rectangle-selection, body.rectangle-selection * { user-select: none !important; }
+
+/* Accessibilité (étape 10, audit de parité) : sans toucher aux variables --cr-* du thème. */
+
+/* Mouvement réduit : plus d'animations ni de transitions (barre de progression comprise). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Contraste forcé de Windows : le système impose ses couleurs ; on garantit seulement des
+   bordures et un contour de focus visibles (couleurs système, jamais celles du thème). */
+@media (forced-colors: active) {
+  button, select, textarea, input, dialog { border: 1px solid ButtonText; }
+  button:disabled { opacity: 1; color: GrayText; border-color: GrayText; }
+  :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  .barre-progression { forced-color-adjust: none; border-color: ButtonText; background: Canvas; }
+  .barre-progression > div { background: Highlight; }
+}

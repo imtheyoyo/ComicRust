@@ -129,6 +129,16 @@ remplacement par renommage `.old`, `data\` jamais touché, redémarrage), notes 
 Tableau fonction par fonction egui ↔ Tauri (réglages, raccourcis clavier, glisser-déposer, ligne de
 commande `comicrust-cli`, tailles de fenêtre mémorisées, accessibilité, performances, mémoire).
 Tout écart est soit corrigé, soit accepté explicitement par Yoyo.
+
+État (audit du 14/11/2026 : `audit-parite.md`, corrections par lots) :
+- Lot L9 « Paquet et docs » : `comicrust-cli.exe` compilé (`-p comicrust-cli`) et livré dans le zip
+  Tauri, essayé dans l'étape « Essai du paquet » (`--help`, `info`, `render` sur un CBZ minimal) ; la mise à
+  jour intégrée le traite comme les autres exe (renommage `.old`, test `comicrust_cli_exe_remplace_…`).
+  Le zip contient `README-Tauri.md` (renommé `README.md` dans le paquet) à la place du README d'egui.
+- Interface : section « Séries » (maquette) retirée de la barre latérale ; placeholder de recherche aligné sur
+  la recherche réelle (tous les champs, comme ComicRack) ; `prefers-reduced-motion` et `forced-colors`
+  pris en charge dans `app.css` (sans variable `--cr-*`).
+- Les autres lots (L1 à L8) sont décrits dans `audit-parite.md`.
 **Recette** `recette/tauri-v0.11.0.md` : la recette de non-régression complète, bloc par bloc.
 
 ### Étape 11 : première release (`tauri-v1.0.0`)
