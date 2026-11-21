@@ -92,9 +92,11 @@ pub fn infos_application(data: &Path) -> InfosApplication {
 #[cfg(feature = "app")]
 pub mod app;
 #[cfg(feature = "app")]
-mod cmd_scan;
 mod cmd_fenetre;
+#[cfg(feature = "app")]
 mod cmd_manquants;
+#[cfg(feature = "app")]
+mod cmd_scan;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 // Logique de la passerelle MCP stdio (testable sans WebView2, donc aussi hors fonction `mcp`).
