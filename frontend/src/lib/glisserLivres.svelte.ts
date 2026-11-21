@@ -1,7 +1,7 @@
 // Glisser-déposer de livres (étape 5), à la souris (événements pointer, comme l'onglet Pages :
 // pas de glisser HTML5, que WebView2 réserve aux fichiers déposés dans la fenêtre) :
 // - sur une liste de lecture du panneau des listes ([data-liste-id]) : ajout ;
-// - entre deux livres de la vue ([data-index]) : réordonnancement de la liste affichée, si elle
+// - entre deux livres de la vue ([data-index]) ou, en vue empilée, entre deux piles ([data-pile])  : réordonnancement de la liste affichée, si elle
 //   est triée dans l'ordre de la liste (y compris une série entière sélectionnée par son en-tête).
 // Un badge suit le pointeur (« 3 livres — Ajouter à « … » », ou le refus), un trait montre la place.
 
@@ -33,6 +33,9 @@ export interface ContexteGlisser {
   /** Livres glissés au-dessus d'une liste : null si accepté, sinon la raison, undefined si la
    *  réponse du backend est attendue ; et son nom. */
   surListe: (id: string) => { refus: string | null | undefined; nom: string };
+  /** Cellules à survoler : `index` (livres, défaut) ou `pile` (vue empilée : attribut `data-pile`,
+   *  chaque pile est un groupe d'un seul élément, déposé entre deux piles). */
+  cellule?: 'index' | 'pile';
   /** Glisser de séries entières : groupe de la vue qui contient l'index `i` (rang du groupe,
    *  premier et dernier index), ou null si les groupes ne sont pas encore connus. */
   groupeDe: (i: number) => { rang: number; debut: number; fin: number } | null;
@@ -72,6 +75,11 @@ export class GlisserLivres {
 
   constructor(private ctx: ContexteGlisser) {}
 
+  /** Nom de l'attribut `data-*` des cellules survolées. */
+  private get attribut(): string {
+    return this.ctx.cellule ?? 'index';
+  }
+
   /** Appui sur le livre `i` (bouton gauche) : le glisser commence après quelques pixels.
    *  `groupes` : appui sur l'en-tête d'un groupe (déplacement de séries entières). */
   appui(e: PointerEvent, i: number, groupes = false): void {
@@ -102,7 +110,7 @@ export class GlisserLivres {
       if (this.indices.length === 0) return;
       this.nb = this.ctx.nombreLivres?.(this.indices) ?? this.indices.length;
       this.nbSeries = this.ctx.series(this.indices);
-      this.groupes = this.depart.groupes;
+      this.groupes = this.depart.groupes || this.ctx.cellule === 'pile';
       this.ctx.debut(this.groupes);
       this.actif = true;
       document.body.classList.add('glisser-livres');
@@ -143,7 +151,8 @@ export class GlisserLivres {
       return;
     }
     const z = this.ctx.zone();
-    const cellule = el?.closest<HTMLElement>('[data-index]');
+    const attr = this.attribut;
+    const cellule = el?.closest<HTMLElement>(`[data-${attr}]`);
     if (!z || !el || !z.contains(el)) {
       this.indication = null;
       return;
@@ -158,7 +167,7 @@ export class GlisserLivres {
       return;
     }
     const r = cellule.getBoundingClientRect();
-    const i = Number(cellule.dataset.index);
+    const i = Number(cellule.getAttribute(`data-${attr}`));
     const h = this.ctx.horizontal();
     if (this.groupes) {
       this.calculerGroupes(i, r, h);
@@ -182,7 +191,7 @@ export class GlisserLivres {
     const moitie = h ? this.x > r.left + r.width / 2 : this.y > r.top + r.height / 2;
     const apres = g.fin === g.debut ? moitie : i - g.debut >= (g.fin - g.debut + 1) / 2;
     this.indication = { type: 'groupes', insertion: g.rang + (apres ? 1 : 0) };
-    const bord = document.querySelector<HTMLElement>(`[data-index="${apres ? g.fin : g.debut}"]`)?.getBoundingClientRect() ?? r;
+    const bord = document.querySelector<HTMLElement>(`[data-${this.attribut}="${apres ? g.fin : g.debut}"]`)?.getBoundingClientRect() ?? r;
     const zr = this.ctx.zone()!.getBoundingClientRect();
     this.trait = h
       ? { x: apres ? bord.right + 5 : bord.left - 8, y: bord.top, l: 3, h: bord.height }
