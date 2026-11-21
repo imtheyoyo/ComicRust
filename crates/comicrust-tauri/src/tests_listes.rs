@@ -1089,3 +1089,169 @@ fn noeud_sans_genre_accepte() {
     assert_eq!(sortie["noeuds"][1]["genre"], "groupe");
     assert!(serde_json::from_value::<NoeudCritere>(serde_json::json!({ "genre": "autre" })).is_err());
 }
+
+// ───────────────────────────── Piles réordonnables (lot L1) ─────────────────────────────
+
+/// Liste de lecture « Piles » (autonome) contenant `ordre` (couples série k / numéro n) dans cet ordre.
+fn liste_piles(b: &Biblio, ordre: &[(usize, usize)]) -> String {
+    let livres = ordre.iter().map(|&(k, n)| id_livre(k, n)).collect();
+    let r = b
+        .creer_liste(&DemandeCreation {
+            type_liste: TypeNouvelle::Lecture,
+            nom: Some("Piles".into()),
+            parent: None,
+            position: None,
+            livres: Some(livres),
+            apres_liste: None,
+        })
+        .unwrap();
+    r.creee.unwrap()
+}
+
+/// Ordre des livres de la liste, sous la forme `T1 W2 S3` (Thanos, Warlock, Surfer).
+fn ordre_liste(b: &Biblio, liste: &str) -> String {
+    let lettre = ["T", "W", "S"];
+    ids_vue(b, &requete(Some(liste), "ordre", None))
+        .iter()
+        .map(|i| {
+            let k = i[..1].parse::<usize>().unwrap();
+            format!("{}{}", lettre[k], &i[1..2])
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn titres_piles(b: &Biblio, liste: &str) -> Vec<String> {
+    b.lister_piles(&requete(Some(liste), "ordre", None)).unwrap().piles.into_iter().map(|p| p.serie).collect()
+}
+
+fn s(t: &[&str]) -> Vec<String> {
+    t.iter().map(|x| x.to_string()).collect()
+}
+
+/// Série dispersée : la pile déplacée est regroupée au dépôt ; piles dans l'ordre de la liste.
+#[test]
+fn piles_serie_dispersee_regroupee_au_depot() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let l = liste_piles(&b, &[(0, 1), (1, 1), (0, 2), (2, 1), (1, 2), (2, 2), (0, 3)]);
+    let req = requete(Some(&l), "ordre", None);
+    assert_eq!(titres_piles(&b, &l), ["Thanos", "Warlock", "Silver Surfer"]);
+    // Silver Surfer (dispersée) en tête : ses deux livres se regroupent.
+    let r = b.deplacer_piles_liste(&l, &req, &s(&["Silver Surfer"]), 0).unwrap();
+    assert!(r.info.contains("Réordonnancement"), "{}", r.info);
+    assert_eq!(ordre_liste(&b, &l), "S1 S2 T1 W1 T2 W2 T3");
+    assert_eq!(titres_piles(&b, &l), ["Silver Surfer", "Thanos", "Warlock"]);
+    // Aucun livre perdu ni dupliqué.
+    assert_eq!(ids_vue(&b, &req).len(), 7);
+}
+
+/// Début / fin, déjà en tête / en queue (rien d'écrit), dépôt sur sa propre place.
+#[test]
+fn piles_debut_fin_et_sans_effet() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let l = liste_piles(&b, &[(0, 1), (0, 2), (1, 1), (2, 1), (2, 2)]);
+    let req = requete(Some(&l), "ordre", None);
+    // Thanos à la fin (frontière 3).
+    b.deplacer_piles_liste(&l, &req, &s(&["Thanos"]), 3).unwrap();
+    assert_eq!(ordre_liste(&b, &l), "W1 S1 S2 T1 T2");
+    // Déjà en tête : Warlock à la frontière 0 ou 1 ne change rien.
+    for ins in [0, 1] {
+        let r = b.deplacer_piles_liste(&l, &req, &s(&["Warlock"]), ins).unwrap();
+        assert!(r.info.is_empty(), "insertion {ins} : rien d'écrit");
+    }
+    // Monter la première pile / descendre la dernière : rien d'écrit.
+    assert!(b.decaler_pile_liste(&l, &req, "Warlock", true).unwrap().info.is_empty());
+    assert!(b.decaler_pile_liste(&l, &req, "Thanos", false).unwrap().info.is_empty());
+    assert_eq!(ordre_liste(&b, &l), "W1 S1 S2 T1 T2");
+    // Pile inconnue : erreur.
+    assert!(b.deplacer_piles_liste(&l, &req, &s(&["Inconnue"]), 0).is_err());
+    assert!(b.decaler_pile_liste(&l, &req, "Inconnue", true).unwrap_err().contains("non affichée"));
+}
+
+/// Plusieurs piles non contiguës déplacées d'un coup : aucun livre perdu, piles gardées entières.
+#[test]
+fn piles_plusieurs_non_contigues() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let l = liste_piles(&b, &[(0, 1), (0, 2), (1, 1), (1, 2), (2, 1), (2, 2)]);
+    let req = requete(Some(&l), "ordre", None);
+    // Thanos + Surfer (séparées par Warlock) à la fin : Warlock passe en tête.
+    b.deplacer_piles_liste(&l, &req, &s(&["Thanos", "Silver Surfer"]), 3).unwrap();
+    assert_eq!(ordre_liste(&b, &l), "W1 W2 T1 T2 S1 S2");
+    // Thanos + Surfer avant Warlock : en tête, dans l'ordre de la liste.
+    b.deplacer_piles_liste(&l, &req, &s(&["Thanos", "Silver Surfer"]), 0).unwrap();
+    assert_eq!(ordre_liste(&b, &l), "T1 T2 S1 S2 W1 W2");
+    assert_eq!(titres_piles(&b, &l), ["Thanos", "Silver Surfer", "Warlock"]);
+}
+
+/// Monter / descendre une pile dispersée : elle se regroupe d'un cran.
+#[test]
+fn piles_monter_descendre() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let l = liste_piles(&b, &[(0, 1), (1, 1), (0, 2), (2, 1), (1, 2)]);
+    let req = requete(Some(&l), "ordre", None);
+    assert_eq!(titres_piles(&b, &l), ["Thanos", "Warlock", "Silver Surfer"]);
+    // Descendre Thanos : passe après Warlock (devant le premier livre de Surfer).
+    b.decaler_pile_liste(&l, &req, "Thanos", false).unwrap();
+    assert_eq!(titres_piles(&b, &l)[..2], ["Warlock", "Thanos"]);
+    // Monter Silver Surfer d'un cran.
+    b.decaler_pile_liste(&l, &req, "Silver Surfer", true).unwrap();
+    let apres = titres_piles(&b, &l);
+    assert_eq!(apres[1], "Silver Surfer", "{apres:?} / {}", ordre_liste(&b, &l));
+    assert_eq!(ids_vue(&b, &req).len(), 5);
+}
+
+/// Refus : vue non triée dans l'ordre, tri décroissant, autre liste affichée, liste intelligente,
+/// lecture seule (ComicDb sans option d'écriture).
+#[test]
+fn piles_refus() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let l = liste_piles(&b, &[(0, 1), (1, 1), (2, 1)]);
+    let avant = ordre_liste(&b, &l);
+    let tri_serie = requete(Some(&l), "serie", None);
+    assert_eq!(b.deplacer_piles_liste(&l, &tri_serie, &s(&["Warlock"]), 0).unwrap_err(), TRIER_POUR_REORDONNER);
+    assert_eq!(b.decaler_pile_liste(&l, &tri_serie, "Warlock", true).unwrap_err(), TRIER_POUR_REORDONNER);
+    let mut decroissant = requete(Some(&l), "ordre", None);
+    decroissant.sens_tri = SensTri::Desc;
+    assert_eq!(b.deplacer_piles_liste(&l, &decroissant, &s(&["Warlock"]), 0).unwrap_err(), TRIER_POUR_REORDONNER);
+    // La vue n'affiche pas cette liste.
+    let autre = requete(None, "ordre", None);
+    assert!(b.deplacer_piles_liste(&l, &autre, &s(&["Warlock"]), 0).unwrap_err().contains("n'affiche pas"));
+    // Liste intelligente.
+    let mut c: CriteresListe = b.lire_criteres(None).unwrap().criteres;
+    c.nom = "Intelligente".into();
+    let intel = b.enregistrer_criteres(None, &c, None, None, None).unwrap().creee.unwrap();
+    let err = b
+        .deplacer_piles_liste(&intel, &requete(Some(&intel), "ordre", None), &s(&["Warlock"]), 0)
+        .unwrap_err();
+    assert!(err.contains("n'est pas une liste de lecture"), "{err}");
+    assert_eq!(ordre_liste(&b, &l), avant, "rien d'écrit");
+
+    // Lecture seule : ComicDb sans l'option d'écriture.
+    let d2 = tempfile::tempdir().unwrap();
+    let (b2, xml) = biblio_comicdb(d2.path());
+    let original = std::fs::read_to_string(&xml).unwrap();
+    let rq = requete(Some(TEST_LISTE), "ordre", None);
+    let piles = b2.lister_piles(&rq).unwrap().piles;
+    assert!(piles.len() >= 2, "la liste de test a plusieurs séries");
+    let e = b2.deplacer_piles_liste(TEST_LISTE, &rq, &[piles[1].serie.clone()], 0).unwrap_err();
+    assert_eq!(e, LECTURE_SEULE);
+    assert_eq!(std::fs::read_to_string(&xml).unwrap(), original);
+}
+
+/// Avec `groupe = série` demandé en plus des piles : mêmes résultats (les piles ignorent le groupe).
+#[test]
+fn piles_avec_groupe_serie() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let l = liste_piles(&b, &[(0, 1), (1, 1), (0, 2), (2, 1)]);
+    let groupee = requete(Some(&l), "ordre", Some(Groupe::Serie));
+    b.deplacer_piles_liste(&l, &groupee, &s(&["Silver Surfer"]), 0).unwrap();
+    assert_eq!(ordre_liste(&b, &l), "S1 T1 W1 T2");
+    b.decaler_pile_liste(&l, &groupee, "Silver Surfer", false).unwrap();
+    assert_eq!(titres_piles(&b, &l)[0], "Thanos");
+}

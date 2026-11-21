@@ -1171,6 +1171,67 @@ impl Biblio {
         let Some(repere) = group_shift_anchor(&livres_groupes, k, haut) else { return self.sans_ecriture() };
         self.reordonner(id, &actuels, livres_groupes[k].clone(), repere)
     }
+
+    /// Piles de la vue (une par série, dans l'ordre de première apparition) : titre et livres de la
+    /// série, y compris ceux dispersés dans la liste. `serie` et `groupe` de la requête sont ignorés,
+    /// comme pour `lister_piles`.
+    fn piles_de(&self, requete: &RequeteLivres) -> Result<Vec<(String, Vec<String>)>, String> {
+        let (base, vue) = self.vue_complete(requete)?;
+        let mut out: Vec<(String, Vec<String>)> = Vec::new();
+        let mut position: HashMap<String, usize> = HashMap::new();
+        for &i in &vue.indices {
+            let b = &base.books[i];
+            let titre = crate::biblio::titre_pile(b);
+            let k = *position.entry(titre.clone()).or_insert_with(|| {
+                out.push((titre, Vec::new()));
+                out.len() - 1
+            });
+            out[k].1.push(b.id.clone());
+        }
+        Ok(out)
+    }
+
+    /// Déplace des piles (séries) en bloc à la frontière `insertion` entre piles ; une série
+    /// dispersée dans la liste est regroupée au dépôt.
+    pub fn deplacer_piles_liste(
+        &self,
+        id: &str,
+        requete: &RequeteLivres,
+        series: &[String],
+        insertion: usize,
+    ) -> Result<ResultatListes, String> {
+        let actuels = self.controler_vue(id, requete)?;
+        let g = self.piles_de(requete)?;
+        let mut livres = Vec::new();
+        let mut piles = Vec::new();
+        for (t, v) in &g {
+            if series.iter().any(|s| s == t) {
+                livres.extend(v.iter().cloned());
+            }
+            piles.push(v.clone());
+        }
+        if livres.is_empty() {
+            return Err("aucune des piles demandées n'est affichée".into());
+        }
+        let Some(repere) = group_drop_anchor(&piles, &livres, insertion) else { return self.sans_ecriture() };
+        self.reordonner(id, &actuels, livres, repere)
+    }
+
+    /// « Monter / Descendre la pile » : décale la pile `serie` d'un cran.
+    pub fn decaler_pile_liste(
+        &self,
+        id: &str,
+        requete: &RequeteLivres,
+        serie: &str,
+        haut: bool,
+    ) -> Result<ResultatListes, String> {
+        let actuels = self.controler_vue(id, requete)?;
+        let g = self.piles_de(requete)?;
+        let k = g.iter().position(|(t, _)| t == serie).ok_or_else(|| format!("pile « {serie} » non affichée"))?;
+        let piles: Vec<Vec<String>> = g.iter().map(|(_, v)| v.clone()).collect();
+        let Some(repere) = group_shift_anchor(&piles, k, haut) else { return self.sans_ecriture() };
+        self.reordonner(id, &actuels, piles[k].clone(), repere)
+    }
 }
 
 /// GUID au format écrit par ComicRack (`8-4-4-4-12` chiffres hexadécimaux).

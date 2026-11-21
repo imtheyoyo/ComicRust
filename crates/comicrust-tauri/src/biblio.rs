@@ -623,7 +623,7 @@ impl Biblio {
     }
 
     /// Vue complète décrite par la requête (liste, recherche, tri, groupe), en cache.
-    fn vue_complete(&self, req: &RequeteLivres) -> Result<(Arc<ComicDatabase>, Arc<Vue>), String> {
+    pub(crate) fn vue_complete(&self, req: &RequeteLivres) -> Result<(Arc<ComicDatabase>, Arc<Vue>), String> {
         let clef = ClefTri::depuis_texte(&req.tri)?;
         let desc = req.sens_tri == SensTri::Desc;
         let groupe = regroupement(req.groupe);
@@ -1249,7 +1249,7 @@ pub fn id_depuis_uri(chemin: &str, hote: Option<&str>) -> String {
 }
 
 /// Titre de la pile d'un livre : sa série affichée, `(sans série)` si elle est vide.
-fn titre_pile(b: &LibraryBook) -> String {
+pub(crate) fn titre_pile(b: &LibraryBook) -> String {
     crate::tri::Regroupement::Serie.titre(b)
 }
 
