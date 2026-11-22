@@ -144,10 +144,7 @@ pub fn nom_du_chemin(chemin: &str) -> String {
 
 /// Entrées du menu : chaque chemin est vérifié (`existe`) ; l'ordre est conservé.
 pub fn verifier_recents(liste: &[String]) -> Vec<Recent> {
-    liste
-        .iter()
-        .map(|c| Recent { chemin: c.clone(), nom: nom_du_chemin(c), existe: Path::new(c).exists() })
-        .collect()
+    liste.iter().map(|c| Recent { chemin: c.clone(), nom: nom_du_chemin(c), existe: Path::new(c).exists() }).collect()
 }
 
 /// Fichiers récents enregistrés, vérifiés.

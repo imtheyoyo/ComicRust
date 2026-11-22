@@ -96,4 +96,42 @@ export function largeurDemandee(largeurZone: number, zoom: number, ajustement: A
   return arrondi > 8192 ? 0 : arrondi;
 }
 
-export const borneZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+/** Livre voisin dans la vue affichée (règle de `next_book` / `ListState::neighbour` de la version
+ *  egui) : le premier livre après (ou avant) `depart` dont le fichier est présent ; les manquants
+ *  sont sautés. `null` : dernier (ou premier) livre, la lecture reste où elle est. `lire(k)` rend le
+ *  livre de rang `k` (ou `undefined` s'il n'est pas disponible : on s'arrête). */
+export async function trouverVoisin<T extends { manquant?: boolean }>(
+  total: number,
+  depart: number,
+  arriere: boolean,
+  lire: (rang: number) => Promise<T | undefined>,
+): Promise<{ rang: number; livre: T } | null> {
+  const pas = arriere ? -1 : 1;
+  for (let k = depart + pas; k >= 0 && k < total; k += pas) {
+    const livre = await lire(k);
+    if (!livre) return null;
+    if (!livre.manquant) return { rang: k, livre };
+  }
+  return null;
+}
+
+/** Taille d'une image pour la barre d'état (« 1000 × 1500 »). */
+export const libelleTaille = (d: Dimensions): string => `${Math.round(d.largeur)} × ${Math.round(d.hauteur)}`;
+
+/** Raccourcis du lecteur, affichés par l'aide (`?` ou F1). `L` : voir la décision ci-dessous. */
+export const RACCOURCIS_LECTEUR: Array<{ touches: string; effet: string }> = [
+  { touches: '← → · Espace · Retour arrière · PgUp PgDn', effet: 'Page suivante / précédente (inversé en sens manga) ; en fin de livre, livre suivant de la liste affichée' },
+  { touches: 'Début · Fin', effet: 'Première / dernière page' },
+  { touches: '↑ ↓', effet: 'Défiler la page' },
+  { touches: '1 · 2 · 3 · 4', effet: 'Ajustement : page entière, largeur, hauteur, taille réelle' },
+  { touches: '+ · − · 0 · Ctrl+molette', effet: 'Zoom avant, arrière, 100 %' },
+  { touches: 'D · V · M', effet: 'Double page, défilement continu, sens manga' },
+  { touches: 'T', effet: 'Miniatures' },
+  { touches: 'L', effet: 'Loupe. Dans la version egui, L affichait le panneau de la liste de lecture : ici la liste est la bibliothèque, la touche reste donc à la loupe' },
+  { touches: 'I', effet: 'Infos du livre' },
+  { touches: 'F · F11', effet: 'Plein écran (Échap pour en sortir)' },
+  { touches: 'Échap · Ctrl+W', effet: 'Fermer le lecteur' },
+  { touches: '? · F1', effet: 'Cette aide' },
+];
+
+export const borneZoom =(z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
