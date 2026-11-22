@@ -53,15 +53,27 @@
   /** Panneau des listes affiché (mémorisé : `vue.listesVisibles`). Masqué : barre latérale réduite. */
   let listesVisibles = $state(true);
 
+  /** Attente maximale de l'arbre des listes avant d'afficher la vue (ms). */
+  const ATTENTE_RESTAURATION_MS = 2500;
+
   /** Ouvre la bibliothèque enregistrée (démarrage, « Réessayer » après une erreur). */
   async function ouvrir() {
     erreur = '';
     choisirAutre = false;
     try {
-      etat = await ouvrirBibliotheque();
+      const ouverte = await ouvrirBibliotheque();
+      if (!ouverte.premierDemarrage) {
+        // Liste à rouvrir : la vue n'est affichée qu'après sa résolution, pour ne pas montrer (et
+        // charger) d'abord la bibliothèque entière. Attente plafonnée : au-delà, la restauration se
+        // fait quand même, un peu plus tard.
+        const restauration = restaurerDerniereListe();
+        if (rouvrirDerniereListe() && preferences().derniereListe) {
+          await Promise.race([restauration, new Promise((r) => setTimeout(r, ATTENTE_RESTAURATION_MS))]);
+        }
+      }
+      etat = ouverte;
       nbLivres = etat.nbLivres;
       if (!etat.premierDemarrage) {
-        void restaurerDerniereListe();
         listes.demarrer();
         // Scripts (tauri-v0.9.0) : liste et écoute des événements, jamais bloquant.
         void scripts.demarrer();
@@ -81,7 +93,7 @@
   /** Démarrage : charge l'arbre des listes puis, si le réglage « Rouvrir la dernière liste au
    *  démarrage » est actif (par défaut), revient sur la dernière liste sélectionnée (dossier, liste de
    *  lecture, liste intelligente), quelle que soit la section ou le lecteur ouvert à la fermeture.
-   *  Aucun livre n'est rouvert. Jamais d'erreur : liste supprimée (identifiant inconnu : autre
+   *  Aucun livre n'est rouvert ; l'identifiant est comparé sans tenir compte de la casse. Jamais d'erreur : liste supprimée (identifiant inconnu : autre
    *  bibliothèque, liste effacée) = bibliothèque entière, et la mémoire est effacée (pas de boucle) ;
    *  arbre illisible ou indisponible = bibliothèque, la mémoire est gardée pour le prochain démarrage. */
   async function restaurerDerniereListe() {
@@ -90,9 +102,10 @@
     if (!rouvrirDerniereListe()) return;
     const id = preferences().derniereListe;
     if (!id || navigations !== avant || !listes.arbre) return;
-    if (listes.noeud(id)) {
-      listes.devoiler(id); // la ligne est visible dans l'arbre (dossiers parents dépliés)
-      choisirListe(id);
+    const n = listes.retrouver(id); // sans tenir compte de la casse du GUID
+    if (n) {
+      listes.devoiler(n.id); // la ligne est visible dans l'arbre (dossiers parents dépliés)
+      choisirListe(n.id);
     } else if (!listes.arbre.etat.erreur) enregistrerDerniereListe(null);
   }
 
