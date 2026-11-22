@@ -10,9 +10,12 @@
     enregistrerAvancement, fermerLivre, messageErreur, ouvrirFichier, ouvrirLivre, pleinEcran, urlPage,
     type Ajustement, type ChoixReprise, type LivreOuvert, type ModeLecture, type PageInfo, type SourceLecteur,
   } from '../lib/api';
+  import { modale } from '../lib/modale';
+  import { recents } from '../lib/recents.svelte';
+  import DialogInfos from './DialogInfos.svelte';
   import {
     borneZoom, debutPlanche, DIMENSIONS_DEFAUT, dimensionsAffichees, echelleAjustement, largeurDemandee,
-    pagesVisibles, planche, positionDe, precedente, suivante, type ContexteNavigation, type Dimensions,
+    libelleTaille, pagesVisibles, planche, positionDe, precedente, RACCOURCIS_LECTEUR, suivante, type ContexteNavigation, type Dimensions,
   } from '../lib/lecteur';
   import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
   import { definirLivreOuvert, pleinEcranFenetreActif, signalerLecteur } from '../lib/fenetre';
@@ -25,8 +28,12 @@
     /** Séance terminée : avancement enregistré et livre fermé côté backend, par n'importe quel
      *  chemin (y compris le démontage) ; le parent relit la liste et le panneau Détail. */
     onlecturefinie?: () => void;
+    /** Fin (ou début) de livre : ouvrir le livre suivant (précédent) de la vue affichée. Le parent
+     *  termine la séance de ce livre puis ouvre l'autre à sa place. Rend `'ouvert'`, `'fin'` (dernier
+     *  ou premier livre : rien ne change) ou `'aucune'` (livre ouvert hors de la vue : pas de suite). */
+    onvoisin?: (arriere: boolean) => Promise<'ouvert' | 'fin' | 'aucune'>;
   }
-  let { source, onfermer, onlecturefinie }: Props = $props();
+  let { source, onfermer, onlecturefinie, onvoisin }: Props = $props();
 
   /** Délai avant l'envoi de l'avancement après un changement de page (ms). */
   const DELAI_AVANCEMENT = 800;
@@ -63,6 +70,8 @@
   /** Dimensions réelles des images chargées (avant rotation), par index de page. */
   const dimsChargees = new SvelteMap<number, Dimensions>();
   const pagesEnErreur = new SvelteSet<number>();
+  /** Taille d'origine (avant rotation) des pages dont l'image chargée n'a pas été réduite. */
+  const taillesReelles = new SvelteMap<number, Dimensions>();
 
   const visibles = $derived(livre ? pagesVisibles(livre.pages, livre.nbPages) : []);
   const infos = $derived(new Map<number, PageInfo>((livre?.pages ?? []).map((p) => [p.index, p])));
@@ -199,10 +208,48 @@
   function avancer() {
     const s = mode === 'defilement' ? (position + 1 < visibles.length ? position + 1 : null) : suivante(ctx, position);
     if (s !== null) void aller(s);
+    else void livreVoisin(false);
   }
   function reculer() {
     const s = mode === 'defilement' ? (position > 0 ? position - 1 : null) : precedente(ctx, position);
     if (s !== null) void aller(s);
+    else if (position === 0) void livreVoisin(true);
+  }
+
+  // ── Livre suivant / précédent ──
+  // Règle d'egui (`next_page` / `prev_page` → `next_book`) : « page suivante » sur la dernière page
+  // ouvre le livre suivant de la liste affichée, « page précédente » sur la première ouvre le
+  // précédent ; sans confirmation, sans réglage, sans bouclage (le dernier livre reste affiché).
+  let voisinEnCours = false;
+  let avis = $state('');
+  let minuterieAvis: ReturnType<typeof setTimeout> | undefined;
+  function dire(texte: string) {
+    avis = texte;
+    clearTimeout(minuterieAvis);
+    minuterieAvis = setTimeout(() => (avis = ''), 2500);
+  }
+  async function livreVoisin(arriere: boolean) {
+    if (!onvoisin || voisinEnCours || !livre || questionReprise) return;
+    voisinEnCours = true;
+    try {
+      const r = await onvoisin(arriere);
+      if (r === 'fin') dire(arriere ? 'Premier livre de la liste.' : 'Dernier livre de la liste.');
+    } catch (e) {
+      dire(messageErreur(e));
+    } finally {
+      voisinEnCours = false;
+    }
+  }
+
+  // ── Infos du livre (I) et aide (?) ──
+  let infosOuvertes = $state(false);
+  let aide = $state(false);
+  function ouvrirInfos() {
+    if (livre) infosOuvertes = true;
+  }
+  function infosFermees() {
+    infosOuvertes = false;
+    racine?.focus();
   }
   const allerA = (k: number) => void aller(mode === 'defilement' ? k : debutPlanche(ctx, k));
 
@@ -451,6 +498,14 @@
 
   // ── Clavier (input.rs) ──
   function clavier(e: KeyboardEvent) {
+    // Aide ouverte : elle garde le clavier (Échap la ferme, pas le lecteur). Fenêtre Infos ouverte :
+    // elle a son propre clavier (le lecteur est enregistré avant elle, il passe donc le premier).
+    if (aide) {
+      if (['Escape', '?', 'F1'].includes(e.key)) aide = false;
+      e.preventDefault();
+      return;
+    }
+    if (infosOuvertes || document.querySelector('dialog[open]')) return;
     if ((!livre || questionReprise) && e.key !== 'Escape') return;
     const cible = e.target as HTMLElement | null;
     if (cible?.closest('input, select, textarea') && e.key !== 'Escape') return;
@@ -483,7 +538,10 @@
       case 'v': case 'V': changerMode(mode === 'defilement' ? 'simple' : 'defilement'); break;
       case 'm': case 'M': basculerManga(); break;
       case 't': case 'T': miniatures = !miniatures; break;
+      // `L` : loupe (la liste de lecture d'egui est ici la bibliothèque ; voir RACCOURCIS_LECTEUR).
       case 'l': case 'L': loupe = !loupe; if (!loupe) loupeVue = null; break;
+      case 'i': case 'I': ouvrirInfos(); break;
+      case '?': case 'F1': aide = true; break;
       case '+': case '=': void zoomer(zoom * 1.25); break;
       case '-': void zoomer(zoom / 1.25); break;
       case '0': void zoomer(1); break;
@@ -522,6 +580,10 @@
             const connue = dimsBrutes(index);
             if (Math.abs(connue.largeur / connue.hauteur - d.largeur / d.hauteur) > 0.01) dimsChargees.set(index, d);
           }
+          // Le backend réduit à `?l=` pixels de large : la taille n'est exacte que si l'image est
+          // plus étroite que la demande (ou demandée en taille d'origine).
+          const demande = Number(/[?&]l=(\d+)/.exec(img.currentSrc || img.src)?.[1] ?? 0);
+          if (demande === 0 || img.naturalWidth < demande) taillesReelles.set(index, d);
           pagesEnErreur.delete(index);
         }
       };
@@ -608,6 +670,7 @@
         }
         manga = l.manga || (memo.manga ?? false);
         livre = l;
+        void recents.ajouter(l.fichier);
         const autre = l.pageRepriseComicrack;
         if (autre === undefined || autre === l.pageReprise) return demarrer(l.pageReprise);
         const reprise = memo.reprise ?? 'demander';
@@ -619,7 +682,11 @@
         await tick();
         boutonReprise?.focus();
       })
-      .catch((e) => (erreur = messageErreur(e)));
+      .catch((e) => {
+        erreur = messageErreur(e);
+        // Comme egui (events.rs) : un fichier qui ne s'ouvre pas quitte les récents.
+        if ('chemin' in source) void recents.retirer(source.chemin);
+      });
     const quitter = () => void envoyerAvancement();
     const pleinEcranDoc = () => {
       if (!document.fullscreenElement && pleinEcranActif && !('__TAURI_INTERNALS__' in window)) pleinEcranActif = false;
@@ -634,6 +701,7 @@
       // même fin de séance (enregistrement puis rafraîchissement du Détail).
       void terminer();
       clearTimeout(minuterieBarres);
+      clearTimeout(minuterieAvis);
       clearTimeout(minuterieAvancement);
       window.removeEventListener('pagehide', quitter);
       document.removeEventListener('fullscreenchange', pleinEcranDoc);
@@ -644,6 +712,14 @@
     if (visibles.length === 0) return '';
     const nums = [...positions].sort((a, b) => a - b).map((k) => k + 1);
     return `${nums.length > 1 ? 'Pages' : 'Page'} ${nums.join('-')} / ${visibles.length}`;
+  });
+  /** Barre d'état (status_bar.rs d'egui) : format, page(s), taille de l'image de la page courante. */
+  const tailleCourante = $derived.by(() => {
+    const index = visibles[position];
+    if (index === undefined) return '';
+    const p = infos.get(index);
+    const d = taillesReelles.get(index) ?? (p?.largeur && p?.hauteur ? { largeur: p.largeur, hauteur: p.hauteur } : undefined);
+    return d ? libelleTaille(d) : '';
   });
   const AJUSTEMENTS: Array<{ id: Ajustement; titre: string }> = [
     { id: 'meilleur', titre: 'Page entière (1)' },
@@ -794,6 +870,39 @@
     </div>
   {/if}
 
+  {#if avis}
+    <p class="avis" role="status" data-testid="avis-lecteur">{avis}</p>
+  {/if}
+
+  {#if aide}
+    <div class="aide" role="dialog" aria-modal="true" aria-label="Raccourcis du lecteur" data-testid="aide-lecteur">
+      <h2>Raccourcis du lecteur</h2>
+      <dl>
+        {#each RACCOURCIS_LECTEUR as r (r.touches)}
+          <dt>{r.touches}</dt><dd>{r.effet}</dd>
+        {/each}
+      </dl>
+      <button onclick={() => { aide = false; racine?.focus(); }}>Fermer (Échap)</button>
+    </div>
+  {/if}
+
+  {#if infosOuvertes && livre}
+    {#if livre.id}
+      <DialogInfos ids={[livre.id]} onfermer={infosFermees} />
+    {:else}
+      <!-- Fichier hors bibliothèque : pas de fiche à éditer, comme la fenêtre « Informations » d'egui. -->
+      <dialog use:modale={{ ouvrirAuMontage: true, fermer: infosFermees }} aria-labelledby="titre-infos-fichier" data-testid="infos-fichier">
+        <h2 id="titre-infos-fichier">Informations</h2>
+        <dl class="infos-fichier">
+          <dt>Fichier</dt><dd>{livre.fichier}</dd>
+          <dt>Format</dt><dd>{livre.format}</dd>
+          <dt>Pages</dt><dd>{livre.nbPages}</dd>
+        </dl>
+        <p><button onclick={infosFermees}>Fermer</button></p>
+      </dialog>
+    {/if}
+  {/if}
+
   <header
     class="barre haut"
     class:cachee={!barres}
@@ -827,7 +936,9 @@
       <label class="outil" title="Grossissement de la loupe">×{grossissement}<input type="range" min="1.5" max="6" step="0.5" bind:value={grossissement} aria-label="Grossissement de la loupe" /></label>
     {/if}
     <button aria-pressed={miniatures} class:actif={miniatures} onclick={() => (miniatures = !miniatures)} title="Miniatures (T)" aria-label="Miniatures">▦</button>
+    <button onclick={ouvrirInfos} title="Infos du livre (I)" aria-label="Infos du livre" data-testid="bouton-infos">ℹ</button>
     <button aria-pressed={pleinEcranActif} class:actif={pleinEcranActif} onclick={() => void basculerPleinEcran()} title="Plein écran (F, F11)" aria-label="Plein écran">⛶</button>
+    <button onclick={() => (aide = true)} title="Raccourcis du lecteur (?)" aria-label="Aide du lecteur" data-testid="bouton-aide">?</button>
   </header>
 
   {#if livre && visibles.length > 0}
@@ -856,6 +967,11 @@
           {/each}
         </div>
       {/if}
+      <div class="etat" data-testid="barre-etat">
+        <span class="fmt" data-testid="etat-format">{livre.format}</span>
+        <span data-testid="etat-pages">{libellePage}</span>
+        {#if tailleCourante}<span data-testid="etat-taille">{tailleCourante}</span>{/if}
+      </div>
       <div class="curseur">
         <button onclick={() => (manga && mode !== 'defilement' ? avancer() : reculer())} title={manga ? 'Page suivante' : 'Page précédente'} aria-label={manga ? 'Page suivante' : 'Page précédente'}>◀</button>
         <input
@@ -947,6 +1063,21 @@
   .groupe-boutons button:last-child { border-radius: 0 var(--cr-rayon) var(--cr-rayon) 0; }
   button.actif { background: var(--cr-accent); color: var(--cr-accent-texte); border-color: var(--cr-accent); }
   button.actif:hover:not(:disabled) { background: var(--cr-accent); }
+  .etat { display: flex; gap: 14px; color: var(--cr-texte-discret); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .etat .fmt { font-weight: 600; color: var(--cr-texte); }
+  .avis {
+    position: absolute; z-index: 3; left: 50%; bottom: 90px; transform: translateX(-50%); margin: 0; padding: 8px 14px;
+    background: var(--cr-fond-panneau); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); box-shadow: var(--cr-ombre);
+  }
+  .aide {
+    position: absolute; z-index: 4; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; gap: 10px;
+    width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 16px 20px;
+    background: var(--cr-fond-panneau); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); box-shadow: var(--cr-ombre-forte);
+  }
+  .aide h2 { margin: 0; font-size: 18px; }
+  .aide dl, .infos-fichier { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  .aide dt, .infos-fichier dt { font-weight: 600; }
+  .aide dd, .infos-fichier dd { margin: 0; overflow-wrap: anywhere; }
   .curseur { display: flex; align-items: center; gap: 8px; }
   .curseur input { flex: 1; accent-color: var(--cr-accent); }
   .miniatures { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; scrollbar-color: var(--cr-bordure) transparent; }

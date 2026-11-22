@@ -33,7 +33,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
 /// Dossier `data\` portable, résolu une fois au démarrage et gardé dans l'état Tauri.
-struct DossierData(PathBuf);
+pub(crate) struct DossierData(pub(crate) PathBuf);
 
 /// Version, dossier `data\` portable et dossiers dérivés.
 #[tauri::command]
@@ -1120,7 +1120,11 @@ pub fn run() {
             crate::cmd_manquants::chercher_manquants,
             crate::cmd_manquants::appliquer_relocalisations,
             crate::cmd_manquants::preparer_retrait,
-            crate::cmd_manquants::retirer_livres
+            crate::cmd_manquants::retirer_livres,
+            crate::cmd_lecteur::lire_recents,
+            crate::cmd_lecteur::ajouter_recent,
+            crate::cmd_lecteur::retirer_recent,
+            crate::cmd_lecteur::vider_recents
         ])
         .setup(move |app| {
             // Thèmes livrés disponibles dès le premier lancement.

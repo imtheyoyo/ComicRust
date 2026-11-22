@@ -1498,3 +1498,18 @@ export const appliquerRelocalisations = (demandes: DemandeRelocalisation[]) =>
   appeler<BilanOperationManquants>('appliquer_relocalisations', { demandes });
 export const preparerRetrait = (ids: string[]) => appeler<PreparationRetrait>('preparer_retrait', { ids });
 export const retirerLivres = (ids: string[], confirme: boolean) => appeler<BilanOperationManquants>('retirer_livres', { ids, confirme });
+
+// ───────────────────────────── Fichiers récents (lot L6, docs/tauri/ipc-lecteur.md) ─────────────────────────────
+// Menu 🕘 : 15 entrées au plus, mémorisées dans `data\comicrust-tauri.json` (bloc `recents`).
+
+export interface RecentFichier {
+  chemin: string;
+  /** Nom du fichier (dernier élément du chemin). */
+  nom: string;
+  /** Le fichier ou dossier existe encore : sinon l'entrée est grisée. */
+  existe: boolean;
+}
+export const lireRecents = () => appeler<RecentFichier[]>('lire_recents');
+export const ajouterRecent = (chemin: string) => appeler<RecentFichier[]>('ajouter_recent', { chemin });
+export const retirerRecent = (chemin: string) => appeler<RecentFichier[]>('retirer_recent', { chemin });
+export const viderRecents = () => appeler<RecentFichier[]>('vider_recents');

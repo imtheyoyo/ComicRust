@@ -158,3 +158,72 @@ toute autre valeur est ignorée.
 
 `getCurrentWindow().setFullscreen()` (permission `core:window:allow-set-fullscreen` de
 `capabilities/default.json`) ; repli sur le plein écran du document hors de Tauri.
+
+---
+
+## Lot L6 : fichiers récents, livre suivant, infos et barre d'état
+
+Écarts 8 et 21 de `audit-parite.md`. Code : `src/reglages.rs` (bloc `recents`, logique pure testée),
+`src/cmd_lecteur.rs` (commandes Tauri, fonction `app`), front `components/Lecteur.svelte`,
+`components/MenuRecents.svelte`, `lib/recents.svelte.ts`, `lib/lecteur.ts` (`trouverVoisin`,
+`RACCOURCIS_LECTEUR`).
+
+### Fichiers récents (menu 🕘)
+Référence egui : `Settings::recent` / `push_recent` (`MAX_RECENT` = 15), menu « 🕘 Récents » de
+`ui/toolbar.rs`.
+
+Section `recents` de `data\comicrust-tauri.json` : tableau de chemins (chaînes), le plus récent
+d'abord, 15 au plus. Absente quand la liste est vide. Lecture tolérante (élément non texte, vide ou
+doublon ignoré ; bloc illisible = liste vide, les autres réglages ne sont jamais perdus). Dédoublonnage
+sans tenir compte de la casse sous Windows. Le fichier n'est réécrit que si la liste change.
+
+| Commande | Arguments | Résultat |
+|---|---|---|
+| `lire_recents` | | `RecentFichier[]` |
+| `ajouter_recent` | `chemin` | `RecentFichier[]` (le chemin passe en tête) |
+| `retirer_recent` | `chemin` | `RecentFichier[]` |
+| `vider_recents` | | `RecentFichier[]` (vide) |
+
+`RecentFichier = { chemin, nom, existe }` : `existe` est vérifié à chaque réponse (commandes `async` :
+un disque réseau éteint ne fige pas la fenêtre) ; le menu grise les entrées absentes.
+
+Alimentation : le lecteur appelle `ajouter_recent(livre.fichier)` dès que le livre est ouvert, quelle
+que soit l'origine (double-clic dans la bibliothèque, Ctrl+O, fichier passé en argument, déposé, ou
+choisi dans le menu). Un fichier qui ne s'ouvre pas est retiré (comme `events.rs` d'egui).
+Limite : les `.cbl` ne sont pas mémorisés (en Tauri, l'import les copie dans les listes : il n'y a pas
+de « liste ouverte » à rouvrir).
+
+### Livre suivant en fin de livre
+Règle d'egui reprise à l'identique (`navigation.rs` : `next_page` / `prev_page` → `next_book`) :
+- « page suivante » (clavier, clic tiers droit, molette, bouton ▶) sur la **dernière page** ouvre le
+  livre suivant ; « page précédente » sur la **première** ouvre le précédent ;
+- **pas de confirmation, pas de réglage** (egui n'en a pas), **pas de bouclage** : au dernier (premier)
+  livre, rien ne change ; Tauri ajoute un avis discret « Dernier livre de la liste. » ;
+- le livre ouvert est celui de la **vue affichée** (tri, filtre, liste, pile ouverte) ; les livres
+  **manquants sont sautés** (egui saute les entrées sans fichier) ; les en-têtes de groupe sont
+  transparents ; dans une pile ouverte, la suite s'arrête à la fin de la pile ;
+- un fichier ouvert hors bibliothèque (Ctrl+O, dépôt, récent) n'a pas de suite ;
+- la séance du livre quitté est terminée normalement (avancement, fermeture, relecture du Détail)
+  avant l'ouverture du suivant ; le suivant s'ouvre à sa page de reprise. Le voisin est cherché avant
+  cette relecture (un tri par « dernière lecture » changerait l'ordre) ;
+- défilement continu : la fin du livre déclenche la suite par les mêmes commandes (flèche droite,
+  Espace sur la dernière page…), pas par le simple défilement.
+
+### Infos du livre (`I`) et barre d'état
+- `I` (ou le bouton ℹ) : livre de la bibliothèque → `DialogInfos` (même fenêtre que dans la
+  bibliothèque, éditable) ; fichier hors bibliothèque → fenêtre « Informations » (fichier, format,
+  pages), comme `info_window` d'egui. Les touches du lecteur sont suspendues tant qu'une fenêtre est
+  ouverte (Échap ne ferme que la fenêtre).
+  Limite : modifier les pages (onglet Pages) d'un livre en cours de lecture ne recharge pas le lecteur.
+- Barre d'état (en bas, avec les barres auto-masquées) : format, « Page(s) x / n », taille de l'image
+  de la page courante. La taille n'est affichée que si elle est exacte (fiche du livre, ou image non
+  réduite par le paramètre `?l=`).
+
+### Conflit de touche `L`
+egui : `L` = panneau de la liste de lecture. Tauri : `L` = loupe (déjà en place, sans équivalent
+d'egui). **Décision : `L` reste la loupe**, le panneau de liste n'ayant pas lieu d'être (la liste
+est la bibliothèque, un Échap plus loin). Documenté dans l'aide du lecteur (`?` ou F1, bouton ?).
+
+### Mode simulé
+`?recents=<chemin>;<chemin>` : liste de départ ; un chemin contenant « absent », « introuvable » ou
+« fantome » est un fichier disparu. `window.__comicrustSimule.recents` expose la liste (`simuleLecteur.ts`).

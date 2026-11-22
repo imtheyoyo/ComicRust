@@ -5,7 +5,7 @@
   import {
     ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, decalerPileListe, deplacerGroupesListe, deplacerLivresListe, deplacerPilesListe, ecouter,
     dansTauri, groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
-    type BibliothequeModifiee, type ClefTri, type Groupe, type Pile, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
+    type BibliothequeModifiee, type ClefTri, type LivreResume, type Groupe, type Pile, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
   } from '../lib/api';
   import { GlisserLivres } from '../lib/glisserLivres.svelte';
   import { DEPOSER_SUR_LECTURE, TRIER_POUR_REORDONNER, glypheListe, type EtatListes } from '../lib/listes.svelte';
@@ -22,6 +22,8 @@
   import GrillePiles from './GrillePiles.svelte';
   import MenuContextuel, { type EntreeMenu } from './MenuContextuel.svelte';
   import Lecteur from './Lecteur.svelte';
+  import MenuRecents from './MenuRecents.svelte';
+  import { trouverVoisin } from '../lib/lecteur';
   import PanneauDetails from './PanneauDetails.svelte';
   import VueTableau from './VueTableau.svelte';
   import { scripts } from '../lib/scripts.svelte';
@@ -206,7 +208,10 @@
       const n = ++ouverture;
       void (async () => {
         if (livreLu && lecteur) await lecteur.terminer();
-        if (n === ouverture) livreLu = { id };
+        if (n === ouverture) {
+          rangLu = null;
+          livreLu = { id };
+        }
       })();
     };
     return () => {
@@ -367,15 +372,43 @@
    *  livre est ouvert : avant la tauri-v0.8.0, le second s'ouvrait pendant l'enregistrement du
    *  premier, et le Détail du premier, resélectionné tout de suite, montrait l'ancienne page
    *  (recette tauri-v0.7.3, C-05). */
-  async function ouvrir(i: number) {
-    const l = bib.livre(i);
+  async function ouvrir(i: number, deja?: LivreResume) {
+    const l = deja ?? bib.livre(i);
     if (!l) return;
     const n = ++ouverture;
     sel.unique(i);
     // Livres manquants : le fichier est examiné avant l'ouverture (fenêtre « Fichier introuvable »).
     if (!(await manquants.peutOuvrir(l.id)) || n !== ouverture) return;
     if (livreLu && lecteur) await lecteur.terminer();
-    if (n === ouverture) livreLu = { id: l.id };
+    if (n === ouverture) {
+      rangLu = i;
+      livreLu = { id: l.id };
+    }
+  }
+
+  /** Rang, dans la vue affichée, du livre de la bibliothèque ouvert dans le lecteur (`null` : fichier
+   *  hors bibliothèque, ou pas de vue : pas de livre suivant). */
+  let rangLu: number | null = null;
+
+  /** Fin de livre dans le lecteur : ouvre le livre suivant (ou précédent) de la vue affichée, comme
+   *  `next_book` d'egui. Les groupes sont transparents (la suite passe d'un groupe au suivant) ; dans
+   *  une pile ouverte, la vue est la pile ; les livres manquants sont sautés ; aucun bouclage. Le
+   *  voisin est cherché AVANT de terminer la séance : la relecture de la liste qui suit pourrait
+   *  changer l'ordre (tri par dernière lecture). */
+  async function ouvrirVoisin(arriere: boolean): Promise<'ouvert' | 'fin' | 'aucune'> {
+    const lu = livreLu;
+    if (rangLu === null || !lu || !('id' in lu)) return 'aucune';
+    let depart = rangLu;
+    if (bib.livre(depart)?.id !== lu.id) {
+      // La vue a été rechargée : le livre est cherché dans les pages gardées.
+      const p = [...bib.pages.entries()].find(([, ls]) => ls.some((x) => x.id === lu.id));
+      if (!p) return 'aucune';
+      depart = p[0] * TAILLE_PAGE + p[1].findIndex((x) => x.id === lu.id);
+    }
+    const v = await trouverVoisin(bib.total, depart, arriere, async (k) => (await bib.livresDe([k]))[0]);
+    if (!v) return 'fin';
+    await ouvrir(v.rang, v.livre);
+    return 'ouvert';
   }
 
   /** Le focus peut-il être déplacé vers la zone affichée ? Oui s'il est perdu (la grille des piles
@@ -417,7 +450,10 @@
   async function ouvrirChemin(chemin: string) {
     const n = ++ouverture;
     if (livreLu && lecteur) await lecteur.terminer();
-    if (n === ouverture) livreLu = { chemin };
+    if (n === ouverture) {
+      rangLu = null;
+      livreLu = { chemin };
+    }
   }
 
   function ouvrirFichier() {
@@ -1099,6 +1135,7 @@
       title="Afficher ou masquer le panneau de détails"
     >Détails</button>
     <button onclick={() => void demanderOuvertureFichier()} title="Lire un fichier qui n'est pas dans la bibliothèque" data-testid="ouvrir-fichier">Ouvrir un fichier…</button>
+    <MenuRecents onouvrir={ouvrirChemin} />
     <button onclick={ouvrirMenuScripts} aria-haspopup="menu" aria-expanded={!!menuScripts && !menuScripts.ids} title="Scripts Python (bibliothèque, livres sélectionnés, gestion)" data-testid="menu-scripts">📜 Scripts ▾</button>
   </header>
 
@@ -1248,7 +1285,7 @@
 
 {#if livreLu}
   {#key livreLu}
-    <Lecteur bind:this={lecteur} source={livreLu} onfermer={lecteurFerme} onlecturefinie={lectureFinie} />
+    <Lecteur bind:this={lecteur} source={livreLu} onfermer={lecteurFerme} onlecturefinie={lectureFinie} onvoisin={ouvrirVoisin} />
   {/key}
 {/if}
 

@@ -64,6 +64,126 @@ pub struct Reglages {
     /// Taille, position et état maximisé de la fenêtre principale (restaurés au démarrage).
     #[serde(skip_serializing_if = "ReglagesFenetre::est_vide")]
     pub fenetre: ReglagesFenetre,
+    /// Fichiers récemment ouverts, le plus récent en premier (bloc `recents`, 15 au plus).
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "recents_tolerants")]
+    pub recents: Vec<String>,
+}
+
+// ───────────────────────────── Fichiers récents (lot L6) ─────────────────────────────
+// Menu 🕘 de la bibliothèque : `Settings::recent` et `push_recent` de la version egui (15 chemins,
+// le plus récent d'abord, sans doublon). Contrat : `docs/tauri/ipc-lecteur.md`.
+
+/// Nombre maximal de fichiers récents mémorisés (`Settings::MAX_RECENT` de la version egui).
+pub const MAX_RECENTS: usize = 15;
+
+/// Deux chemins désignent-ils le même fichier ? Sous Windows, la casse est ignorée (NTFS).
+fn meme_chemin(a: &str, b: &str) -> bool {
+    if cfg!(windows) {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
+
+/// Met `chemin` en tête de la liste : l'ancienne occurrence est retirée (pas de doublon), la liste
+/// est plafonnée à [`MAX_RECENTS`]. Un chemin vide est ignoré. Renvoie vrai si la liste a changé.
+pub fn pousser_recent(liste: &mut Vec<String>, chemin: &str) -> bool {
+    let chemin = chemin.trim();
+    if chemin.is_empty() {
+        return false;
+    }
+    if liste.first().is_some_and(|p| p == chemin) {
+        return false;
+    }
+    liste.retain(|p| !meme_chemin(p, chemin));
+    liste.insert(0, chemin.to_string());
+    liste.truncate(MAX_RECENTS);
+    true
+}
+
+/// Retire `chemin` de la liste. Renvoie vrai si la liste a changé.
+pub fn retirer_recent_de(liste: &mut Vec<String>, chemin: &str) -> bool {
+    let avant = liste.len();
+    liste.retain(|p| !meme_chemin(p, chemin.trim()));
+    liste.len() != avant
+}
+
+/// Liste lue dans du JSON quelconque : seules les chaînes non vides sont gardées, dans l'ordre,
+/// sans doublon, 15 au plus (fichier modifié à la main ou d'une autre version : jamais d'erreur).
+pub fn recents_depuis_json(v: &Value) -> Vec<String> {
+    let mut liste: Vec<String> = Vec::new();
+    for p in v.as_array().into_iter().flatten().filter_map(Value::as_str) {
+        let p = p.trim();
+        if !p.is_empty() && !liste.iter().any(|d| meme_chemin(d, p)) && liste.len() < MAX_RECENTS {
+            liste.push(p.to_string());
+        }
+    }
+    liste
+}
+
+fn recents_tolerants<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(recents_depuis_json(&Value::deserialize(d)?))
+}
+
+/// Un fichier récent tel que le menu l'affiche.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recent {
+    pub chemin: String,
+    /// Nom du fichier (dernier élément du chemin, séparateurs `/` et `\`).
+    pub nom: String,
+    /// Le fichier (ou dossier) existe encore : sinon l'entrée est grisée.
+    pub existe: bool,
+}
+
+/// Nom du fichier d'un chemin, quel que soit le séparateur (chemins Windows lus sous Linux compris).
+pub fn nom_du_chemin(chemin: &str) -> String {
+    let net = chemin.trim_end_matches(['/', '\\']);
+    net.rsplit(['/', '\\']).next().filter(|n| !n.is_empty()).unwrap_or(chemin).to_string()
+}
+
+/// Entrées du menu : chaque chemin est vérifié (`existe`) ; l'ordre est conservé.
+pub fn verifier_recents(liste: &[String]) -> Vec<Recent> {
+    liste.iter().map(|c| Recent { chemin: c.clone(), nom: nom_du_chemin(c), existe: Path::new(c).exists() }).collect()
+}
+
+/// Fichiers récents enregistrés, vérifiés.
+pub fn lire_recents(data: &Path) -> Result<Vec<Recent>, String> {
+    Ok(verifier_recents(&lire(data)?.recents))
+}
+
+/// Ouverture d'un fichier : il passe en tête des récents. Le fichier n'est réécrit que si la
+/// liste change.
+pub fn ajouter_recent(data: &Path, chemin: &str) -> Result<Vec<Recent>, String> {
+    let liste = modifier_recents(data, |l| pousser_recent(l, chemin))?;
+    Ok(verifier_recents(&liste))
+}
+
+/// Retire une entrée (fichier qui ne s'ouvre pas, ou choix de l'utilisateur).
+pub fn retirer_recent(data: &Path, chemin: &str) -> Result<Vec<Recent>, String> {
+    let liste = modifier_recents(data, |l| retirer_recent_de(l, chemin))?;
+    Ok(verifier_recents(&liste))
+}
+
+/// Vide la liste.
+pub fn vider_recents(data: &Path) -> Result<Vec<Recent>, String> {
+    let liste = modifier_recents(data, |l| {
+        let change = !l.is_empty();
+        l.clear();
+        change
+    })?;
+    Ok(verifier_recents(&liste))
+}
+
+/// Lecture-modification des seuls récents, sous verrou ; le fichier est réécrit seulement si `f`
+/// rend vrai (rien à écrire = pas d'usure du disque, ni de fichier créé pour rien).
+fn modifier_recents(data: &Path, f: impl FnOnce(&mut Vec<String>) -> bool) -> Result<Vec<String>, String> {
+    let _v = verrou();
+    let mut r = lire(data)?;
+    if f(&mut r.recents) {
+        ecrire(data, &r)?;
+    }
+    Ok(r.recents)
 }
 
 /// Géométrie mémorisée de la fenêtre principale (section `fenetre`, `docs/tauri/ipc-fenetre.md`).
@@ -834,6 +954,7 @@ mod tests {
                 valeurs: [("a.py".to_string(), serde_json::json!({"n": 3}))].into(),
             },
             analyse: ReglagesAnalyse { au_demarrage: Some(false), suivre_comicrack: None },
+            recents: vec!["D:/BD/x.cbz".to_string()],
         };
         ecrire(d.path(), &r).unwrap();
         assert_eq!(lire(d.path()).unwrap(), r);
@@ -1164,5 +1285,119 @@ mod tests {
         assert!(!r.suivre_comicrack);
         std::fs::write(chemin_reglages(d.path()), r#"{"analyse": 3}"#).unwrap();
         assert!(lire_reglages_analyse(d.path()).unwrap().au_demarrage);
+    }
+}
+
+#[cfg(test)]
+mod tests_recents {
+    use super::*;
+
+    fn liste(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn le_plus_recent_passe_en_tete() {
+        let mut l = liste(&["/a.cbz", "/b.cbz"]);
+        assert!(pousser_recent(&mut l, "/c.cbz"));
+        assert_eq!(l, liste(&["/c.cbz", "/a.cbz", "/b.cbz"]));
+    }
+
+    #[test]
+    fn dedoublonnage_remonte_l_ancienne_entree() {
+        let mut l = liste(&["/a.cbz", "/b.cbz", "/c.cbz"]);
+        assert!(pousser_recent(&mut l, "/c.cbz"));
+        assert_eq!(l, liste(&["/c.cbz", "/a.cbz", "/b.cbz"]));
+        assert_eq!(l.len(), 3, "pas de doublon");
+    }
+
+    #[test]
+    fn deja_en_tete_rien_ne_change() {
+        let mut l = liste(&["/a.cbz", "/b.cbz"]);
+        assert!(!pousser_recent(&mut l, "/a.cbz"));
+        assert_eq!(l, liste(&["/a.cbz", "/b.cbz"]));
+    }
+
+    #[test]
+    fn plafond_de_quinze_entrees_la_plus_ancienne_sort() {
+        let mut l = Vec::new();
+        for i in 0..20 {
+            pousser_recent(&mut l, &format!("/livre{i}.cbz"));
+        }
+        assert_eq!(l.len(), MAX_RECENTS);
+        assert_eq!(l[0], "/livre19.cbz");
+        assert_eq!(l[MAX_RECENTS - 1], "/livre5.cbz");
+        assert!(!l.contains(&"/livre4.cbz".to_string()));
+    }
+
+    #[test]
+    fn chemin_vide_ignore_et_espaces_retires() {
+        let mut l = liste(&["/a.cbz"]);
+        assert!(!pousser_recent(&mut l, "   "));
+        assert!(pousser_recent(&mut l, "  /b.cbz "));
+        assert_eq!(l, liste(&["/b.cbz", "/a.cbz"]));
+    }
+
+    #[test]
+    fn retrait_d_une_entree() {
+        let mut l = liste(&["/a.cbz", "/b.cbz"]);
+        assert!(retirer_recent_de(&mut l, "/a.cbz"));
+        assert!(!retirer_recent_de(&mut l, "/absent.cbz"));
+        assert_eq!(l, liste(&["/b.cbz"]));
+    }
+
+    #[test]
+    fn lecture_tolerante() {
+        let v: Value = serde_json::json!(["/a.cbz", 3, null, "", "/a.cbz", "  /b.cbz  ", {"x": 1}]);
+        assert_eq!(recents_depuis_json(&v), liste(&["/a.cbz", "/b.cbz"]));
+        assert!(recents_depuis_json(&serde_json::json!("pas une liste")).is_empty());
+        let trop: Vec<String> = (0..40).map(|i| format!("/{i}.cbz")).collect();
+        assert_eq!(recents_depuis_json(&serde_json::json!(trop)).len(), MAX_RECENTS);
+    }
+
+    #[test]
+    fn nom_du_chemin_windows_et_unix() {
+        assert_eq!(nom_du_chemin(r"D:\BD\Thanos\Thanos 01.cbz"), "Thanos 01.cbz");
+        assert_eq!(nom_du_chemin("/srv/bd/x.cbz"), "x.cbz");
+        assert_eq!(nom_du_chemin(r"D:\BD\Dossier\"), "Dossier");
+        assert_eq!(nom_du_chemin("seul.cbz"), "seul.cbz");
+    }
+
+    #[test]
+    fn aller_retour_dans_le_fichier_sans_toucher_au_reste() {
+        let d = tempfile::tempdir().unwrap();
+        // Rien d'écrit tant que rien ne change.
+        assert!(lire_recents(d.path()).unwrap().is_empty());
+        assert!(!chemin_reglages(d.path()).exists());
+
+        modifier(d.path(), |r| r.mode = Some(Mode::Autonome)).unwrap();
+        let existant = d.path().join("existe.cbz");
+        std::fs::write(&existant, b"x").unwrap();
+        let chemin = existant.to_string_lossy().into_owned();
+        ajouter_recent(d.path(), "/absent/fantome.cbz").unwrap();
+        let l = ajouter_recent(d.path(), &chemin).unwrap();
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].chemin, chemin);
+        assert!(l[0].existe, "fichier présent");
+        assert_eq!(l[0].nom, "existe.cbz");
+        assert!(!l[1].existe, "fichier absent : entrée grisée");
+        // Le reste des réglages est intact et le bloc relu à l'identique.
+        let r = lire(d.path()).unwrap();
+        assert_eq!(r.mode, Some(Mode::Autonome));
+        assert_eq!(r.recents.len(), 2);
+        let l = retirer_recent(d.path(), "/absent/fantome.cbz").unwrap();
+        assert_eq!(l.len(), 1);
+        assert!(vider_recents(d.path()).unwrap().is_empty());
+        let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
+        assert!(!texte.contains("recents"), "bloc absent quand la liste est vide");
+    }
+
+    #[test]
+    fn bloc_illisible_ne_bloque_pas_les_reglages() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(chemin_reglages(d.path()), r#"{"mode":"autonome","recents":42}"#).unwrap();
+        let r = lire(d.path()).unwrap();
+        assert_eq!(r.mode, Some(Mode::Autonome));
+        assert!(r.recents.is_empty());
     }
 }

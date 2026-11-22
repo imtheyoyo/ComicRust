@@ -30,7 +30,7 @@ Audit du 14/11/2026 (étape 10 du plan). Préfixes de preuve : **E** = `crates/c
 |---|---|---|
 | Bibliothèque | 🟡 | pas de Ctrl+O ni F11 ; ➕ `/`, Ctrl+F |
 | Lecteur : pages, 1-4, +/-/0, D, M, T, F/F11, Échap, Ctrl+W | ✅ | ➕ V, ↑↓, Ctrl+molette |
-| Lecteur : `I` infos, `L` liste, Ctrl+O | ❌/🟡 | `L` = loupe côté Tauri |
+| Lecteur : `I` infos, `L` liste, Ctrl+O | ✅/🟡 | `I` ✅ (lot L6) ; `L` = loupe côté Tauri, décision documentée dans l'aide (`?`) |
 
 ### Glisser-déposer
 | Fonction | Statut | Remarque |
@@ -47,7 +47,7 @@ Audit du 14/11/2026 (étape 10 du plan). Préfixes de preuve : **E** = `crates/c
 | Menu livre, menu des listes | ✅ | ➕ Renommer/déplacer, Ouvrir le dossier |
 | Entrées « manquants » | ❌ | |
 | Monter/Descendre la série sur une pile | 🟡 | présent pour les livres groupés seulement |
-| Fichiers récents (🕘, 15 entrées) | ❌ | |
+| Fichiers récents (🕘, 15 entrées) | ✅ | lot L6, `ipc-lecteur.md` ; `.cbl` non mémorisés |
 | À propos / aide / raccourcis / état PDFium | ❌ | |
 
 ### Ligne de commande, fenêtre
@@ -56,7 +56,7 @@ Audit du 14/11/2026 (étape 10 du plan). Préfixes de preuve : **E** = `crates/c
 
 ### Lecteur
 - Formats, modes simple/double/manga, ajustements, zoom, miniatures, reprise : ✅ ; ➕ défilement continu, loupe, rotation.
-- ❌ Fin de livre → livre suivant de la liste ; ❌ Infos du livre (`I`) et statut (format, pages, taille).
+- ✅ Fin de livre → livre suivant de la vue affichée, Infos du livre (`I`) et barre d'état (lot L6, `ipc-lecteur.md`).
 - 🟡 Listes `.cbl` : import dans les listes (conception différente).
 - ❌ **Dialogue natif Ouvrir/Dossier** : aucun plugin dialog, chemins saisis à la main (Ouvrir, Dossiers, Import/Export .cbl, Transfert, scripts).
 

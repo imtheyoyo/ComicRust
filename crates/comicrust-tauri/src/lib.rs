@@ -94,6 +94,8 @@ pub mod app;
 #[cfg(feature = "app")]
 mod cmd_fenetre;
 #[cfg(feature = "app")]
+mod cmd_lecteur;
+#[cfg(feature = "app")]
 mod cmd_manquants;
 #[cfg(feature = "app")]
 mod cmd_scan;
