@@ -95,6 +95,8 @@
     // Scripts applicables, listés directement dans le menu : chargés sans attendre (les entrées
     // se mettent à jour quand la liste arrive).
     void scripts.charger();
+    // Raison de lecture seule à jour pour les entrées grisées (« Marquer comme lu »…).
+    void manquants.rafraichir();
   }
 
   // ───── Scripts Python (tauri-v0.9.0) : menu de la barre d'outils et sous-menu du clic droit ─────
@@ -119,7 +121,7 @@
    *  « Scripts », une entrée par script du hook Books, repli propre si indisponibles / aucun /
    *  trop nombreux (entrées `books:<id>` et `scripts-gerer`, traitées par `agirSurIds`). */
   function entreesScriptsMenu(n: number): EntreeMenu[] {
-    const titre: EntreeMenu = { id: 'titre-scripts', libelle: 'Scripts', desactive: true, separe: true };
+    const titre: EntreeMenu = { id: 'titre-scripts', libelle: 'Scripts', titre: true, separe: true };
     const gerer = (libelle = 'Gérer les scripts…'): EntreeMenu => ({ id: 'scripts-gerer', libelle });
     if (!scripts.etat) {
       if (scripts.erreur) return [titre, { id: 'scripts-indispo', libelle: 'Scripts indisponibles', desactive: true, aide: scripts.erreur }, gerer()];
@@ -699,22 +701,35 @@
   function entreesLecture(): EntreeMenu[] {
     const raison = manquants.raison;
     return [
-      { id: 'marquerLu', libelle: '✔ Marquer comme lu', desactive: !!raison, aide: raison ?? 'Progression à 100 %' },
-      { id: 'marquerNonLu', libelle: '↺ Marquer comme non lu', desactive: !!raison, aide: raison ?? 'Remet la progression à zéro' },
+      { id: 'marquerLu', libelle: '✔ Marquer comme lu', desactive: !!raison, aideVisible: true, aide: raison ?? 'Progression à 100 %' },
+      { id: 'marquerNonLu', libelle: '↺ Marquer comme non lu', desactive: !!raison, aideVisible: true, aide: raison ?? 'Remet la progression à zéro' },
     ];
   }
 
   /** Marque les livres lus ou non lus ; la vue se recharge par `bibliotheque-modifiee` (sélection gardée). */
+  /** Résumé « 3 : pages inconnues ; 2 : modifié par ailleurs » des livres non modifiés, par raison. */
+  function resumeIgnores(ignores: Array<{ raison: string }>): string {
+    const n = new Map<string, number>();
+    for (const i of ignores) n.set(i.raison, (n.get(i.raison) ?? 0) + 1);
+    return [...n].map(([r, k]) => `${k.toLocaleString('fr-FR')} : ${r}`).join(' ; ');
+  }
   async function marquerLus(ids: string[], lu: boolean) {
     try {
       const b = await marquerLecture(ids, lu);
       if (b.ignores.length) {
-        erreurAction = `${b.ignores.length.toLocaleString('fr-FR')} livre(s) non modifié(s) : ${b.ignores[0].raison}`;
+        erreurAction = `Livres non modifiés — ${resumeIgnores(b.ignores)}`;
+      } else if (b.modifies.length === 0 && b.inchanges > 0) {
+        infoLecture = lu ? 'Déjà marqué comme lu.' : 'Déjà marqué comme non lu.';
+        clearTimeout(minuterieInfo);
+        minuterieInfo = setTimeout(() => (infoLecture = ''), 3000);
       }
     } catch (e) {
       erreurAction = messageErreur(e);
     }
   }
+  /** Retour bref quand tous les livres visés sont déjà dans l'état demandé. */
+  let infoLecture = $state('');
+  let minuterieInfo: ReturnType<typeof setTimeout> | undefined;
 
   /** Menu contextuel des piles : les actions portent sur les livres de TOUTES les piles sélectionnées. */
   const entreesPiles = $derived.by<EntreeMenu[]>(() => {
@@ -1262,6 +1277,7 @@
       {:else if nbSel > 1}· {nbSel.toLocaleString('fr-FR')} sélectionnés{:else if sel.curseur >= 0}· sélection {(sel.curseur + 1).toLocaleString('fr-FR')}{/if}
     </span>
     {#if erreurAction}<span class="alerte" role="alert">{erreurAction}</span>{/if}
+    {#if infoLecture}<span role="status" data-testid="info-lecture">{infoLecture}</span>{/if}
     <span class="espace"></span>
     {#if scan.enCours}
       <span class="scan">

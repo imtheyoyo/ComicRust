@@ -70,6 +70,21 @@ fn nombre_pages(b: &LibraryBook, local: Option<Avancement>) -> u32 {
     b.page_count.filter(|n| *n > 0).or(local.map(|a| a.pages as u32).filter(|n| *n > 0)).unwrap_or(0)
 }
 
+/// Reporte dans le bilan ce que le rapport d'écriture ComicRack n'a pas écrit (absents, conflits,
+/// erreurs) et les livres déjà à jour. Fonction pure, testée sans base.
+pub fn integrer_rapport(bilan: &mut BilanLecture, rapport: &db::WriteReport) {
+    for id in &rapport.missing {
+        bilan.ignores.push(LivreIgnore { id: id.clone(), raison: "absent de la base ComicRack".into() });
+    }
+    for id in rapport.conflicts.iter().chain(&rapport.stale) {
+        bilan.ignores.push(LivreIgnore { id: id.clone(), raison: "modifié par ailleurs".into() });
+    }
+    for (id, m) in &rapport.failed {
+        bilan.ignores.push(LivreIgnore { id: id.clone(), raison: m.clone() });
+    }
+    bilan.inchanges += rapport.unchanged.len();
+}
+
 /// Marque les livres `ids` comme lus (`lu`) ou non lus. Voir l'en-tête du module pour les règles
 /// d'écriture. Les livres inconnus de la bibliothèque sont ignorés en silence (comme l'édition).
 pub fn marquer_lecture(
@@ -103,11 +118,22 @@ pub fn marquer_lecture(
     let mut bilan = BilanLecture { lu, modifies: Vec::new(), inchanges: 0, ignores: Vec::new() };
     // (livre, nombre de pages) à écrire.
     let mut a_ecrire: Vec<(LibraryBook, u32)> = Vec::new();
+    // Livres ouverts dans le lecteur : la fermeture réécrirait la page courante et annulerait « non lu ».
+    let ouverts: HashSet<String> = lecteur.ids_ouverts().into_iter().map(|i| i.to_ascii_lowercase()).collect();
     for b in &livres {
+        if ouverts.contains(&b.id.to_ascii_lowercase()) {
+            bilan.ignores.push(LivreIgnore { id: b.id.clone(), raison: "ouvert dans le lecteur".into() });
+            continue;
+        }
         let local = b.file.as_deref().and_then(|f| lecteur.avancement_de(Path::new(f)));
         let n = nombre_pages(b, local);
         if n == 0 {
             bilan.ignores.push(LivreIgnore { id: b.id.clone(), raison: "nombre de pages inconnu".into() });
+            continue;
+        }
+        if n == 1 {
+            // Une seule page : « lu » (page 0) est indiscernable de « non lu » dans la fiche.
+            bilan.ignores.push(LivreIgnore { id: b.id.clone(), raison: "livre d'une seule page".into() });
             continue;
         }
         if deja_dans_l_etat(b, lu) {
@@ -124,42 +150,51 @@ pub fn marquer_lecture(
                 let mut st = Store::open_existing(cfg).map_err(|e| format!("base ComicRust inaccessible : {e}"))?;
                 // Fiches relues dans la base : seules les colonnes de lecture changent.
                 let mut relues = st.get(&ids_ecrits).map_err(|e| format!("lecture de la base ComicRust : {e}"))?;
+                for (b, _) in &a_ecrire {
+                    if !relues.iter().any(|r| r.id.eq_ignore_ascii_case(&b.id)) {
+                        bilan.ignores.push(LivreIgnore { id: b.id.clone(), raison: "absent de la base".into() });
+                    }
+                }
                 for r in &mut relues {
                     let n = a_ecrire.iter().find(|(b, _)| b.id.eq_ignore_ascii_case(&r.id)).map_or(0, |(_, n)| *n);
                     let (courante, derniere) = pages_cibles(lu, n);
                     r.current_page = Some(courante);
                     r.last_page_read = Some(derniere);
+                    // Comme le lecteur : PageCount renseigné s'il manquait.
+                    if r.page_count.unwrap_or(0) == 0 {
+                        r.page_count = Some(n);
+                    }
                 }
-                let compteur =
-                    st.upsert(&relues).map_err(|e| format!("lecture non enregistrée dans la base ComicRust : {e}"))?;
-                biblio.signaler_ecriture_autonome(relues.iter().map(|r| r.id.clone()), Some(compteur));
-                relues
+                if relues.is_empty() {
+                    Vec::new()
+                } else {
+                    let compteur = st
+                        .upsert(&relues)
+                        .map_err(|e| format!("lecture non enregistrée dans la base ComicRust : {e}"))?;
+                    biblio.signaler_ecriture_autonome(relues.iter().map(|r| r.id.clone()), Some(compteur));
+                    relues
+                }
             }
             Cible::Comicrack(cfg) => {
                 let edits: Vec<BookEdit> = a_ecrire
                     .iter()
                     .map(|(b, n)| {
                         let (courante, derniere) = pages_cibles(lu, *n);
-                        BookEdit::new(&b.id)
+                        let e = BookEdit::new(&b.id)
                             .set("CurrentPage", Value::Int(courante.into()))
-                            .set("LastPageRead", Value::Int(derniere.into()))
+                            .set("LastPageRead", Value::Int(derniere.into()));
+                        // Comme le lecteur : PageCount renseigné s'il manquait.
+                        if b.page_count.unwrap_or(0) == 0 {
+                            e.set("PageCount", Value::Int((*n).into()))
+                        } else {
+                            e
+                        }
                     })
                     .collect();
                 let rapport = db::update_books(cfg, &edits)
                     .map_err(|e| format!("base ComicRack inaccessible, lecture non modifiée : {e}"))?;
                 biblio.signaler_rapport_comicrack(&rapport);
-                for id in &rapport.missing {
-                    bilan.ignores.push(LivreIgnore { id: id.clone(), raison: "absent de la base ComicRack".into() });
-                }
-                for id in rapport.conflicts.iter().chain(&rapport.stale) {
-                    bilan
-                        .ignores
-                        .push(LivreIgnore { id: id.clone(), raison: "modifié par ailleurs, réessaie".into() });
-                }
-                for (id, m) in &rapport.failed {
-                    bilan.ignores.push(LivreIgnore { id: id.clone(), raison: m.clone() });
-                }
-                bilan.inchanges += rapport.unchanged.len();
+                integrer_rapport(&mut bilan, &rapport);
                 rapport.written.iter().map(|w| w.book.clone()).collect()
             }
             Cible::LectureSeule(m) => return Err(m.clone()),

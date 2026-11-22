@@ -18,6 +18,11 @@ Réponse `BilanLecture` :
 { "lu": true, "modifies": ["id1"], "inchanges": 1, "ignores": [{ "id": "id2", "raison": "nombre de pages inconnu" }] }
 ```
 
+- Raisons d'`ignores` : « ouvert dans le lecteur » (la fermeture réécrirait la page courante), « livre d'une
+  seule page » (lu indiscernable de non lu), « nombre de pages inconnu », « absent de la base » (Store) /
+  « absent de la base ComicRack », « modifié par ailleurs », erreur SQL, et « avancement local non mis à jour »
+  (échec d'écriture de `avancement.json` : le livre est alors **à la fois** dans `modifies`, sa fiche est écrite,
+  et dans `ignores`).
 - `modifies` : livres dont la fiche a été écrite ; `inchanges` : déjà dans l'état demandé ;
   `ignores` : non modifiés (pages inconnues, conflit d'écriture ComicRack, absent de la base…).
 - Erreur (`Err(String)`, message lisible) : fiches non modifiables, base hors ligne, analyse en cours,
@@ -34,6 +39,10 @@ Réponse `BilanLecture` :
 | ComicRack MySQL, « Lecture et écriture » | Seuls `CurrentPage` et `LastPageRead` réécrits (`BookEdit`, protocole des compteurs). |
 | ComicRack MySQL en lecture seule, ComicDb.xml, aucune bibliothèque | **Refusé** avec la raison habituelle (`LECTURE_SEULE_*`) ; rien n'est écrit (ni base ComicRack, ni `avancement.json`). |
 
+- `PageCount` est aussi écrit quand la fiche n'en a pas (nombre de pages pris de l'avancement local), comme
+  le lecteur (`edition_lecture_comicrack`).
+- Chemin autonome : fiche relue (`Store::get`) puis `Store::upsert`, et non `set_progress`, car celui-ci
+  incrémente `OpenCount` et change `Opened` (ce n'est pas une ouverture) et n'écrit pas `PageCount`.
 - **Lu** : `CurrentPage = LastPageRead = pages - 1` (100 % selon `LibraryBook::read_percent`). Le nombre de
   pages vient de la fiche (`PageCount`), à défaut de l'avancement local ; sinon le livre est ignoré.
 - **Non lu** : `CurrentPage = LastPageRead = 0`.
@@ -48,10 +57,10 @@ Réponse `BilanLecture` :
 
 - **Deux entrées**, sans bascule, comme ComicRack : `✔ Marquer comme lu` (`marquerLu`) et
   `↺ Marquer comme non lu` (`marquerNonLu`), juste sous « Lire ». Désactivées, avec la raison en
-  infobulle, quand `manquants.raison` indique des fiches non modifiables. Pas de raccourci clavier
+  infobulle **et écrite sous le libellé** (`aideVisible`), quand `manquants.raison` (relue à l'ouverture du menu) indique des fiches non modifiables. Pas de raccourci clavier
   (`lib/raccourcis.ts` inchangé).
-- **Scripts au premier niveau** (plus de sous-menu « Scripts ▸ ») : séparateur, titre désactivé
-  « Scripts », puis une entrée `books:<id>` par script actif du hook `Books`.
+- **Scripts au premier niveau** (plus de sous-menu « Scripts ▸ ») : séparateur, intitulé non interactif
+  « Scripts » (`role="presentation"`, pas un menuitem), puis une entrée `books:<id>` par script actif du hook `Books`.
   - `scripts.charger()` est lancé à l'ouverture du menu, sans attendre (les entrées apparaissent à
     l'arrivée de la liste ; « Chargement des scripts… » en attendant).
   - Indisponible (`raisonIndisponible` : Python absent, script en cours) : entrées désactivées, raison en
@@ -66,3 +75,8 @@ Réponse `BilanLecture` :
 `?lecture=lectureSeule` refuse l'écriture (message affiché dans la barre d'état) ;
 `?manquants=lectureSeule` désactive les entrées ; `?scripts=vide` / `?scripts=sansPython` montrent les replis.
 `window.__comicrustSimule.lectureEtat.appels` liste les appels reçus.
+
+## Retours dans la barre d'état
+
+Livres non modifiés : message groupé par raison (« Livres non modifiés — 3 : pages inconnues ; 2 : modifié par
+ailleurs »). Tous déjà dans l'état demandé : « Déjà marqué comme lu / non lu. » pendant 3 s.

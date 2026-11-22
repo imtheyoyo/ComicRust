@@ -8,6 +8,10 @@
     aide?: string;
     /** Séparateur avant l'entrée. */
     separe?: boolean;
+    /** Simple intitulé de section (non interactif, `role="presentation"`), pas une commande. */
+    titre?: boolean;
+    /** Désactivée : la raison (`aide`) est aussi écrite sous le libellé, pas seulement en infobulle. */
+    aideVisible?: boolean;
   }
 </script>
 
@@ -69,9 +73,14 @@
   onkeydown={clavier} oncontextmenu={(e) => e.preventDefault()} data-testid="menu-contextuel">
   {#each entrees as e (e.id)}
     {#if e.separe}<div class="separateur" role="separator"></div>{/if}
-    <button role="menuitem" disabled={e.desactive} title={e.aide} onclick={() => { onfermer(); onchoix(e.id); }} data-menu={e.id}>
-      <span>{e.libelle}</span>{#if e.raccourci}<kbd>{e.raccourci}</kbd>{/if}
-    </button>
+    {#if e.titre}
+      <div class="titre" role="presentation" data-menu={e.id}>{e.libelle}</div>
+    {:else}
+      <button role="menuitem" disabled={e.desactive} aria-disabled={e.desactive ? 'true' : undefined} title={e.aide}
+        onclick={() => { onfermer(); onchoix(e.id); }} data-menu={e.id}>
+        <span>{e.libelle}{#if e.desactive && e.aideVisible && e.aide}<small class="raison">{e.aide}</small>{/if}</span>{#if e.raccourci}<kbd>{e.raccourci}</kbd>{/if}
+      </button>
+    {/if}
   {/each}
 </div>
 
@@ -85,6 +94,8 @@
     display: flex; justify-content: space-between; gap: 18px; text-align: left; border: 0; background: none; padding: 6px 10px;
   }
   .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--cr-accent); color: var(--cr-accent-texte); outline: none; }
+  .titre { padding: 4px 10px 2px; font-size: 12px; opacity: 0.7; }
+  .raison { display: block; font-size: 11px; opacity: 0.8; max-width: 260px; white-space: normal; }
   kbd { font: inherit; font-size: 12px; opacity: 0.75; }
   .separateur { height: 1px; margin: 4px 2px; background: var(--cr-bordure); }
 </style>

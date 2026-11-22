@@ -1059,6 +1059,11 @@ impl Lecteur {
         }
     }
 
+    /// Identifiants des livres de la bibliothèque ouverts dans une séance de lecture.
+    pub fn ids_ouverts(&self) -> HashSet<String> {
+        self.verrou().values().filter_map(|s| s.id.clone()).collect()
+    }
+
     /// Avancement mémorisé localement (`avancement.json`) pour un fichier.
     pub fn avancement_de(&self, fichier: &Path) -> Option<crate::avancement::Avancement> {
         self.memoire.lire(fichier)
