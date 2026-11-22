@@ -110,7 +110,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 ## Limites connues (acceptées pour cette version)
 
 - Mêmes limites que la [tauri-v1.0.0](tauri-v1.0.0.md).
-- Jauges : la règle « nouveau » est une hypothèse (à confirmer en JG-02) ; la bibliothèque entière s'affiche brièvement avant de basculer sur la dernière liste au démarrage.
+- Jauges : la règle « nouveau » (non lu, jamais ouvert, ajouté il y a **moins de 7 jours**) est une hypothèse à confirmer en JG-02 ; le premier scan d'une collection existante rend tous ses livres « nouveaux » pendant une semaine ; la bibliothèque entière s'affiche brièvement avant de basculer sur la dernière liste au démarrage.
 - Bedetheque : non vérifié sur le vrai site (présence du lien vers la série dans les vraies pages d'album, comportement face à Cloudflare) ; la recherche ordinaire relit la page de la série pour chaque livre de la même série (comportement d'avant).
 - Plusieurs piles dispersées : Monter / Descendre les regroupe au point d'arrivée (comme le glisser-déposer).
 
@@ -118,7 +118,8 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
-| | | | |
+| (relecture) | [M] | Sous-menu : fermeture par le pointeur pendant que le clavier y a le focus (plus aucune touche ne répondait) | **Corrigé avant publication** |
+| (relecture) | [m] | Règle « nouveau » (7 jours strict, date future), minuit, contraste des pastilles, lien de série pris hors de l'en-tête, GUID de liste sensible à la casse, flash au démarrage | **Corrigés** |
 
 ## Bilan
 
