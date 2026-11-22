@@ -13,8 +13,6 @@ export const DERNIERS_AJOUTS = 12;
 export type MembresSimules = { ids: string[] } | { inconnu: string };
 
 const exposition = { appels: 0 };
-(globalThis as { __comicrustSimule?: Record<string, unknown> }).__comicrustSimule ??= {};
-(globalThis as unknown as { __comicrustSimule: Record<string, unknown> }).__comicrustSimule.jauges = exposition;
 
 function jaugeDe(livres: LivreListe[], seuil: number): Jauge {
   const j: Jauge = { nouveaux: 0, nonLus: 0, total: livres.length };
@@ -29,6 +27,9 @@ function jaugeDe(livres: LivreListe[], seuil: number): Jauge {
 /** Jauges de la bibliothèque et de chaque liste dont le contenu est connu. */
 export function jaugesSimulees(livres: LivreListe[], listes: Array<{ id: string; membres: MembresSimules }>): JaugesListes {
   exposition.appels++;
+  // Exposé à chaque appel : le simulé principal peut remplacer l'objet global après le chargement du module.
+  (globalThis as { __comicrustSimule?: Record<string, unknown> }).__comicrustSimule ??= {};
+  (globalThis as unknown as { __comicrustSimule: Record<string, unknown> }).__comicrustSimule.jauges = exposition;
   const dernier = livres.reduce((m, l) => Math.max(m, l.ajout), 0);
   const seuil = dernier - DERNIERS_AJOUTS;
   const parId = new Map(livres.map((l) => [l.id, l]));

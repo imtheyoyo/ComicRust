@@ -411,7 +411,7 @@
       Afficher les jauges des listes
     </label>
     <p class="discret petit">Comme dans ComicRack : trois compteurs à droite de chaque liste et de la bibliothèque, rouge pour les nouveaux livres
-      (jamais ouverts, ajoutés depuis moins de 7 jours), jaune pour les livres non lus, vert pour le total. Désactivé, seul le total est affiché.</p>
+      (jamais ouverts, ajoutés il y a moins de 7 jours), jaune pour les livres non lus, vert pour le total. Désactivé, seul le total est affiché.</p>
   </fieldset>
   <fieldset class="comicrack" data-testid="reglage-analyse">
     <legend>Analyse et suivi</legend>
