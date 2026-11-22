@@ -140,6 +140,49 @@ async function testsLivres(browser) {
   await page.close();
 }
 
+async function testsCorrections(browser) {
+  console.log('Corrections : focus, fermeture involontaire, flèches');
+  const page = await ouvrir(browser);
+  await clicDroitLivre(page);
+  // 1. Focus dans le sous-menu, le pointeur bouge sur le menu principal : le focus ne se perd pas.
+  await parent(page).click();
+  await sous(page).waitFor();
+  await page.waitForTimeout(100);
+  await page.locator('[data-testid=menu-contextuel] [data-menu=renommer]').hover();
+  await page.mouse.move(await page.evaluate(() => innerWidth / 2), 5); // sort du menu
+  await attendre(900);
+  ok((await sous(page).count()) === 0, 'sous-menu refermé par le pointeur');
+  ok((await focusMenu(page)) === 'scripts', `focus rendu à « Scripts » (${await focusMenu(page)})`);
+  await page.keyboard.press('ArrowDown');
+  ok((await focusMenu(page)) !== null, 'les flèches atteignent encore le menu');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+  ok((await page.locator('[data-testid=menu-contextuel]').count()) === 0, 'Échap ferme le menu');
+  // 2. Sous-menu ouvert au survol, ArrowDown déplace le focus : il se referme.
+  await clicDroitLivre(page);
+  await parent(page).hover();
+  await sous(page).waitFor();
+  await parent(page).focus();
+  await page.keyboard.press('ArrowDown');
+  ok((await sous(page).count()) === 0 && (await parent(page).getAttribute('aria-expanded')) === 'false', 'ArrowDown hors de l\'entrée parente : sous-menu fermé');
+  await page.keyboard.press('Escape');
+  await page.close();
+  // 3. ArrowUp depuis le conteneur (sous-menu grisé n'a pas d'entrée focalisable) : pas de plantage ;
+  //    sous-menu à entrées actives : conteneur focalisé puis ArrowUp → dernière entrée.
+  const p2 = await ouvrir(browser);
+  await clicDroitLivre(p2);
+  await parent(p2).click();
+  await sous(p2).waitFor();
+  await p2.waitForTimeout(100);
+  await sous(p2).evaluate((e) => e.focus());
+  await p2.keyboard.press('ArrowUp');
+  ok((await focusMenu(p2)) === 'scripts-gerer', `ArrowUp depuis le conteneur : dernière entrée (${await focusMenu(p2)})`);
+  await sous(p2).evaluate((e) => e.focus());
+  await p2.keyboard.press('ArrowDown');
+  ok((await focusMenu(p2)) === 'books:nettoyage.py:nettoyer', 'ArrowDown depuis le conteneur : première entrée');
+  await p2.close();
+}
+
 async function testsBords(browser) {
   console.log('Bords d\'écran et défilement');
   // Bord droit : le sous-menu bascule à gauche.
@@ -309,6 +352,7 @@ async function testsPiles(browser) {
   try {
     await testsLivres(browser);
     await testsBords(browser);
+    await testsCorrections(browser);
     await testsReplis(browser);
     await testsPiles(browser);
   } finally {
