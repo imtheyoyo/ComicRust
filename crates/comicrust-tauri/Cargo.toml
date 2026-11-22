@@ -42,7 +42,7 @@ tauri = { version = "2", optional = true }
 # Dialogues natifs de fichiers (Ouvrir / Enregistrer / dossier) : lot L8, docs/tauri/ipc-dialogue.md.
 tauri-plugin-dialog = { version = "2", optional = true }
 # Mise à jour intégrée (module `maj`) : empreintes et extraction du paquet (noyau testable).
-sha2 = "0.10"
+sha2 = "0.11"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Mise à jour : accès à GitHub, mêmes fonctions que la version egui (certificats et proxy du
 # système). Fonction `app` seulement ; les tests l'ont en dépendance de développement.
