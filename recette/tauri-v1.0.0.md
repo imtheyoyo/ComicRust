@@ -117,8 +117,10 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 15 | 15 | 0 |
+| [M] majeurs | 20 | 20 | 0 |
+| [m] mineurs | 9 | 9 | 0 |
 
-**Décision : (à remplir)**
+Rapport de Yoyo du 22/11/2026 20:59 ([rapport](rapports/tauri-v1.0.0-2026-11-22.txt)) : 44 OK, 0 échec. P-01 : 1.0.0 / 1.0.0 ; PF-01 : 63 Mo. PI-05 : première/dernière pile OK mais l'entrée Monter/Descendre n'est pas grisée (→ 1.0.1). Demandes → 1.0.1 : jauges des listes (rouge nouveaux, jaune non lus, vert total), scripts en sous-menu latéral, résumé de série dans Bedetheque Scraper 2, version dans le titre, réouverture sur la dernière liste.
+
+**Décision : GO** confirmé par Yoyo le 22/11/2026, avec fusion de `tauri2-web` dans `main` et archivage d'egui (branche `egui-archive`) ; les demandes ci-dessus sont traitées dans la tauri-v1.0.1.

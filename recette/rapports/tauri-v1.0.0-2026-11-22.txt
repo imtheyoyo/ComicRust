@@ -1,0 +1,19 @@
+Rapport de recette ComicRust tauri-v1.0.0 — 22/11/2026 20:59
+Résultat : 44 OK, 0 échec(s), 0 non testé(s) sur 44.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 1.0.0 / 1.0.0
+- PI-05 : première / descendre la dernière : ok mais entrée n'est pas grisée.
+- PF-01 : 63 Mo
+
+Améliorations :
+
+- Comme dans ComicRack : Ajouter les jauges pour les listes (Rouge: Nouveaux livres, Jaune: Livres non lus, Vert : Total livres dans la liste)
+- Clic droit sur un livre, le menu s'ouvre, il faut que les scripts soient rangés dans un sous menu. Passage/clic de la souris ouvre le sous menu à côte du menu principal.
+- Script Bedetheque Scraper 2 : Lors de la récupération des informations d'un livre, s'il n'y a rien dans le résumé, il faut récupérer le résumé de la série.
+- Ajoute la version de ComicRust dans le titre de la fenêtre principale.
+- à la réouverture de comicrust, revenir tout le temps à la dernière liste ouverte.
