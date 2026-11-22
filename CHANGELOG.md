@@ -5,6 +5,28 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v1.0.1] — 2026-11-22
+
+Version d'améliorations suite à la recette tauri-v1.0.0 (GO du 22/11/2026, 44/44 OK).
+
+### Nouveautés
+- **Jauges des listes** (comme ComicRack) : trois compteurs à droite de chaque liste et de la Bibliothèque,
+  rouge = nouveaux livres, jaune = livres non lus, vert = total. Se mettent à jour après lecture, marquage lu /
+  non lu, analyse, import. Réglage « Afficher les jauges des listes » ; couleurs via les thèmes
+  (variables facultatives `--cr-jauge-*`, les trois thèmes livrés sont mis à jour).
+- **Scripts en sous-menu latéral** dans le clic droit des livres et des piles (survol, clic ou Flèche droite) ;
+  sous-menu générique, défilant, accessible au clavier.
+- **Monter / Descendre la pile** grisés sur la première / dernière pile (avec la raison) ; Monter / Descendre
+  déplacent aussi un bloc de plusieurs piles.
+- **Bedetheque Scraper 2** : si l'album n'a pas de résumé, le résumé de la **série** est repris (option
+  « Utiliser le résumé de la série si l'album n'en a pas », activée par défaut).
+- **Version dans le titre** de la fenêtre (« ComicRust 1.0.1 »).
+- **Réouverture sur la dernière liste** à chaque démarrage (réglage « Rouvrir la dernière liste au
+  démarrage », activé par défaut).
+
+### Recette
+[`recette/tauri-v1.0.1.md`](recette/tauri-v1.0.1.md) : les nouveautés et la non-régression complète.
+
 ## [tauri-v1.0.0] — 2026-11-22
 
 Étape 11 de la feuille de route : **première release** de la version Tauri. Les fonctions sont gelées :
