@@ -60,4 +60,13 @@
   --cr-lecture-piste: #d5dae3;
   /* (facultatif) Ombre marquée des fenêtres flottantes et du lecteur. */
   --cr-ombre-forte: 0 8px 28px rgba(20, 30, 50, 0.25);
+  /* (facultatif) Jauge des listes, nouveaux livres : fond (rouge) et texte posé dessus (4,5:1 au moins). */
+  --cr-jauge-nouveaux-fond: #c62828;
+  --cr-jauge-nouveaux-texte: #ffffff;
+  /* (facultatif) Jauge des listes, livres non lus : fond (jaune) et texte posé dessus. */
+  --cr-jauge-non-lus-fond: #f2b01e;
+  --cr-jauge-non-lus-texte: #1d2330;
+  /* (facultatif) Jauge des listes, total des livres : fond (vert) et texte posé dessus. */
+  --cr-jauge-total-fond: #2e7d32;
+  --cr-jauge-total-texte: #ffffff;
 }

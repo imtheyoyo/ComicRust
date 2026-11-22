@@ -52,6 +52,12 @@ variable `--cr-*` utilisée mais absente de `CONTRAT` : en ajouter une impose de
 | `--cr-rectangle-bordure` | Contour du rectangle de sélection | F | `var(--cr-accent)` |
 | `--cr-lecture-piste` | Piste vide des barres de lecture et de progression | F | `var(--cr-bordure)` |
 | `--cr-ombre-forte` | Ombre marquée des fenêtres flottantes et du lecteur | F | `var(--cr-ombre)` |
+| `--cr-jauge-nouveaux-fond` | Jauge des listes : fond du compteur de nouveaux livres (rouge) | F | `#c62828` |
+| `--cr-jauge-nouveaux-texte` | Jauge des listes : texte du compteur de nouveaux livres | F | `#ffffff` |
+| `--cr-jauge-non-lus-fond` | Jauge des listes : fond du compteur de livres non lus (jaune) | F | `#f2b01e` |
+| `--cr-jauge-non-lus-texte` | Jauge des listes : texte du compteur de livres non lus | F | `#1d2330` |
+| `--cr-jauge-total-fond` | Jauge des listes : fond du compteur de total de livres (vert) | F | `#2e7d32` |
+| `--cr-jauge-total-texte` | Jauge des listes : texte du compteur de total de livres | F | `#ffffff` |
 
 En plus des variables : `color-scheme: light | dark;` dans le `:root`. Il commande l'apparence des contrôles
 natifs (cases à cocher, barres de défilement, champs de date). Son absence produit un avertissement.
