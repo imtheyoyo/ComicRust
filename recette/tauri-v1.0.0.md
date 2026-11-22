@@ -39,7 +39,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 - [ ] **ML-03 [B]** « ✔ Marquer comme lu » sur un ou plusieurs livres (copie **autonome**) : pastille « lu » / 100 %, le filtre « non lus » et les listes intelligentes se mettent à jour, la sélection est conservée ; « ↺ Marquer comme non lu » remet à 0 ; le compteur d'ouvertures ne bouge pas.
 - [ ] **ML-04 [M]** Même chose sur un clic droit de **pile(s)** : tous les livres des piles sélectionnées sont concernés (le nombre annoncé est juste).
 - [ ] **ML-05 [M]** Copie **liée** à ComicRack en lecture seule (mode par défaut) : les deux entrées sont grisées avec la raison, rien n'est écrit ; en mode « Lecture et écriture » (sur une **copie** de la base) : l'état est écrit et ComicRack le voit.
-- [ ] **ML-06 [m]** Livre sans nombre de pages connu : ignoré avec un message, les autres livres de la sélection sont traités.
+- [ ] **ML-06 [m]** Cas ignorés avec leur raison (les autres livres de la sélection sont traités) : livre **ouvert dans le lecteur**, livre d'**une seule page**, livre sans nombre de pages connu ; si tout est déjà dans l'état demandé : message « Déjà marqué comme lu / non lu. ».
 - [ ] **DO-01 [M]** Documentation : `README.md` du zip, À propos / Aide (F1), `docs\` du dépôt : cohérents avec la version (pas de texte périmé, liens valides).
 
 ## 2. Piles réordonnables (liste de lecture, tri « Ordre de la liste », « Empiler par série »)
@@ -104,6 +104,7 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 ## Limites connues (acceptées pour cette version)
 
 - Mêmes limites que la [tauri-v0.11.0](tauri-v0.11.0.md) (écritures disque courtes sur le fil principal, chemins absolus dans les textes copiés, taille minimale 800 × 500, séries dispersées entrelacées entre plusieurs piles, sélection de livres repérée par rang après rechargement…).
+- Un livre d'une seule page ne peut pas être marqué lu (indiscernable de non lu) ; un livre ouvert dans le lecteur est ignoré.
 - « Marquer comme lu / non lu » est refusé en ComicRack lecture seule et avec ComicDb.xml (les pastilles et filtres lisent la fiche, pas le fichier d'avancement local) ; l'écriture dans une vraie base ComicRack n'a pas pu être testée automatiquement.
 
 ## Anomalies

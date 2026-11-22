@@ -15,7 +15,7 @@ la validation de cette version, la version egui est archivée et la version Taur
 - **Menu du livre (clic droit)** : la liste des **scripts** s'affiche directement dans le menu (plus de
   sous-menu à ouvrir), avec repli propre (scripts indisponibles, aucun script, liste longue).
 - **Marquer comme lu / non lu** : sur un ou plusieurs livres ou piles. Écrit dans la base ComicRust ; avec
-  ComicRack, seulement en mode « Lecture et écriture » (refusé en lecture seule, avec la raison affichée).
+  ComicRack, seulement en mode « Lecture et écriture » (refusé en lecture seule, avec la raison affichée). Les livres ouverts dans le lecteur ou d'une seule page sont ignorés avec leur raison.
 - **Documentation** finalisée : README du paquet, aide (F1), docs du dépôt.
 
 ### Recette
