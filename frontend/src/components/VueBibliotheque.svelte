@@ -88,9 +88,9 @@
    *  n'y en a qu'une), retenues hors de l'état réactif : le menu se ferme (`menu = null`) AVANT
    *  d'appeler l'action choisie. Lire `menu` à ce moment-là levait une erreur (menu nul) et aucune
    *  entrée du menu n'agissait (« Modifier les infos » sans effet alors que Ctrl+I marchait). */
-  let pilesMenu: { ids: string[]; serie: string | null } | undefined;
+  let pilesMenu: { ids: string[]; serie: string | null; series: string[] } | undefined;
   function ouvrirMenu(x: number, y: number, piles = false) {
-    pilesMenu = piles ? { ids: idsPiles(), serie: nbPilesSel === 1 ? pileSelectionnee : null } : undefined;
+    pilesMenu = piles ? { ids: idsPiles(), serie: nbPilesSel === 1 ? pileSelectionnee : null, series: seriesPilesSel() } : undefined;
     menu = { x, y, piles };
     // Scripts applicables, listés directement dans le menu : chargés sans attendre (les entrées
     // se mettent à jour quand la liste arrive).
@@ -99,7 +99,7 @@
     void manquants.rafraichir();
   }
 
-  // ───── Scripts Python (tauri-v0.9.0) : menu de la barre d'outils et sous-menu du clic droit ─────
+  // ───── Scripts Python (tauri-v0.9.0) : menu de la barre d'outils ; sous-menu « Scripts ▸ » du clic droit ─────
 
   /** Menu des scripts ouvert : entrées et livres visés (null : sélection lue au choix). */
   let menuScripts = $state<{ x: number; y: number; entrees: EntreeMenu[]; ids: string[] | null } | null>(null);
@@ -114,28 +114,29 @@
     }));
   }
 
-  /** Nombre maximal de scripts listés dans le menu contextuel ; les autres : « Gérer les scripts… ». */
-  const MAX_SCRIPTS_MENU = 12;
-
-  /** Scripts applicables aux `n` livres visés, au premier niveau du menu contextuel : titre
-   *  « Scripts », une entrée par script du hook Books, repli propre si indisponibles / aucun /
-   *  trop nombreux (entrées `books:<id>` et `scripts-gerer`, traitées par `agirSurIds`). */
+  /** Entrée « Scripts ▸ » du menu contextuel (`n` livres visés) : un sous-menu latéral qui défile s'il
+   *  est long (pas de limite d'affichage). Une entrée par script du hook Books (`books:<id>`), repli
+   *  propre si chargement en cours / indisponible / aucun script, et « Gérer les scripts… »
+   *  (`scripts-gerer`) en bas ; les choix sont traités par `agirSurIds`. */
   function entreesScriptsMenu(n: number): EntreeMenu[] {
-    const titre: EntreeMenu = { id: 'titre-scripts', libelle: 'Scripts', titre: true, separe: true };
-    const gerer = (libelle = 'Gérer les scripts…'): EntreeMenu => ({ id: 'scripts-gerer', libelle });
-    if (!scripts.etat) {
-      if (scripts.erreur) return [titre, { id: 'scripts-indispo', libelle: 'Scripts indisponibles', desactive: true, aide: scripts.erreur }, gerer()];
-      return [titre, { id: 'scripts-charge', libelle: 'Chargement des scripts…', desactive: true }];
-    }
-    const liste = scripts.scriptsDe('Books');
-    if (liste.length === 0) return [titre, { id: 'scripts-aucun', libelle: 'Aucun script', desactive: true, aide: 'Aucun script actif pour les livres' }, gerer()];
-    const indispo = scripts.raisonIndisponible;
-    const vues = liste.slice(0, MAX_SCRIPTS_MENU).map((s): EntreeMenu => ({
-      id: `books:${s.id}`, libelle: s.nom, desactive: !!indispo || n === 0,
-      aide: indispo ?? (n === 0 ? 'Sélectionner des livres d\'abord' : s.description),
-    }));
-    const reste = liste.length - vues.length;
-    return [titre, ...vues, ...(reste > 0 ? [gerer(`… et ${reste.toLocaleString('fr-FR')} autre(s) : gérer les scripts…`)] : [])];
+    const gerer: EntreeMenu = { id: 'scripts-gerer', libelle: 'Gérer les scripts…', separe: true };
+    const sousMenu = ((): EntreeMenu[] => {
+      if (!scripts.etat) {
+        if (scripts.erreur) return [{ id: 'scripts-indispo', libelle: 'Scripts indisponibles', desactive: true, aide: scripts.erreur }, gerer];
+        return [{ id: 'scripts-charge', libelle: 'Chargement des scripts…', desactive: true }];
+      }
+      const liste = scripts.scriptsDe('Books');
+      if (liste.length === 0) return [{ id: 'scripts-aucun', libelle: 'Aucun script', desactive: true, aide: 'Aucun script actif pour les livres' }, gerer];
+      const indispo = scripts.raisonIndisponible;
+      return [
+        ...liste.map((s): EntreeMenu => ({
+          id: `books:${s.id}`, libelle: s.nom, desactive: !!indispo || n === 0,
+          aide: indispo ?? (n === 0 ? 'Sélectionner des livres d\'abord' : s.description),
+        })),
+        gerer,
+      ];
+    })();
+    return [{ id: 'scripts', libelle: '📜 Scripts', separe: true, sousMenu }];
   }
 
   function ouvrirMenuScripts(ev: MouseEvent) {
@@ -738,7 +739,8 @@
     const f = (k: number) => k.toLocaleString('fr-FR');
     const quoi = np > 1 ? `les ${f(n)} livres de ${f(np)} piles` : n > 1 ? `les ${f(n)} livres` : 'le livre';
     const raison = listes.raison;
-    const refusPile = refusDecalerPile();
+    const refusHaut = refusDecalerPile(true);
+    const refusBas = refusDecalerPile(false);
     return [
       ...(np === 1 ? [{ id: 'ouvrir', libelle: '📂 Ouvrir la pile', raccourci: 'Entrée' }] : []),
       ...entreesLecture(),
@@ -752,26 +754,57 @@
       ...(liste?.type === 'lecture'
         ? [
             { id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, raccourci: 'Suppr', desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' },
-            { id: 'monter-pile', libelle: '⬆ Monter la pile', raccourci: 'Alt+↑', desactive: !!refusPile, aide: refusPile ?? undefined },
-            { id: 'descendre-pile', libelle: '⬇ Descendre la pile', raccourci: 'Alt+↓', desactive: !!refusPile, aide: refusPile ?? undefined },
+            { id: 'monter-pile', libelle: np > 1 ? '⬆ Monter les piles' : '⬆ Monter la pile', raccourci: 'Alt+↑', desactive: !!refusHaut, aide: refusHaut ?? undefined, aideVisible: true },
+            { id: 'descendre-pile', libelle: np > 1 ? '⬇ Descendre les piles' : '⬇ Descendre la pile', raccourci: 'Alt+↓', desactive: !!refusBas, aide: refusBas ?? undefined, aideVisible: true },
           ]
         : []),
     ];
   });
 
   /** Action du menu des piles (`cible` : retenue à l'ouverture du menu, voir `pilesMenu`). */
-  async function actionPiles(id: string, cible: { ids: string[]; serie: string | null }) {
+  async function actionPiles(id: string, cible: { ids: string[]; serie: string | null; series: string[] }) {
     erreurAction = '';
     if (id === 'ouvrir') {
       if (cible.serie !== null) void ouvrirPile(cible.serie);
     } else if (id === 'monter-pile' || id === 'descendre-pile') {
-      if (cible.serie !== null) await decalerPile(cible.serie, id === 'monter-pile');
+      await decalerPiles(cible.series, id === 'monter-pile');
     } else await agirSurIds(id, cible.ids);
   }
 
-  /** Raison pour laquelle « Monter / Descendre la pile » est indisponible (null : possible). */
-  function refusDecalerPile(): string | null {
-    return refusReordonner() ?? (nbPilesSel === 1 ? null : 'Sélectionne une seule pile');
+  /** Titres (séries) des piles sélectionnées, dans l'ordre de la vue. */
+  const seriesPilesSel = (): string[] => selPiles.indices().flatMap((i) => (bib.piles[i] ? [bib.piles[i].serie] : []));
+
+  /** Raison pour laquelle « Monter / Descendre la pile » est sans effet (null : possible) : pas une liste
+   *  de lecture dans son ordre, aucune pile choisie, ou pile(s) déjà en tête (monter) / en queue (descendre).
+   *  Plusieurs piles : le bloc des piles sélectionnées bouge d'un cran (déjà en tête : rangs 0…k-1). */
+  function refusDecalerPile(haut: boolean): string | null {
+    const refus = refusReordonner();
+    if (refus) return refus;
+    const rangs = selPiles.indices().filter((i) => i < bib.piles.length);
+    const k = rangs.length;
+    if (k === 0) return 'Sélectionne une pile';
+    const n = bib.piles.length;
+    if (haut && rangs[k - 1] < k) return k === 1 ? 'Cette pile est déjà la première de la liste' : 'Ces piles sont déjà en tête de la liste';
+    if (!haut && rangs[0] >= n - k) return k === 1 ? 'Cette pile est déjà la dernière de la liste' : 'Ces piles sont déjà en queue de la liste';
+    return null;
+  }
+
+  /** Décale d'un cran la pile `series[0]` ou, pour plusieurs piles, le bloc des piles sélectionnées
+   *  (déposées à la frontière précédant / suivant le bloc ; une sélection dispersée est regroupée). */
+  async function decalerPiles(series: string[], haut: boolean) {
+    if (series.length === 0) return;
+    if (series.length === 1) { await decalerPile(series[0], haut); return; }
+    if (!liste) return;
+    const idl = liste.id;
+    const req = requete();
+    const rangs = series.map((t) => bib.piles.findIndex((p) => p.serie === t)).filter((i) => i >= 0);
+    if (rangs.length === 0) return;
+    const insertion = haut ? Math.max(0, Math.min(...rangs) - 1) : Math.max(...rangs) + 2;
+    try {
+      await listes.executer('Réordonnancement de la liste', () => deplacerPilesListe(idl, req, series, insertion));
+    } catch (e) {
+      erreurAction = messageErreur(e);
+    }
   }
 
   /** Monte ou descend la pile `serie` d'un cran dans la liste de lecture ; la pile reste sélectionnée
@@ -787,12 +820,19 @@
     }
   }
 
-  /** Alt+↑ / Alt+↓ dans la grille des piles : pile courante, ou la raison du refus dans une liste. */
+  /** Alt+↑ / Alt+↓ dans la grille des piles (liste de lecture) : décale la pile courante ou le bloc des
+   *  piles sélectionnées. Sans effet possible (déjà en tête / en queue) : message bref, pas une erreur. */
   function decalerPileClavier(haut: boolean) {
     if (liste?.type !== 'lecture') return;
-    const refus = refusDecalerPile();
-    if (refus) erreurAction = refus;
-    else if (pileSelectionnee !== null) void decalerPile(pileSelectionnee, haut);
+    const refus = refusDecalerPile(haut);
+    if (refus) {
+      if (refusReordonner()) erreurAction = refus;
+      else {
+        infoLecture = refus;
+        clearTimeout(minuterieInfo);
+        minuterieInfo = setTimeout(() => (infoLecture = ''), 3000);
+      }
+    } else void decalerPiles(nbPilesSel > 1 ? seriesPilesSel() : pileSelectionnee !== null ? [pileSelectionnee] : [], haut);
   }
 
   /** Piles déposées à la frontière `insertion` entre piles : les piles saisies au début du glisser. */
