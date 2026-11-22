@@ -5,6 +5,37 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v0.11.0] — 2026-11-22
+
+Étape 10 de la feuille de route : **audit de parité** avec la version egui (v0.10.9). Tous les écarts
+bloquants et majeurs de [`docs/tauri/audit-parite.md`](docs/tauri/audit-parite.md) sont traités. Reprend
+la demande de la recette tauri-v0.10.0 (réordonner les séries d'une liste de lecture).
+
+### Nouveautés
+- **Piles réordonnables** : dans une liste de lecture triée « Ordre de la liste » avec « Empiler par série »,
+  glisser une ou plusieurs piles entre deux autres (trait d'insertion), ou « Monter / Descendre la pile »
+  (Alt+↑/↓) ; une série dispersée est regroupée au dépôt.
+- **Livres manquants** : marquage après analyse, dialogue « Livres manquants » (recherche des fichiers déplacés,
+  relocalisation, retrait de la bibliothèque).
+- **Analyse** au démarrage, bouton **Arrêter**, **bilan** de fin.
+- **Fenêtre** : taille et position mémorisées, titre dynamique, F11 en bibliothèque, fichier passé en
+  argument ou déposé sur la fenêtre (`.cbl` importé, dossier : lire ou ajouter), Ctrl+O avec le **dialogue
+  natif** Windows, fichiers récents, rapport de plantage `data\plantage.txt`.
+- **Lecteur** : livre suivant en fin de livre, infos du livre (`I`).
+- **Réglages et aide** : fenêtre **À propos / Aide** (F1, diagnostic sans secret, raccourcis), **assistant de
+  configuration rejouable**, thème « Comme Windows », panneau Listes masquable (Ctrl+Maj+L).
+- **Bibliothèque** : 9 regroupements comme en egui, tableau à 11 colonnes redimensionnables, « Copier les
+  livres », « Relire ».
+- **Paquet** : `comicrust-cli.exe` et un `README.md` propre à la version Tauri dans le zip.
+
+### Corrections
+- Relectures indépendantes : marques « manquant » pendant l'analyse, faux rapports de plantage d'un fil
+  secondaire, deux livres relocalisés sur un même fichier, F1 doublé dans le lecteur, Ctrl+O sur `.cbl`,
+  raccourcis actifs sous les fenêtres modales.
+
+### Recette
+[`recette/tauri-v0.11.0.md`](recette/tauri-v0.11.0.md).
+
 ## [tauri-v0.10.0] — 2026-11-14
 
 Étape 8 de la feuille de route : **thèmes**. Reprend aussi la remarque de la recette tauri-v0.9.1
