@@ -9,7 +9,9 @@
   import type { Pile } from '../lib/api';
   import { cibleClavier } from '../lib/navigation';
   import { modificateurs, type Selection } from '../lib/selection.svelte';
-  import { RectangleSelection, touchesGrille } from '../lib/rectangleSelection.svelte';
+  import { RectangleSelection } from '../lib/rectangleSelection.svelte';
+  import type { Boite } from '../lib/rectangleSelection.svelte';
+  import type { Intervalle } from '../lib/selection.svelte';
 
   interface Props {
     piles: Pile[];
@@ -33,6 +35,8 @@
   const ESPACE = 16;
   const LEGENDE = 46;
   const SURPLUS = 2; // lignes rendues hors écran
+  /** Hauteur d'un en-tête de groupe (regroupement autre que série : `Row::Header` d'egui). */
+  const HAUT_ENTETE = 34;
   /** Décalage des couvertures de fond, en pixels. */
   const DECALAGE = 6;
 
@@ -46,17 +50,75 @@
   const largeurCellule = $derived((largeur - 2 * MARGE - (colonnes - 1) * ESPACE) / colonnes);
   const hautCouverture = $derived(largeurCellule * 1.5);
   const hautLigne = $derived(hautCouverture + LEGENDE + ESPACE);
-  const nbLignes = $derived(Math.ceil(piles.length / colonnes));
-  const hautTotal = $derived(nbLignes * hautLigne + 2 * MARGE - ESPACE);
+  /** Rangées de la grille : en-têtes de groupe (titre et nombre de livres, comme `stacked_rows` d'egui) et
+   *  lignes de piles. Chaque rangée d'en-tête ouvre un groupe : les piles se placent par ligne de
+   *  `colonnes` à l'intérieur du groupe. Sans `groupe` sur les piles, aucune rangée d'en-tête. */
+  interface Rangee { top: number; haut: number; entete?: { titre: string; nb: number }; debut: number; fin: number }
+  const disposition = $derived.by(() => {
+    const rangees: Rangee[] = [];
+    const place: Array<{ x: number; y: number }> = new Array(piles.length);
+    let top = MARGE;
+    let i = 0;
+    while (i < piles.length) {
+      const g = piles[i].groupe;
+      let fin = i + 1;
+      while (fin < piles.length && piles[fin].groupe === g) fin++;
+      if (g !== undefined) {
+        const nb = piles.slice(i, fin).reduce((n, p) => n + p.nbLivres, 0);
+        rangees.push({ top, haut: HAUT_ENTETE, entete: { titre: g, nb }, debut: i, fin: i });
+        top += HAUT_ENTETE;
+      }
+      for (let k = i; k < fin; k += colonnes) {
+        const f = Math.min(fin, k + colonnes);
+        rangees.push({ top, haut: hautLigne, debut: k, fin: f });
+        for (let j = k; j < f; j++) place[j] = { x: MARGE + (j - k) * (largeurCellule + ESPACE), y: top };
+        top += hautLigne;
+      }
+      i = fin;
+    }
+    return { rangees, place, hautTotal: piles.length ? top - ESPACE + MARGE : 2 * MARGE - ESPACE };
+  });
+  const hautTotal = $derived(disposition.hautTotal);
 
-  const ligneA = $derived(Math.max(0, Math.floor((haut - MARGE) / hautLigne) - SURPLUS));
-  const ligneB = $derived(Math.min(nbLignes - 1, Math.floor((haut + hauteur - MARGE) / hautLigne) + SURPLUS));
+  /** Rangées (piles et en-têtes) visibles, avec une marge hors écran. */
+  const visibles = $derived.by(() => {
+    const marge = SURPLUS * hautLigne;
+    return disposition.rangees.filter((r) => r.top + r.haut >= haut - marge && r.top <= haut + hauteur + marge);
+  });
+  const entetes = $derived(visibles.filter((r) => r.entete));
   const indices = $derived.by(() => {
-    const dernier = Math.min(piles.length - 1, (ligneB + 1) * colonnes - 1);
     const liste: number[] = [];
-    for (let i = ligneA * colonnes; i <= dernier; i++) liste.push(i);
+    for (const r of visibles) for (let i = r.debut; i < r.fin; i++) liste.push(i);
     return liste;
   });
+
+  /** Piles touchées par un rectangle (géométrie de la disposition : les piles hors écran comptent). */
+  function touches(b: Boite, px: number, py: number): { intervalles: Intervalle[]; dernier: number } {
+    const vide = { intervalles: [] as Intervalle[], dernier: -1 };
+    const pas = largeurCellule + ESPACE;
+    let c0 = Math.max(0, Math.ceil((b.x1 - MARGE - largeurCellule) / pas));
+    if (MARGE + c0 * pas + largeurCellule <= b.x1) c0++;
+    const c1 = Math.min(colonnes - 1, Math.floor((b.x2 - MARGE) / pas));
+    if (c0 > c1) return vide;
+    const hCell = hautCouverture + LEGENDE;
+    const intervalles: Intervalle[] = [];
+    let proche: Rangee | null = null;
+    let ecart = Infinity;
+    for (const r of disposition.rangees) {
+      if (r.entete) continue;
+      const d = py < r.top ? r.top - py : py > r.top + hCell ? py - r.top - hCell : 0;
+      if (d < ecart) { ecart = d; proche = r; }
+      if (r.top + hCell <= b.y1 || r.top >= b.y2) continue;
+      const a = r.debut + c0;
+      const z = Math.min(r.fin - 1, r.debut + c1);
+      if (a <= z) intervalles.push([a, z]);
+    }
+    if (!intervalles.length || !proche) return vide;
+    const c = Math.max(c0, Math.min(c1, Math.floor((px - MARGE) / pas)));
+    let dernier = Math.min(proche.debut + c, proche.fin - 1);
+    if (!intervalles.some(([a, z]) => dernier >= a && dernier <= z)) dernier = intervalles[intervalles.length - 1][1];
+    return { intervalles, dernier };
+  }
 
   /** Pile courante (curseur clavier), -1 si aucune. */
   const courant = $derived(sel.curseur < piles.length ? sel.curseur : -1);
@@ -80,17 +142,13 @@
     sel: () => sel,
     zone: () => zone ?? null,
     piste: () => piste ?? null,
-    touches: (b, px, py) =>
-      touchesGrille(b, px, py, {
-        total: piles.length, colonnes, marge: MARGE, largeur: largeurCellule, espace: ESPACE,
-        hautCellule: hautCouverture + LEGENDE, hautLigne,
-      }),
+    touches,
   });
   $effect(() => () => rectangle.detruire());
 
   function afficher(i: number) {
     if (!zone) return;
-    const haute = MARGE + Math.floor(i / colonnes) * hautLigne;
+    const haute = disposition.place[i]?.y ?? MARGE;
     const basse = haute + hautCouverture + LEGENDE;
     if (haute < zone.scrollTop) zone.scrollTop = haute - MARGE;
     else if (basse > zone.scrollTop + hauteur) zone.scrollTop = basse - hauteur + MARGE;
@@ -153,10 +211,15 @@
 >
   <!-- Au moins toute la hauteur visible : le vide sous la dernière ligne fait partie de la piste. -->
   <div class="piste" bind:this={piste} style:height="{hautTotal}px" style:min-height="{hauteur}px">
+    {#each entetes as r (r.top)}
+      <!-- En-tête de groupe (non cliquable, comme `Row::Header` d'egui) : titre et nombre de livres. -->
+      <div class="entete-groupe" data-entete={r.debut} data-testid="entete-groupe" style:top="{r.top}px" style:height="{HAUT_ENTETE - 6}px">
+        <strong>{r.entete!.titre}</strong><span class="nb">{r.entete!.nb} livre{r.entete!.nb > 1 ? 's' : ''}</span>
+      </div>
+    {/each}
     {#each indices as i (i)}
       {@const p = piles[i]}
-      {@const ligne = Math.floor(i / colonnes)}
-      {@const col = i % colonnes}
+      {@const pos = disposition.place[i]}
       {@const pile = p.nbLivres > 1}
       <!-- Le clavier est géré par la zone (aria-activedescendant). -->
       <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -167,7 +230,7 @@
         class:courant={i === courant}
         data-pile={i}
         style:width="{largeurCellule}px"
-        style:transform="translate({MARGE + col * (largeurCellule + ESPACE)}px, {MARGE + ligne * hautLigne}px)"
+        style:transform="translate({pos.x}px, {pos.y}px)"
         role="option"
         aria-selected={sel.contient(i)}
         tabindex="-1"
@@ -222,6 +285,11 @@
     position: absolute; top: 0; left: 0; cursor: pointer; user-select: none;
     border-radius: var(--cr-rayon); padding: 0; contain: layout paint;
   }
+  .entete-groupe {
+    position: absolute; left: 0; right: 0; display: flex; align-items: baseline; gap: 10px; padding: 0 16px;
+    border-bottom: 1px solid var(--cr-bordure); font-size: 14.5px; user-select: none; overflow: hidden; white-space: nowrap;
+  }
+  .entete-groupe .nb { color: var(--cr-texte-discret); font-size: 12px; }
   .couverture { position: relative; }
   /* La couverture de devant est plus petite que la cellule quand des couvertures de fond dépassent
      en haut à droite : tout reste dans le cadre. */

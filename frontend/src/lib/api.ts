@@ -112,7 +112,9 @@ export type ClefTri =
   /** « Ordre de la liste » (rang dans la liste affichée ; sans liste : ordre de la bibliothèque). */
   | 'ordre';
 export type SensTri = 'asc' | 'desc';
-export type Groupe = 'aucun' | 'serie' | 'editeur';
+/** Regroupements (comme `GroupKey` d'egui) : aucun, série, éditeur, scénariste, année, arc, genre, format,
+ *  état de lecture (`etat`). */
+export type Groupe = 'aucun' | 'serie' | 'editeur' | 'scenariste' | 'annee' | 'arc' | 'genre' | 'format' | 'etat';
 
 export interface RequeteLivres {
   recherche?: string;
@@ -138,6 +140,8 @@ export interface Pile {
   ids: string[];
   /** Couverture du premier livre. */
   urlCouverture: string;
+  /** En-tête de groupe (titre du groupe du premier livre) : regroupement autre que aucun / série. */
+  groupe?: string;
 }
 
 export interface ReponsePiles {
@@ -152,6 +156,17 @@ export interface LivreResume {
   numero?: string;
   editeur?: string;
   annee?: number;
+  /** Colonnes du tableau (lot L5) : volume, mois de parution, scénariste, note (0-5), date d'ajout ISO,
+   *  chemin du fichier, avancement de lecture en % (absent si 0). */
+  volume?: number;
+  mois?: number;
+  scenariste?: string;
+  note?: number;
+  ajoute?: string;
+  fichier?: string;
+  avancement?: number;
+  /** Titre du groupe du livre (même titre que `groupes_vue`), absent sans regroupement. */
+  groupe?: string;
   pages: number;
   lu: boolean;
   /** À utiliser telle quelle : `cr-couv://<id>`, ou `http://cr-couv.localhost/<id>` sous Windows. */
@@ -235,6 +250,14 @@ export interface PreferencesVue {
   /** Vue propre à chaque liste (clé : identifiant). À l'enregistrement, fusion liste par liste ;
    *  `null` efface la vue d'une liste (liste supprimée). */
   listes?: Record<string, VueListe | null>;
+  /** Colonnes du tableau (sous-objet remplacé en entier à chaque enregistrement). */
+  tableau?: PreferencesTableau;
+}
+
+/** Colonnes du tableau mémorisées (`vue.tableau`) : visibles (absent : toutes) et largeurs en px. */
+export interface PreferencesTableau {
+  colonnes?: string[];
+  largeurs?: Record<string, number>;
 }
 
 /** Vue mémorisée d'une liste (tri, sens, groupe, grille / tableau), comme dans ComicRack. */

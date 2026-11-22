@@ -474,8 +474,9 @@ pub struct PreferencesTableau {
 }
 
 impl PreferencesTableau {
-    /// Construit les réglages depuis du JSON ; `None` si ce n'est pas un objet ou s'il ne reste rien
-    /// de valide.
+    /// Construit les réglages depuis du JSON ; `None` si ce n'est pas un objet. Un objet sans rien de
+    /// valide donne les réglages par défaut (toutes les colonnes, largeurs d'origine), ce que
+    /// [`PreferencesVue::fusionner`] prend pour « effacer ».
     pub fn depuis_json(v: &Value) -> Option<Self> {
         let o = v.as_object()?;
         let colonnes = o.get("colonnes").and_then(Value::as_array).and_then(|a| {
@@ -497,8 +498,7 @@ impl PreferencesTableau {
                 .collect();
             (!l.is_empty()).then_some(l)
         });
-        let r = Self { colonnes, largeurs };
-        (r != Self::default()).then_some(r)
+        Some(Self { colonnes, largeurs })
     }
 }
 
@@ -661,20 +661,11 @@ impl PreferencesVue {
         macro_rules! prendre {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
-        prendre!(
-            tri,
-            sens_tri,
-            groupe,
-            vue,
-            empiler,
-            zoom,
-            details,
-            largeur_details,
-            largeur_listes,
-            theme,
-            lecteur,
-            tableau
-        );
+        prendre!(tri, sens_tri, groupe, vue, empiler, zoom, details, largeur_details, largeur_listes, theme, lecteur);
+        // Colonnes du tableau : sous-objet remplacé en entier ; un objet vide efface les réglages.
+        if let Some(t) = m.tableau {
+            self.tableau = (t != PreferencesTableau::default()).then_some(t);
+        }
         // Vues des listes : fusion liste par liste (`null` efface), jamais d'entrée `null` gardée.
         if let Some(patch) = m.listes {
             let mut listes = self.listes.take().unwrap_or_default();
@@ -1264,7 +1255,7 @@ mod tests {
         assert_eq!(l.len(), 3, "colonne inconnue et largeur non numérique ignorées");
         // Aucune colonne valide : toutes visibles (champ absent), jamais un tableau vide.
         let p = PreferencesVue::depuis_json(&serde_json::json!({ "tableau": { "colonnes": ["x"] } }));
-        assert_eq!(p.tableau, None);
+        assert_eq!(p.tableau, Some(PreferencesTableau::default()));
         let p = PreferencesVue::depuis_json(&serde_json::json!({ "tableau": 4 }));
         assert_eq!(p.tableau, None);
     }
@@ -1293,5 +1284,15 @@ mod tests {
                 .unwrap();
         assert_eq!(apres.tableau, Some(t2));
         assert_eq!(lire_preferences_vue(d.path()).unwrap().tableau.unwrap().largeurs, None);
+        // Objet vide : « tout afficher, largeurs d'origine » efface la section.
+        let apres = enregistrer_preferences_vue(
+            d.path(),
+            PreferencesVue { tableau: Some(PreferencesTableau::default()), ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!(apres.tableau, None);
+        assert_eq!(apres.tri.as_deref(), Some("titre"));
+        let brut: Value = serde_json::from_str(&std::fs::read_to_string(chemin_reglages(d.path())).unwrap()).unwrap();
+        assert!(brut["vue"].get("tableau").is_none(), "{brut}");
     }
 }

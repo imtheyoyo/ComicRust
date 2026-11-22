@@ -62,9 +62,9 @@ Audit du 14/11/2026 (étape 10 du plan). Préfixes de preuve : **E** = `crates/c
 
 ### Bibliothèque
 - Tri (10 clés + ordre de la liste), recherche rapide, listes (lecture, intelligentes, dossiers, copie liée) : ✅.
-- Regroupement : egui 9 (aucun, série, éditeur, scénariste, année, arc, genre, format, état de lecture) ; Tauri 3 🟡.
-- Tableau : egui 11 colonnes redimensionnables ; Tauri colonnes réduites, sans redimensionnement 🟡.
-- Piles : ✅ ; 🟡 pas d'en-têtes de groupe en mode empilé.
+- ✅ **Regroupement** (lot L5, `ipc-groupes.md`) : les 9 clés d'egui, mêmes titres et même ordre ; `deplacer_groupes_liste` / `decaler_groupe_liste` valables pour tous.
+- ✅ **Tableau** (lot L5) : 11 colonnes comme egui, tri au clic, choix des colonnes visibles et redimensionnement mémorisés (`vue.tableau`). Ajout Tauri : choix des colonnes (egui les affiche toutes).
+- Piles : ✅ ; en-têtes de groupe en mode empilé (lot L5) ✅.
 - ❌ « Copier les livres », « ⟳ Relire » ; ➕ section « Séries » de la barre latérale = maquette à retirer.
 
 ### Import, scan, manquants

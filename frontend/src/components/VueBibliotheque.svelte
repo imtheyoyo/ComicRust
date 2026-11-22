@@ -187,6 +187,12 @@
     { id: 'aucun', titre: 'Aucun groupement' },
     { id: 'serie', titre: 'Par série' },
     { id: 'editeur', titre: 'Par éditeur' },
+    { id: 'scenariste', titre: 'Par scénariste' },
+    { id: 'annee', titre: 'Par année' },
+    { id: 'arc', titre: 'Par arc' },
+    { id: 'genre', titre: 'Par genre' },
+    { id: 'format', titre: 'Par format' },
+    { id: 'etat', titre: 'Par état de lecture' },
   ];
 
   onMount(() => {
@@ -584,16 +590,16 @@
             { id: 'retirer', libelle: `➖ Retirer ${quoi} de la liste`, raccourci: 'Suppr', desactive: !!raison, aide: raison ?? 'Les fichiers ne sont pas supprimés' },
             { id: 'monter', libelle: '⬆ Monter dans la liste', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
             { id: 'descendre', libelle: '⬇ Descendre dans la liste', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
-            ...(bib.params.groupe === 'serie'
+            ...(bib.params.groupe !== 'aucun'
               ? [
-                  { id: 'monter-serie', libelle: '⬆ Monter la série', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
-                  { id: 'descendre-serie', libelle: '⬇ Descendre la série', desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
+                  { id: 'monter-serie', libelle: `⬆ Monter ${bib.params.groupe === 'serie' ? 'la série' : 'le groupe'}`, desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
+                  { id: 'descendre-serie', libelle: `⬇ Descendre ${bib.params.groupe === 'serie' ? 'la série' : 'le groupe'}`, desactive: !!refusOrdre, aide: refusOrdre ?? undefined },
                 ]
               : []),
           ]
         : []),
       ...(bib.params.groupe !== 'aucun'
-        ? [{ id: 'groupe', libelle: bib.params.groupe === 'serie' ? 'Sélectionner toute la série' : 'Sélectionner tout l\'éditeur' }]
+        ? [{ id: 'groupe', libelle: bib.params.groupe === 'serie' ? 'Sélectionner toute la série' : bib.params.groupe === 'editeur' ? 'Sélectionner tout l\'éditeur' : 'Sélectionner tout le groupe' }]
         : []),
     ];
     return [
@@ -952,9 +958,10 @@
     contient: (i) => sel.contient(i),
     choisir: (i) => sel.unique(i),
     selectionPrete: () => selectionGroupeEnCours,
+    motGroupe: () => (bib.params.groupe === 'serie' ? 'série' : 'groupe'),
     indices: () => sel.indices(),
     series: (ind) => {
-      if (bib.params.groupe !== 'serie') return 0;
+      if (bib.params.groupe === 'aucun') return 0;
       return new Set(ind.map((i) => bib.livre(i)).filter((l) => !!l).map((l) => bib.nomGroupe(l!))).size;
     },
     surListe: (id) => ({ refus: listes.depot(id), nom: listes.noeud(id)?.nom ?? '' }),

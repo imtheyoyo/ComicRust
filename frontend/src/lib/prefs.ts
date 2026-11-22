@@ -3,7 +3,7 @@
 // `vue`), jamais dans le localStorage de la WebView. Chargées une fois au démarrage (avant le premier
 // lister_livres), puis enregistrées avec un délai pour regrouper les changements rapides.
 import {
-  dansTauri, enregistrerPreferencesVue, lirePreferencesVue, type PreferencesLecteur, type PreferencesVue, type VueListe,
+  dansTauri, enregistrerPreferencesVue, lirePreferencesVue, type PreferencesLecteur, type PreferencesTableau, type PreferencesVue, type VueListe,
 } from './api';
 
 /** Délai d'enregistrement après le dernier changement (ms). */
@@ -89,6 +89,25 @@ export function enregistrerReglagesLecteur(patch: PreferencesLecteur): void {
   if (JSON.stringify(apres) === JSON.stringify(avant)) return;
   courantes.lecteur = apres;
   enAttente.lecteur = { ...apres };
+  clearTimeout(minuterie);
+  minuterie = setTimeout(vider, DELAI_ENREGISTREMENT);
+}
+
+/** Colonnes du tableau mémorisées (`vue.tableau`). */
+export function reglagesTableau(): PreferencesTableau {
+  const t = courantes.tableau ?? {};
+  return { colonnes: t.colonnes ? [...t.colonnes] : undefined, largeurs: t.largeurs ? { ...t.largeurs } : undefined };
+}
+
+/** Mémorise les colonnes du tableau (sous-objet envoyé en entier, comme le lecteur) ; `colonnes`
+ *  absent = toutes visibles. */
+export function enregistrerTableau(t: PreferencesTableau): void {
+  const apres: PreferencesTableau = {};
+  if (t.colonnes?.length) apres.colonnes = [...t.colonnes];
+  if (t.largeurs && Object.keys(t.largeurs).length) apres.largeurs = { ...t.largeurs };
+  if (JSON.stringify(apres) === JSON.stringify(courantes.tableau ?? {})) return;
+  courantes.tableau = apres;
+  enAttente.tableau = { ...apres };
   clearTimeout(minuterie);
   minuterie = setTimeout(vider, DELAI_ENREGISTREMENT);
 }

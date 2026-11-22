@@ -59,7 +59,7 @@ export class RectangleSelection {
     if (!z || !p || !cible) return;
     // Pas sur un livre, une pile, un en-tête de groupe ni un contrôle (l'en-tête collant du tableau
     // est exclu plus bas par `margeHaut`).
-    if (cible.closest('[data-index], [data-groupe], [data-pile], button, input, select, a')) return;
+    if (cible.closest('[data-index], [data-groupe], [data-entete], [data-pile], button, input, select, a')) return;
     // Pas sur la barre de défilement (à droite ou en bas de la zone).
     const zr = z.getBoundingClientRect();
     if (e.clientX - zr.left - z.clientLeft >= z.clientWidth || e.clientY - zr.top - z.clientTop >= z.clientHeight) return;

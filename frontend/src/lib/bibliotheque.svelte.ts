@@ -61,8 +61,10 @@ export class Bibliotheque {
   }
 
   nomGroupe(l: LivreResume): string {
+    // Titre calculé par le backend (même clé que `groupes_vue`) ; repli si absent (anciens simulés).
+    if (l.groupe !== undefined) return l.groupe;
     const v = this.params.groupe === 'serie' ? l.serie : l.editeur;
-    return v || (this.params.groupe === 'serie' ? 'Sans série' : 'Sans éditeur');
+    return v || (this.params.groupe === 'serie' ? '(sans série)' : '(sans éditeur)');
   }
 
   /** Active ou désactive la vue empilée ; les piles sont chargées au prochain `reinitialiser`
