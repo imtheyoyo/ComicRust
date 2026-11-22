@@ -29,6 +29,7 @@
   import { scripts } from '../lib/scripts.svelte';
   import { ID_MANQUANTS, manquants } from '../lib/manquants.svelte';
   import BandeauManquants from './BandeauManquants.svelte';
+  import BoutonsRapport from './BoutonsRapport.svelte';
 
   interface Props {
     scan: SuiviScan;
@@ -1081,7 +1082,8 @@
 
 <div class="vue">
   <header class="outils" role="toolbar" aria-label="Outils de la bibliothèque">
-    {#if liste}<h1 class="titre-liste" title={liste.description || liste.nom} data-testid="titre-liste">{nomListe}</h1>{/if}
+    {#if liste}<h1 class="titre-liste" title={liste.description || liste.nom} data-testid="titre-liste">{nomListe}</h1>
+      <BoutonsRapport type="copier" requete={{ ...bib.params, debut: 0, nombre: 0 }} titre={liste.nom} />{/if}
     <input
       bind:this={champRecherche}
       class="recherche"
@@ -1136,6 +1138,7 @@
     >Détails</button>
     <button onclick={() => void demanderOuvertureFichier()} title="Lire un fichier qui n'est pas dans la bibliothèque" data-testid="ouvrir-fichier">Ouvrir un fichier…</button>
     <MenuRecents onouvrir={ouvrirChemin} />
+    <BoutonsRapport type="relire" onrelu={() => { void bib.reinitialiser(false); void listes.charger(); }} />
     <button onclick={ouvrirMenuScripts} aria-haspopup="menu" aria-expanded={!!menuScripts && !menuScripts.ids} title="Scripts Python (bibliothèque, livres sélectionnés, gestion)" data-testid="menu-scripts">📜 Scripts ▾</button>
   </header>
 

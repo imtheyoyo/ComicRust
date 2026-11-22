@@ -4,8 +4,14 @@
   // Aussi affiché (tauri-v0.9.1) quand la base de la copie autonome est introuvable (`baseAbsente` :
   // dossier data copié sans comicrust.db) ou quand la bibliothèque ne s'ouvre pas (`probleme`) :
   // l'utilisateur crée une nouvelle base ou en choisit une autre ; rien n'est créé sans son clic.
+  // Mode « modification » (lot L7, écart 7) : rejoué depuis Réglages ▸ « Changer de bibliothèque / de
+  // connexion… » (comme « Assistant de configuration… » de la version egui). Le formulaire est prérempli
+  // avec la bibliothèque actuelle, l'annulation ne change rien, un choix qui échoue n'est pas enregistré
+  // et la base actuelle n'est jamais supprimée (confirmation avant de remplacer la bibliothèque affichée).
+  import { onMount } from 'svelte';
   import {
-    configurerMysql, configurerPremierDemarrage, type EtatBiblio, type ModeBiblio, type TypeStore, messageErreur,
+    configurationBiblio, configurerMysql, configurerPremierDemarrage, lireConnexionsMysql, type ConfigurationBiblio,
+    type EtatBiblio, type ModeBiblio, type TypeStore, messageErreur,
   } from '../lib/api';
   import { choisirFichier, dialogueDisponible, dossierDe, FILTRE_INI, FILTRE_TOUS } from '../lib/dialogue';
   import FormulaireMysql, { mysqlVide, versParametres } from './FormulaireMysql.svelte';
@@ -18,8 +24,12 @@
     probleme?: string;
     /** Retour à l'écran précédent (erreur d'ouverture : « Réessayer »). */
     onretour?: () => void;
+    /** Mode « modification » : l'assistant est rouvert sur une bibliothèque déjà configurée. */
+    modification?: boolean;
+    /** Mode « modification » : abandon (bouton Annuler, Échap) ; rien n'est changé. */
+    onannuler?: () => void;
   }
-  let { onpret, baseAbsente, probleme, onretour }: Props = $props();
+  let { onpret, baseAbsente, probleme, onretour, modification = false, onannuler }: Props = $props();
 
   let mode = $state<ModeBiblio>('autonome');
   let cheminIni = $state('');
@@ -31,6 +41,44 @@
   let mysqlCr = $state(mysqlVide());
   let occupe = $state(false);
   let erreur = $state('');
+  /** Mode modification : bibliothèque actuelle, confirmation demandée, mots de passe déjà enregistrés. */
+  let actuelle = $state<ConfigurationBiblio | null>(null);
+  let aConfirmer = $state(false);
+  let mdpStore = $state(false);
+  let mdpCr = $state(false);
+
+  onMount(() => {
+    if (!modification) return;
+    void (async () => {
+      try {
+        const [c, k] = await Promise.all([configurationBiblio(), lireConnexionsMysql()]);
+        actuelle = c;
+        if (c.mode) mode = c.mode;
+        if (c.mode === 'comicrack') {
+          if (c.cheminIni) cheminIni = c.cheminIni;
+          if (!c.cheminIni && k.comicrackMysql) sourceCr = 'mysql';
+        } else store = k.store;
+        const pre = (p: { serveur: string; port: number; utilisateur: string; base: string }) =>
+          ({ ...mysqlVide(), serveur: p.serveur, port: String(p.port), utilisateur: p.utilisateur, base: p.base });
+        if (k.storeMysql) { mysqlStore = pre(k.storeMysql); mdpStore = k.storeMysql.motDePasseDefini; }
+        if (k.comicrackMysql) { mysqlCr = pre(k.comicrackMysql); mdpCr = k.comicrackMysql.motDePasseDefini; }
+      } catch (e) {
+        erreur = messageErreur(e);
+      }
+    })();
+  });
+
+  /** Échap abandonne la modification (jamais pendant l'ouverture). */
+  function clavier(e: KeyboardEvent) {
+    if (modification && e.key === 'Escape' && !occupe) {
+      e.preventDefault();
+      if (aConfirmer) aConfirmer = false;
+      else onannuler?.();
+    }
+  }
+
+  /** Base SQLite de ComicRust qui serait créée vide par le choix (aucune base existante). */
+  const creeraBaseVide = $derived(modification && mode === 'autonome' && store === 'sqlite' && actuelle !== null && !actuelle.baseSqlitePresente);
 
   const valide = $derived(
     mode === 'autonome' ? store === 'sqlite' || mysqlStore.serveur.trim().length > 0 : sourceCr === 'mysql' || cheminIni.trim().length > 0,
@@ -42,14 +90,25 @@
     if (c) cheminIni = c;
   }
 
+  /** Valide : en mode modification, une confirmation précède le remplacement de la bibliothèque. */
+  function demander() {
+    if (!valide || occupe) return;
+    if (modification && !aConfirmer) {
+      aConfirmer = true;
+      return;
+    }
+    void valider();
+  }
+
   async function valider() {
     if (!valide || occupe) return;
+    aConfirmer = false;
     occupe = true;
     erreur = '';
     try {
       const mysql = mode === 'autonome' ? (store === 'mysql' ? mysqlStore : null) : sourceCr === 'mysql' ? mysqlCr : null;
       if (mysql) {
-        const p = versParametres(mysql);
+        const p = versParametres(mysql, mode === 'autonome' ? mdpStore : mdpCr);
         if (typeof p === 'string') throw new Error(p);
         onpret(await configurerMysql({ mode, store: mode === 'autonome' ? 'mysql' : undefined, mysql: p }));
       } else {
@@ -63,9 +122,18 @@
   }
 </script>
 
+<svelte:window onkeydown={clavier} />
 <main class="ecran">
-  <form class="carte" onsubmit={(e) => { e.preventDefault(); void valider(); }} data-testid="premier-demarrage">
-    {#if baseAbsente}
+  <form class="carte" onsubmit={(e) => { e.preventDefault(); demander(); }} data-testid="premier-demarrage">
+    {#if modification}
+      <h1>Changer de bibliothèque ou de connexion</h1>
+      <div class="alerte" role="status" data-testid="modification-info">
+        <p>Bibliothèque actuelle :
+          <strong>{#if !actuelle}…{:else if actuelle.mode === 'comicrack'}liée à ComicRack{#if actuelle.cheminIni} (<code>{actuelle.cheminIni}</code>){:else if actuelle.comicrackMysql} (connexion MySQL saisie){/if}{:else if actuelle.storeMysql}autonome, base MySQL{:else}autonome, base SQLite{/if}</strong>.</p>
+        <p class="discret">Rien n'est supprimé : la base de ComicRust (<code>{actuelle?.baseSqlite ?? 'data\\comicrust.db'}</code>) et vos réglages restent en place, vous pourrez y revenir.
+          Un choix qui échoue n'est pas enregistré ; « Annuler » ne change rien.</p>
+      </div>
+    {:else if baseAbsente}
       <h1>Base ComicRust introuvable</h1>
       <div class="alerte" role="status" data-testid="base-absente">
         <p>La base de cette copie autonome n'existe pas :</p>
@@ -112,7 +180,7 @@
         <label class="option"><input type="radio" name="store" value="mysql" bind:group={store} /> Serveur MySQL / MariaDB (base existante, les tables sont créées)</label>
       </fieldset>
       {#if store === 'mysql'}
-        <FormulaireMysql id="mysql-store" cible="autonome" bind:valeurs={mysqlStore} />
+        <FormulaireMysql id="mysql-store" cible="autonome" bind:valeurs={mysqlStore} memorise={mdpStore} />
       {/if}
     {:else}
       <fieldset data-testid="choix-source-cr">
@@ -129,17 +197,30 @@
           </span>
         </label>
       {:else}
-        <FormulaireMysql id="mysql-cr" cible="comicrack" bind:valeurs={mysqlCr} />
+        <FormulaireMysql id="mysql-cr" cible="comicrack" bind:valeurs={mysqlCr} memorise={mdpCr} />
       {/if}
     {/if}
 
     {#if erreur}<p class="erreur" role="alert">{erreur}</p>{/if}
     <div class="actions">
       {#if onretour}<button type="button" onclick={onretour} disabled={occupe}>Réessayer</button>{/if}
+      {#if modification}<button type="button" onclick={() => onannuler?.()} disabled={occupe} data-testid="premier-annuler">Annuler</button>{/if}
       <button class="principal" type="submit" disabled={!valide || occupe} data-testid="premier-valider">
-        {occupe ? 'Ouverture…' : baseAbsente && mode === 'autonome' && store === 'sqlite' ? 'Créer une nouvelle base' : 'Continuer'}
+        {occupe ? 'Ouverture…' : modification ? 'Changer de bibliothèque' : baseAbsente && mode === 'autonome' && store === 'sqlite' ? 'Créer une nouvelle base' : 'Continuer'}
       </button>
     </div>
+    {#if aConfirmer}
+      <div class="alerte" role="alertdialog" aria-label="Confirmer le changement" data-testid="confirmer-changement">
+        <p><strong>Remplacer la bibliothèque affichée ?</strong></p>
+        <p class="discret">ComicRust va ouvrir {mode === 'comicrack' ? 'la bibliothèque ComicRack choisie' : store === 'mysql' ? 'la base MySQL choisie' : 'la base SQLite locale'}.
+          Les listes et l'analyse repartent de cette bibliothèque. La bibliothèque actuelle n'est pas supprimée.
+          {#if creeraBaseVide}Aucune base SQLite n'existe encore : une base vide sera créée.{/if}</p>
+        <div class="actions">
+          <button type="button" onclick={() => (aConfirmer = false)} data-testid="confirmer-non">Revenir</button>
+          <button type="button" class="principal" onclick={() => void valider()} data-testid="confirmer-oui">Confirmer</button>
+        </div>
+      </div>
+    {/if}
   </form>
 </main>
 

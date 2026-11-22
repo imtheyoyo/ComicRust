@@ -3,6 +3,32 @@ import { enregistrerPreference, preferences } from './prefs';
 
 export const THEME_DEFAUT = 'moderne-clair';
 
+/** Thème virtuel « Comme Windows » : suit `prefers-color-scheme` (Moderne clair ou Moderne sombre).
+ *  Il n'a pas de fichier : seul le front le connaît ; l'identifiant est enregistré tel quel. */
+export const THEME_SYSTEME = 'systeme';
+const THEME_SYSTEME_SOMBRE = 'moderne-sombre';
+
+/** Le système demande-t-il un affichage sombre ? */
+export function systemeSombre(): boolean {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+}
+
+/** Thème (fichier) réellement chargé pour un identifiant : « Comme Windows » devient clair ou sombre. */
+export function themeReel(id: string): string {
+  return id === THEME_SYSTEME ? (systemeSombre() ? THEME_SYSTEME_SOMBRE : THEME_DEFAUT) : id;
+}
+
+let suiviSysteme = false;
+/** Réapplique « Comme Windows » quand le système bascule clair ↔ sombre (posé une seule fois). */
+function suivreSysteme(): void {
+  if (suiviSysteme || typeof window === 'undefined' || !window.matchMedia) return;
+  suiviSysteme = true;
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    // Un aperçu d'un autre thème en cours n'est pas bousculé : il reviendra au thème enregistré ensuite.
+    if (idApplique === THEME_SYSTEME) void appliquerTheme(THEME_SYSTEME, { persister: false }).catch(() => { /* garde l'affichage */ });
+  });
+}
+
 /** Thème mémorisé dans data\comicrust-tauri.json (après `chargerPreferences`). */
 export function themeMemorise(): string {
   return preferences().theme ?? THEME_DEFAUT;
@@ -105,8 +131,9 @@ export async function appliquerTheme(id: string, opts: OptionsTheme = {}): Promi
   const perime = () => mien !== sequence;
   let choisi = id;
   let reponse;
+  if (id === THEME_SYSTEME) suivreSysteme();
   try {
-    reponse = await chargerTheme(id);
+    reponse = await chargerTheme(themeReel(id));
     if (perime()) return idApplique ?? id;
     if (reponse.css !== cssApplique || id !== idApplique) injecterCss(reponse.css);
   } catch (e) {

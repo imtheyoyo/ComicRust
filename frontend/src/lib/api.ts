@@ -230,6 +230,8 @@ export interface PreferencesVue {
   largeurListes?: number;
   /** Identifiant du thème (fichier CSS de data\themes). */
   theme?: string;
+  /** Panneau des listes affiché (absent : affiché). Masqué : barre latérale réduite à des boutons. */
+  listesVisibles?: boolean;
   /** Réglages du lecteur (sous-objet remplacé en entier à chaque enregistrement). */
   lecteur?: PreferencesLecteur;
   /** Vue propre à chaque liste (clé : identifiant). À l'enregistrement, fusion liste par liste ;
@@ -1513,3 +1515,43 @@ export const lireRecents = () => appeler<RecentFichier[]>('lire_recents');
 export const ajouterRecent = (chemin: string) => appeler<RecentFichier[]>('ajouter_recent', { chemin });
 export const retirerRecent = (chemin: string) => appeler<RecentFichier[]>('retirer_recent', { chemin });
 export const viderRecents = () => appeler<RecentFichier[]>('vider_recents');
+
+// ───────────────────────────── Lot L7 : Réglages, aide et configuration ─────────────────────────────
+// Contrat : docs/tauri/ipc-reglages-aide.md. Aucun secret dans ces réponses.
+
+export interface EtatPdfium { charge: boolean; chemin?: string; erreur?: string }
+export interface InfosDiagnostic {
+  version: string;
+  systeme: string;
+  mode?: ModeBiblio;
+  source: string;
+  nbLivres?: number;
+  dossierExe: string;
+  dossierData: string;
+  dossierThemes: string;
+  dossierWebview: string;
+  cheminIni?: string;
+  baseSqlite: string;
+  baseSqlitePresente: boolean;
+  storeMysql: boolean;
+  comicrackMysql: boolean;
+  pdfium: EtatPdfium;
+  depot: string;
+}
+export interface ConfigurationBiblio {
+  mode?: ModeBiblio;
+  cheminIni?: string;
+  storeMysql: boolean;
+  comicrackMysql: boolean;
+  baseSqlite: string;
+  baseSqlitePresente: boolean;
+  baseSqliteTaille?: number;
+}
+
+export const infosDiagnostic = () => appeler<InfosDiagnostic>('infos_diagnostic');
+export const texteDiagnostic = () => appeler<string>('texte_diagnostic');
+export const configurationBiblio = () => appeler<ConfigurationBiblio>('configuration_biblio');
+/** « ⟳ Relire » : recharge la bibliothèque depuis sa source. */
+export const relireBibliotheque = () => appeler<EtatBiblio>('relire_bibliotheque');
+/** « 📋 Copier les livres » : rapport texte des livres affichés. */
+export const rapportLivres = (requete: RequeteLivres, titre: string) => appeler<string>('rapport_livres', { requete, titre });

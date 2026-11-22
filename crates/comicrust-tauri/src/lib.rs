@@ -19,6 +19,8 @@
 //! - la surveillance de la base et l'état hors ligne ([`surveillance`]),
 //! - les scripts Python ([`scripts`] : hôte de scripts du cœur, aperçu, application, automatismes),
 //! - la mise à jour intégrée depuis les releases `tauri-v*` ([`maj`]),
+//! - l'aide et la configuration ([`diagnostic`] : À propos, diagnostic copiable sans secret, assistant
+//!   rejouable, « Copier les livres »),
 //! - les commandes IPC (module `app`, fonction `app` uniquement) qui appellent `comicrust-core`.
 //!
 //! Le code sans dépendance à Tauri est compilé et testé partout (Linux compris) ; la fenêtre
@@ -28,6 +30,7 @@ pub mod avancement;
 pub mod biblio;
 pub mod connexion;
 pub mod couvertures;
+pub mod diagnostic;
 pub mod edition;
 pub mod fenetre;
 pub mod lecteur;
@@ -52,6 +55,8 @@ pub mod tri;
 mod tests_biblio;
 #[cfg(test)]
 mod tests_connexion;
+#[cfg(test)]
+mod tests_diagnostic;
 #[cfg(test)]
 mod tests_formulaires;
 #[cfg(test)]
@@ -91,6 +96,8 @@ pub fn infos_application(data: &Path) -> InfosApplication {
 
 #[cfg(feature = "app")]
 pub mod app;
+#[cfg(feature = "app")]
+mod cmd_diagnostic;
 #[cfg(feature = "app")]
 mod cmd_fenetre;
 #[cfg(feature = "app")]

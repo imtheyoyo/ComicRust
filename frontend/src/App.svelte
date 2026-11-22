@@ -9,6 +9,7 @@
   import DialogMaj from './components/DialogMaj.svelte';
   import DialogDossiers from './components/DialogDossiers.svelte';
   import DialogReglages from './components/DialogReglages.svelte';
+  import DialogAPropos from './components/DialogAPropos.svelte';
   import DialogTransfert from './components/DialogTransfert.svelte';
   import DialogScripts from './components/DialogScripts.svelte';
   import FenetreScript from './components/FenetreScript.svelte';
@@ -46,6 +47,11 @@
   let dossiers = $state<DialogDossiers>();
   let reglages = $state<DialogReglages>();
   let transfert = $state<DialogTransfert>();
+  let apropos = $state<DialogAPropos>();
+  /** Assistant de configuration rejoué (Réglages ▸ « Changer de bibliothèque / de connexion… »). */
+  let modifierBiblio = $state(false);
+  /** Panneau des listes affiché (mémorisé : `vue.listesVisibles`). Masqué : barre latérale réduite. */
+  let listesVisibles = $state(true);
 
   /** Ouvre la bibliothèque enregistrée (démarrage, « Réessayer » après une erreur). */
   async function ouvrir() {
@@ -74,6 +80,7 @@
         // Préférences d'affichage d'abord : le thème et le premier lister_livres en dépendent.
         const prefs = await chargerPreferences();
         if (typeof prefs.largeurListes === 'number') largeurListes = borneListes(prefs.largeurListes);
+        if (typeof prefs.listesVisibles === 'boolean') listesVisibles = prefs.listesVisibles;
         // Un thème inutilisable ne doit jamais empêcher le démarrage : on garde les replis d'app.css.
         try {
           const voulu = themeMemorise();
@@ -180,6 +187,25 @@
     };
   }
 
+  function basculerListes() {
+    listesVisibles = !listesVisibles;
+    enregistrerPreference({ listesVisibles });
+  }
+
+  /** Ctrl+Maj+L (comme le bouton « 📂 Listes » d'egui) : pas dans une saisie ni sous une fenêtre ouverte. */
+  function clavierListes(e: KeyboardEvent) {
+    if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'l') return;
+    if ((e.target as HTMLElement | null)?.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
+    e.preventDefault();
+    basculerListes();
+  }
+
+  /** Assistant rejoué terminé : même rechargement que la fin d'un transfert (listes, vue, analyse). */
+  function biblioChangee(e: EtatBiblio) {
+    modifierBiblio = false;
+    bibliothequeRouverte(e);
+  }
+
   function pret(e: EtatBiblio) {
     erreur = '';
     choisirAutre = false;
@@ -250,7 +276,7 @@
 </script>
 
 <!-- F11, Échap (sortie du plein écran) et Ctrl+O hors lecteur ; phase de capture : avant les touches de la vue. -->
-<svelte:window onkeydowncapture={gererClavierFenetre} />
+<svelte:window onkeydowncapture={gererClavierFenetre} onkeydown={clavierListes} />
 {#if erreur && choisirAutre}
   <PremierDemarrage onpret={pret} probleme={erreur} onretour={() => void ouvrir()} />
 {:else if erreur}
@@ -266,7 +292,7 @@
 {:else if etat.premierDemarrage}
   <PremierDemarrage onpret={pret} baseAbsente={etat.baseAbsente} />
 {:else}
-  <div class="cadre">
+  <div class="cadre" inert={modifierBiblio}>
   {#if avertissementTheme}
     <div class="avis-theme" role="status" data-testid="avertissement-theme">
       <span>{avertissementTheme}</span>
@@ -286,7 +312,11 @@
       {listes}
       onliste={choisirListe}
       largeur={largeurListes}
+      {listesVisibles}
+      onbasculerlistes={basculerListes}
+      onaide={() => void apropos?.ouvrir()}
     />
+    {#if listesVisibles}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="poignee-listes"
@@ -301,6 +331,7 @@
       {@attach ecouteursPoigneeListes}
       data-testid="poignee-listes"
     ></div>
+    {/if}
     {#if section === 'bibliotheque' || listeAffichee}
       <VueBibliotheque {scan} bind:nbLivres {rafraichir} {listes} liste={listeAffichee} />
     {:else if section === 'listes'}
@@ -311,9 +342,16 @@
     {/if}
   </div>
   </div>
+  {#if modifierBiblio}
+    <!-- L'application reste en place dessous (annuler ne change rien) ; `inert` la rend inaccessible au clavier. -->
+    <div class="superposition" role="dialog" aria-modal="true" aria-label="Changer de bibliothèque ou de connexion" data-testid="assistant-modification">
+      <PremierDemarrage modification onpret={biblioChangee} onannuler={() => (modifierBiblio = false)} />
+    </div>
+  {/if}
   <DepotFichiers {listes} {scan} {versBibliotheque} />
   <DialogDossiers bind:this={dossiers} {scan} />
-  <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} onmaj={rechercherMaj} />
+  <DialogReglages bind:this={reglages} {themeActif} mode={etat.mode} onTheme={(id) => (themeActif = id)} onecriture={() => void listes.charger()} ontransfert={() => void transfert?.ouvrir()} onmaj={rechercherMaj} onassistant={() => (modifierBiblio = true)} />
+  <DialogAPropos bind:this={apropos} />
   <DialogTransfert bind:this={transfert} onbibliotheque={bibliothequeRouverte} />
   <DialogManquants />
   {#if scripts.gestionOuverte}
@@ -333,6 +371,7 @@
 
 <style>
   .cadre { height: 100vh; display: flex; flex-direction: column; }
+  .superposition { position: fixed; inset: 0; z-index: 50; overflow: auto; background: var(--cr-fond); }
   .avis-theme { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: 12px; color: var(--cr-texte-discret); border-bottom: 1px solid var(--cr-bordure); }
   .avis-theme button { border: none; background: none; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; }
   .appli { flex: 1; min-height: 0; display: flex; }
