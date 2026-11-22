@@ -1,0 +1,15 @@
+Rapport de recette ComicRust tauri-v0.11.0 — 22/11/2026 13:39
+Résultat : 36 OK, 1 échec(s), 0 non testé(s) sur 37.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (1)
+- LE-01 [Majeur] Fin de livre : proposition du livre suivant (même série / même liste) ; accepter l'ouvre, refuser reste sur la dernière page.
+  Note : Aucun message. Le livre suivant s'affiche automatiquement.
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 0.11.0 / 0.11.0
+- PF-01 : 60 Mo
+
+Améliorations :
+ - Sur un livre, Clic droit, Script : La liste des scripts doit s'afficher sans cliquer sur script.
+ - Sur un livre, Clic droit : Ajouter dans la liste la fonction 'Marquer comme lu / non lu'

@@ -66,7 +66,7 @@ depuis l'Explorateur, les mesures de mémoire.
 
 ## 5. Lecteur
 
-- [ ] **LE-01 [M]** Fin de livre : proposition du **livre suivant** (même série / même liste) ; accepter l'ouvre, refuser reste sur la dernière page.
+- [ ] **LE-01 [M]** Fin de livre : « page suivante » sur la dernière page ouvre **automatiquement** le livre suivant (comme en egui), « page précédente » sur la première ouvre le précédent.
 - [ ] **LE-02 [M]** Touche **I** : panneau d'infos du livre dans le lecteur ; F1 ou ? dans le lecteur ouvre/ferme l'aide du lecteur (et n'ouvre **pas** l'À propos).
 - [ ] **LE-03 [m]** `L` : voir la liste des raccourcis du lecteur (À propos ▸ raccourcis) ; reprise de lecture à la dernière page.
 
@@ -115,8 +115,10 @@ depuis l'Explorateur, les mesures de mémoire.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 13 | 13 | 0 |
+| [M] majeurs | 16 | 15 | 1 (LE-01 : erreur de recette) |
+| [m] mineurs | 8 | 8 | 0 |
 
-**Décision : (à remplir)**
+Rapport de Yoyo du 22/11/2026 13:39 ([rapport](rapports/tauri-v0.11.0-2026-11-22.txt)) : 36 OK, 1 échec. **LE-01** : erreur de rédaction de la recette (le livre suivant s'ouvre automatiquement, comme en egui, sans message) : comportement conforme, pas de correctif. P-01 : 0.11.0 / 0.11.0 ; PF-01 : 60 Mo. Demandes intégrées à la première release : liste des scripts affichée directement dans le clic droit d'un livre ; « Marquer comme lu / non lu » dans ce menu.
+
+**Décision : GO** confirmé par Yoyo le 22/11/2026 ; étape suivante : tauri-v1.0.0 (les deux demandes y sont intégrées).
