@@ -116,10 +116,7 @@ fn liste_de_lecture_et_identifiants_absents() {
 #[test]
 fn liste_vide_et_dossier_vide() {
     let b = base();
-    let l = [
-        liste("vide", ids(&[])),
-        liste("dossier", ListKind::Folder { combine: Combine::Or, children: vec![] }),
-    ];
+    let l = [liste("vide", ids(&[])), liste("dossier", ListKind::Folder { combine: Combine::Or, children: vec![] })];
     let r = jauges(&l, &b);
     assert_eq!(r.listes["vide"], j(0, 0, 0));
     assert_eq!(r.listes["dossier"], j(0, 0, 0));
@@ -143,10 +140,7 @@ fn liste_intelligente_et_dossier() {
     let intelligente = liste("S", ListKind::Smart { query: Some(q), cached: None });
     let dossier = liste(
         "D",
-        ListKind::Folder {
-            combine: Combine::Or,
-            children: vec![intelligente.clone(), liste("L", ids(&["d", "e"]))],
-        },
+        ListKind::Folder { combine: Combine::Or, children: vec![intelligente.clone(), liste("L", ids(&["d", "e"]))] },
     );
     let r = jauges(&[dossier, liste("I", ids(&["a", "d"]))], &b);
     assert_eq!(r.listes["S"], j(2, 3, 3), "Thanos : a, b nouveaux ; a, b, c non lus");

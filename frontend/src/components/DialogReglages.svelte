@@ -9,6 +9,7 @@
   } from '../lib/api';
   import { enregistrerReglagesAnalyse, lireReglagesAnalyse, type ChoixReprise, type ReglagesAnalyse } from '../lib/api';
   import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
+  import { jauges } from '../lib/jauges.svelte';
   import {
     appliquerTheme, apercuTheme, messageTheme, rechargerThemeCourant, restaurerTheme, THEME_DEFAUT, THEME_SYSTEME, themeApplique,
     themePersiste, themeReel,
@@ -388,6 +389,15 @@
       {#if enregistre}<p class="ok" role="status">{enregistre}</p>{/if}
     </fieldset>
   {/if}
+  <fieldset class="comicrack" data-testid="reglage-affichage">
+    <legend>Affichage des listes</legend>
+    <label class="case">
+      <input type="checkbox" checked={jauges.actif} onchange={(e) => jauges.activer(e.currentTarget.checked)} data-testid="jauges-listes" />
+      Afficher les jauges des listes
+    </label>
+    <p class="discret petit">Comme dans ComicRack : trois compteurs à droite de chaque liste et de la bibliothèque, rouge pour les nouveaux livres
+      (jamais ouverts, ajoutés depuis moins de 7 jours), jaune pour les livres non lus, vert pour le total. Désactivé, seul le total est affiché.</p>
+  </fieldset>
   <fieldset class="comicrack" data-testid="reglage-analyse">
     <legend>Analyse et suivi</legend>
     <label class="case">

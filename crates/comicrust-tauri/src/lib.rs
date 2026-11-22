@@ -107,9 +107,9 @@ mod cmd_diagnostic;
 #[cfg(feature = "app")]
 mod cmd_fenetre;
 #[cfg(feature = "app")]
-mod cmd_lecteur;
-#[cfg(feature = "app")]
 mod cmd_jauges;
+#[cfg(feature = "app")]
+mod cmd_lecteur;
 #[cfg(feature = "app")]
 mod cmd_lecture_etat;
 #[cfg(feature = "app")]

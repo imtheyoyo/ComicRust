@@ -2,6 +2,7 @@
 // liste affichée, dossiers dépliés, renommage, opération en cours et bilan. Aucune logique métier :
 // comptes, dépôts possibles, positions, lecture seule viennent du backend.
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { jauges } from './jauges.svelte';
 import { arbreListes, depotLivresPossible, etatListes, messageErreur, type ArbreListes, type NoeudListe, type ResultatListes } from './api';
 
 /** Texte du contrat (refus de réordonner une vue qui n'est pas dans l'ordre de la liste). */
@@ -68,6 +69,7 @@ export class EtatListes {
       this.arbre = await arbreListes();
       this.erreur = '';
       this.verifierCourante();
+      jauges.rafraichir(); // comptes à jour (premier chargement, listes relues, après un scan…)
     } catch (e) {
       this.erreur = messageErreur(e);
     }
@@ -126,6 +128,7 @@ export class EtatListes {
         if (n) this.renommage = { id: n.id, texte: n.nom };
       }
       this.version++;
+      jauges.rafraichir(); // liste créée, dupliquée, modifiée, livres ajoutés
       return r;
     } catch (e) {
       this.info = { texte: `${operation} : rien n'a été enregistré. ${messageErreur(e)}`, erreur: true };

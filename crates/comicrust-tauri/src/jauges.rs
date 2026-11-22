@@ -34,6 +34,9 @@ pub struct Jauge {
     pub total: usize,
 }
 
+/// Jauges gardées avec la clé `(génération, révision des fiches, version des listes, jour)`.
+pub(crate) type JaugesEnCache = ((u64, u64, u64, NaiveDate), Arc<JaugesListes>);
+
 /// Jauges de la bibliothèque et de chaque liste dont le contenu est connu.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -256,7 +256,7 @@ pub struct CacheListes {
     empreinte: Option<Empreinte>,
     resolu: Option<Resolu>,
     /// Jauges des listes (`jauges.rs`), avec la clé du contenu pour lequel elles sont calculées.
-    pub(crate) jauges: Option<((u64, u64, u64, chrono::NaiveDate), Arc<crate::jauges::JaugesListes>)>,
+    pub(crate) jauges: Option<crate::jauges::JaugesEnCache>,
     en_cours: Option<String>,
     sonde: Option<(Instant, Result<bool, String>)>,
     detecteur: Option<Detecteur>,
