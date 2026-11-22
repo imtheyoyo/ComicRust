@@ -252,9 +252,11 @@ pub struct CacheListes {
     source: Option<Source>,
     items: Arc<Vec<ComicList>>,
     erreur: Option<String>,
-    version: u64,
+    pub(crate) version: u64,
     empreinte: Option<Empreinte>,
     resolu: Option<Resolu>,
+    /// Jauges des listes (`jauges.rs`), avec la clé du contenu pour lequel elles sont calculées.
+    pub(crate) jauges: Option<((u64, u64, u64, chrono::NaiveDate), Arc<crate::jauges::JaugesListes>)>,
     en_cours: Option<String>,
     sonde: Option<(Instant, Result<bool, String>)>,
     detecteur: Option<Detecteur>,
@@ -344,7 +346,7 @@ fn compte(m: &Members, db: &ComicDatabase) -> Option<usize> {
 // ───────────────────────────── Lecture des listes ─────────────────────────────
 
 impl Biblio {
-    fn cache(&self) -> std::sync::MutexGuard<'_, CacheListes> {
+    pub(crate) fn cache(&self) -> std::sync::MutexGuard<'_, CacheListes> {
         self.listes.lock().unwrap_or_else(|e| e.into_inner())
     }
 
