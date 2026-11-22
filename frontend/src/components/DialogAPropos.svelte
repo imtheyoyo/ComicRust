@@ -3,6 +3,7 @@
   // raccourcis clavier et « Copier les informations de diagnostic » (sans secret : le texte est fait
   // par le backend, docs/tauri/ipc-reglages-aide.md). F1 ou l'entrée de la barre latérale l'ouvre.
   import { infosDiagnostic, majOuvrirPage, messageErreur, texteDiagnostic, type InfosDiagnostic } from '../lib/api';
+  import { lecteurAffiche } from '../lib/fenetre';
   import { fermerModale, modale } from '../lib/modale';
   import { RACCOURCIS } from '../lib/raccourcis';
 
@@ -28,6 +29,7 @@
   /** F1 : ouvre l'aide, sauf si une autre fenêtre est déjà ouverte. */
   function clavier(e: KeyboardEvent) {
     if (e.key !== 'F1' || e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+    if (lecteurAffiche() || e.defaultPrevented) return; // le lecteur a sa propre aide F1
     e.preventDefault();
     if (dialogue?.open || document.querySelector('dialog[open]')) return;
     void ouvrir();

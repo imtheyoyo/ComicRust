@@ -116,13 +116,25 @@ export async function demanderOuvertureFichier(): Promise<void> {
     return;
   }
   const chemin = await ouvrirFichierDialogue();
-  if (chemin) await ouvreur?.ouvrirChemin(chemin);
+  if (!chemin) return;
+  // Même aiguillage qu'un fichier déposé (un .cbl s'importe, il ne s'ouvre pas comme livre).
+  if (routeurChemins) await routeurChemins(chemin);
+  else await ouvreur?.ouvrirChemin(chemin);
+}
+
+let routeurChemins: ((chemin: string) => Promise<void>) | null = null;
+/** Le composant des fichiers déposés fournit l'aiguillage par nature de chemin (Ctrl+O). */
+export function enregistrerRouteurChemins(f: (chemin: string) => Promise<void>): () => void {
+  routeurChemins = f;
+  return () => {
+    if (routeurChemins === f) routeurChemins = null;
+  };
 }
 
 // ───────────────────────────── Clavier de la fenêtre ─────────────────────────────
 
 /** Fenêtre modale ou menu ouvert : le clavier est à lui seul. */
-const calqueOuvert = (): boolean => !!document.querySelector('dialog[open], [role="menu"]');
+const calqueOuvert = (): boolean => !!document.querySelector('dialog[open], [aria-modal="true"], [role="menu"]');
 
 /** Raccourcis de la fenêtre hors lecteur (le lecteur gère ses propres touches) : F11 plein écran,
  *  Échap pour en sortir, Ctrl+O. À brancher en phase de capture sur `window`. */

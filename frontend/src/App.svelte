@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import DepotFichiers from './components/DepotFichiers.svelte';
   import DialogPlantage from './components/DialogPlantage.svelte';
-  import { gererClavierFenetre, suivrePleinEcran } from './lib/fenetre';
+  import { gererClavierFenetre, lecteurAffiche, suivrePleinEcran } from './lib/fenetre';
   import BarreLaterale, { type Section } from './components/BarreLaterale.svelte';
   import BandeauBase from './components/BandeauBase.svelte';
   import BandeauMaj from './components/BandeauMaj.svelte';
@@ -195,7 +195,8 @@
   /** Ctrl+Maj+L (comme le bouton « 📂 Listes » d'egui) : pas dans une saisie ni sous une fenêtre ouverte. */
   function clavierListes(e: KeyboardEvent) {
     if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'l') return;
-    if ((e.target as HTMLElement | null)?.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
+    if (lecteurAffiche() || modifierBiblio) return;
+    if ((e.target as HTMLElement | null)?.closest('input, textarea, select') || document.querySelector('dialog[open], [aria-modal="true"]')) return;
     e.preventDefault();
     basculerListes();
   }

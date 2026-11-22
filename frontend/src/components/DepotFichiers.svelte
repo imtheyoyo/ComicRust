@@ -7,7 +7,7 @@
   import { onMount } from 'svelte';
   import { ajouterDossier, importerCbl, lancerScan, lancementInitial, messageErreur, type GenreChemin } from '../lib/api';
   import type { SuiviScan } from '../lib/bibliotheque.svelte';
-  import { attendreOuvreur, ecouterDepots, traiterChemin, type ActionsChemin } from '../lib/fenetre';
+  import { attendreOuvreur, ecouterDepots, enregistrerRouteurChemins, traiterChemin, type ActionsChemin } from '../lib/fenetre';
   import type { EtatListes } from '../lib/listes.svelte';
   import { fermerModale, modale } from '../lib/modale';
 
@@ -89,6 +89,7 @@
   onMount(() => {
     let vivant = true;
     let arreter: (() => void) | undefined;
+    const oublierRouteur = enregistrerRouteurChemins((c) => traiter(c));
     // Premier chemin déposé seulement (comme la version egui).
     void ecouterDepots(
       (chemins) => void traiter(chemins[0]),
@@ -104,6 +105,7 @@
       .catch((e) => console.warn('argument de lancement', e));
     return () => {
       vivant = false;
+      oublierRouteur();
       arreter?.();
       clearTimeout(minuterie);
     };
