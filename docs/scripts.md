@@ -200,7 +200,10 @@ lue) ; en lien direct vers un album (QuickScrape, rescrape), la page de la séri
 depuis le lien de la page de l'album, **une seule fois par série et par exécution** (série
 sans résumé ou page illisible comprises). Série sans résumé : rien n'est écrit. Page de la
 série illisible (réseau, 404, site qui bloque) : avertissement au journal, le reste de la
-fiche est traité normalement. Sans effet si « Résumé » est décoché dans les données à
+fiche est traité normalement. Le repli vaut pour **tous les tomes** : il est
+indépendant de « Résumé de la série sur le 1er tome seulement » (qui ne règle que le résumé de
+série placé devant un résumé d'album existant) ; l'adresse de la série est lue dans l'entête
+de la page de l'album (ou son encart « Série »), jamais ailleurs dans la page. Sans effet si « Résumé » est décoché dans les données à
 récupérer ; « Ne remplir que les champs vides » garde un résumé déjà présent.
 
 Import de l'`App.Config` : un réglage fait seulement d'espaces et de retours à la ligne

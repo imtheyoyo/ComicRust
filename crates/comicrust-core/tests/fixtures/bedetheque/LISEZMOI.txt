@@ -50,6 +50,7 @@ defi_cloudflare_attention.html : page « Attention Required! | Cloudflare » ave
 (200). Les deux doivent être reconnues comme blocage.
 
 Albums sans résumé (retour au résumé de la série) : resume_vide.html (réponse « ajax » blanche,
-albums 22, 601, 602), album_blacksad_2_sans_resume.html (série avec résumé, serie_blacksad.html),
+albums 22, 601, 602), album_blacksad_2_sans_resume.html (série avec résumé, serie_blacksad.html ; un lien parasite vers
+une autre série, dans un menu avant l'entête, ne doit jamais être suivi),
 album_serie_sans_resume.html + serie_sans_resume.html (série sans résumé, entièrement fictive) et
 album_serie_introuvable.html (série 602 : page absente du serveur, 404). Écrites à la main, texte factice.

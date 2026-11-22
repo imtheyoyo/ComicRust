@@ -2025,8 +2025,22 @@ def _cle_serie(url):
     return u.replace("__10000.html", ".html")
 
 
-# Lien vers la série dans une page d'album (titre de l'entête) : « …/serie-59-BD-Blacksad.html ».
-LIEN_SERIE_ALBUM = re.compile(r'href="([^"]*?/?serie-\d+[^"]*?\.html)', re.I)
+# Lien vers la série dans une page d'album : seulement dans l'entête de l'album (titre
+# « <h1><a href="…/serie-59-BD-Blacksad.html"> ») ou, à défaut, l'encart « Série » : un lien de
+# série ailleurs dans la page (menu, publicité, autre série) n'est jamais suivi.
+LIEN_SERIE_ENTETE = re.compile(r'bdt-ah-top.{0,2000}?<h1>(.*?)</h1>', re.I | re.S)
+LIEN_SERIE_ENCART = re.compile(r'<dt>S.rie</dt><dd>(.*?)</dd>', re.I | re.S)
+LIEN_SERIE_HREF = re.compile(r'href="([^"]*?/?serie-\d+[^"]*?\.html)', re.I)
+
+
+def _lien_serie_album(albumHTML):
+    """Adresse de la page de la série d'après l'entête de l'album ('' si absente)."""
+    for bloc in (LIEN_SERIE_ENTETE, LIEN_SERIE_ENCART):
+        b = bloc.search(albumHTML)
+        m = LIEN_SERIE_HREF.search(b.group(1)) if b else None
+        if m:
+            return checkWebChar(m.group(1))
+    return ""
 
 
 def _resume_serie_par_album(albumHTML):
@@ -2034,15 +2048,17 @@ def _resume_serie_par_album(albumHTML):
     de la série suivie depuis le lien de la page de l'album. Une seule requête par série et par
     exécution (un échec ou l'absence de résumé sont aussi gardés) ; en cas d'erreur (réseau,
     site qui bloque) le livre est traité sans résumé de série, un avertissement est noté."""
-    m = LIEN_SERIE_ALBUM.search(albumHTML)
-    if not m or stop():
+    lien = _lien_serie_album(albumHTML)
+    if not lien or stop():
         return ""
-    lien = checkWebChar(m.group(1))
     cle = _cle_serie(lien)
     if cle in S.resumes_series:
         debuglog("Résumé de la série déjà lu : " + cle)
         return S.resumes_series[cle]
-    page = _read_url(lien.split("#")[0].replace(".html", "__10000.html"), False, silencieux=True)
+    url_serie = lien.split("#")[0]
+    if "__10000.html" not in url_serie:
+        url_serie = url_serie.lower().replace(".html", "__10000.html")
+    page = _read_url(url_serie, False, silencieux=True)
     resume = _resume_page_serie(page) if page else ""
     if not stop():
         S.resumes_series[cle] = resume
@@ -3226,8 +3242,13 @@ def BDConfigForm(valeurs):
              ui.checkbox("COUNTOF", Trans(110)),
              ui.checkbox("COUNTFINIE", Trans(126)),
              ui.checkbox("ResumePremierTome", Trans(149)),
-             ui.checkbox("SerieResumeSiAlbumVide", _t("Utiliser le résumé de la série si l'album n'en a pas",
-                                                      "Use the series summary if the album has none")),
+             ui.checkbox("SerieResumeSiAlbumVide",
+                         _t("Utiliser le résumé de la série si l'album n'en a pas (pour tous les tomes)",
+                            "Use the series summary if the album has none (for every volume)"),
+                         help=_t("Indépendant de « Résumé de la série sur le 1er tome seulement » : un album "
+                                 "sans résumé reçoit celui de la série, quel que soit son tome.",
+                                 "Independent of “Series' synopsis on 1st comic book only”: an album without a "
+                                 "summary gets the series summary, whatever its volume.")),
              ui.checkbox("ShortWebLink", Trans(48)),
              ui.checkbox("AcceptGenericArtists", Trans(74)),
              ui.separator(),

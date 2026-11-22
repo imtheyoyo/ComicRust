@@ -1268,6 +1268,20 @@ fn resume_de_la_serie_si_l_album_n_en_a_pas() {
     assert_eq!(n("/serie-59-bd-blacksad__10000.html"), 1, "{chemins:?}");
     assert_eq!(n("/serie-600-bd-les-ombres-factices__10000.html"), 1, "{chemins:?}");
     assert_eq!(n("/serie-602-bd-serie-disparue__10000.html"), 1, "{chemins:?}");
+    // Lien parasite (menu) plus haut dans la page de l'album 22 : jamais suivi, seul le lien de
+    // l'entête de l'album compte.
+    assert_eq!(n("/serie-999-bd-serie-parasite__10000.html"), 0, "{chemins:?}");
+    assert!(!chemins.iter().any(|c| c.contains("serie-999") || c.contains("__10000__10000")), "{chemins:?}");
+
+    // « Résumé de la série sur le 1er tome seulement » : le repli de l'album vide vaut quand
+    // même pour tous les tomes (comportement voulu, documenté).
+    let hote = Arc::new(Hote::avec(vec![livre("t2", "Blacksad", "2")]).reglages(
+        &srv,
+        journaux.path(),
+        json!({"SerieResumeEverywhere": false}),
+    ));
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t2"]), hote.clone());
+    assert_eq!(champs(&r, "t2")["Summary"], json!(resume_serie));
 }
 
 /// Réglages : formulaire à trois onglets, import de l'App.Config de ComicRack, enregistrement.
