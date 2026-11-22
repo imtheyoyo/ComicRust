@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v0.11.0 (pré-release de l'étape **audit de parité** avec la version egui v0.10.9) |
 | Paquet | `ComicRust-Tauri-tauri-v0.11.0-windows-x64.zip` |
-| SHA-256 | `(à renseigner à la publication)` |
+| SHA-256 | `19b3c44b2e2efe499a9c83b98487ac34afcc823ed1ebd0db5d005a33811a6bfe` |
 | Contenu | tous les écarts [B] et [M] de `docs/tauri/audit-parite.md` : piles réordonnables, livres manquants, scan au démarrage, fenêtre et fichiers déposés, dialogue natif, assistant rejouable, À propos / F1, récents, livre suivant, regroupements, tableau, CLI dans le zip |
 | Origine | [recette tauri-v0.10.0](tauri-v0.10.0.md) : **GO** du 14/11/2026 ; demande « déplacer les séries dans une liste de lecture » ([rapport](rapports/tauri-v0.10.0-2026-11-14.txt)) |
 
