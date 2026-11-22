@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v1.0.1 (version corrective et d'améliorations suite à la tauri-v1.0.0) |
 | Paquet | `ComicRust-Tauri-tauri-v1.0.1-windows-x64.zip` |
-| SHA-256 | `(à renseigner à la publication)` |
+| SHA-256 | `20a014fd4a57474f33936cb00e26442a36a5fe1bec0d3279844a35d71cb9949f` |
 | Contenu | jauges des listes ; scripts en sous-menu latéral ; Monter/Descendre grisés (et déplacement de plusieurs piles) ; résumé de série dans Bedetheque Scraper 2 ; version dans le titre ; réouverture sur la dernière liste |
 | Origine | [recette tauri-v1.0.0](tauri-v1.0.0.md) : **GO** du 22/11/2026 ; demandes de Yoyo ([rapport](rapports/tauri-v1.0.0-2026-11-22.txt)) |
 
