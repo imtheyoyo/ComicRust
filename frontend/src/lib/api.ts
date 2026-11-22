@@ -254,6 +254,11 @@ export interface PreferencesVue {
   listes?: Record<string, VueListe | null>;
   /** Colonnes du tableau (sous-objet remplacé en entier à chaque enregistrement). */
   tableau?: PreferencesTableau;
+  /** « Rouvrir la dernière liste au démarrage » (absent : activé). */
+  rouvrirDerniereListe?: boolean;
+  /** Identifiant (GUID) de la dernière liste sélectionnée ; absent : toute la bibliothèque. À
+   *  l'enregistrement, `''` l'efface (retour à la bibliothèque). */
+  derniereListe?: string;
 }
 
 /** Colonnes du tableau mémorisées (`vue.tableau`) : visibles (absent : toutes) et largeurs en px. */

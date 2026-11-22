@@ -112,6 +112,19 @@ export function enregistrerTableau(t: PreferencesTableau): void {
   minuterie = setTimeout(vider, DELAI_ENREGISTREMENT);
 }
 
+/** Dernière liste sélectionnée (`null` : toute la bibliothèque), mémorisée par son identifiant stable
+ *  (GUID). Passe par l'enregistrement différé habituel (rien d'envoyé si la valeur ne change pas ;
+ *  l'écriture se fait côté backend, hors du fil de l'interface). */
+export function enregistrerDerniereListe(id: string | null): void {
+  if ((id ?? '') === (courantes.derniereListe ?? '')) return;
+  enregistrerPreference({ derniereListe: id ?? '' });
+}
+
+/** « Rouvrir la dernière liste au démarrage » : activé tant que l'utilisateur ne l'a pas désactivé. */
+export function rouvrirDerniereListe(): boolean {
+  return courantes.rouvrirDerniereListe !== false;
+}
+
 /** Vue mémorisée d'une liste (tri, sens, groupe, grille / tableau), ou `undefined`. */
 export function vueListe(id: string): VueListe | undefined {
   const v = courantes.listes?.[id];

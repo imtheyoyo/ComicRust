@@ -19,6 +19,9 @@ export function genreSimule(chemin: string): GenreChemin {
   return 'livre';
 }
 
+/** Version affichée dans le titre simulé (le vrai backend utilise `CARGO_PKG_VERSION`). */
+export const VERSION_SIMULEE = '0.0.0-simule';
+
 export const COMMANDES_FENETRE = ['definir_titre_fenetre', 'lancement_initial', 'classer_chemin', 'lire_plantage', 'acquitter_plantage'];
 
 export interface TracesFenetre {
@@ -48,13 +51,15 @@ export function creerFenetreSimulee() {
   const g = globalThis as unknown as { __comicrustSimule?: Record<string, unknown> };
   g.__comicrustSimule ??= {};
   g.__comicrustSimule.fenetre = traces;
+  // Titre initial (le vrai backend le fixe à la création de la fenêtre) : repère « ComicRust <version> ».
+  document.title = `ComicRust ${VERSION_SIMULEE}`;
 
   return {
     appeler(commande: string, args: Record<string, unknown>): unknown {
       switch (commande) {
         case 'definir_titre_fenetre': {
           const t = typeof args.titre === 'string' ? args.titre.trim() : '';
-          const titre = t ? `${t} — ComicRust` : 'ComicRust';
+          const titre = t ? `${t} — ComicRust ${VERSION_SIMULEE}` : `ComicRust ${VERSION_SIMULEE}`;
           traces.titres.push(titre);
           document.title = titre;
           return null;

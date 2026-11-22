@@ -580,6 +580,14 @@ pub struct PreferencesVue {
     /// Colonnes du tableau (sous-objet `tableau`, remplacé en entier à chaque enregistrement).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tableau: Option<PreferencesTableau>,
+    /// Réglage « Rouvrir la dernière liste au démarrage » (absent = **activé**).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rouvrir_derniere_liste: Option<bool>,
+    /// Identifiant (stable : GUID de la liste) de la dernière liste sélectionnée : dossier, liste de
+    /// lecture ou liste intelligente. Absent = toute la bibliothèque. À l'enregistrement, une chaîne
+    /// vide l'efface (retour à la bibliothèque) ; le fichier ne contient jamais de chaîne vide.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derniere_liste: Option<String>,
 }
 
 /// Colonnes du tableau (section `vue.tableau`) : colonnes visibles et largeurs choisies par
@@ -778,6 +786,12 @@ impl PreferencesVue {
             lecteur: o.get("lecteur").and_then(PreferencesLecteur::depuis_json),
             listes: o.get("listes").and_then(listes_depuis_json),
             tableau: o.get("tableau").and_then(PreferencesTableau::depuis_json),
+            rouvrir_derniere_liste: o.get("rouvrirDerniereListe").and_then(Value::as_bool),
+            derniere_liste: o
+                .get("derniereListe")
+                .and_then(Value::as_str)
+                .filter(|s| s.is_empty() || id_liste_valide(s))
+                .map(str::to_string),
         }
     }
 
@@ -798,8 +812,13 @@ impl PreferencesVue {
             largeur_listes,
             theme,
             listes_visibles,
-            lecteur
+            lecteur,
+            rouvrir_derniere_liste
         );
+        // Dernière liste : une chaîne vide efface (retour à la bibliothèque entière).
+        if let Some(id) = m.derniere_liste {
+            self.derniere_liste = (!id.is_empty()).then_some(id);
+        }
         // Colonnes du tableau : sous-objet remplacé en entier ; un objet vide efface les réglages.
         if let Some(t) = m.tableau {
             self.tableau = (t != PreferencesTableau::default()).then_some(t);
@@ -1163,6 +1182,8 @@ mod tests {
             lecteur: None,
             listes: None,
             tableau: None,
+            rouvrir_derniere_liste: Some(false),
+            derniere_liste: Some("{1f4c-AB}".into()),
         };
         assert_eq!(enregistrer_preferences_vue(d.path(), p.clone()).unwrap(), p);
         assert_eq!(lire_preferences_vue(d.path()).unwrap(), p);
@@ -1434,6 +1455,72 @@ mod tests {
         assert_eq!(apres.tri.as_deref(), Some("titre"));
         let brut: Value = serde_json::from_str(&std::fs::read_to_string(chemin_reglages(d.path())).unwrap()).unwrap();
         assert!(brut["vue"].get("tableau").is_none(), "{brut}");
+    }
+
+    // ───── Réouverture sur la dernière liste ─────
+
+    #[test]
+    fn anciens_reglages_sans_derniere_liste() {
+        // Fichier d'une version antérieure : aucun des deux champs, rien ne casse, réglage activé.
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            chemin_reglages(d.path()),
+            r#"{"mode":"autonome","vue":{"zoom":120,"listes":{"{AB-1}":{"tri":"titre"}}}}"#,
+        )
+        .unwrap();
+        let v = lire_preferences_vue(d.path()).unwrap();
+        assert_eq!((v.rouvrir_derniere_liste, v.derniere_liste.clone()), (None, None));
+        assert_eq!(v.zoom, Some(120));
+        // Absent = activé : la valeur par défaut est portée par le front (`!== false`) ; rien n'est
+        // réécrit tant que l'utilisateur ne change pas de liste.
+        let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
+        assert!(!texte.contains("derniereListe") && !texte.contains("rouvrirDerniereListe"));
+    }
+
+    #[test]
+    fn derniere_liste_ecriture_relecture_et_effacement() {
+        let d = tempfile::tempdir().unwrap();
+        let p = |id: &str| PreferencesVue { derniere_liste: Some(id.into()), ..Default::default() };
+        let apres = enregistrer_preferences_vue(d.path(), p("3F2504E0-4F89-11D3-9A0C-0305E82C3301")).unwrap();
+        assert_eq!(apres.derniere_liste.as_deref(), Some("3F2504E0-4F89-11D3-9A0C-0305E82C3301"));
+        let brut: Value = serde_json::from_str(&std::fs::read_to_string(chemin_reglages(d.path())).unwrap()).unwrap();
+        assert_eq!(brut["vue"]["derniereListe"], "3F2504E0-4F89-11D3-9A0C-0305E82C3301", "{brut}");
+        // Un enregistrement sans ce champ ne l'efface pas (fusion champ par champ).
+        let apres =
+            enregistrer_preferences_vue(d.path(), PreferencesVue { zoom: Some(150), ..Default::default() }).unwrap();
+        assert!(apres.derniere_liste.is_some());
+        // Réglage désactivé : la dernière liste reste mémorisée.
+        let apres = enregistrer_preferences_vue(
+            d.path(),
+            PreferencesVue { rouvrir_derniere_liste: Some(false), ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!((apres.rouvrir_derniere_liste, apres.derniere_liste.is_some()), (Some(false), true));
+        // Chaîne vide : retour à la bibliothèque entière, le champ disparaît du fichier.
+        let apres = enregistrer_preferences_vue(d.path(), p("")).unwrap();
+        assert_eq!(apres.derniere_liste, None);
+        let texte = std::fs::read_to_string(chemin_reglages(d.path())).unwrap();
+        assert!(!texte.contains("derniereListe"), "{texte}");
+        assert!(texte.contains("\"rouvrirDerniereListe\": false"), "{texte}");
+    }
+
+    #[test]
+    fn derniere_liste_lecture_tolerante() {
+        let lire_json = |j: Value| PreferencesVue::depuis_json(&j);
+        // Type invalide, identifiant absurde (chemin, trop long) : ignorés sans erreur.
+        for mauvais in [
+            serde_json::json!(42),
+            serde_json::json!(["a"]),
+            serde_json::json!("../../etc/passwd"),
+            serde_json::json!("x".repeat(101)),
+            serde_json::json!(null),
+        ] {
+            let v =
+                lire_json(serde_json::json!({"derniereListe": mauvais, "rouvrirDerniereListe": "oui", "zoom": 130}));
+            assert_eq!((v.derniere_liste, v.rouvrir_derniere_liste, v.zoom), (None, None, Some(130)));
+        }
+        let v = lire_json(serde_json::json!({"derniereListe": "{AB-12}", "rouvrirDerniereListe": true}));
+        assert_eq!((v.derniere_liste.as_deref(), v.rouvrir_derniere_liste), (Some("{AB-12}"), Some(true)));
     }
 }
 

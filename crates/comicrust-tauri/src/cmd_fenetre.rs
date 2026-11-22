@@ -104,7 +104,8 @@ pub fn evenement_fenetre(fen: &tauri::Window, evenement: &tauri::WindowEvent) {
     }
 }
 
-/// Titre de la fenêtre : `Some(titre)` = « titre — ComicRust » ; `None` = « ComicRust ».
+/// Titre de la fenêtre : `Some(titre)` = « titre — ComicRust 1.0.1 » ; `None` = « ComicRust 1.0.1 »
+/// (la version est celle du paquet, ajoutée ici : le front ne la connaît pas).
 #[tauri::command]
 pub fn definir_titre_fenetre(fen: tauri::WebviewWindow, titre: Option<String>) -> Result<(), String> {
     fen.set_title(&fenetre::titre_fenetre(titre.as_deref())).map_err(|e| e.to_string())
