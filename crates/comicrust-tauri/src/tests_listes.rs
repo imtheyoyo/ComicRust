@@ -1253,3 +1253,42 @@ fn piles_avec_groupe_serie() {
     b.decaler_pile_liste(&l, &groupee, "Silver Surfer", false).unwrap();
     assert_eq!(titres_piles(&b, &l)[0], "Thanos");
 }
+
+/// Lot L5 : `deplacer_groupes_liste` / `decaler_groupe_liste` avec les nouveaux regroupements. La
+/// fixture donne 1990 à Thanos, 1991 à Warlock et 1992 à Silver Surfer : un groupe « année » est une
+/// série entière ; les titres des groupes sont ceux de `groupes_vue`.
+#[test]
+fn deplacer_groupes_avec_les_nouveaux_regroupements() {
+    let d = tempfile::tempdir().unwrap();
+    let b = biblio_autonome(d.path());
+    let l = liste_piles(&b, &[(0, 1), (1, 1), (0, 2), (2, 1), (1, 2)]);
+    let par_annee = requete(Some(&l), "ordre", Some(Groupe::Annee));
+    let g = b.groupes_vue(&par_annee).unwrap();
+    assert_eq!(
+        g.iter().map(|x| (x.titre.as_str(), x.nombre)).collect::<Vec<_>>(),
+        [("1990", 2), ("1991", 2), ("1992", 1)],
+        "les groupes suivent leur premier livre dans la liste"
+    );
+    let titres = |b: &Biblio| b.groupes_vue(&par_annee).unwrap().into_iter().map(|x| x.titre).collect::<Vec<_>>();
+    // L'année 1992 en tête ; les autres livres gardent leur ordre relatif dans la liste.
+    b.deplacer_groupes_liste(&l, &par_annee, &s(&["1992"]), 0).unwrap();
+    assert_eq!(ordre_liste(&b, &l), "S1 T1 W1 T2 W2");
+    assert_eq!(titres(&b), ["1992", "1990", "1991"]);
+    // Descendre d'un cran le groupe « 1992 » : il passe après « 1990 ».
+    b.decaler_groupe_liste(&l, &par_annee, "1992", false).unwrap();
+    assert_eq!(titres(&b), ["1990", "1992", "1991"]);
+    assert_eq!(ordre_liste(&b, &l).split(' ').count(), 5, "aucun livre perdu");
+    // Groupe inconnu : erreur lisible, rien d'écrit.
+    assert!(b.decaler_groupe_liste(&l, &par_annee, "2001", true).is_err());
+    // Sans groupe : refus (message générique, plus « par série »).
+    let plat = requete(Some(&l), "ordre", None);
+    let e = b.decaler_groupe_liste(&l, &plat, "1992", true).unwrap_err();
+    assert!(e.contains("non groupée"), "{e}");
+    // Groupe d'après l'état de lecture : un seul groupe « Non lu », déplacer ne casse rien.
+    let par_etat = requete(Some(&l), "ordre", Some(Groupe::Etat));
+    let g = b.groupes_vue(&par_etat).unwrap();
+    assert_eq!(g.iter().map(|x| x.titre.as_str()).collect::<Vec<_>>(), ["Non lu"]);
+    let r = b.deplacer_groupes_liste(&l, &par_etat, &s(&["Non lu"]), 0).unwrap();
+    assert!(r.info.is_empty(), "déjà en tête : rien d'écrit");
+    assert_eq!(titres(&b), ["1990", "1992", "1991"], "rien n'a bougé");
+}

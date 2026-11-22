@@ -1135,7 +1135,9 @@ impl Biblio {
     fn controler_groupes(&self, id: &str, requete: &RequeteLivres) -> Result<VueGroupee, String> {
         let actuels = self.controler_vue(id, requete)?;
         if crate::biblio::regroupement(requete.groupe) == crate::tri::Regroupement::Aucun {
-            return Err("vue non groupée : groupe la vue par série pour déplacer des séries entières".into());
+            return Err(
+                "vue non groupée : groupe la vue (par série, par exemple) pour déplacer des groupes entiers".into()
+            );
         }
         let g = self.groupes_de(requete)?;
         let titres = g.iter().map(|(t, _)| t.clone()).collect();

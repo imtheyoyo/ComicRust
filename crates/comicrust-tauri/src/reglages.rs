@@ -386,7 +386,12 @@ pub const TRIS: &[&str] =
 /// Sens de tri.
 pub const SENS: &[&str] = &["asc", "desc"];
 /// Regroupements.
-pub const GROUPES: &[&str] = &["aucun", "serie", "editeur"];
+pub const GROUPES: &[&str] = &["aucun", "serie", "editeur", "scenariste", "annee", "arc", "genre", "format", "etat"];
+/// Colonnes du tableau, dans l'ordre d'affichage de la version egui (`COLS` de `library_table.rs`).
+pub const COLONNES_TABLEAU: &[&str] =
+    &["serie", "numero", "titre", "parution", "editeur", "scenariste", "pages", "lu", "note", "ajoute", "fichier"];
+/// Bornes de la largeur d'une colonne du tableau (px).
+pub const LARGEUR_COLONNE: (u32, u32) = (30, 2000);
 /// Types de vue de la bibliothèque.
 pub const VUES: &[&str] = &["grille", "tableau"];
 /// Bornes de la taille des couvertures (px, curseur « Taille »).
@@ -448,6 +453,53 @@ pub struct PreferencesVue {
     /// sont gardées. Jamais écrit dans `ComicDb.xml` ni dans la base de ComicRack.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listes: Option<BTreeMap<String, Option<VueListe>>>,
+    /// Colonnes du tableau (sous-objet `tableau`, remplacé en entier à chaque enregistrement).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tableau: Option<PreferencesTableau>,
+}
+
+/// Colonnes du tableau (section `vue.tableau`) : colonnes visibles et largeurs choisies par
+/// l'utilisateur. Les colonnes gardent toujours l'ordre de [`COLONNES_TABLEAU`] ; la colonne
+/// « # » des listes n'est pas concernée. Lecture tolérante : identifiants inconnus et doublons
+/// ignorés, largeurs ramenées dans [`LARGEUR_COLONNE`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferencesTableau {
+    /// Colonnes visibles (absent : toutes). Jamais vide : au moins une colonne reste affichée.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colonnes: Option<Vec<String>>,
+    /// Largeur en pixels des colonnes redimensionnées (clé : identifiant de colonne).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub largeurs: Option<BTreeMap<String, u32>>,
+}
+
+impl PreferencesTableau {
+    /// Construit les réglages depuis du JSON ; `None` si ce n'est pas un objet ou s'il ne reste rien
+    /// de valide.
+    pub fn depuis_json(v: &Value) -> Option<Self> {
+        let o = v.as_object()?;
+        let colonnes = o.get("colonnes").and_then(Value::as_array).and_then(|a| {
+            let demandees: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
+            // Ordre canonique, sans doublon ni identifiant inconnu.
+            let v: Vec<String> =
+                COLONNES_TABLEAU.iter().filter(|c| demandees.contains(c)).map(|c| (*c).to_string()).collect();
+            (!v.is_empty()).then_some(v)
+        });
+        let (min, max) = LARGEUR_COLONNE;
+        let largeurs = o.get("largeurs").and_then(Value::as_object).and_then(|m| {
+            let l: BTreeMap<String, u32> = m
+                .iter()
+                .filter(|(c, _)| COLONNES_TABLEAU.contains(&c.as_str()))
+                .filter_map(|(c, n)| {
+                    let n = n.as_f64().filter(|n| n.is_finite())?;
+                    Some((c.clone(), n.round().clamp(f64::from(min), f64::from(max)) as u32))
+                })
+                .collect();
+            (!l.is_empty()).then_some(l)
+        });
+        let r = Self { colonnes, largeurs };
+        (r != Self::default()).then_some(r)
+    }
 }
 
 /// Vue mémorisée d'une liste (section `vue.listes.<id>`). Lecture tolérante champ par champ.
@@ -600,6 +652,7 @@ impl PreferencesVue {
             theme: o.get("theme").and_then(Value::as_str).filter(|s| id_theme_valide(s)).map(str::to_string),
             lecteur: o.get("lecteur").and_then(PreferencesLecteur::depuis_json),
             listes: o.get("listes").and_then(listes_depuis_json),
+            tableau: o.get("tableau").and_then(PreferencesTableau::depuis_json),
         }
     }
 
@@ -608,7 +661,20 @@ impl PreferencesVue {
         macro_rules! prendre {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
-        prendre!(tri, sens_tri, groupe, vue, empiler, zoom, details, largeur_details, largeur_listes, theme, lecteur);
+        prendre!(
+            tri,
+            sens_tri,
+            groupe,
+            vue,
+            empiler,
+            zoom,
+            details,
+            largeur_details,
+            largeur_listes,
+            theme,
+            lecteur,
+            tableau
+        );
         // Vues des listes : fusion liste par liste (`null` efface), jamais d'entrée `null` gardée.
         if let Some(patch) = m.listes {
             let mut listes = self.listes.take().unwrap_or_default();
@@ -965,6 +1031,7 @@ mod tests {
             theme: Some("moderne-sombre".into()),
             lecteur: None,
             listes: None,
+            tableau: None,
         };
         assert_eq!(enregistrer_preferences_vue(d.path(), p.clone()).unwrap(), p);
         assert_eq!(lire_preferences_vue(d.path()).unwrap(), p);
@@ -1164,5 +1231,67 @@ mod tests {
         assert!(!r.suivre_comicrack);
         std::fs::write(chemin_reglages(d.path()), r#"{"analyse": 3}"#).unwrap();
         assert!(lire_reglages_analyse(d.path()).unwrap().au_demarrage);
+    }
+
+    #[test]
+    fn groupes_acceptes_comme_egui() {
+        // Les neuf regroupements de `GroupKey::ALL` : chacun est lu par les réglages et par `tri`.
+        for g in ["aucun", "serie", "editeur", "scenariste", "annee", "arc", "genre", "format", "etat"] {
+            let p = PreferencesVue::depuis_json(&serde_json::json!({ "groupe": g }));
+            assert_eq!(p.groupe.as_deref(), Some(g));
+            assert!(crate::tri::Regroupement::depuis_texte(g).is_some(), "{g}");
+        }
+        assert_eq!(GROUPES.len(), crate::tri::Regroupement::TOUS.len());
+        let p = PreferencesVue::depuis_json(&serde_json::json!({ "groupe": "couleur" }));
+        assert_eq!(p.groupe, None);
+    }
+
+    #[test]
+    fn tableau_lecture_tolerante_et_ordre_canonique() {
+        let p = PreferencesVue::depuis_json(&serde_json::json!({
+            "tableau": {
+                "colonnes": ["fichier", "titre", "inconnue", "titre", "note", 3],
+                "largeurs": { "titre": 10, "fichier": 99999, "serie": 150.4, "bidule": 80, "pages": "large" }
+            }
+        }));
+        let t = p.tableau.unwrap();
+        // Ordre egui, sans doublon ni identifiant inconnu.
+        assert_eq!(t.colonnes.unwrap(), ["titre", "note", "fichier"]);
+        let l = t.largeurs.unwrap();
+        assert_eq!(l["titre"], 30, "borne basse");
+        assert_eq!(l["fichier"], 2000, "borne haute");
+        assert_eq!(l["serie"], 150);
+        assert_eq!(l.len(), 3, "colonne inconnue et largeur non numérique ignorées");
+        // Aucune colonne valide : toutes visibles (champ absent), jamais un tableau vide.
+        let p = PreferencesVue::depuis_json(&serde_json::json!({ "tableau": { "colonnes": ["x"] } }));
+        assert_eq!(p.tableau, None);
+        let p = PreferencesVue::depuis_json(&serde_json::json!({ "tableau": 4 }));
+        assert_eq!(p.tableau, None);
+    }
+
+    #[test]
+    fn tableau_enregistre_dans_vue_tableau_sans_toucher_au_reste() {
+        let d = tempfile::tempdir().unwrap();
+        enregistrer_preferences_vue(d.path(), PreferencesVue { tri: Some("titre".into()), ..Default::default() })
+            .unwrap();
+        let t = PreferencesTableau {
+            colonnes: Some(vec!["serie".into(), "scenariste".into()]),
+            largeurs: Some(BTreeMap::from([("scenariste".to_string(), 180)])),
+        };
+        let apres =
+            enregistrer_preferences_vue(d.path(), PreferencesVue { tableau: Some(t.clone()), ..Default::default() })
+                .unwrap();
+        assert_eq!(apres.tableau, Some(t.clone()));
+        assert_eq!(apres.tri.as_deref(), Some("titre"));
+        let brut: Value = serde_json::from_str(&std::fs::read_to_string(chemin_reglages(d.path())).unwrap()).unwrap();
+        assert_eq!(brut["vue"]["tableau"]["colonnes"], serde_json::json!(["serie", "scenariste"]));
+        assert_eq!(brut["vue"]["tableau"]["largeurs"]["scenariste"], 180);
+        // Le sous-objet est remplacé en entier (les largeurs disparaissent avec lui).
+        let t2 = PreferencesTableau { colonnes: Some(vec!["fichier".into()]), largeurs: None };
+        let apres =
+            enregistrer_preferences_vue(d.path(), PreferencesVue { tableau: Some(t2.clone()), ..Default::default() })
+                .unwrap();
+        assert_eq!(apres.tableau, Some(t2));
+        assert_eq!(lire_preferences_vue(d.path()).unwrap().tableau.unwrap().largeurs, None);
     }
 }

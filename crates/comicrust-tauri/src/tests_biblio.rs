@@ -110,6 +110,58 @@ fn piles_par_serie_et_pile_ouverte() {
     assert_eq!(b.lister(&req).unwrap().total, 4);
 }
 
+/// Lot L5 : titre de groupe porté par chaque livre (`groupe`), en-tête de groupe des piles, champs
+/// des colonnes du tableau, pour les regroupements ajoutés (scénariste, année, éditeur…).
+#[test]
+fn regroupements_titres_dans_les_livres_et_les_piles() {
+    let d = tempfile::tempdir().unwrap();
+    let bd = d.path().join("bd");
+    creer_bd(&bd);
+    let b = autonome(&d.path().join("data"));
+    b.ajouter_dossier(&bd.to_string_lossy()).unwrap();
+    scanner(&b);
+
+    // Sans regroupement : pas de titre de groupe, ni sur les livres ni sur les piles.
+    let plat = b.lister(&requete("serie", SensTri::Asc, None, None)).unwrap();
+    assert!(plat.livres.iter().all(|l| l.groupe.is_none()));
+    assert!(b
+        .lister_piles(&requete("serie", SensTri::Asc, None, None))
+        .unwrap()
+        .piles
+        .iter()
+        .all(|p| p.groupe.is_none()));
+
+    // Par scénariste : le livre sans fiche passe en premier (« (sans scénariste) » < « jonathan… »).
+    let r = requete("serie", SensTri::Asc, Some(Groupe::Scenariste), None);
+    let p = b.lister(&r).unwrap();
+    let titres: Vec<_> = p.livres.iter().map(|l| l.groupe.clone().unwrap()).collect();
+    assert_eq!(titres, ["(sans scénariste)", "Jonathan Hickman", "Jonathan Hickman", "Jonathan Hickman"]);
+    // Champs du tableau : scénariste, avancement absent (jamais ouvert), chemin du fichier.
+    let hickman = &p.livres[1];
+    assert_eq!(hickman.scenariste.as_deref(), Some("Jonathan Hickman"));
+    assert!(hickman.fichier.as_deref().is_some_and(|f| f.ends_with(".cbz")));
+    assert_eq!(hickman.avancement, None);
+    assert_eq!(hickman.annee, Some(2020));
+    // Piles : l'en-tête est le groupe du premier livre de la pile.
+    let piles = b.lister_piles(&r).unwrap().piles;
+    assert_eq!(
+        piles.iter().map(|p| p.groupe.as_deref().unwrap()).collect::<Vec<_>>().first(),
+        Some(&"(sans scénariste)")
+    );
+    assert!(piles.iter().all(|p| p.groupe.is_some()));
+
+    // Par année, éditeur, état de lecture : mêmes titres que `groupes_vue` (clé des déplacements).
+    for (g, premier) in [(Groupe::Annee, "(sans année)"), (Groupe::Editeur, "(sans éditeur)"), (Groupe::Etat, "Non lu")]
+    {
+        let p = b.lister(&requete("serie", SensTri::Asc, Some(g), None)).unwrap();
+        assert_eq!(p.livres[0].groupe.as_deref(), Some(premier), "{premier}");
+    }
+    // Série : titre de groupe présent sur les livres, redondant (donc absent) sur les piles.
+    let r = requete("serie", SensTri::Asc, Some(Groupe::Serie), None);
+    assert!(b.lister(&r).unwrap().livres.iter().all(|l| l.groupe.is_some()));
+    assert!(b.lister_piles(&r).unwrap().piles.iter().all(|p| p.groupe.is_none()));
+}
+
 fn autonome(data: &Path) -> Biblio {
     let b = Biblio::nouvelle(data.to_path_buf());
     let etat = b.configurer(&ChoixPremierDemarrage { mode: Mode::Autonome, chemin_ini: None }).unwrap();
