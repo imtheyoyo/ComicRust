@@ -2,6 +2,8 @@
   import type { ModeBiblio } from '../lib/api';
   import type { EtatListes } from '../lib/listes.svelte';
   import { manquants } from '../lib/manquants.svelte';
+  import { jauges } from '../lib/jauges.svelte';
+  import Jauges from './Jauges.svelte';
   import PanneauListes from './PanneauListes.svelte';
 
   export type Section = 'bibliotheque' | 'listes';
@@ -58,7 +60,9 @@
         <button class="entree" class:actif={section === e.id && !(e.id === 'bibliotheque' && manquants.affiche)} aria-current={section === e.id ? 'page' : undefined} onclick={() => onsection(e.id)}>
           <span class="glyphe" aria-hidden="true">{e.glyphe}</span>
           <span class="nom">{e.titre}</span>
-          {#if e.id === 'bibliotheque'}<span class="compte">{nbLivres.toLocaleString('fr-FR')}</span>{/if}
+          {#if e.id === 'bibliotheque'}
+            {#if jauges.racine}<Jauges jauge={jauges.racine} />{:else}<span class="compte">{nbLivres.toLocaleString('fr-FR')}</span>{/if}
+          {/if}
         </button>
       </li>
     {/each}

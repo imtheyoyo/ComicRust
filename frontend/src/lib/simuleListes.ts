@@ -8,6 +8,7 @@ import type {
   EditeurListe, EtatListes, GroupeVue, ListeDepart, ModeCriteres, NatureValeur, NoeudCritere, NoeudListe, Operateur,
   PlaceListe, RapportCbl, RequeteLivres, ResultatListes, TypeCritere, TypeListe,
 } from './api';
+import { jaugesSimulees } from './simuleJauges';
 
 /** Livre factice tel que simule.ts le garde (champs lus par les critères). */
 export interface LivreListe {
@@ -497,6 +498,8 @@ export function creerListesSimulees(ctx: ContexteListes) {
         return etat();
       case 'arbre_listes':
         return arbre();
+      case 'jauges_listes':
+        return jaugesSimulees(ctx.livres, tous().map((l) => ({ id: l.id, membres: membres(l) })));
       case 'bilan_listes':
         return tous().filter((l) => l.type !== 'dossier').map((l) => {
           const m = membres(l);

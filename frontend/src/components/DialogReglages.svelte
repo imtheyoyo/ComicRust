@@ -9,6 +9,7 @@
   } from '../lib/api';
   import { enregistrerReglagesAnalyse, lireReglagesAnalyse, type ChoixReprise, type ReglagesAnalyse } from '../lib/api';
   import { enregistrerPreference, enregistrerReglagesLecteur, reglagesLecteur, rouvrirDerniereListe } from '../lib/prefs';
+  import { jauges } from '../lib/jauges.svelte';
   import {
     appliquerTheme, apercuTheme, messageTheme, rechargerThemeCourant, restaurerTheme, THEME_DEFAUT, THEME_SYSTEME, themeApplique,
     themePersiste, themeReel,
@@ -402,6 +403,15 @@
       Rouvrir la dernière liste au démarrage
     </label>
     <p class="discret petit">Au lancement, la bibliothèque s'affiche sur la dernière liste sélectionnée (dossier, liste de lecture ou liste intelligente), même si Réglages ou le lecteur étaient ouverts à la fermeture. Aucun livre n'est rouvert. Désactivé, la bibliothèque entière s'affiche à chaque démarrage.</p>
+  </fieldset>
+  <fieldset class="comicrack" data-testid="reglage-affichage">
+    <legend>Affichage des listes</legend>
+    <label class="case">
+      <input type="checkbox" checked={jauges.actif} onchange={(e) => jauges.activer(e.currentTarget.checked)} data-testid="jauges-listes" />
+      Afficher les jauges des listes
+    </label>
+    <p class="discret petit">Comme dans ComicRack : trois compteurs à droite de chaque liste et de la bibliothèque, rouge pour les nouveaux livres
+      (jamais ouverts, ajoutés depuis moins de 7 jours), jaune pour les livres non lus, vert pour le total. Désactivé, seul le total est affiché.</p>
   </fieldset>
   <fieldset class="comicrack" data-testid="reglage-analyse">
     <legend>Analyse et suivi</legend>

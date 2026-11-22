@@ -27,6 +27,7 @@
   import PanneauDetails from './PanneauDetails.svelte';
   import VueTableau from './VueTableau.svelte';
   import { scripts } from '../lib/scripts.svelte';
+  import { jauges } from '../lib/jauges.svelte';
   import { ID_MANQUANTS, manquants } from '../lib/manquants.svelte';
   import BandeauManquants from './BandeauManquants.svelte';
   import BoutonsRapport from './BoutonsRapport.svelte';
@@ -508,6 +509,7 @@
   function lectureFinie() {
     void bib.reinitialiser(false);
     fichesModifiees++;
+    jauges.rafraichir(); // la lecture notée change les non lus / nouveaux des listes
   }
 
   /** Lecteur fermé (après `lectureFinie`) : on le retire et on rend le focus à la liste. */

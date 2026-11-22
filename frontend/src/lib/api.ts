@@ -247,6 +247,8 @@ export interface PreferencesVue {
   theme?: string;
   /** Panneau des listes affiché (absent : affiché). Masqué : barre latérale réduite à des boutons. */
   listesVisibles?: boolean;
+  /** Jauges des listes (compteurs rouge / jaune / vert) ; absent : affichées. */
+  jaugesListes?: boolean;
   /** Réglages du lecteur (sous-objet remplacé en entier à chaque enregistrement). */
   lecteur?: PreferencesLecteur;
   /** Vue propre à chaque liste (clé : identifiant). À l'enregistrement, fusion liste par liste ;
@@ -1600,3 +1602,17 @@ export interface BilanLecture {
 }
 /** Marque des livres lus (`lu` vrai) ou non lus ; refusé (message lisible) en lecture seule. */
 export const marquerLecture = (ids: string[], lu: boolean) => appeler<BilanLecture>('marquer_lecture', { ids, lu });
+
+// ───────────── Jauges des listes (lot jauges, docs/tauri/ipc-jauges.md) ─────────────
+/** Les trois comptes d'une liste : nouveaux (rouge), non lus (jaune), total (vert). */
+export interface Jauge {
+  nouveaux: number;
+  nonLus: number;
+  total: number;
+}
+/** Jauges de la bibliothèque (`racine`) et de chaque liste dont le contenu est connu (clé : identifiant). */
+export interface JaugesListes {
+  racine: Jauge;
+  listes: Record<string, Jauge>;
+}
+export const jaugesListes = () => appeler<JaugesListes>('jauges_listes');

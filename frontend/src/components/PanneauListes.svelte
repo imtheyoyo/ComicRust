@@ -16,7 +16,9 @@
   import { choisirFichier, dialogueDisponible, dossierDe, enregistrerSous, FILTRE_CBL, FILTRE_TOUS } from '../lib/dialogue';
   import { ID_MANQUANTS, manquants } from '../lib/manquants.svelte';
   import { enregistrerVueListe } from '../lib/prefs';
+  import { jauges } from '../lib/jauges.svelte';
   import EditeurListeIntelligente from './EditeurListeIntelligente.svelte';
+  import Jauges from './Jauges.svelte';
   import MenuContextuel, { type EntreeMenu } from './MenuContextuel.svelte';
 
   interface Props {
@@ -543,7 +545,11 @@
               onpointerdown={(e) => e.stopPropagation()} aria-label="Nouveau nom" spellcheck="false" data-testid="renommage-liste" />
           {:else}
             <span class="nom">{n.nom}</span>
-            <span class="compte" class:inconnu={n.nbLivres === undefined}>{nombre(n)}</span>
+            {#if jauges.de(n.id)}
+              <Jauges jauge={jauges.de(n.id)!} />
+            {:else}
+              <span class="compte" class:inconnu={n.nbLivres === undefined}>{nombre(n)}</span>
+            {/if}
           {/if}
         </div>
       {/each}

@@ -17,6 +17,13 @@
   --cr-rectangle-bordure: var(--cr-accent);
   --cr-lecture-piste: rgb(0 0 0 / 45%);
   --cr-ombre-forte: 0 8px 32px rgb(0 0 0 / 0.4);
+  /* Jauges des listes (compteurs rouge, jaune, vert) : couples fond / texte lisibles (4,5:1). */
+  --cr-jauge-nouveaux-fond: #c62828;
+  --cr-jauge-nouveaux-texte: #ffffff;
+  --cr-jauge-non-lus-fond: #f2b01e;
+  --cr-jauge-non-lus-texte: #1d2330;
+  --cr-jauge-total-fond: #2e7d32;
+  --cr-jauge-total-texte: #ffffff;
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }

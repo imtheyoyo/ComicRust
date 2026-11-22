@@ -33,6 +33,7 @@ pub mod couvertures;
 pub mod diagnostic;
 pub mod edition;
 pub mod fenetre;
+pub mod jauges;
 pub mod lecteur;
 pub mod lecture_etat;
 pub mod liberation;
@@ -60,6 +61,8 @@ mod tests_connexion;
 mod tests_diagnostic;
 #[cfg(test)]
 mod tests_formulaires;
+#[cfg(test)]
+mod tests_jauges;
 #[cfg(test)]
 mod tests_lecture_etat;
 #[cfg(test)]
@@ -103,6 +106,8 @@ pub mod app;
 mod cmd_diagnostic;
 #[cfg(feature = "app")]
 mod cmd_fenetre;
+#[cfg(feature = "app")]
+mod cmd_jauges;
 #[cfg(feature = "app")]
 mod cmd_lecteur;
 #[cfg(feature = "app")]

@@ -31,6 +31,10 @@ pub const THEMES_ANCIENS: &[(&str, &str)] = &[
     ("moderne-clair", include_str!("../themes/anciennes/moderne-clair.v1.css")),
     ("moderne-sombre", include_str!("../themes/anciennes/moderne-sombre.v1.css")),
     ("classique", include_str!("../themes/anciennes/classique.v1.css")),
+    // Avant les jauges des listes (variables `--cr-jauge-*` facultatives ajoutées).
+    ("moderne-clair", include_str!("../themes/anciennes/moderne-clair.v2.css")),
+    ("moderne-sombre", include_str!("../themes/anciennes/moderne-sombre.v2.css")),
+    ("classique", include_str!("../themes/anciennes/classique.v2.css")),
 ];
 
 /// Version du contrat de variables des thèmes livrés (`/* @contrat: 2 */`).
@@ -96,6 +100,12 @@ pub const CONTRAT: &[VariableContrat] = &[
     f("--cr-rectangle-bordure", "Contour du rectangle de sélection", "var(--cr-accent)"),
     f("--cr-lecture-piste", "Piste vide des barres de lecture et de progression", "var(--cr-bordure)"),
     f("--cr-ombre-forte", "Ombre marquée des fenêtres flottantes et du lecteur", "var(--cr-ombre)"),
+    f("--cr-jauge-nouveaux-fond", "Jauge des listes : fond du compteur de nouveaux livres (rouge)", "#c62828"),
+    f("--cr-jauge-nouveaux-texte", "Jauge des listes : texte du compteur de nouveaux livres", "#ffffff"),
+    f("--cr-jauge-non-lus-fond", "Jauge des listes : fond du compteur de livres non lus (jaune)", "#f2b01e"),
+    f("--cr-jauge-non-lus-texte", "Jauge des listes : texte du compteur de livres non lus", "#1d2330"),
+    f("--cr-jauge-total-fond", "Jauge des listes : fond du compteur de total de livres (vert)", "#2e7d32"),
+    f("--cr-jauge-total-texte", "Jauge des listes : texte du compteur de total de livres", "#ffffff"),
 ];
 
 /// Un thème disponible dans `data\themes`, tel que le voit le front (contrat IPC `ThemeInfo`).
@@ -550,7 +560,7 @@ mod tests {
     #[test]
     fn contrat_coherent() {
         assert_eq!(CONTRAT.iter().filter(|v| v.obligatoire).count(), 12);
-        assert_eq!(CONTRAT.iter().filter(|v| !v.obligatoire).count(), 13);
+        assert_eq!(CONTRAT.iter().filter(|v| !v.obligatoire).count(), 19);
         for (i, v) in CONTRAT.iter().enumerate() {
             assert!(v.nom.starts_with("--cr-"), "{}", v.nom);
             assert!(!v.role.is_empty(), "{}", v.nom);
@@ -769,6 +779,22 @@ mod tests {
     }
 
     #[test]
+    fn themes_livres_avant_les_jauges_mis_a_jour() {
+        // Les thèmes de la 1.0.0 (sans variables de jauge) non modifiés reçoivent les jauges.
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        for (i, (id, _)) in THEMES_LIVRES.iter().enumerate() {
+            std::fs::write(d.join(format!("{id}.css")), THEMES_ANCIENS[3 + i].1).unwrap();
+        }
+        assert_eq!(installer_themes_livres(d).unwrap().len(), 3);
+        for (id, css) in THEMES_LIVRES {
+            let installe = std::fs::read_to_string(d.join(format!("{id}.css"))).unwrap();
+            assert_eq!(&installe, css);
+            assert!(installe.contains("--cr-jauge-total-fond:"));
+        }
+    }
+
+    #[test]
     fn mise_a_jour_automatique_des_livres_inchanges() {
         let tmp = tempfile::tempdir().unwrap();
         let d = tmp.path();
@@ -789,12 +815,13 @@ mod tests {
 
     #[test]
     fn les_anciennes_versions_sont_bien_anciennes() {
-        for ((id, ancien), (id2, nouveau)) in THEMES_ANCIENS.iter().zip(THEMES_LIVRES) {
-            assert_eq!(id, id2);
+        for (id, ancien) in THEMES_ANCIENS {
+            let (_, nouveau) = THEMES_LIVRES.iter().find(|(i, _)| i == id).expect("thème livré correspondant");
             assert_ne!(normaliser(ancien), normaliser(nouveau), "{id} : l'ancienne version doit différer");
-            assert!(!ancien.contains("@contrat"), "{id}");
             assert!(nouveau.contains(&format!("@contrat: {VERSION_CONTRAT}")), "{id}");
         }
+        // Une ancienne version du contrat 1 n'a pas d'en-tête `@contrat`.
+        assert!(THEMES_ANCIENS[..3].iter().all(|(id, ancien)| !ancien.contains("@contrat") && !id.is_empty()));
     }
 
     #[test]
@@ -830,7 +857,7 @@ mod tests {
             assert!(css.matches("/*").count() >= CONTRAT.len(), "{id} : variables non commentées");
         }
         assert!(THEMES_LIVRES.iter().any(|(id, _)| *id == THEME_DEFAUT));
-        assert_eq!(THEMES_LIVRES.len(), THEMES_ANCIENS.len());
+        assert!(THEMES_ANCIENS.iter().all(|(id, _)| THEMES_LIVRES.iter().any(|(i, _)| i == id)));
     }
 
     #[test]
@@ -890,6 +917,11 @@ mod tests {
             ] {
                 let c = contraste(premier, second);
                 assert!(c >= min, "{id} : contraste {nom} = {c:.2}:1, minimum {min}:1");
+            }
+            // Jauges des listes : texte lisible sur chacun des trois fonds.
+            for jauge in ["nouveaux", "non-lus", "total"] {
+                let c = contraste(&v(&format!("--cr-jauge-{jauge}-texte")), &v(&format!("--cr-jauge-{jauge}-fond")));
+                assert!(c >= 4.5, "{id} : contraste jauge {jauge} = {c:.2}:1, minimum 4.5:1");
             }
             // Messages d'erreur, de succès et d'avertissement lisibles sur le fond et le panneau.
             for nom in ["--cr-erreur", "--cr-succes", "--cr-avertissement"] {

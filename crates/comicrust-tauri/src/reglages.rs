@@ -568,6 +568,10 @@ pub struct PreferencesVue {
     /// réduit à une colonne de boutons (lot L7).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listes_visibles: Option<bool>,
+    /// Jauges des listes (compteurs rouge / jaune / vert à droite de chaque liste ; absent =
+    /// affichées). Voir `docs/tauri/ipc-jauges.md`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jauges_listes: Option<bool>,
     /// Réglages du lecteur (sous-objet `lecteur`, remplacé en entier à chaque enregistrement).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lecteur: Option<PreferencesLecteur>,
@@ -783,6 +787,7 @@ impl PreferencesVue {
             largeur_listes: borne("largeurListes", LARGEUR_LISTES),
             theme: o.get("theme").and_then(Value::as_str).filter(|s| id_theme_valide(s)).map(str::to_string),
             listes_visibles: o.get("listesVisibles").and_then(Value::as_bool),
+            jauges_listes: o.get("jaugesListes").and_then(Value::as_bool),
             lecteur: o.get("lecteur").and_then(PreferencesLecteur::depuis_json),
             listes: o.get("listes").and_then(listes_depuis_json),
             tableau: o.get("tableau").and_then(PreferencesTableau::depuis_json),
@@ -812,6 +817,7 @@ impl PreferencesVue {
             largeur_listes,
             theme,
             listes_visibles,
+            jauges_listes,
             lecteur,
             rouvrir_derniere_liste
         );
@@ -1179,6 +1185,7 @@ mod tests {
             largeur_listes: Some(310),
             theme: Some("moderne-sombre".into()),
             listes_visibles: Some(false),
+            jauges_listes: Some(false),
             lecteur: None,
             listes: None,
             tableau: None,
