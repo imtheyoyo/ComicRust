@@ -70,7 +70,7 @@ Audit du 14/11/2026 (étape 10 du plan). Préfixes de preuve : **E** = `crates/c
 ### Import, scan, manquants
 - ❌ **Analyse automatique au démarrage** (egui : `scan_after_load = true`).
 - ❌ « Arrêter l'analyse », bilan copiable des erreurs.
-- ✅ **Livres manquants** (lot L3, `ipc-manquants.md`) : badge, indicateur du tableau, entrée « Livres manquants (N) » (toujours visible, discrète à 0), Retrouver le fichier, Chercher dans un dossier, Retirer (confirmation), fenêtre « Fichier introuvable » / « Disque inaccessible ». 🟡 chemins saisis (pas de dialogue natif : point d'extension `selecteurs`) ; pas de menu « Fichiers » en Tauri ; marque en mémoire seulement pour une bibliothèque ComicRack ; la table `converted` d'egui n'a pas d'équivalent.
+- ✅ **Livres manquants** (lot L3, `ipc-manquants.md`) : badge, indicateur du tableau, entrée « Livres manquants (N) » (toujours visible, discrète à 0), Retrouver le fichier, Chercher dans un dossier, Retirer (confirmation), fenêtre « Fichier introuvable » / « Disque inaccessible ». 🟢 dialogues natifs branchés au lot L8 (`ipc-dialogue.md`) ; pas de menu « Fichiers » en Tauri ; marque en mémoire seulement pour une bibliothèque ComicRack ; la table `converted` d'egui n'a pas d'équivalent.
 - ✅ Base hors ligne.
 
 ### Édition : ✅ (Infos 5 onglets, Pages, ComicInfo, conversion) ; ➕ renommer/déplacer.
