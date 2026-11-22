@@ -5,6 +5,23 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v1.0.0] — 2026-11-22
+
+Étape 11 de la feuille de route : **première release** de la version Tauri. Les fonctions sont gelées :
+la parité avec la version egui (v0.10.9) est atteinte (audit de la tauri-v0.11.0, GO du 22/11/2026). Après
+la validation de cette version, la version egui est archivée et la version Tauri devient la seule maintenue.
+
+### Nouveautés
+- **Menu du livre (clic droit)** : la liste des **scripts** s'affiche directement dans le menu (plus de
+  sous-menu à ouvrir), avec repli propre (scripts indisponibles, aucun script, liste longue).
+- **Marquer comme lu / non lu** : sur un ou plusieurs livres ou piles. Écrit dans la base ComicRust ; avec
+  ComicRack, seulement en mode « Lecture et écriture » (refusé en lecture seule, avec la raison affichée).
+- **Documentation** finalisée : README du paquet, aide (F1), docs du dépôt.
+
+### Recette
+[`recette/tauri-v1.0.0.md`](recette/tauri-v1.0.0.md) : les nouveautés et **toute** la non-régression de
+la tauri-v0.11.0.
+
 ## [tauri-v0.11.0] — 2026-11-22
 
 Étape 10 de la feuille de route : **audit de parité** avec la version egui (v0.10.9). Tous les écarts
