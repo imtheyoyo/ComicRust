@@ -18,6 +18,11 @@ impl Biblio {
     /// calculé des listes sont invalidés si quelque chose a changé.
     pub(crate) fn marquer_manquants(&self, marques: &[Marque]) -> Vec<String> {
         let mut g = self.verrou();
+        // Pendant une analyse, la base est partagée avec elle (`Arc::ptr_eq` à la fin) : ne pas la cloner ;
+        // l'analyse recalcule de toute façon les marques « manquant ».
+        if g.scan_en_cours {
+            return Vec::new();
+        }
         let Some(base) = g.base.as_mut() else { return Vec::new() };
         let a_changer: Vec<(usize, Option<bool>)> = marques
             .iter()

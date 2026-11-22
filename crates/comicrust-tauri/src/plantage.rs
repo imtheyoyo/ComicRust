@@ -58,6 +58,13 @@ pub fn installer(data: PathBuf) {
     let precedent = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let fil = std::thread::current();
+        // Seule une panique du fil principal est un vrai plantage : celles des fils de travail sont
+        // rattrapées (commandes Tauri, décodeurs d'images `catch_unwind`) et ne doivent pas laisser de
+        // faux rapport au lancement suivant.
+        if fil.name() != Some("main") {
+            precedent(info);
+            return;
+        }
         let texte = formater_rapport(
             env!("CARGO_PKG_VERSION"),
             &chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),

@@ -970,7 +970,7 @@ pub fn run() {
         .manage(EtatFenetre::nouveau(data.clone(), initial))
         .manage(DossierData(data))
         // Géométrie de la fenêtre mémorisée (redimensionnement, déplacement, fermeture).
-        .on_window_event(|fen, evenement| cmd_fenetre::evenement_fenetre(fen, evenement))
+        .on_window_event(cmd_fenetre::evenement_fenetre)
         // Couvertures : `cr-couv://localhost/<id>` (Windows : `http://cr-couv.localhost/<id>`), servies
         // depuis le cache `data\couvertures` par les fils de `Biblio::pool` (jamais le fil principal :
         // la première lecture d'une archive sur le NAS peut durer). 404 si illisible.

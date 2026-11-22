@@ -838,8 +838,14 @@ impl Manquants {
         let _garde = self.biblio.prendre_edition()?;
         let mut livres: Vec<(LibraryBook, PathBuf)> = Vec::new();
         let mut ignorees = 0usize;
+        // Deux fiches d'un même lot ne peuvent pas viser le même fichier (cases cochées à la main).
+        let mut cibles_prises: std::collections::HashSet<String> = std::collections::HashSet::new();
         for d in demandes {
             let nouveau = PathBuf::from(nettoyer_chemin(&d.nouveau));
+            if !cibles_prises.insert(nouveau.to_string_lossy().to_lowercase()) {
+                ignorees += 1;
+                continue;
+            }
             match self.biblio.livre(&d.id) {
                 Some(b) if b.file.as_deref() == Some(d.ancien.as_str()) => livres.push((b, nouveau)),
                 _ => ignorees += 1,
@@ -864,7 +870,10 @@ impl Manquants {
         let n = ids.len();
         let mut info = format!("{n} fiche{} mise{} à jour.", pluriel(n), pluriel(n));
         if ignorees > 0 {
-            info.push_str(&format!(" {ignorees} ignorée{} (fiche modifiée entre-temps).", pluriel(ignorees)));
+            info.push_str(&format!(
+                " {ignorees} ignorée{} (fiche modifiée entre-temps ou fichier visé deux fois).",
+                pluriel(ignorees)
+            ));
         }
         Ok(BilanOperation { nb: n, info, erreur: None })
     }
