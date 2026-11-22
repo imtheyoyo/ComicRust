@@ -144,7 +144,11 @@ Tout écart est soit corrigé, soit accepté explicitement par Yoyo.
 ### Étape 11 : première release (`tauri-v1.0.0`)
 Gel des fonctions, documentation (README, aide), décision sur la suite de la version egui
 (maintenue, archivée ou remplacée), fusion sur `main`.
-**Recette** `recette/tauri-v1.0.0.md`.
+**Recette** `recette/tauri-v1.0.0.md` : **GO** du 22/11/2026 (44/44 OK). Décision de Yoyo : egui archivée et Tauri seule
+maintenue. Fait : branche `egui-archive` (= `main` v0.10.9), `main` avancée sur `tauri2-web` (fusion sans perte),
+README principal réécrit pour Tauri. Les publications (`release-tauri.yml`) restent déclenchées depuis
+`tauri2-web` ; `main` est avancée sur elle après chaque GO. Suite : tauri-v1.0.1 (jauges des listes, scripts en
+sous-menu latéral, résumé de série Bedetheque, version dans le titre, réouverture sur la dernière liste).
 
 ## Hors périmètre de la parité
 
