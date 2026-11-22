@@ -15,7 +15,7 @@
   import { Selection } from '../lib/selection.svelte';
   import DialogInfos from './DialogInfos.svelte';
   import { fermerModale, modale } from '../lib/modale';
-  import { enregistrerOuvreur } from '../lib/fenetre';
+  import { demanderOuvertureFichier, enregistrerOuvreur } from '../lib/fenetre';
   import DialogOperation from './DialogOperation.svelte';
   import DialogRenommer from './DialogRenommer.svelte';
   import GrilleCouvertures from './GrilleCouvertures.svelte';
@@ -1098,7 +1098,7 @@
       onclick={() => (details = !details)}
       title="Afficher ou masquer le panneau de détails"
     >Détails</button>
-    <button onclick={() => dialogueFichier?.showModal()} title="Lire un fichier qui n'est pas dans la bibliothèque" data-testid="ouvrir-fichier">Ouvrir un fichier…</button>
+    <button onclick={() => void demanderOuvertureFichier()} title="Lire un fichier qui n'est pas dans la bibliothèque" data-testid="ouvrir-fichier">Ouvrir un fichier…</button>
     <button onclick={ouvrirMenuScripts} aria-haspopup="menu" aria-expanded={!!menuScripts && !menuScripts.ids} title="Scripts Python (bibliothèque, livres sélectionnés, gestion)" data-testid="menu-scripts">📜 Scripts ▾</button>
   </header>
 

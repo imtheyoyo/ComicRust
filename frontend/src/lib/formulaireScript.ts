@@ -267,3 +267,18 @@ export function groupesInsertion(c: ControleScript): Array<{ titre: string; item
   }
   return out.filter((g) => g.items.length > 0);
 }
+
+// ───────────── « Parcourir… » des champs fichier / dossier (lot L8) ─────────────
+
+/** Filtres d'un champ fichier (`["Images", "jpg;png"]` ou `["Images", ["jpg", "png"]]`), mis en forme pour
+ *  le dialogue natif (extensions sans `*.` ni point), comme `FormSpec` du cœur. */
+export function filtresChamp(c: ControleScript): Array<{ nom: string; extensions: string[] }> {
+  const sortie: Array<{ nom: string; extensions: string[] }> = [];
+  for (const f of c.filters ?? []) {
+    if (!Array.isArray(f) || f.length !== 2) continue;
+    const brut = Array.isArray(f[1]) ? f[1].map(texteValeur) : texteValeur(f[1]).split(/[;, ]/);
+    const extensions = brut.map((e) => e.trim().replace(/^\*\./, '').replace(/^\./, '')).filter((e) => e.length > 0);
+    if (extensions.length > 0) sortie.push({ nom: texteValeur(f[0]), extensions });
+  }
+  return sortie;
+}

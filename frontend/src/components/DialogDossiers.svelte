@@ -3,6 +3,7 @@
   import { fermerModale, modale } from '../lib/modale';
   import { ajouterDossier, lancerScan, listerDossiers, retirerDossier, messageErreur } from '../lib/api';
   import type { SuiviScan } from '../lib/bibliotheque.svelte';
+  import { choisirDossier, dialogueDisponible } from '../lib/dialogue';
 
   interface Props {
     scan: SuiviScan;
@@ -46,6 +47,14 @@
       nouveau = '';
       return liste;
     });
+
+  /** « Parcourir… » : dialogue natif de dossier, puis ajout direct du dossier choisi. */
+  async function parcourir() {
+    const chemin = await choisirDossier({ titre: 'Ajouter un dossier de BD', cheminInitial: nouveau });
+    if (!chemin) return;
+    nouveau = chemin;
+    await ajouter();
+  }
 
   const lancer = () =>
     agir(async () => {
@@ -103,6 +112,7 @@
 
   <form class="ajout" onsubmit={(e) => { e.preventDefault(); void ajouter(); }}>
     <input type="text" bind:value={nouveau} placeholder="Chemin du dossier à ajouter" aria-label="Chemin du dossier à ajouter" spellcheck="false" autocomplete="off" />
+    {#if dialogueDisponible()}<button type="button" onclick={() => void parcourir()} data-testid="dossiers-parcourir">Parcourir…</button>{/if}
     <button type="submit" disabled={!nouveau.trim()}>Ajouter</button>
   </form>
 

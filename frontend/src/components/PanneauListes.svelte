@@ -13,6 +13,7 @@
   } from '../lib/api';
   import { glypheListe, infobulleListe, type EtatListes, type LigneArbre } from '../lib/listes.svelte';
   import { modale } from '../lib/modale';
+  import { choisirFichier, dialogueDisponible, dossierDe, enregistrerSous, FILTRE_CBL, FILTRE_TOUS } from '../lib/dialogue';
   import { ID_MANQUANTS, manquants } from '../lib/manquants.svelte';
   import { enregistrerVueListe } from '../lib/prefs';
   import EditeurListeIntelligente from './EditeurListeIntelligente.svelte';
@@ -353,6 +354,24 @@
     else importCbl.erreur = listes.info?.texte ?? 'Import impossible.';
   }
 
+  /** « Parcourir… » de l'import : dialogue natif « Ouvrir », puis analyse directe du fichier choisi. */
+  async function parcourirImport() {
+    const c = await choisirFichier({ titre: 'Importer une liste de lecture', cheminInitial: dossierDe(importCbl?.chemin ?? ''), filtres: [FILTRE_CBL, FILTRE_TOUS] });
+    if (!c || !importCbl) return;
+    importCbl.chemin = c;
+    importCbl.rapport = null;
+    await analyser();
+  }
+
+  /** « Parcourir… » de l'export : dialogue natif « Enregistrer sous » (il confirme l'écrasement), puis export. */
+  async function parcourirExport() {
+    if (!exportCbl) return;
+    const c = await enregistrerSous({ titre: 'Exporter la liste en .cbl', cheminInitial: exportCbl.chemin || `${exportCbl.nom}.cbl`, filtres: [FILTRE_CBL] });
+    if (!c || !exportCbl) return;
+    exportCbl.chemin = c;
+    await exporter();
+  }
+
   async function exporter() {
     if (!exportCbl || !exportCbl.chemin.trim()) return;
     exportCbl.erreur = '';
@@ -639,8 +658,11 @@
     <h2 id="titre-import">Importer une liste de lecture (.cbl)</h2>
     <form class="formulaire" onsubmit={(e) => { e.preventDefault(); void (importCbl?.rapport ? importer() : analyser()); }}>
       <label for="chemin-cbl">Chemin du fichier .cbl (ComicRack, Comic Book Reading Lists…) :</label>
-      <input id="chemin-cbl" type="text" bind:value={importCbl.chemin} placeholder="D:\Listes\Thanos.cbl" spellcheck="false" autocomplete="off"
-        disabled={importCbl.importe} oninput={() => { if (importCbl) importCbl.rapport = null; }} data-testid="chemin-cbl" />
+      <div class="saisie-chemin">
+        <input id="chemin-cbl" type="text" bind:value={importCbl.chemin} placeholder="D:\Listes\Thanos.cbl" spellcheck="false" autocomplete="off"
+          disabled={importCbl.importe} oninput={() => { if (importCbl) importCbl.rapport = null; }} data-testid="chemin-cbl" />
+        {#if dialogueDisponible()}<button type="button" onclick={() => void parcourirImport()} disabled={importCbl.importe || importCbl.cours} data-testid="parcourir-cbl">Parcourir…</button>{/if}
+      </div>
       {#if importCbl.rapport}
         {@const r = importCbl.rapport}
         <div class="rapport" data-testid="rapport-cbl">
@@ -685,7 +707,10 @@
     <h2 id="titre-export">Exporter « {exportCbl.nom} » en .cbl</h2>
     <form class="formulaire" onsubmit={(e) => { e.preventDefault(); void exporter(); }}>
       <label for="chemin-export">Fichier à écrire (l'extension .cbl est ajoutée si besoin) :</label>
-      <input id="chemin-export" type="text" bind:value={exportCbl.chemin} placeholder={`D:\\Listes\\${exportCbl.nom}.cbl`} spellcheck="false" autocomplete="off" data-testid="chemin-export" />
+      <div class="saisie-chemin">
+        <input id="chemin-export" type="text" bind:value={exportCbl.chemin} placeholder={`D:\\Listes\\${exportCbl.nom}.cbl`} spellcheck="false" autocomplete="off" data-testid="chemin-export" />
+        {#if dialogueDisponible()}<button type="button" onclick={() => void parcourirExport()} data-testid="parcourir-export">Parcourir…</button>{/if}
+      </div>
       {#if exportCbl.erreur}<p class="erreur" role="alert">{exportCbl.erreur}</p>{/if}
       {#if exportCbl.bilan}<p class="ok" role="status">✔ {exportCbl.bilan}</p>{/if}
       <div class="pied">
@@ -738,6 +763,8 @@
   .fermer-info { padding: 0 4px; border: 0; background: none; font-size: 11px; }
   .discret { color: var(--cr-texte-discret); font-size: 12px; padding: 4px 10px; margin: 0; }
   .formulaire { display: grid; gap: 8px; }
+  .saisie-chemin { display: flex; gap: 8px; }
+  .saisie-chemin input { flex: 1; min-width: 0; }
   .rapport { padding: 8px; border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); background: var(--cr-fond); }
   .rapport p { margin: 0 0 6px; }
   .pied { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

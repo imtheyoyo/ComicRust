@@ -5,6 +5,7 @@
   // progression, Arrêter), bilan. Contrat : docs/tauri/ipc-transfert.md.
   import { fermerModale, modale } from '../lib/modale';
   import { onDestroy } from 'svelte';
+  import { choisirFichier, dialogueDisponible, dossierDe, FILTRE_TOUS, FILTRE_XML } from '../lib/dialogue';
   import {
     annulerTransfert, apercuTransfert, ecouter, lancerTransfert, messageErreur, type ApercuTransfert, type EtatBiblio,
     type ProgressionTransfert, type ResumeTransfert, type SourceTransfert,
@@ -77,6 +78,12 @@
     }
   }
 
+  /** « Parcourir… » : dialogue natif pour ComicDb.xml. */
+  async function parcourirComicdb() {
+    const c = await choisirFichier({ titre: 'ComicDb.xml de ComicRack', cheminInitial: dossierDe(comicdb), filtres: [FILTRE_XML, FILTRE_TOUS] });
+    if (c) comicdb = c;
+  }
+
   function arreter() {
     arretDemande = true;
     void annulerTransfert();
@@ -111,8 +118,11 @@
         </label>
         <label class="chemin">
           <span>{source === 'mysql' ? 'ComicDb.xml (listes, dossiers) :' : 'ComicDb.xml :'}</span>
-          <input type="text" bind:value={comicdb} spellcheck="false" autocomplete="off" data-testid="chemin-comicdb"
-            placeholder="Chemin de ComicDb.xml" />
+          <span class="saisie">
+            <input type="text" bind:value={comicdb} spellcheck="false" autocomplete="off" data-testid="chemin-comicdb"
+              placeholder="Chemin de ComicDb.xml" />
+            {#if dialogueDisponible()}<button type="button" onclick={() => void parcourirComicdb()} data-testid="comicdb-parcourir">Parcourir…</button>{/if}
+          </span>
         </label>
         {#if !apercu.mysql}
           <p class="discret petit">Aucune base MySQL trouvée dans ComicRack.ini : si ComicRack range ses livres dans MySQL,
@@ -183,6 +193,8 @@
   .case input { margin-top: 3px; accent-color: var(--cr-accent); }
   .chemin { display: grid; gap: 4px; margin: 4px 0 6px; }
   .chemin input { min-width: 0; }
+  .saisie { display: flex; gap: 8px; }
+  .saisie input { flex: 1; }
   .destination { margin-bottom: 6px; word-break: break-all; }
   code { font-family: ui-monospace, Consolas, monospace; background: var(--cr-fond-survol); padding: 1px 5px; border-radius: 3px; }
   .discret { color: var(--cr-texte-discret); }

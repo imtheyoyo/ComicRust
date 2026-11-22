@@ -7,6 +7,7 @@
   import {
     configurerMysql, configurerPremierDemarrage, type EtatBiblio, type ModeBiblio, type TypeStore, messageErreur,
   } from '../lib/api';
+  import { choisirFichier, dialogueDisponible, dossierDe, FILTRE_INI, FILTRE_TOUS } from '../lib/dialogue';
   import FormulaireMysql, { mysqlVide, versParametres } from './FormulaireMysql.svelte';
 
   interface Props {
@@ -34,6 +35,12 @@
   const valide = $derived(
     mode === 'autonome' ? store === 'sqlite' || mysqlStore.serveur.trim().length > 0 : sourceCr === 'mysql' || cheminIni.trim().length > 0,
   );
+
+  /** « Parcourir… » : dialogue natif pour ComicRack.ini (ou ComicDb.xml). */
+  async function parcourirIni() {
+    const c = await choisirFichier({ titre: 'ComicRack.ini de l\'installation', cheminInitial: dossierDe(cheminIni), filtres: [FILTRE_INI, FILTRE_TOUS] });
+    if (c) cheminIni = c;
+  }
 
   async function valider() {
     if (!valide || occupe) return;
@@ -116,7 +123,10 @@
       {#if sourceCr === 'ini'}
         <label class="champ">
           <span>Fichier <code>ComicRack.ini</code> de l'installation</span>
-          <input type="text" bind:value={cheminIni} placeholder="C:\ComicRack\ComicRack.ini" autocomplete="off" spellcheck="false" />
+          <span class="saisie">
+            <input type="text" bind:value={cheminIni} placeholder="C:\ComicRack\ComicRack.ini" autocomplete="off" spellcheck="false" data-testid="chemin-ini" />
+            {#if dialogueDisponible()}<button type="button" onclick={() => void parcourirIni()} disabled={occupe} data-testid="ini-parcourir">Parcourir…</button>{/if}
+          </span>
         </label>
       {:else}
         <FormulaireMysql id="mysql-cr" cible="comicrack" bind:valeurs={mysqlCr} />
@@ -157,6 +167,8 @@
   .choix span { display: grid; gap: 2px; }
   small { color: var(--cr-texte-discret); font-size: 13px; }
   .champ { display: grid; gap: 6px; }
+  .saisie { display: flex; gap: 8px; }
+  .saisie input { flex: 1; min-width: 0; }
   legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
   .option { display: flex; gap: 8px; align-items: center; cursor: pointer; }
   .option input { accent-color: var(--cr-accent); }

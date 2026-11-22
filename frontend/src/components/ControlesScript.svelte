@@ -12,9 +12,10 @@
   // est inséré comme texte (aucun {@html}) ; les images passent par imageScriptSure.
   import { imageScriptSure, type ControleScript } from '../lib/api';
   import {
-    celluleVide, choixNormaux, colonnesTable, estSecret, groupesInsertion, indication, rangChoix, texteValeur,
+    celluleVide, choixNormaux, colonnesTable, estSecret, filtresChamp, groupesInsertion, indication, rangChoix, texteValeur,
   } from '../lib/formulaireScript';
   import ControlesScript from './ControlesScript.svelte';
+  import { choisirDossier, choisirFichier, dialogueDisponible, dossierDe, enregistrerSous } from '../lib/dialogue';
 
   interface Props {
     controles: ControleScript[];
@@ -55,6 +56,17 @@
   const pleineLargeur = (c: ControleScript) =>
     ['label', 'separator', 'image', 'group', 'columns', 'tabs', 'button', 'checkbox'].includes(c.type) ||
     enBloc(c) || !(c.label ?? '').trim();
+
+  /** « Parcourir… » d'un champ fichier ou dossier : dialogue natif (dossier, ouvrir ou enregistrer sous). */
+  async function parcourir(c: ControleScript) {
+    const actuel = texteValeur(valeurs[c.key!]).trim();
+    const titre = c.label || undefined;
+    let choisi: string | null;
+    if (c.type === 'folder') choisi = await choisirDossier({ titre, cheminInitial: actuel });
+    else if (c.save) choisi = await enregistrerSous({ titre, cheminInitial: actuel, filtres: filtresChamp(c) });
+    else choisi = await choisirFichier({ titre, cheminInitial: dossierDe(actuel) || actuel, filtres: filtresChamp(c) });
+    if (choisi) fixer(c.key, choisi);
+  }
 
   function fixer(cle: string | undefined, v: unknown) {
     if (cle) valeurs[cle] = v;
@@ -314,10 +326,13 @@
         </div>
         <div class="ligne"><button type="button" class="mini" disabled={off} onclick={() => ajouterLigne(c)}>➕ Ajouter une ligne</button></div>
       {:else if c.type === 'folder' || c.type === 'file'}
-        <input {id} type="text" disabled={off} spellcheck="false" style:width={styleTaille(c.width)} aria-invalid={!!err}
-          placeholder={c.type === 'folder' ? 'Chemin du dossier' : 'Chemin du fichier'}
-          title={(aide ? aide + ' — ' : '') + 'Saisir ou coller le chemin complet' + (c.filters?.length ? ` (${c.filters.map((f) => texteValeur(f[0])).join(', ')})` : '')}
-          value={texteValeur(valeurs[c.key!])} oninput={(e) => fixer(c.key, e.currentTarget.value)} />
+        <span class="champ-chemin">
+          <input {id} type="text" disabled={off} spellcheck="false" style:width={styleTaille(c.width)} aria-invalid={!!err}
+            placeholder={c.type === 'folder' ? 'Chemin du dossier' : 'Chemin du fichier'}
+            title={(aide ? aide + ' — ' : '') + 'Saisir ou coller le chemin complet' + (c.filters?.length ? ` (${c.filters.map((f) => texteValeur(f[0])).join(', ')})` : '')}
+            value={texteValeur(valeurs[c.key!])} oninput={(e) => fixer(c.key, e.currentTarget.value)} />
+          {#if dialogueDisponible()}<button type="button" class="mini" disabled={off} onclick={() => void parcourir(c)} data-testid="script-parcourir">Parcourir…</button>{/if}
+        </span>
       {:else if c.type === 'label'}
         <p class="texte style-{c.style || 'normal'}" title={aide}>{c.text ?? c.label ?? ''}</p>
       {:else if c.type === 'separator'}
@@ -404,6 +419,8 @@
   .multi .case { align-items: flex-start; }
   .multi .case span { overflow-wrap: anywhere; }
   .liste-edit { min-width: 220px; width: 100%; }
+  .champ-chemin { display: flex; gap: 6px; align-items: center; }
+  .champ-chemin input { flex: 1; min-width: 0; }
   .table-defile { overflow: auto; border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); }
   table { border-collapse: collapse; width: 100%; }
   th { position: sticky; top: 0; background: var(--cr-fond-survol); text-align: left; padding: 4px 6px; font-weight: 600; }
