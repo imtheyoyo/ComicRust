@@ -1117,6 +1117,7 @@ pub fn run() {
             cmd_fenetre::classer_chemin,
             cmd_fenetre::lire_plantage,
             cmd_fenetre::acquitter_plantage,
+            crate::cmd_lecture_etat::marquer_lecture,
             crate::cmd_manquants::etat_manquants,
             crate::cmd_manquants::verifier_manquants,
             crate::cmd_manquants::arreter_manquants,

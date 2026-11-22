@@ -34,6 +34,7 @@ pub mod diagnostic;
 pub mod edition;
 pub mod fenetre;
 pub mod lecteur;
+pub mod lecture_etat;
 pub mod liberation;
 pub mod listes;
 pub mod listes_cbl;
@@ -59,6 +60,8 @@ mod tests_connexion;
 mod tests_diagnostic;
 #[cfg(test)]
 mod tests_formulaires;
+#[cfg(test)]
+mod tests_lecture_etat;
 #[cfg(test)]
 mod tests_listes;
 #[cfg(test)]
@@ -102,6 +105,8 @@ mod cmd_diagnostic;
 mod cmd_fenetre;
 #[cfg(feature = "app")]
 mod cmd_lecteur;
+#[cfg(feature = "app")]
+mod cmd_lecture_etat;
 #[cfg(feature = "app")]
 mod cmd_manquants;
 #[cfg(feature = "app")]

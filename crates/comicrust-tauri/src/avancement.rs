@@ -119,6 +119,23 @@ impl Memoire {
         Ok(a)
     }
 
+    /// Remplace (ou, avec `None`, oublie) l'avancement de `fichier`, sans garder « la page la plus
+    /// loin » : sert à « Marquer comme lu / non lu » (`docs/tauri/ipc-lecture-etat.md`). Écrit le
+    /// fichier seulement si quelque chose change.
+    pub fn fixer(&self, fichier: &Path, valeur: Option<Avancement>) -> Result<(), String> {
+        let mut g = self.charge();
+        let table = g.get_or_insert_with(HashMap::new);
+        let change = match valeur {
+            Some(a) => table.insert(cle(fichier), a) != Some(a),
+            None => table.remove(&cle(fichier)).is_some(),
+        };
+        drop(g);
+        if change {
+            self.ecrire()?;
+        }
+        Ok(())
+    }
+
     /// Écrit la table. Les écritures sont sérialisées et chacune prend la table **au moment
     /// d'écrire** : deux appels concurrents ne peuvent pas laisser sur le disque l'état le plus
     /// ancien (la table n'est pas verrouillée pendant l'écriture disque).

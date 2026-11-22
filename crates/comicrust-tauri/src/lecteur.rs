@@ -1059,6 +1059,20 @@ impl Lecteur {
         }
     }
 
+    /// Avancement mémorisé localement (`avancement.json`) pour un fichier.
+    pub fn avancement_de(&self, fichier: &Path) -> Option<crate::avancement::Avancement> {
+        self.memoire.lire(fichier)
+    }
+
+    /// Remplace ou oublie l'avancement local d'un fichier (« Marquer comme lu / non lu »).
+    pub fn fixer_avancement(
+        &self,
+        fichier: &Path,
+        valeur: Option<crate::avancement::Avancement>,
+    ) -> Result<(), String> {
+        self.memoire.fixer(fichier, valeur)
+    }
+
     /// Note la page courante (index = numéro de page). `termine` : la dernière page a été vue
     /// (livre lu jusqu'au bout) ; la lecture est alors écrite dans la base sans attendre la
     /// fermeture.
