@@ -59,15 +59,25 @@ Réponse `BilanLecture` :
   `↺ Marquer comme non lu` (`marquerNonLu`), juste sous « Lire ». Désactivées, avec la raison en
   infobulle **et écrite sous le libellé** (`aideVisible`), quand `manquants.raison` (relue à l'ouverture du menu) indique des fiches non modifiables. Pas de raccourci clavier
   (`lib/raccourcis.ts` inchangé).
-- **Scripts au premier niveau** (plus de sous-menu « Scripts ▸ ») : séparateur, intitulé non interactif
-  « Scripts » (`role="presentation"`, pas un menuitem), puis une entrée `books:<id>` par script actif du hook `Books`.
-  - `scripts.charger()` est lancé à l'ouverture du menu, sans attendre (les entrées apparaissent à
-    l'arrivée de la liste ; « Chargement des scripts… » en attendant).
+- **Sous-menu « Scripts ▸ »** (lot menu ; avant : scripts au premier niveau en 1.0.0) : une entrée `scripts`
+  (`sousMenu: EntreeMenu[]`, voir « Sous-menus génériques ») ouvre un panneau latéral avec une entrée
+  `books:<id>` par script actif du hook `Books`, **sans limite** (le panneau défile), puis « Gérer les
+  scripts… » (`scripts-gerer`) en bas.
+  - `scripts.charger()` est lancé à l'ouverture du menu ; le sous-menu se met à jour à l'arrivée de la
+    liste (« Chargement des scripts… » en attendant).
   - Indisponible (`raisonIndisponible` : Python absent, script en cours) : entrées désactivées, raison en
     infobulle. Erreur de chargement : « Scripts indisponibles » + « Gérer les scripts… ».
   - Aucun script : « Aucun script » (désactivé) + « Gérer les scripts… ».
-  - Plus de 12 scripts : les 12 premiers, puis « … et N autre(s) : gérer les scripts… » (`scripts-gerer`).
-  - Le menu défile (`max-height`) s'il dépasse la fenêtre.
+- **Sous-menus génériques** (`MenuContextuel.svelte`) : `EntreeMenu.sousMenu` (un niveau). L'entrée porte
+  `aria-haspopup="menu"`, `aria-expanded`, `aria-controls` ; le panneau est un `role="menu"` à côté du menu
+  (à droite, à gauche si pas la place, dans la fenêtre, défile). Ouverture : survol (150 ms), clic, Entrée ou
+  Flèche droite (focus sur la 1re entrée). Fermeture : Flèche gauche ou Échap (focus rendu à l'entrée ; le
+  menu reste), survol d'une autre entrée ou sortie du pointeur après 400 ms (annulée si le pointeur rejoint le
+  sous-menu : traversée en diagonale), clic ailleurs. « Ajouter à la liste… » est une fenêtre, pas un sous-menu.
+- **Piles (liste de lecture, « Ordre de la liste »)** : « ⬆ Monter / ⬇ Descendre la pile » sont grisés, raison
+  en infobulle et sous le libellé, quand ils sont sans effet : première pile (Monter), dernière (Descendre) ;
+  plusieurs piles : bloc déjà en tête / en queue. Plusieurs piles sélectionnées : le bloc est décalé d'un cran
+  (`deplacer_piles_liste`). Alt+↑ / Alt+↓ : même règle, la raison s'affiche brièvement (`info-lecture`).
 - Le menu « 📜 Scripts ▾ » de la barre d'outils est inchangé.
 
 ## Simulé

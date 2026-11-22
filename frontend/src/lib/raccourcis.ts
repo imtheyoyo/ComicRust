@@ -34,9 +34,10 @@ export const RACCOURCIS: GroupeRaccourcis[] = [
       { touches: 'Entrée', action: 'Ouvrir le livre (ou la pile) courant' },
       { touches: 'Ctrl+I', action: 'Informations du livre sélectionné' },
       { touches: 'Menu, Maj+F10', action: 'Menu contextuel de la sélection' },
+      { touches: '→ / ← (menu contextuel)', action: 'Ouvrir / refermer un sous-menu (« Scripts ▸ ») ; Échap referme le sous-menu' },
       { touches: 'Suppr', action: 'Retirer de la liste de lecture, ou de la bibliothèque (avec confirmation)' },
       { touches: 'Échap (pile ouverte)', action: 'Revenir aux piles' },
-      { touches: 'Alt+↑ / Alt+↓', action: 'Monter / descendre la pile dans une liste de lecture' },
+      { touches: 'Alt+↑ / Alt+↓', action: 'Monter / descendre la pile (ou le bloc de piles sélectionnées) dans une liste de lecture ; sans effet en tête / en queue' },
     ],
   },
   {

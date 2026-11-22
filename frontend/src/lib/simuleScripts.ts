@@ -8,7 +8,10 @@
 // Paramètres d'adresse :
 // - `?scripts=lectureSeule` : bibliothèque en lecture seule (aperçu visible, application refusée) ;
 // - `?scripts=sansPython` : Python introuvable (erreur lisible dans la gestion) ;
-// - `?scripts=vide` : aucun script.
+// - `?scripts=vide` : aucun script ;
+// - `?scripts=beaucoup` : 30 scripts pour les livres (sous-menu « Scripts ▸ » du clic droit qui défile) ;
+// - `?scripts=echec` : la liste des scripts ne se charge pas (erreur) ;
+// - `?scripts=lent` : la liste des scripts met 1,5 s à arriver (état « Chargement… »).
 // L'application des modifications prend un peu de temps (250 ms par ligne) : l'état « application
 // en cours » (créneau occupé, Arrêter entre deux lignes) est ainsi visible et testable.
 // `window.__comicrustScripts` expose aux tests les appels reçus (réponses, vignettes, application…).
@@ -91,7 +94,11 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
   (globalThis as { __comicrustScripts?: typeof tests }).__comicrustScripts = tests;
 
   let auto = false;
-  let scripts: InfoScript[] = variante === 'vide' ? [] : [
+  const nombreux = (): InfoScript[] => Array.from({ length: 30 }, (_, k) => ({
+    id: `lot${k}.py:lancer`, nom: `Script de lot n° ${String(k + 1).padStart(2, '0')}`, fichier: `lot${k}.py`, hooks: ['Books'], actif: true,
+    description: `Script simulé ${k + 1} sur 30.`,
+  }));
+  let scripts: InfoScript[] = variante === 'vide' ? [] : variante === 'beaucoup' ? nombreux() : [
     {
       id: 'nettoyage.py:nettoyer', nom: 'Nettoyage des titres', fichier: 'nettoyage.py', hooks: ['Books'], actif: true,
       description: 'Retire les espaces en trop et corrige la casse des titres.', auteur: 'ComicRust',
@@ -503,6 +510,8 @@ export function creerScriptsSimules(ctx: ContexteScripts) {
     switch (commande) {
       case 'scripts_lister':
       case 'scripts_recharger':
+        if (variante === 'echec') throw new Error('Le service de scripts ne répond pas (simulé).');
+        if (variante === 'lent') return new Promise((ok) => setTimeout(() => ok(etat()), 1500));
         return etat();
       case 'scripts_activer': {
         const s = scripts.find((x) => x.id === args.id);
