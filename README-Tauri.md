@@ -89,9 +89,8 @@ débogage** ; `ComicRust-Tauri.exe` n'embarque pas ce serveur. Voir `MCP-tauri.m
 
 ## Limites connues de cette version
 
-- Version de transition : certaines fonctions de la version egui (`ComicRust.exe`) ne sont pas encore
-  reprises ; l'audit de parité est dans `docs/tauri/audit-parite.md` (dépôt) et la recette de la
-  version dans `RECETTE.md`.
+- La version egui (`ComicRust.exe`) est archivée : la version Tauri a repris toutes ses fonctions (audit de parité :
+  `docs/tauri/audit-parite.md` dans le dépôt ; recette de la version : `RECETTE.md`).
 - Pas de serveur OPDS / HTTP, ni d'association de fichiers Windows (hors périmètre pour l'instant).
 - Pas d'installateur : l'application n'est pas enregistrée dans « Applications » de Windows.
 - L'exécutable n'est pas signé numériquement : SmartScreen peut afficher un avertissement au premier
