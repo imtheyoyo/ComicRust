@@ -86,7 +86,8 @@ Réglages ▸ « Démarrage » ▸ « Rouvrir la dernière liste au démarrage �
 bibliothèque entière s'affiche à chaque démarrage (comportement d'avant).
 
 Deux champs de la section `vue` de `data\comicrust-tauri.json`, sans nouvelle commande IPC (mêmes
-`lire_preferences_vue` / `enregistrer_preferences_vue`) :
+`lire_preferences_vue` / `enregistrer_preferences_vue`). La section `vue` porte aussi `jaugesListes` (jauges des
+listes, voir `ipc-jauges.md`) : fusion champ par champ, les trois réglages sont indépendants.
 
 | Champ | Type | Sens |
 |---|---|---|
@@ -106,7 +107,14 @@ Deux champs de la section `vue` de `data\comicrust-tauri.json`, sans nouvelle co
   chargé, la liste est sélectionnée et ses dossiers parents dépliés. Elle ne dépend ni de la section ni du lecteur
   ni des Réglages ouverts à la fermeture : on revient à la bibliothèque, sur cette liste (vue, tri et regroupement
   de la liste, déjà mémorisés par `vue.listes.<id>`). **Aucun livre n'est rouvert** (ComicRust n'a pas de
-  réglage « rouvrir le dernier livre »). La liste virtuelle « Livres manquants » n'est pas mémorisée.
+  réglage « rouvrir le dernier livre »). La liste virtuelle « Livres manquants » n'est **pas
+  mémorisée** : l'afficher laisse en mémoire la liste précédente, et c'est elle qui est rouverte au démarrage.
+- **Pas de flash au démarrage** : quand le réglage est actif et qu'une liste est mémorisée, la vue n'est affichée
+  qu'après la résolution de la liste (attente de l'arbre plafonnée à 2,5 s : au-delà, la vue s'affiche sur la
+  bibliothèque et bascule dès que l'arbre arrive). Sans liste mémorisée, rien n'attend l'arbre.
+- **Identifiant comparé sans tenir compte de la casse** (`EtatListes.retrouver`, comme `ComicList::find` du
+  backend) : si ComicRack réécrit les GUID en majuscules ou en minuscules, la liste est retrouvée et la mémoire
+  n'est pas effacée à tort.
 - **Cas limites** : liste supprimée ou identifiant inconnu (autre bibliothèque, autre connexion) = bibliothèque
   entière, sans erreur, et la mémoire est effacée (pas de boucle) ; liste renommée = retrouvée (l'identifiant est
   stable) ; arbre illisible ou indisponible (ComicDb.xml absent, base hors ligne) = bibliothèque, mémoire gardée

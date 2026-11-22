@@ -149,6 +149,19 @@ export class EtatListes {
     return undefined;
   }
 
+  /** Retrouve une liste par son identifiant **sans tenir compte de la casse** (comme `ComicList::find`
+   *  du backend : ComicRack peut réécrire les GUID en majuscules ou en minuscules). */
+  retrouver(id: string | null | undefined, liste = this.arbre?.listes ?? []): NoeudListe | undefined {
+    if (!id) return undefined;
+    const bas = id.toLowerCase();
+    for (const n of liste) {
+      if (n.id.toLowerCase() === bas) return n;
+      const r = n.enfants && this.retrouver(id, n.enfants);
+      if (r) return r;
+    }
+    return undefined;
+  }
+
   /** Parent et rang d'une liste. */
   place(id: string, liste = this.arbre?.listes ?? [], parent: NoeudListe | null = null): { parent: NoeudListe | null; rang: number } | null {
     for (let i = 0; i < liste.length; i++) {
