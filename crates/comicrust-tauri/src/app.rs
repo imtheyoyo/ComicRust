@@ -961,6 +961,8 @@ pub fn run() {
     let bibliotheque = Biblio::nouvelle(data.clone());
     let lecteur = Lecteur::nouveau(data.clone(), bibliotheque.clone());
     tauri::Builder::default()
+        // Dialogues natifs de fichiers (Ouvrir, dossier, Enregistrer sous) : docs/tauri/ipc-dialogue.md.
+        .plugin(tauri_plugin_dialog::init())
         .manage(Edition::nouvelle(bibliotheque.clone(), lecteur.clone()))
         .manage(Transfert::nouveau(bibliotheque.clone()))
         .manage(lecteur)

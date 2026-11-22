@@ -20,7 +20,7 @@ required-features = ["app"]
 [features]
 default = []
 # Application Tauri complète (fenêtre, commandes IPC).
-app = ["dep:tauri", "dep:tauri-build", "dep:ureq", "dep:windows-sys"]
+app = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build", "dep:ureq", "dep:windows-sys"]
 # Sert le front compilé (frontend/dist) depuis le binaire au lieu du serveur Vite :
 # obligatoire pour la version livrée, absent en développement (`npm run dev`).
 custom-protocol = ["app", "tauri/custom-protocol"]
@@ -39,6 +39,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Dates de lecture écrites dans la base ComicRack (`Opened`), comme le cœur.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { version = "2", optional = true }
+# Dialogues natifs de fichiers (Ouvrir / Enregistrer / dossier) : lot L8, docs/tauri/ipc-dialogue.md.
+tauri-plugin-dialog = { version = "2", optional = true }
 # Mise à jour intégrée (module `maj`) : empreintes et extraction du paquet (noyau testable).
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }

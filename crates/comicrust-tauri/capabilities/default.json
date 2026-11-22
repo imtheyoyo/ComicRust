@@ -1,13 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions de la fenêtre principale : commandes de l'application, plein écran (lecteur et bibliothèque : F11, état lu pour Échap). Le titre de la fenêtre et la géométrie passent par des commandes de l'application ; les fichiers déposés arrivent par les événements de glisser-déposer (core:event, compris dans core:default). Aucun accès direct au système de fichiers depuis le front.",
+  "description": "Permissions de la fenêtre principale : commandes de l'application, plein écran (lecteur et bibliothèque : F11, état lu pour Échap). Le titre de la fenêtre et la géométrie passent par des commandes de l'application ; les fichiers déposés arrivent par les événements de glisser-déposer (core:event, compris dans core:default). Dialogues natifs de fichiers (plugin dialog : ouvrir et enregistrer sous, pas les boîtes de message). Aucun accès direct au système de fichiers depuis le front.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
     "core:window:allow-set-fullscreen",
-    "core:window:allow-is-fullscreen"
+    "core:window:allow-is-fullscreen",
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }
