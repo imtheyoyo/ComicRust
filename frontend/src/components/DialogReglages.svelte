@@ -10,8 +10,10 @@
   import { enregistrerReglagesAnalyse, lireReglagesAnalyse, type ChoixReprise, type ReglagesAnalyse } from '../lib/api';
   import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
   import {
-    appliquerTheme, apercuTheme, messageTheme, rechargerThemeCourant, restaurerTheme, THEME_DEFAUT, themeApplique, themePersiste,
+    appliquerTheme, apercuTheme, messageTheme, rechargerThemeCourant, restaurerTheme, THEME_DEFAUT, THEME_SYSTEME, themeApplique,
+    themePersiste, themeReel,
   } from '../lib/theme';
+  import { lecteurAffiche } from '../lib/fenetre';
 
   interface Props {
     themeActif: string;
@@ -24,8 +26,12 @@
     ontransfert?: () => void;
     /** « Rechercher une mise à jour… » : ferme les réglages et ouvre la fenêtre « Mise à jour ». */
     onmaj?: () => void;
+    /** « Changer de bibliothèque / de connexion… » : ferme les réglages et rouvre l'assistant (lot L7). */
+    onassistant?: () => void;
   }
-  let { themeActif, onTheme, mode = 'autonome', onecriture, ontransfert, onmaj }: Props = $props();
+  let { themeActif, onTheme, mode = 'autonome', onecriture, ontransfert, onmaj, onassistant }: Props = $props();
+  /** Un livre est ouvert dans le lecteur : on ne change pas de bibliothèque dessous. */
+  let lecteurOuvert = $state(false);
   let ecritureComicrack = $state(false);
   let confirmerEcriture = $state(false);
   let enregistre = $state('');
@@ -77,9 +83,13 @@
     noeud.querySelector<HTMLButtonElement>('button')?.focus();
   }
 
+  /** « Comme Windows » : thème virtuel (pas de fichier), clair ou sombre selon le système. */
+  const estSysteme = $derived(choix === THEME_SYSTEME);
   const themeChoisi = $derived(themes.find((t) => t.id === choix));
+  /** Thème dont le fichier est réellement appliqué (pour « Comme Windows » : Moderne clair ou sombre). */
+  const themeEffectif = $derived(themes.find((t) => t.id === themeReel(choix)));
   /** Avertissements du thème choisi (@import, url(http…) ignorés…). */
-  const avertissements = $derived(themeChoisi?.avertissements ?? []);
+  const avertissements = $derived(themeEffectif?.avertissements ?? []);
 
   export async function ouvrir() {
     choix = themeActif || themePersiste();
@@ -87,6 +97,7 @@
     erreur = '';
     messageInfo = '';
     confirmation = null;
+    lecteurOuvert = lecteurAffiche();
     ouvert = true;
     dialogue?.showModal();
     void chargerAnalyse();
@@ -113,7 +124,7 @@
         if (choix === themeApplique()) invalide = true;
         erreur = `Le thème « ${themes.find((t) => t.id === themeApplique())?.nom ?? themeApplique()} » est inutilisable : ${messageTheme(e)} L'affichage reste sur le dernier thème valide.`;
       }
-      if (!themes.some((t) => t.id === choix)) choix = THEME_DEFAUT;
+      if (choix !== THEME_SYSTEME && !themes.some((t) => t.id === choix)) choix = THEME_DEFAUT;
       info = await infos();
       if (mode === 'comicrack') ecritureComicrack = (await lireReglagesEdition()).ecritureComicrack;
     } catch (e) {
@@ -209,8 +220,8 @@
   async function copierCss() {
     erreur = '';
     try {
-      await navigator.clipboard.writeText(await exporterTheme(choix));
-      messageInfo = `CSS du thème « ${themeChoisi?.nom ?? choix} » copié dans le presse-papiers.`;
+      await navigator.clipboard.writeText(await exporterTheme(themeReel(choix)));
+      messageInfo = `CSS du thème « ${themeEffectif?.nom ?? themeReel(choix)} » copié dans le presse-papiers.`;
     } catch (err) {
       erreur = `Copie impossible : ${messageErreur(err)}`;
     }
@@ -287,6 +298,13 @@
     </div>
     <!-- Liste de boutons radio : flèches = aperçu en direct, survol = aperçu temporaire. -->
     <div class="liste-themes" role="group" aria-label="Thème" onmouseleave={() => survoler(null)} data-testid="liste-themes">
+      <label class="theme" class:choisi={estSysteme} onmouseenter={() => survoler(THEME_SYSTEME)} data-testid="theme-{THEME_SYSTEME}"
+        title="Suit le réglage clair / sombre de Windows : Moderne clair ou Moderne sombre">
+        <input type="radio" name="theme" value={THEME_SYSTEME} checked={estSysteme} onchange={() => void selectionner(THEME_SYSTEME)} />
+        <span class="pastille mi" aria-hidden="true"><i></i><b></b></span>
+        <span class="nom-theme">Comme Windows</span>
+        <span class="badge">auto</span>
+      </label>
       {#each themes as t (t.id)}
         <label class="theme" class:choisi={choix === t.id} onmouseenter={() => survoler(t.id)} data-testid="theme-{t.id}">
           <input type="radio" name="theme" value={t.id} checked={choix === t.id} onchange={() => void selectionner(t.id)} />
@@ -310,7 +328,7 @@
     <div class="ligne actions-themes">
       <input bind:this={champFichier} type="file" accept=".css,text/css" class="cache" onchange={importer} data-testid="theme-fichier" tabindex="-1" />
       <button type="button" onclick={() => champFichier?.click()} data-testid="theme-importer">Importer un thème…</button>
-      <button type="button" onclick={copierCss} disabled={!themeChoisi} data-testid="theme-copier">Copier le CSS</button>
+      <button type="button" onclick={copierCss} disabled={!themeEffectif} data-testid="theme-copier">Copier le CSS</button>
       <button type="button" onclick={ouvrirDossier} data-testid="theme-dossier">Ouvrir le dossier des thèmes</button>
       <button type="button" onclick={() => (confirmation = 'supprimer')} disabled={!themeChoisi || themeChoisi.livre}
         title={themeChoisi?.livre ? 'Un thème livré ne se supprime pas' : 'Supprimer ce thème personnel'} data-testid="theme-supprimer">Supprimer</button>
@@ -393,6 +411,15 @@
     <p class="discret petit">Quand la bibliothèque et ce poste n'ont pas retenu la même page : demander à chaque fois, ou toujours reprendre à la page de ComicRack ou de ComicRust.</p>
     {#if erreurAnalyse}<p class="erreur" role="alert">{erreurAnalyse}</p>{/if}
   </fieldset>
+  {#if onassistant}
+    <fieldset class="comicrack" data-testid="reglage-assistant">
+      <legend>Bibliothèque et connexion</legend>
+      <p class="discret petit transfert">Passer d'une bibliothèque autonome à une bibliothèque liée à ComicRack (ou l'inverse), ou changer de base MySQL.
+        Rien n'est supprimé ; l'assistant s'ouvre avec la configuration actuelle et peut être annulé.</p>
+      <button onclick={() => { fermerModale(dialogue); onassistant(); }} disabled={lecteurOuvert} data-testid="ouvrir-assistant">Changer de bibliothèque / de connexion…</button>
+      {#if lecteurOuvert}<p class="discret petit transfert" data-testid="assistant-lecteur">Fermez d'abord le livre ouvert dans le lecteur.</p>{/if}
+    </fieldset>
+  {/if}
   {#if ontransfert}
     <fieldset class="comicrack" data-testid="reglage-transfert">
       <legend>Passer de ComicRack à ComicRust</legend>
@@ -466,6 +493,10 @@
   .nom-theme { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Pastille : fond du thème, point d'accent et trait de texte (couleurs lues dans le fichier CSS). */
   .pastille { position: relative; flex: none; width: 34px; height: 20px; border: 2px solid; border-radius: 6px; overflow: hidden; }
+  /* « Comme Windows » : moitié claire, moitié sombre. */
+  .pastille.mi { background: linear-gradient(90deg, #f5f6f8 50%, #1b1f27 50%); border-color: var(--cr-texte-discret); }
+  .pastille.mi i { background: #3b6ef5; }
+  .pastille.mi b { background: #8a93a6; }
   .pastille i { position: absolute; right: 3px; top: 3px; width: 10px; height: 10px; border-radius: 50%; }
   .pastille b { position: absolute; left: 3px; bottom: 3px; width: 14px; height: 3px; border-radius: 2px; }
   .badge { flex: none; font-size: 11px; padding: 0 6px; border: 1px solid var(--cr-bordure); border-radius: 999px; color: var(--cr-texte-discret); }

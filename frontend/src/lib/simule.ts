@@ -11,6 +11,7 @@ import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
 import { creerMajSimulee } from './simuleMaj';
 import { creerScanSimule } from './simuleScan';
+import { COMMANDES_REGLAGES, creerReglagesSimules } from './simuleReglages';
 import { creerScriptsSimules } from './simuleScripts';
 import { creerManquantsSimules } from './simuleManquants';
 import { COMMANDES_THEMES, creerThemesSimules, themesRefuses } from './simuleThemes';
@@ -339,6 +340,9 @@ const transfert = creerTransfertSimule({
 // Mise à jour (tauri-v0.8.0) : voir simuleMaj.ts.
 const maj = creerMajSimulee({ emettre, pause });
 
+// Aide, assistant rejouable, Relire, Copier les livres (lot L7) : voir simuleReglages.ts.
+const reglagesSimules = creerReglagesSimules({ etat: () => etat, connexions: () => connexionsSimulees, livres: () => LIVRES });
+
 // Fenêtre et lancement (lot L2) : voir simuleFenetre.ts.
 const fenetreSimulee = creerFenetreSimulee();
 
@@ -376,6 +380,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
   const rm = maj.appeler(commande, args);
   if (rm !== undefined) return rm;
   if (COMMANDES_THEMES.includes(commande)) return themesSimules.appeler(commande, args);
+  if (COMMANDES_REGLAGES.includes(commande)) return reglagesSimules.appeler(commande, args);
   if (COMMANDES_FENETRE.includes(commande)) return fenetreSimulee.appeler(commande, args);
   if (commande.startsWith('script')) {
     const rs = scriptsSimules.appeler(commande, args);

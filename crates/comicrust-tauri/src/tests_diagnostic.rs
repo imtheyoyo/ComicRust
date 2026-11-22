@@ -117,7 +117,10 @@ fn diagnostic_sans_bibliotheque_ni_reglages_lisibles() {
     let texte = diagnostic::texte_diagnostic(&infos);
     assert!(texte.contains("aucune bibliothèque ouverte"), "{texte}");
     assert!(texte.contains("SQLite") && texte.contains("absente"), "{texte}");
-    assert!(diagnostic::configuration(d.path()).is_err(), "la description de la bibliothèque, elle, signale le fichier illisible");
+    assert!(
+        diagnostic::configuration(d.path()).is_err(),
+        "la description de la bibliothèque, elle, signale le fichier illisible"
+    );
 }
 
 #[test]
@@ -262,7 +265,11 @@ fn panneau_listes_memorise_et_tolerant() {
     // Autre préférence enregistrée : la valeur est gardée ; valeur absurde dans le fichier : ignorée.
     reglages::enregistrer_preferences_vue(d.path(), PreferencesVue { zoom: Some(150), ..Default::default() }).unwrap();
     assert_eq!(reglages::lire_preferences_vue(d.path()).unwrap().listes_visibles, Some(false));
-    std::fs::write(reglages::chemin_reglages(d.path()), r#"{"mode":"autonome","vue":{"listesVisibles":"non","zoom":120}}"#).unwrap();
+    std::fs::write(
+        reglages::chemin_reglages(d.path()),
+        r#"{"mode":"autonome","vue":{"listesVisibles":"non","zoom":120}}"#,
+    )
+    .unwrap();
     let v = reglages::lire_preferences_vue(d.path()).unwrap();
     assert_eq!((v.listes_visibles, v.zoom), (None, Some(120)));
     assert_eq!(reglages::enregistrer_preferences_vue(d.path(), p(true)).unwrap().listes_visibles, Some(true));

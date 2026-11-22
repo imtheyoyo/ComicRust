@@ -613,7 +613,20 @@ impl PreferencesVue {
         macro_rules! prendre {
             ($($c:ident),*) => { $( if m.$c.is_some() { self.$c = m.$c; } )* };
         }
-        prendre!(tri, sens_tri, groupe, vue, empiler, zoom, details, largeur_details, largeur_listes, theme, listes_visibles, lecteur);
+        prendre!(
+            tri,
+            sens_tri,
+            groupe,
+            vue,
+            empiler,
+            zoom,
+            details,
+            largeur_details,
+            largeur_listes,
+            theme,
+            listes_visibles,
+            lecteur
+        );
         // Vues des listes : fusion liste par liste (`null` efface), jamais d'entrée `null` gardée.
         if let Some(patch) = m.listes {
             let mut listes = self.listes.take().unwrap_or_default();

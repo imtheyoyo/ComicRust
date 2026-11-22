@@ -48,6 +48,10 @@ pub fn relire_bibliotheque(biblio: tauri::State<'_, Biblio>) -> Result<EtatBibli
 
 /// « 📋 Copier les livres » : rapport texte des livres affichés (série, numéro, volume, année, fichier).
 #[tauri::command(async)]
-pub fn rapport_livres(biblio: tauri::State<'_, Biblio>, requete: RequeteLivres, titre: String) -> Result<String, String> {
+pub fn rapport_livres(
+    biblio: tauri::State<'_, Biblio>,
+    requete: RequeteLivres,
+    titre: String,
+) -> Result<String, String> {
     diagnostic::rapport_livres(&biblio, &requete, &titre)
 }
