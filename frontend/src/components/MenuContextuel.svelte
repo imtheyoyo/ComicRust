@@ -113,9 +113,12 @@
   function fermerSous(rendreFocus: boolean) {
     clearTimeout(minuterie);
     const id = ouvert;
+    // Le panneau qui contient le focus disparaît : le focus revient toujours à l'entrée parente
+    // (sinon il tombe sur le body et plus aucune touche n'atteint le menu).
+    const focusDedans = !!sousPanneau?.contains(document.activeElement);
     ouvert = null;
     posSous = null;
-    if (rendreFocus && id !== null) boutonDe(id)?.focus();
+    if ((rendreFocus || focusDedans) && id !== null) boutonDe(id)?.focus();
   }
   function planifierFermeture() {
     clearTimeout(minuterie);
@@ -137,7 +140,7 @@
     const k = liste.indexOf(document.activeElement as HTMLButtonElement);
     const courante = !sous && k >= 0 ? entrees.find((x) => x.id === liste[k].dataset.menu) : undefined;
     if (e.key === 'ArrowDown') liste[(k + 1) % liste.length]?.focus();
-    else if (e.key === 'ArrowUp') liste[(k - 1 + liste.length) % liste.length]?.focus();
+    else if (e.key === 'ArrowUp') liste[k < 0 ? liste.length - 1 : (k - 1 + liste.length) % liste.length]?.focus();
     else if (e.key === 'Home') liste[0]?.focus();
     else if (e.key === 'End') liste[liste.length - 1]?.focus();
     else if (e.key === 'ArrowRight' && courante?.sousMenu && !courante.desactive) ouvrir(courante.id, true);
@@ -145,6 +148,9 @@
     else if (e.key === 'Escape' && (sous || ouvert !== null)) fermerSous(true);
     else if (e.key === 'Escape' || e.key === 'Tab') onfermer();
     else return;
+    // Menu principal : le focus quitte l'entrée parente d'un sous-menu ouvert au survol → on le referme.
+    if (!sous && ouvert !== null && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)
+      && (document.activeElement as HTMLElement | null)?.dataset.menu !== ouvert) fermerSous(false);
     e.preventDefault();
     e.stopPropagation();
   }
