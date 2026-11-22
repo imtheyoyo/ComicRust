@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v1.0.0 (**première release** de la version Tauri, étape 11) |
 | Paquet | `ComicRust-Tauri-tauri-v1.0.0-windows-x64.zip` |
-| SHA-256 | `(à renseigner à la publication)` |
+| SHA-256 | `fd2237dbb2d4f81d7e49f351df82e57454d726085d3674a8b32d66ae8ee0cf8f` |
 | Contenu | gel des fonctions ; menu du livre : scripts affichés directement, « Marquer comme lu / non lu » ; documentation finalisée ; refait **toute** la recette de non-régression de la 0.11.0 |
 | Origine | [recette tauri-v0.11.0](tauri-v0.11.0.md) : **GO** du 22/11/2026 ; demandes de Yoyo ([rapport](rapports/tauri-v0.11.0-2026-11-22.txt)) |
 
