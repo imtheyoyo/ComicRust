@@ -13,7 +13,9 @@ camelCase, **aucune logique métier côté front**.
 |---|---|
 | **total** (vert) | livres de la liste présents dans la base : **exactement** le `nbLivres` de `arbre_listes` (livres manquants compris : leur fiche reste dans la base ; identifiants de liste absents de la base ignorés). |
 | **non lus** (jaune) | livres dont la lecture est à moins de 100 % (`LibraryBook::read_percent() != 100`, comme la pastille « lu » de la vue et « Marquer comme lu / non lu »). Les livres en cours comptent donc comme non lus ; nombre de pages inconnu : non lu. |
-| **nouveaux** (rouge) | livres non lus **jamais ouverts** (ni `Opened`, ni `OpenCount`, ni page lue) et **ajoutés depuis au plus 7 jours** (`Added`, constante `JOURS_NOUVEAU`). Sans date d'ajout : jamais nouveau. Un nouveau est toujours aussi compté dans les non lus. |
+| **nouveaux** (rouge) | livres non lus **jamais ouverts** (ni `Opened`, ni `OpenCount`, ni page lue) et **ajoutés il y a moins de 7 jours** (`Added`, constante `JOURS_NOUVEAU`, comparaison stricte : un livre ajouté il y a 7 jours n'est plus nouveau). Sans date d'ajout, ou avec un `Added` dans le futur (horloge déréglée, `ComicDb.xml`) : jamais nouveau. Un nouveau est toujours aussi compté dans les non lus. |
+
+**Limite connue** : le premier scan d'une collection existante donne à tous ses livres une date d'ajout récente ; tant qu'ils sont jamais ouverts, ils sont tous « nouveaux » pendant une semaine.
 
 Remarque : ComicRack lui-même ne documente pas la règle exacte de « nouveau » dans les sources
 dont nous disposons (`docs/INVENTAIRE_REA.md` ne cite que `AddedTime`, `OpenedTime`,
@@ -66,6 +68,8 @@ fermeture du lecteur (progression notée) et import ; les demandes rapprochées 
 « Afficher les jauges des listes » dans Réglages. Désactivé, le panneau retrouve le compteur
 unique de total d'avant et la commande n'est plus appelée.
 
+Les jauges sont aussi recalculées par le front au changement de jour local (minuit) et au retour de visibilité de la fenêtre, si la date a changé depuis le dernier calcul (la fenêtre « nouveau » glisse avec le jour).
+
 ## Accessibilité et thème
 
 - Chaque jauge porte un texte alternatif complet : « 12 nouveaux, 40 non lus, 120 livres »
@@ -75,4 +79,4 @@ unique de total d'avant et la commande n'est plus appelée.
   `--cr-jauge-nouveaux-texte`, `--cr-jauge-non-lus-fond`, `--cr-jauge-non-lus-texte`,
   `--cr-jauge-total-fond`, `--cr-jauge-total-texte` ; valeurs de repli dans `app.css` et valeurs
   propres à chacun des trois thèmes livrés (contraste texte/fond ≥ 4,5:1, vérifié par les tests
-  de thèmes).
+  de thèmes). Chaque pastille a un double liseré (1 px de fond de panneau, puis 1 px de texte, variables existantes) pour rester distincte sur le fond de panneau comme sur la ligne sélectionnée (couleur d'accent) : aucune variable de plus.

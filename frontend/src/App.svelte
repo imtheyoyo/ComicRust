@@ -19,6 +19,7 @@
   import { SuiviScan } from './lib/bibliotheque.svelte';
   import { connexion } from './lib/connexion.svelte';
   import { EtatListes } from './lib/listes.svelte';
+  import { jauges } from './lib/jauges.svelte';
   import { miseAJour } from './lib/maj.svelte';
   import { scripts } from './lib/scripts.svelte';
   import { ID_MANQUANTS, NOEUD_MANQUANTS, manquants } from './lib/manquants.svelte';
@@ -150,6 +151,7 @@
       connexion.arreter();
       miseAJour.arreter();
       listes.arreter();
+      jauges.arreter();
       scripts.arreter();
       manquants.arreter();
     };

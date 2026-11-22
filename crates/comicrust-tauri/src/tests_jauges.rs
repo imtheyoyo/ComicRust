@@ -56,7 +56,7 @@ fn base() -> ComicDatabase {
     f.missing = Some(true);
     ComicDatabase::from_books(vec![
         livre("a", "Thanos", il_y_a(0), None),
-        livre("b", "Thanos", il_y_a(JOURS_NOUVEAU), Some(0)),
+        livre("b", "Thanos", il_y_a(JOURS_NOUVEAU - 1), Some(0)),
         livre("c", "Thanos", il_y_a(JOURS_NOUVEAU + 1), None),
         livre("d", "Warlock", il_y_a(2), Some(5)),
         livre("e", "Warlock", il_y_a(3), Some(19)),
@@ -70,13 +70,14 @@ fn jauges(listes: &[ComicList], base: &ComicDatabase) -> JaugesListes {
 
 #[test]
 fn definition_de_nouveau_et_non_lu() {
-    let seuil = aujourdhui() - chrono::Duration::days(JOURS_NOUVEAU);
-    let e = |b: &LibraryBook| etat_livre(b, seuil);
+    let e = |b: &LibraryBook| etat_livre(b, aujourdhui());
     // Récent, jamais ouvert : nouveau et non lu.
     assert_eq!(e(&livre("x", "S", il_y_a(0), None)), (true, true));
-    // Le dernier jour compte, le lendemain non.
-    assert_eq!(e(&livre("x", "S", il_y_a(JOURS_NOUVEAU), None)), (true, true));
-    assert_eq!(e(&livre("x", "S", il_y_a(JOURS_NOUVEAU + 1), None)), (false, true));
+    // Strictement moins de 7 jours : à 6 jours oui, à 7 jours non ; ajouté dans le futur : non.
+    assert_eq!(e(&livre("x", "S", il_y_a(JOURS_NOUVEAU - 1), None)), (true, true));
+    assert_eq!(e(&livre("x", "S", il_y_a(JOURS_NOUVEAU), None)), (false, true));
+    assert_eq!(e(&livre("x", "S", il_y_a(-1), None)), (false, true));
+    assert_eq!(e(&livre("x", "S", il_y_a(-400), None)), (false, true));
     // Sans date d'ajout (ou « jamais » de ComicRack) : jamais nouveau.
     assert_eq!(e(&livre("x", "S", None, None)), (false, true));
     assert_eq!(e(&livre("x", "S", Some("0001-01-01T00:00:00".into()), None)), (false, true));
@@ -100,7 +101,7 @@ fn definition_de_nouveau_et_non_lu() {
 fn racine_et_bibliotheque() {
     let b = base();
     let r = jauges(&[liste("lib", ListKind::Library)], &b);
-    // Nouveaux : a, b (7 jours) et f (manquant : compté comme les autres) ; non lus : tous sauf e.
+    // Nouveaux : a, b (6 jours) et f (manquant : compté comme les autres) ; non lus : tous sauf e.
     assert_eq!(r.racine, j(3, 5, 6));
     assert_eq!(r.listes["lib"], r.racine);
 }

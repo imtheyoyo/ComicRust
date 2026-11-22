@@ -22,10 +22,12 @@
 </span>
 
 <style>
-  .jauges { display: inline-flex; align-items: center; gap: 2px; flex: none; margin-left: auto; }
+  .jauges { display: inline-flex; align-items: center; gap: 5px; padding: 0 2px; flex: none; margin-left: auto; }
   .pastille {
     min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center;
     font-size: 11px; font-weight: 600; line-height: 16px; font-variant-numeric: tabular-nums;
+    /* Double liseré : visible sur le fond de panneau (anneau de texte) et sur la ligne sélectionnée (anneau de panneau). */
+    box-shadow: 0 0 0 1px var(--cr-fond-panneau), 0 0 0 2px var(--cr-texte);
   }
   .nouveaux { background: var(--cr-jauge-nouveaux-fond); color: var(--cr-jauge-nouveaux-texte); }
   .non-lus { background: var(--cr-jauge-non-lus-fond); color: var(--cr-jauge-non-lus-texte); }

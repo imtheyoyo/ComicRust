@@ -72,6 +72,9 @@ bousculé). L'identifiant est enregistré tel quel dans `vue.theme` (accepté pa
 Annuler et OK de `DialogReglages` fonctionnent comme pour les autres thèmes. Limite : un thème personnel
 nommé `systeme.css` serait masqué par le thème virtuel.
 
+## Jauges des listes
+Préférence `vue.jaugesListes` (booléen, absent = activé) : case « Afficher les jauges des listes » dans Réglages ▸ Affichage des listes. Contrat, définitions et mise à jour : `ipc-jauges.md`.
+
 ## Panneau des listes masquable
 Préférence `vue.listesVisibles` (booléen, absent = affiché). Bouton « Masquer les listes » (barre latérale) et
 raccourci **Ctrl+Maj+L** ; masqué, la barre latérale devient une colonne de 48 px (Bibliothèque, Afficher les
