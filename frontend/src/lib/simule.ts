@@ -17,6 +17,7 @@ import { creerManquantsSimules } from './simuleManquants';
 import { COMMANDES_THEMES, creerThemesSimules, themesRefuses } from './simuleThemes';
 import { COMMANDES_FENETRE, creerFenetreSimulee } from './simuleFenetre';
 import { COMMANDES_RECENTS, creerRecentsSimules } from './simuleLecteur';
+import { comparerTitres, titreGroupe } from './simuleGroupes';
 
 const NB_LIVRES = Number(new URLSearchParams(location.search).get('n')) || 5000;
 const LATENCE_MS = 12;
@@ -116,6 +117,14 @@ const LIVRES = genererLivres(NB_LIVRES);
 
 // ───────────── Requêtes (filtre, tri, groupe) avec cache de l'ordre ─────────────
 
+/** Arc, format et avancement simulés (lot L5) : un livre sur sept a un arc, le format suit l'extension. */
+const arcDe = (l: LivreInterne) => (Number(l.id) % 7 === 0 ? `Arc ${1 + (Number(l.id) % 3)}` : undefined);
+const formatDe = (l: LivreInterne) => (l.fichier.endsWith('.cbr') ? 'CBR' : 'CBZ');
+const avancementDe = (l: LivreInterne) => (l.lu ? 100 : l.pageCourante > 0 ? Math.max(1, Math.round((l.pageCourante / Math.max(1, l.pages)) * 100)) : 0);
+/** Titre de groupe d'un livre pour un regroupement (même règles que le backend). */
+const groupeDe = (l: LivreInterne, g: RequeteLivres['groupe']) =>
+  titreGroupe({ ...l, arc: arcDe(l), format: formatDe(l), avancement: avancementDe(l) }, g);
+
 const cle = (l: LivreInterne, c: ClefTri): string | number => {
   switch (c) {
     case 'titre': return l.titre;
@@ -160,17 +169,18 @@ function ordonner(q: RequeteLivres): LivreInterne[] {
     const rangGroupe = new Map<string, number>();
     if (groupe) {
       for (const l of liste) {
-        const g = l[groupe] ?? '';
+        const g = groupeDe(l, groupe).toLowerCase();
         rangGroupe.set(g, Math.min(rangGroupe.get(g) ?? Infinity, pos(l)));
       }
     }
-    liste.sort((a, b) => (groupe ? (rangGroupe.get(a[groupe] ?? '')! - rangGroupe.get(b[groupe] ?? '')!) * sens : 0) || sens * (pos(a) - pos(b)));
+    liste.sort((a, b) => (groupe ? (rangGroupe.get(groupeDe(a, groupe).toLowerCase())! - rangGroupe.get(groupeDe(b, groupe).toLowerCase())!) * sens : 0) || sens * (pos(a) - pos(b)));
     return liste;
   }
   liste.sort((a, b) => {
     if (groupe) {
-      const g = cmp(a[groupe] ?? '', b[groupe] ?? '');
-      if (g) return g;
+      // Comme le backend : titres comparés en minuscules, sens inversé en tri décroissant.
+      const g = comparerTitres(groupeDe(a, groupe), groupeDe(b, groupe));
+      if (g) return sens * g;
     }
     return sens * cmp(cle(a, q.tri), cle(b, q.tri)) || Number(a.id) - Number(b.id);
   });
@@ -187,9 +197,13 @@ function ordonnerPile(q: RequeteLivres): LivreInterne[] {
   return q.serie === undefined ? liste : liste.filter((l) => titrePile(l) === q.serie);
 }
 
-const resume = (l: LivreInterne): LivreResume => ({
+const resume = (l: LivreInterne, g?: RequeteLivres['groupe']): LivreResume => ({
   id: l.id, titre: l.titre, serie: l.serie, numero: l.numero, editeur: l.editeur,
   annee: l.annee, pages: l.pages, lu: l.lu, urlCouverture: l.urlCouverture,
+  mois: l.mois, scenariste: l.scenariste, note: l.note || undefined, fichier: l.fichier,
+  ajoute: `2024-${String(1 + (l.ajout % 12)).padStart(2, '0')}-${String(1 + (l.ajout % 28)).padStart(2, '0')}T10:00:00`,
+  avancement: avancementDe(l) || undefined,
+  ...(g && g !== 'aucun' ? { groupe: groupeDe(l, g) } : {}),
   ...(mq.est(l.id) ? { manquant: true } : {}),
 });
 
@@ -324,7 +338,7 @@ const listes = creerListesSimulees({
   },
   comicrackLance: () => etat.mode === 'comicrack' && new URLSearchParams(location.search).has('comicrackOuvert'),
   vue: (q) => ordonnerPile(q),
-  titreGroupe: (l, g) => (g === 'editeur' ? l.editeur ?? '(sans éditeur)' : l.serie ?? '(sans série)'),
+  titreGroupe: (l, g) => groupeDe(l as LivreInterne, g as RequeteLivres['groupe']),
 });
 
 // Transfert ComicRack → ComicRust (étape 6) : voir simuleTransfert.ts.
@@ -456,7 +470,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
       const rangs = q.liste && q.liste !== '@manquants' ? new Map(listes.livresDe(q.liste).map((id, i) => [id, i + 1])) : null;
       const rep: ReponseLivres = {
         total: liste.length,
-        livres: liste.slice(q.debut, q.debut + q.nombre).map((l) => (rangs ? { ...resume(l), rang: rangs.get(l.id) } : resume(l))),
+        livres: liste.slice(q.debut, q.debut + q.nombre).map((l) => (rangs ? { ...resume(l, q.groupe), rang: rangs.get(l.id) } : resume(l, q.groupe))),
       };
       return rep;
     }
@@ -469,7 +483,7 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
         const t = titrePile(l);
         if (simuleTests.pilesMasquees.has(t)) continue;
         let p = piles.get(t);
-        if (!p) piles.set(t, (p = { serie: t, nbLivres: 0, nbLus: 0, ids: [], urlCouverture: l.urlCouverture }));
+        if (!p) piles.set(t, (p = { serie: t, nbLivres: 0, nbLus: 0, ids: [], urlCouverture: l.urlCouverture, ...(q.groupe && q.groupe !== 'aucun' && q.groupe !== 'serie' ? { groupe: groupeDe(l, q.groupe) } : {}) }));
         p.nbLivres++;
         if (l.lu) p.nbLus++;
         p.ids.push(l.id);

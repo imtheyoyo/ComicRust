@@ -5,6 +5,8 @@
   import { cibleClavier } from '../lib/navigation';
   import { modificateurs, type Modificateurs, type Selection } from '../lib/selection.svelte';
   import { RectangleSelection, touchesLignes } from '../lib/rectangleSelection.svelte';
+  import { COLONNES, colonnesVisibles, largeurColonne, LARGEUR_MAX, LARGEUR_MIN, LARGEUR_MIN_FICHIER, type Colonne } from '../lib/colonnes';
+  import { enregistrerTableau, reglagesTableau } from '../lib/prefs';
 
   interface Props {
     bib: Bibliotheque;
@@ -28,17 +30,80 @@
   /** Liste affichée : colonne « # » (rang dans la liste, tri « ordre »). */
   // La liste virtuelle « Livres manquants » n'a pas d'ordre propre : pas de colonne « # ».
   const avecRang = $derived(!!bib.params.liste && bib.params.liste !== '@manquants');
-  const colonnes = $derived<Array<{ clef: ClefTri | null; titre: string; classe?: string }>>([
-    ...(avecRang ? [{ clef: 'ordre' as ClefTri, titre: '#', classe: 'num' }] : []),
-    { clef: null, titre: '' },
-    { clef: 'titre', titre: 'Titre' },
-    { clef: 'serie', titre: 'Série' },
-    { clef: null, titre: 'N°', classe: 'num' },
-    { clef: null, titre: 'Éditeur' },
-    { clef: 'parution', titre: 'Année', classe: 'num' },
-    { clef: 'pages', titre: 'Pages', classe: 'num' },
-    { clef: null, titre: 'Lu', classe: 'num' },
-  ]);
+
+  // Colonnes comme egui (11 colonnes, ordre et formats de lib/colonnes.ts) ; visibilité et largeurs
+  // choisies sont mémorisées dans data\comicrust-tauri.json (`vue.tableau`).
+  const reglages = reglagesTableau();
+  let idsVisibles = $state<string[] | undefined>(reglages.colonnes);
+  let largeurs = $state<Record<string, number>>(reglages.largeurs ?? {});
+  const colonnes = $derived(colonnesVisibles(idsVisibles));
+  const largeursPx = $derived(colonnes.map((c) => largeurColonne(c, largeurs)));
+  const gabarit = $derived([...(avecRang ? ['40px'] : []), '30px', ...largeursPx.map((w) => `${w}px`)].join(' '));
+  /** Largeur du contenu : cellules, espaces de 10 px entre elles et marges de 12 px. */
+  const largeurTotale = $derived(
+    24 + (avecRang ? 40 : 0) + 30 + largeursPx.reduce((a, b) => a + b, 0) + 10 * (colonnes.length + (avecRang ? 1 : 0)),
+  );
+  const sauver = () => enregistrerTableau({ colonnes: idsVisibles, largeurs });
+
+  /** Redimensionnement : glisser la poignée à droite de l'en-tête (double-clic : largeur d'egui). */
+  function redimensionner(e: PointerEvent, c: Colonne, i: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const depart = e.clientX;
+    const w0 = largeursPx[i];
+    const min = c.id === 'fichier' ? LARGEUR_MIN_FICHIER : LARGEUR_MIN;
+    const bouger = (m: PointerEvent) => {
+      largeurs = { ...largeurs, [c.id]: Math.round(Math.min(LARGEUR_MAX, Math.max(min, w0 + m.clientX - depart))) };
+    };
+    const fin = () => {
+      window.removeEventListener('pointermove', bouger);
+      window.removeEventListener('pointerup', fin);
+      window.removeEventListener('pointercancel', fin);
+      sauver();
+    };
+    window.addEventListener('pointermove', bouger);
+    window.addEventListener('pointerup', fin);
+    window.addEventListener('pointercancel', fin);
+  }
+  function reinitialiserLargeur(c: Colonne) {
+    const { [c.id]: _, ...reste } = largeurs;
+    largeurs = reste;
+    sauver();
+  }
+
+  // Menu « Colonnes » (bouton de l'en-tête ou clic droit sur l'en-tête) : cases à cocher.
+  let menu = $state<{ x: number; y: number } | null>(null);
+  function ouvrirMenu(x: number, y: number) {
+    menu = { x: Math.max(4, Math.min(x, window.innerWidth - 230)), y: Math.max(4, Math.min(y, window.innerHeight - 380)) };
+  }
+  function basculer(c: Colonne) {
+    const visibles = colonnes.map((x) => x.id);
+    const suite = visibles.includes(c.id) ? visibles.filter((id) => id !== c.id) : [...visibles, c.id];
+    if (suite.length === 0) return; // au moins une colonne
+    const ordonnees = COLONNES.filter((x) => suite.includes(x.id)).map((x) => x.id);
+    idsVisibles = ordonnees.length === COLONNES.length ? undefined : ordonnees;
+    sauver();
+  }
+  function toutAfficher() {
+    idsVisibles = undefined;
+    sauver();
+  }
+  $effect(() => {
+    if (!menu) return;
+    const hors = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-testid="colonnes-menu"], [data-testid="colonnes-bouton"]')) menu = null;
+    };
+    const echap = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') menu = null;
+    };
+    window.addEventListener('pointerdown', hors, true);
+    window.addEventListener('keydown', echap);
+    return () => {
+      window.removeEventListener('pointerdown', hors, true);
+      window.removeEventListener('keydown', echap);
+    };
+  });
 
   let zone = $state<HTMLDivElement>();
   let piste = $state<HTMLDivElement>();
@@ -128,20 +193,44 @@
   aria-rowcount={bib.total}
   data-testid="tableau"
 >
-  <div class="entete" role="row" style:height="{HAUT_ENTETE}px">
-    {#each colonnes as c (c.titre)}
-      {#if c.clef}
-        {@const clef = c.clef}
-        <button class="ch {c.classe ?? ''}" role="columnheader" onclick={() => ontri(clef)} tabindex="-1"
-          >{c.titre}{fleche(c.clef)}</button
-        >
-      {:else}
-        <span class="ch {c.classe ?? ''}" role="columnheader">{c.titre}</span>
-      {/if}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="entete" role="row" tabindex="-1" style:height="{HAUT_ENTETE}px" style:grid-template-columns={gabarit} style:min-width="{largeurTotale}px"
+    oncontextmenu={(e) => { e.preventDefault(); ouvrirMenu(e.clientX, e.clientY); }}>
+    {#if avecRang}
+      <button class="ch num" role="columnheader" onclick={() => ontri('ordre')} tabindex="-1" title="Ordre de la liste">#{fleche('ordre')}</button>
+    {/if}
+    <button class="ch bouton-colonnes" type="button" tabindex="-1" aria-label="Choisir les colonnes" title="Choisir les colonnes" aria-haspopup="menu"
+      aria-expanded={!!menu} data-testid="colonnes-bouton"
+      onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); if (menu) menu = null; else ouvrirMenu(r.left, r.bottom + 2); }}>☰</button>
+    {#each colonnes as c, i (c.id)}
+      <div class="cel-entete {c.num ? 'num' : ''}" data-colonne={c.id}>
+        {#if c.tri}
+          {@const clef = c.tri}
+          <button class="ch {c.num ? 'num' : ''}" role="columnheader" onclick={() => ontri(clef)} tabindex="-1"
+            >{c.titre}{fleche(c.tri)}</button
+          >
+        {:else}
+          <span class="ch {c.num ? 'num' : ''}" role="columnheader">{c.titre}</span>
+        {/if}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="poignee-col" data-testid="poignee-colonne" data-colonne={c.id} title="Glisser pour redimensionner (double-clic : largeur d'origine)"
+          onpointerdown={(e) => redimensionner(e, c, i)} ondblclick={() => reinitialiserLargeur(c)}></span>
+      </div>
     {/each}
   </div>
+  {#if menu}
+    <div class="menu-colonnes" role="menu" aria-label="Colonnes du tableau" data-testid="colonnes-menu" style:left="{menu.x}px" style:top="{menu.y}px">
+      {#each COLONNES as c (c.id)}
+        <label>
+          <input type="checkbox" checked={colonnes.some((x) => x.id === c.id)} disabled={colonnes.length === 1 && colonnes[0].id === c.id}
+            onchange={() => basculer(c)} data-colonne={c.id} />{c.titre}
+        </label>
+      {/each}
+      <button type="button" onclick={toutAfficher} disabled={!idsVisibles}>Tout afficher</button>
+    </div>
+  {/if}
   <!-- La piste occupe au moins toute la hauteur visible : le vide sous les lignes en fait partie. -->
-  <div class="piste" bind:this={piste} style:height="{bib.total * HAUT_LIGNE}px" style:min-height="{Math.max(0, hauteur - HAUT_ENTETE)}px">
+  <div class="piste" bind:this={piste} style:height="{bib.total * HAUT_LIGNE}px" style:min-height="{Math.max(0, hauteur - HAUT_ENTETE)}px" style:min-width="{largeurTotale}px">
     {#each indices as i (i)}
       {@const l = bib.livre(i)}
       <!-- Le clavier est géré par la zone du tableau. -->
@@ -153,6 +242,7 @@
         data-index={i}
         class:debut-groupe={bib.debutGroupe(i)}
         style:transform="translateY({i * HAUT_LIGNE}px)"
+        style:grid-template-columns={gabarit}
         style:height="{HAUT_LIGNE}px"
         role="row"
         aria-rowindex={i + 1}
@@ -166,21 +256,27 @@
         {#if l}
           {#if avecRang}<span class="cellule num discret">{l.rang ?? ''}</span>{/if}
           <span class="mini"><img src={l.urlCouverture} alt="" loading="lazy" decoding="async" draggable="false" /></span>
-          <span class="cellule" class:manquant={l.manquant} title={l.manquant ? `${l.titre} — fichier introuvable` : l.titre}>{#if l.manquant}<span class="alerte-manquant" data-testid="indicateur-manquant" aria-label="Fichier introuvable">⚠ </span>{/if}{l.titre}</span>
-          {#if bib.debutGroupe(i) && bib.params.groupe === 'serie'}
-            <!-- En-tête de la série (vue groupée) : clic = toute la série ; on peut la glisser aussitôt. -->
+          {#if bib.debutGroupe(i) && !(bib.params.groupe === 'serie' && colonnes.some((c) => c.id === 'serie'))}
+            <!-- En-tête du groupe (autre regroupement que la série, ou colonne Série masquée) : étiquette au-dessus de
+                 la première ligne ; clic = tout le groupe, on peut la glisser aussitôt. -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <span class="cellule tete-groupe" title="{bib.nomGroupe(l)} — cliquer pour sélectionner toute la série (Ctrl : l'ajouter)" data-groupe={i}
+            <span class="etiquette-groupe" title="{bib.nomGroupe(l)} — cliquer pour sélectionner tout le groupe (Ctrl : l'ajouter)" data-groupe={i}
               onpointerdown={(e) => { if (e.button !== 0) return; e.stopPropagation(); ongroupe?.(i, modificateurs(e)); onappui?.(e, i, true); }}
               onclick={(e) => e.stopPropagation()}>▸ {bib.nomGroupe(l)}</span>
-          {:else}
-            <span class="cellule discret" title={l.serie}>{l.serie ?? '—'}</span>
           {/if}
-          <span class="cellule num">{l.numero ?? ''}</span>
-          <span class="cellule discret" title={l.editeur}>{l.editeur ?? '—'}</span>
-          <span class="cellule num">{l.annee ?? ''}</span>
-          <span class="cellule num">{l.pages}</span>
-          <span class="cellule num">{l.lu ? '✓' : ''}</span>
+          {#each colonnes as c (c.id)}
+            {#if c.id === 'titre'}
+              <span class="cellule" class:manquant={l.manquant} title={l.manquant ? `${l.titre} — fichier introuvable` : l.titre}>{#if l.manquant}<span class="alerte-manquant" data-testid="indicateur-manquant" aria-label="Fichier introuvable">⚠ </span>{/if}{l.titre}</span>
+            {:else if c.id === 'serie' && bib.debutGroupe(i) && bib.params.groupe === 'serie'}
+              <!-- En-tête de la série (vue groupée) : clic = toute la série ; on peut la glisser aussitôt. -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <span class="cellule tete-groupe" title="{bib.nomGroupe(l)} — cliquer pour sélectionner toute la série (Ctrl : l'ajouter)" data-groupe={i}
+                onpointerdown={(e) => { if (e.button !== 0) return; e.stopPropagation(); ongroupe?.(i, modificateurs(e)); onappui?.(e, i, true); }}
+                onclick={(e) => e.stopPropagation()}>▸ {bib.nomGroupe(l)}</span>
+            {:else}
+              <span class="cellule {c.num ? 'num' : ''} {c.id === 'serie' || c.num ? '' : 'discret'}" data-col={c.id} title={c.cellule(l)}>{c.cellule(l) || (c.num ? '' : '—')}</span>
+            {/if}
+          {/each}
         {:else}
           {#if avecRang}<span></span>{/if}<span></span><span class="cellule"><span class="squelette"></span></span>
         {/if}
@@ -197,14 +293,27 @@
 <style>
   .alerte-manquant { color: var(--cr-erreur); font-weight: 700; }
   .cellule.manquant { color: var(--cr-texte-discret); }
-  .zone { position: relative; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; outline: none; }
+  .zone { position: relative; overflow-y: auto; overflow-x: auto; flex: 1; min-height: 0; outline: none; }
   .zone:focus-visible { box-shadow: inset 0 0 0 2px var(--cr-accent); }
-  .entete, .ligne {
-    display: grid; align-items: center; column-gap: 10px; padding: 0 12px;
-    grid-template-columns: 30px minmax(120px, 2fr) minmax(90px, 1.3fr) 56px minmax(80px, 1fr) 60px 56px 36px;
+  .entete, .ligne { display: grid; align-items: center; column-gap: 10px; padding: 0 12px; }
+  .cel-entete { position: relative; min-width: 0; overflow: visible; }
+  .cel-entete .ch { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .cel-entete.num .ch, .ch.num { text-align: right; width: 100%; }
+  /* Poignée de redimensionnement : à cheval sur l'espace entre deux colonnes. */
+  .poignee-col { position: absolute; top: -8px; bottom: -8px; right: -9px; width: 10px; cursor: col-resize; z-index: 3; }
+  .poignee-col:hover { background: color-mix(in srgb, var(--cr-accent) 45%, transparent); }
+  .bouton-colonnes { text-align: center; }
+  .menu-colonnes {
+    position: fixed; z-index: 20; display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 200px;
+    background: var(--cr-fond-panneau); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); box-shadow: var(--cr-ombre);
   }
-  .avec-rang .entete, .avec-rang .ligne {
-    grid-template-columns: 40px 30px minmax(120px, 2fr) minmax(90px, 1.3fr) 56px minmax(80px, 1fr) 60px 56px 36px;
+  .menu-colonnes label { display: flex; gap: 8px; align-items: center; padding: 3px 6px; cursor: pointer; }
+  .menu-colonnes label:hover { background: var(--cr-fond-survol); }
+  .menu-colonnes button { margin-top: 4px; }
+  .etiquette-groupe {
+    position: absolute; top: 0; left: 44px; z-index: 1; max-width: 40%; padding: 0 8px; font-size: 10px; line-height: 12px; font-weight: 600;
+    background: var(--cr-accent); color: var(--cr-accent-texte); border-radius: 0 0 var(--cr-rayon) var(--cr-rayon);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
   }
   .entete {
     position: sticky; top: 0; z-index: 2; background: var(--cr-fond-panneau);

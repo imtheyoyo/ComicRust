@@ -55,16 +55,71 @@ impl ClefTri {
     }
 }
 
-/// Regroupement.
+/// Regroupement : clé de groupe, libellés et ordre **identiques** à `GroupKey` de la version egui
+/// (`crates/comicrust/src/library/sorting.rs`). Les groupes se suivent dans l'ordre alphabétique de
+/// leur titre en minuscules (sens inversé si le tri est décroissant) ; pour « Année » le titre est
+/// l'année en texte (`(sans année)` avant les chiffres, car `(` précède `0`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Regroupement {
     Aucun,
     Serie,
     Editeur,
+    Scenariste,
+    Annee,
+    Arc,
+    Genre,
+    Format,
+    /// État de lecture : « Non lu », « En cours », « Lu ».
+    EtatLecture,
 }
 
 impl Regroupement {
-    /// Titre du groupe d'un livre.
+    /// Tous les regroupements, dans l'ordre du menu egui (`GroupKey::ALL`).
+    pub const TOUS: [Regroupement; 9] = [
+        Regroupement::Aucun,
+        Regroupement::Serie,
+        Regroupement::Editeur,
+        Regroupement::Scenariste,
+        Regroupement::Annee,
+        Regroupement::Arc,
+        Regroupement::Genre,
+        Regroupement::Format,
+        Regroupement::EtatLecture,
+    ];
+
+    /// Texte de l'IPC et des réglages (`vue.groupe`) → regroupement.
+    pub fn depuis_texte(t: &str) -> Option<Self> {
+        Some(match t {
+            "aucun" => Self::Aucun,
+            "serie" => Self::Serie,
+            "editeur" => Self::Editeur,
+            "scenariste" => Self::Scenariste,
+            "annee" => Self::Annee,
+            "arc" => Self::Arc,
+            "genre" => Self::Genre,
+            "format" => Self::Format,
+            "etat" => Self::EtatLecture,
+            _ => return None,
+        })
+    }
+
+    /// Libellé du menu « Groupe » (`GroupKey::label_of_key` d'egui).
+    pub fn libelle(self) -> &'static str {
+        match self {
+            Self::Aucun => "Aucun",
+            Self::Serie => "Série",
+            Self::Editeur => "Éditeur",
+            Self::Scenariste => "Scénariste",
+            Self::Annee => "Année",
+            Self::Arc => "Arc",
+            Self::Genre => "Genre",
+            Self::Format => "Format",
+            Self::EtatLecture => "État de lecture",
+        }
+    }
+
+    /// Titre du groupe d'un livre (`GroupKey::label` d'egui, sauf la série : celle affichée, déduite
+    /// du nom de fichier à défaut de fiche, comme les piles).
     pub(crate) fn titre(self, b: &LibraryBook) -> String {
         let texte = |v: &Option<String>, vide: &str| {
             v.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(|| vide.into())
@@ -73,6 +128,18 @@ impl Regroupement {
             Regroupement::Aucun => String::new(),
             Regroupement::Serie => texte(&Some(b.shadow_series()), "(sans série)"),
             Regroupement::Editeur => texte(&b.publisher, "(sans éditeur)"),
+            Regroupement::Scenariste => texte(&b.writer, "(sans scénariste)"),
+            Regroupement::Annee => {
+                b.year.filter(|y| *y > 0).map(|y| y.to_string()).unwrap_or_else(|| "(sans année)".into())
+            }
+            Regroupement::Arc => texte(&b.story_arc, "(sans arc)"),
+            Regroupement::Genre => texte(&b.genre, "(sans genre)"),
+            Regroupement::Format => texte(&b.format, "(sans format)"),
+            Regroupement::EtatLecture => match b.read_percent() {
+                None | Some(0) => "Non lu".into(),
+                Some(100) => "Lu".into(),
+                Some(_) => "En cours".into(),
+            },
         }
     }
 }
@@ -357,5 +424,115 @@ mod tests {
         assert_eq!(v, [2, 1, 0, 4, 3], "décroissant : groupes et livres à l'envers");
         trier(&mut v, &l, ClefTri::Ordre, false, Regroupement::Aucun, &|i| Some(pos[i]));
         assert_eq!(v, [3, 0, 4, 2, 1], "sans groupe : ordre de la liste");
+    }
+
+    /// Livre d'essai pour les clés de groupe.
+    fn fiche(id: &str) -> LibraryBook {
+        LibraryBook { id: id.into(), series: Some("S".into()), ..Default::default() }
+    }
+
+    #[test]
+    fn titres_des_groupes_comme_egui() {
+        let vide = fiche("v");
+        assert_eq!(Regroupement::Aucun.titre(&vide), "");
+        assert_eq!(Regroupement::Editeur.titre(&vide), "(sans éditeur)");
+        assert_eq!(Regroupement::Scenariste.titre(&vide), "(sans scénariste)");
+        assert_eq!(Regroupement::Annee.titre(&vide), "(sans année)");
+        assert_eq!(Regroupement::Arc.titre(&vide), "(sans arc)");
+        assert_eq!(Regroupement::Genre.titre(&vide), "(sans genre)");
+        assert_eq!(Regroupement::Format.titre(&vide), "(sans format)");
+        assert_eq!(Regroupement::EtatLecture.titre(&vide), "Non lu");
+        let mut b = fiche("b");
+        b.writer = Some("  Jim Starlin ".into());
+        b.year = Some(1991);
+        b.story_arc = Some("Infinity Gauntlet".into());
+        b.genre = Some("Super-héros".into());
+        b.format = Some("Series".into());
+        assert_eq!(Regroupement::Scenariste.titre(&b), "Jim Starlin", "espaces retirés");
+        assert_eq!(Regroupement::Annee.titre(&b), "1991");
+        assert_eq!(Regroupement::Arc.titre(&b), "Infinity Gauntlet");
+        assert_eq!(Regroupement::Genre.titre(&b), "Super-héros");
+        assert_eq!(Regroupement::Format.titre(&b), "Series");
+        // Année 0 = pas d'année ; texte blanc = absent.
+        b.year = Some(0);
+        b.writer = Some("   ".into());
+        assert_eq!(Regroupement::Annee.titre(&b), "(sans année)");
+        assert_eq!(Regroupement::Scenariste.titre(&b), "(sans scénariste)");
+    }
+
+    #[test]
+    fn etat_de_lecture_non_lu_en_cours_lu() {
+        let mut b = fiche("b");
+        b.page_count = Some(20);
+        assert_eq!(Regroupement::EtatLecture.titre(&b), "Non lu", "jamais ouvert");
+        b.last_page_read = Some(0);
+        assert_eq!(Regroupement::EtatLecture.titre(&b), "Non lu");
+        b.last_page_read = Some(9);
+        assert_eq!(Regroupement::EtatLecture.titre(&b), "En cours");
+        b.last_page_read = Some(19);
+        assert_eq!(Regroupement::EtatLecture.titre(&b), "Lu");
+    }
+
+    #[test]
+    fn textes_et_libelles_des_regroupements() {
+        let attendu = [
+            ("aucun", "Aucun"),
+            ("serie", "Série"),
+            ("editeur", "Éditeur"),
+            ("scenariste", "Scénariste"),
+            ("annee", "Année"),
+            ("arc", "Arc"),
+            ("genre", "Genre"),
+            ("format", "Format"),
+            ("etat", "État de lecture"),
+        ];
+        // Même ordre que `GroupKey::ALL` d'egui.
+        for (r, (texte, libelle)) in Regroupement::TOUS.iter().zip(attendu) {
+            assert_eq!(Regroupement::depuis_texte(texte), Some(*r));
+            assert_eq!(r.libelle(), libelle);
+        }
+        assert_eq!(Regroupement::depuis_texte("couleur"), None);
+    }
+
+    #[test]
+    fn groupes_par_annee_ordre_alphabetique_du_titre() {
+        // egui compare les titres en minuscules : « (sans année) » avant les chiffres ; en tri
+        // décroissant, les années décroissent et « (sans année) » passe en dernier.
+        let mk = |id: &str, an: Option<i32>| LibraryBook { id: id.into(), year: an, ..Default::default() };
+        let l = vec![mk("a", Some(1995)), mk("b", None), mk("c", Some(1991)), mk("d", Some(2003))];
+        let mut v = vec![0, 1, 2, 3];
+        trier(&mut v, &l, ClefTri::Titre, false, Regroupement::Annee, &|_| None);
+        assert_eq!(v, [1, 2, 0, 3]);
+        trier(&mut v, &l, ClefTri::Titre, true, Regroupement::Annee, &|_| None);
+        assert_eq!(v, [3, 0, 2, 1]);
+    }
+
+    #[test]
+    fn groupes_par_scenariste_et_etat_ordre_egui() {
+        let mk = |id: &str, w: Option<&str>, lu: Option<u32>| LibraryBook {
+            id: id.into(),
+            writer: w.map(str::to_string),
+            page_count: Some(10),
+            last_page_read: lu,
+            ..Default::default()
+        };
+        let l = vec![mk("a", Some("Zoe"), Some(9)), mk("b", None, None), mk("c", Some("alan"), Some(4))];
+        let mut v = vec![0, 1, 2];
+        trier(&mut v, &l, ClefTri::Titre, false, Regroupement::Scenariste, &|_| None);
+        assert_eq!(v, [1, 2, 0], "(sans scénariste), alan, Zoe : titres comparés en minuscules");
+        // « en cours » < « lu » < « non lu » (ordre alphabétique des titres en minuscules).
+        trier(&mut v, &l, ClefTri::Titre, false, Regroupement::EtatLecture, &|_| None);
+        assert_eq!(v, [2, 0, 1], "En cours (c), Lu (a), Non lu (b)");
+    }
+
+    #[test]
+    fn groupes_dans_l_ordre_de_la_liste_pour_les_nouvelles_cles() {
+        // Ordre de la liste + groupe par scénariste : le groupe suit son premier livre dans la liste.
+        let mk = |id: &str, w: &str| LibraryBook { id: id.into(), writer: Some(w.into()), ..Default::default() };
+        let l = vec![mk("a1", "A"), mk("z1", "Z"), mk("a2", "A")];
+        let pos = [1usize, 0, 2]; // liste : z1, a1, a2
+        let mut v = vec![0, 1, 2];
+        trier(&mut v, &l, ClefTri::Ordre, false, Regroupement::Scenariste, &|i| Some(pos[i]));
+        assert_eq!(v, [1, 0, 2], "Z d'abord (premier de la liste), puis A");
     }
 }

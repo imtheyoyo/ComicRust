@@ -66,6 +66,14 @@ pub enum Groupe {
     Aucun,
     Serie,
     Editeur,
+    Scenariste,
+    Annee,
+    Arc,
+    Genre,
+    Format,
+    /// État de lecture (Non lu / En cours / Lu).
+    #[serde(rename = "etat")]
+    Etat,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -99,9 +107,33 @@ pub struct LivreResume {
     pub editeur: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annee: Option<i32>,
+    /// Volume (colonne « N° » : `v2 #3` comme egui).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<i32>,
+    /// Mois de parution (colonne « Parution » : `03/1991` comme egui).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mois: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenariste: Option<String>,
+    /// Note de 0 à 5 (colonne « Note » : étoiles).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<f32>,
+    /// Date d'ajout ISO telle que dans la fiche (colonne « Ajouté »).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ajoute: Option<String>,
+    /// Chemin du fichier (colonne « Fichier »).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fichier: Option<String>,
+    /// Avancement de lecture en % (colonne « Lu »), absent si 0 ou inconnu.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avancement: Option<u32>,
     pub pages: u32,
     pub lu: bool,
     pub url_couverture: String,
+    /// Titre du groupe du livre pour le regroupement demandé (`(sans scénariste)`, `1991`, `Non lu`…) ;
+    /// absent sans regroupement. Même titre que `groupes_vue` (clé de `deplacer_groupes_liste`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groupe: Option<String>,
     /// Avec une liste : rang du livre dans la liste (1 = premier), colonne « # ».
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rang: Option<usize>,
@@ -130,6 +162,10 @@ pub struct Pile {
     pub ids: Vec<String>,
     /// Couverture du premier livre de la pile.
     pub url_couverture: String,
+    /// Titre du groupe de la pile (celui de son premier livre, comme `stacked_rows` d'egui) pour un
+    /// regroupement autre que « aucun » et « série » (redondant avec les piles) : en-tête de groupe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groupe: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -664,10 +700,14 @@ impl Biblio {
         let fin = debut.saturating_add(req.nombre.min(NOMBRE_MAX)).min(total);
         let revs = self.revisions.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let avec_rang = req.liste.is_some();
+        let groupe = regroupement(req.groupe);
         let livres = vue.indices[debut..fin]
             .iter()
             .map(|&i| {
                 let mut r = resume(&base.books[i]);
+                if groupe != Regroupement::Aucun {
+                    r.groupe = Some(groupe.titre(&base.books[i]));
+                }
                 r.url_couverture = avec_revision(r.url_couverture, revs.get(&r.id.to_ascii_lowercase()));
                 if avec_rang {
                     r.rang = vue.rang(i).map(|n| n + 1);
@@ -683,6 +723,7 @@ impl Biblio {
     /// comme `stacks()` de la version egui.
     pub fn lister_piles(&self, req: &RequeteLivres) -> Result<PagePiles, String> {
         let (base, vue) = self.vue_complete(req)?;
+        let groupe = regroupement(req.groupe);
         let revs = self.revisions.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let mut position: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         let mut piles: Vec<Pile> = Vec::new();
@@ -691,7 +732,15 @@ impl Biblio {
             let titre = titre_pile(b);
             let k = *position.entry(titre.clone()).or_insert_with(|| {
                 let url = avec_revision(url_couverture(&b.id), revs.get(&b.id.to_ascii_lowercase()));
-                piles.push(Pile { serie: titre, nb_livres: 0, nb_lus: 0, ids: Vec::new(), url_couverture: url });
+                let g = (groupe != Regroupement::Aucun && groupe != Regroupement::Serie).then(|| groupe.titre(b));
+                piles.push(Pile {
+                    serie: titre,
+                    nb_livres: 0,
+                    nb_lus: 0,
+                    ids: Vec::new(),
+                    url_couverture: url,
+                    groupe: g,
+                });
                 piles.len() - 1
             });
             let p = &mut piles[k];
@@ -1212,6 +1261,12 @@ pub(crate) fn regroupement(g: Option<Groupe>) -> Regroupement {
         Groupe::Aucun => Regroupement::Aucun,
         Groupe::Serie => Regroupement::Serie,
         Groupe::Editeur => Regroupement::Editeur,
+        Groupe::Scenariste => Regroupement::Scenariste,
+        Groupe::Annee => Regroupement::Annee,
+        Groupe::Arc => Regroupement::Arc,
+        Groupe::Genre => Regroupement::Genre,
+        Groupe::Format => Regroupement::Format,
+        Groupe::Etat => Regroupement::EtatLecture,
     }
 }
 
@@ -1409,9 +1464,17 @@ fn resume(b: &LibraryBook) -> LivreResume {
         numero: non_vide_txt(&b.shadow_number()).filter(|n| n != "-"),
         editeur: non_vide(&b.publisher),
         annee: b.year.filter(|y| *y > 0),
+        volume: b.volume.filter(|v| *v >= 0),
+        mois: b.month.filter(|m| *m > 0),
+        scenariste: non_vide(&b.writer),
+        note: b.rating.filter(|r| *r > 0.0),
+        ajoute: non_vide(&b.added).filter(|d| !d.starts_with("0001-01-01")),
+        fichier: non_vide(&b.file),
+        avancement: b.read_percent().filter(|p| *p > 0),
         pages: b.page_count.unwrap_or(0),
         lu: b.read_percent() == Some(100),
         url_couverture: url_couverture(&b.id),
+        groupe: None,
         rang: None,
         manquant: crate::manquants::est_manquant(b),
     }

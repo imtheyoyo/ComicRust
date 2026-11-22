@@ -24,6 +24,8 @@ export interface ContexteGlisser {
   nombreLivres?: (indices: number[]) => number;
   /** Nombre de séries de la sélection (0 sans regroupement par série). */
   series: (indices: number[]) => number;
+  /** Mot du badge pour ces groupes : « série » (défaut) ou « groupe » (autres regroupements). */
+  motGroupe?: () => string;
   /** Sélection d'un en-tête de série terminée (elle se calcule de façon asynchrone : début et fin
    *  du groupe sont lus au backend). Évite que le glisser ne remplace une sélection encore en cours
    *  de construction (Ctrl+clic sur deux séries puis glisser). */
@@ -249,7 +251,7 @@ export class GlisserLivres {
   get badge(): { quoi: string; action: string | null; refus: boolean } {
     const s = (k: number) => (k > 1 ? 's' : '');
     const quoi = this.nbSeries > 0
-      ? `📚 ${this.nbSeries} série${s(this.nbSeries)} · ${this.nb} livre${s(this.nb)}`
+      ? `📚 ${this.nbSeries} ${this.ctx.motGroupe?.() ?? 'série'}${s(this.nbSeries)} · ${this.nb} livre${s(this.nb)}`
       : `📚 ${this.nb} livre${s(this.nb)}`;
     const i = this.indication;
     if (!i) return { quoi, action: null, refus: false };
