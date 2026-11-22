@@ -78,6 +78,7 @@
 <style>
   .menu {
     position: fixed; z-index: 50; min-width: 240px; padding: 4px; display: flex; flex-direction: column;
+    max-height: calc(100vh - 8px); overflow-y: auto; /* menu long (scripts listés) : défile plutôt que déborder */
     background: var(--cr-fond-panneau); border: 1px solid var(--cr-bordure); border-radius: var(--cr-rayon); box-shadow: var(--cr-ombre);
   }
   .menu button {

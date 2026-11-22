@@ -14,6 +14,7 @@ import { creerScanSimule } from './simuleScan';
 import { COMMANDES_REGLAGES, creerReglagesSimules } from './simuleReglages';
 import { creerScriptsSimules } from './simuleScripts';
 import { creerManquantsSimules } from './simuleManquants';
+import { creerLectureEtatSimulee } from './simuleLectureEtat';
 import { COMMANDES_THEMES, creerThemesSimules, themesRefuses } from './simuleThemes';
 import { COMMANDES_FENETRE, creerFenetreSimulee } from './simuleFenetre';
 import { COMMANDES_RECENTS, creerRecentsSimules } from './simuleLecteur';
@@ -393,8 +394,24 @@ const mq = creerManquantsSimules({
   invalider: () => { ordreCle = ''; },
 });
 
+// « Marquer comme lu / non lu » (lot menu du livre) : voir simuleLectureEtat.ts.
+const lectureEtat = creerLectureEtatSimulee({
+  livres: LIVRES,
+  lectureSeule: () => {
+    const h = base.motif();
+    if (h) return h;
+    if (etat.mode !== 'comicrack') return undefined;
+    const r = edition('lire_reglages_edition', {}) as { ecritureComicrack: boolean };
+    return r.ecritureComicrack ? undefined : 'Bibliothèque ComicRack en lecture seule (cocher « Lecture et écriture » dans Réglages).';
+  },
+  emettre,
+  invalider: () => { ordreCle = ''; },
+});
+
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
+  const rl = lectureEtat.appeler(commande, args);
+  if (rl !== undefined) return rl;
   const rm = maj.appeler(commande, args);
   if (rm !== undefined) return rm;
   if (COMMANDES_THEMES.includes(commande)) return themesSimules.appeler(commande, args);

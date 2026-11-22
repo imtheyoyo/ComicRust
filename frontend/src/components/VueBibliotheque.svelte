@@ -4,7 +4,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import {
     ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, decalerPileListe, deplacerGroupesListe, deplacerLivresListe, deplacerPilesListe, ecouter,
-    dansTauri, groupesVue, messageErreur, ouvrirDossierFichier, retirerLivresListe,
+    dansTauri, groupesVue, marquerLecture, messageErreur, ouvrirDossierFichier, retirerLivresListe,
     type BibliothequeModifiee, type ClefTri, type LivreResume, type Groupe, type Pile, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
   } from '../lib/api';
   import { GlisserLivres } from '../lib/glisserLivres.svelte';
@@ -92,10 +92,10 @@
   function ouvrirMenu(x: number, y: number, piles = false) {
     pilesMenu = piles ? { ids: idsPiles(), serie: nbPilesSel === 1 ? pileSelectionnee : null } : undefined;
     menu = { x, y, piles };
-    positionMenu = { x, y };
+    // Scripts applicables, listés directement dans le menu : chargés sans attendre (les entrées
+    // se mettent à jour quand la liste arrive).
+    void scripts.charger();
   }
-  /** Dernière position du menu contextuel : le sous-menu « Scripts ▸ » s'ouvre au même endroit. */
-  let positionMenu = { x: 0, y: 0 };
 
   // ───── Scripts Python (tauri-v0.9.0) : menu de la barre d'outils et sous-menu du clic droit ─────
 
@@ -110,6 +110,30 @@
       id: `${prefixe}:${s.id}`, libelle: s.nom, desactive: !!indispo || n === 0,
       aide: indispo ?? (n === 0 ? 'Sélectionner des livres d\'abord' : s.description),
     }));
+  }
+
+  /** Nombre maximal de scripts listés dans le menu contextuel ; les autres : « Gérer les scripts… ». */
+  const MAX_SCRIPTS_MENU = 12;
+
+  /** Scripts applicables aux `n` livres visés, au premier niveau du menu contextuel : titre
+   *  « Scripts », une entrée par script du hook Books, repli propre si indisponibles / aucun /
+   *  trop nombreux (entrées `books:<id>` et `scripts-gerer`, traitées par `agirSurIds`). */
+  function entreesScriptsMenu(n: number): EntreeMenu[] {
+    const titre: EntreeMenu = { id: 'titre-scripts', libelle: 'Scripts', desactive: true, separe: true };
+    const gerer = (libelle = 'Gérer les scripts…'): EntreeMenu => ({ id: 'scripts-gerer', libelle });
+    if (!scripts.etat) {
+      if (scripts.erreur) return [titre, { id: 'scripts-indispo', libelle: 'Scripts indisponibles', desactive: true, aide: scripts.erreur }, gerer()];
+      return [titre, { id: 'scripts-charge', libelle: 'Chargement des scripts…', desactive: true }];
+    }
+    const liste = scripts.scriptsDe('Books');
+    if (liste.length === 0) return [titre, { id: 'scripts-aucun', libelle: 'Aucun script', desactive: true, aide: 'Aucun script actif pour les livres' }, gerer()];
+    const indispo = scripts.raisonIndisponible;
+    const vues = liste.slice(0, MAX_SCRIPTS_MENU).map((s): EntreeMenu => ({
+      id: `books:${s.id}`, libelle: s.nom, desactive: !!indispo || n === 0,
+      aide: indispo ?? (n === 0 ? 'Sélectionner des livres d\'abord' : s.description),
+    }));
+    const reste = liste.length - vues.length;
+    return [titre, ...vues, ...(reste > 0 ? [gerer(`… et ${reste.toLocaleString('fr-FR')} autre(s) : gérer les scripts…`)] : [])];
   }
 
   function ouvrirMenuScripts(ev: MouseEvent) {
@@ -641,6 +665,7 @@
     ];
     return [
       { id: 'lire', libelle: 'Lire', raccourci: 'Entrée', desactive: plusieurs, aide: plusieurs ? 'Un seul livre à la fois' : undefined },
+      ...entreesLecture(),
       { id: 'infos', libelle: plusieurs ? `✏ Modifier les infos des ${nbSel.toLocaleString('fr-FR')} livres…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: true },
       { id: 'ecritureInfos', libelle: plusieurs ? 'Écrire les infos dans les fichiers…' : 'Écrire les infos dans le fichier', separe: true,
         aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
@@ -648,7 +673,7 @@
       { id: 'renommer', libelle: 'Renommer / déplacer…' },
       { id: 'dossier', libelle: 'Ouvrir le dossier du fichier', separe: true, desactive: plusieurs,
         aide: plusieurs ? 'Un seul livre à la fois' : 'Montre le fichier dans l\'Explorateur de Windows' },
-      entreeScripts(),
+      ...entreesScriptsMenu(nbSel || (sel.curseur >= 0 ? 1 : 0)),
       ...entreesListes,
       ...entreesManquants(),
     ];
@@ -669,10 +694,26 @@
     ];
   }
 
-  /** Entrée « 📜 Scripts ▸ » du menu contextuel : ouvre la liste des scripts du hook Books. */
-  function entreeScripts(): EntreeMenu {
-    const n = scripts.scriptsDe('Books').length;
-    return { id: 'scripts', libelle: '📜 Scripts ▸', separe: true, desactive: n === 0, aide: n === 0 ? 'Aucun script actif pour les livres' : 'Lancer un script sur ces livres' };
+  /** « Marquer comme lu » / « Marquer comme non lu » (comme ComicRack : deux entrées, sans bascule).
+   *  Désactivées quand les fiches ne sont pas modifiables (ComicRack en lecture seule, hors ligne). */
+  function entreesLecture(): EntreeMenu[] {
+    const raison = manquants.raison;
+    return [
+      { id: 'marquerLu', libelle: '✔ Marquer comme lu', desactive: !!raison, aide: raison ?? 'Progression à 100 %' },
+      { id: 'marquerNonLu', libelle: '↺ Marquer comme non lu', desactive: !!raison, aide: raison ?? 'Remet la progression à zéro' },
+    ];
+  }
+
+  /** Marque les livres lus ou non lus ; la vue se recharge par `bibliotheque-modifiee` (sélection gardée). */
+  async function marquerLus(ids: string[], lu: boolean) {
+    try {
+      const b = await marquerLecture(ids, lu);
+      if (b.ignores.length) {
+        erreurAction = `${b.ignores.length.toLocaleString('fr-FR')} livre(s) non modifié(s) : ${b.ignores[0].raison}`;
+      }
+    } catch (e) {
+      erreurAction = messageErreur(e);
+    }
   }
 
   /** Menu contextuel des piles : les actions portent sur les livres de TOUTES les piles sélectionnées. */
@@ -685,12 +726,13 @@
     const refusPile = refusDecalerPile();
     return [
       ...(np === 1 ? [{ id: 'ouvrir', libelle: '📂 Ouvrir la pile', raccourci: 'Entrée' }] : []),
+      ...entreesLecture(),
       { id: 'infos', libelle: n > 1 ? `✏ Modifier les infos ${quoi.replace(/^les /, 'des ')}…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: np === 1 },
       { id: 'ecritureInfos', libelle: n > 1 ? 'Écrire les infos dans les fichiers…' : 'Écrire les infos dans le fichier', separe: true,
         aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
       { id: 'conversion', libelle: n > 1 ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ', aide: 'Seuls les CBR, CB7 et CBT se convertissent' },
       { id: 'renommer', libelle: 'Renommer / déplacer…' },
-      entreeScripts(),
+      ...entreesScriptsMenu(n),
       { id: 'ajouter', libelle: `➕ Ajouter ${quoi} à une liste…`, separe: true, desactive: !!raison, aide: raison },
       ...(liste?.type === 'lecture'
         ? [
@@ -838,11 +880,17 @@
       void manquants.demanderRetrait(ids);
       return;
     }
-    if (id === 'scripts') {
-      menuScripts = {
-        x: positionMenu.x, y: positionMenu.y, ids,
-        entrees: [{ id: 'titre-sur', libelle: `Sur ${ids.length.toLocaleString('fr-FR')} livre(s)`, desactive: true }, ...entreesScriptsLivres(ids.length)],
-      };
+    if (id === 'marquerLu' || id === 'marquerNonLu') {
+      await marquerLus(ids, id === 'marquerLu');
+      return;
+    }
+    if (id === 'scripts-gerer') {
+      scripts.ouvrirGestion();
+      return;
+    }
+    if (id.startsWith('books:')) {
+      const s = scripts.etat?.scripts.find((x) => x.id === id.slice('books:'.length));
+      if (s) void scripts.lancer(s, 'Books', ids);
       return;
     }
     if (id === 'infos') infosDe = ids;

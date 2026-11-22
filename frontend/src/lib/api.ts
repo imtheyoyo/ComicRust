@@ -1578,3 +1578,20 @@ export const configurationBiblio = () => appeler<ConfigurationBiblio>('configura
 export const relireBibliotheque = () => appeler<EtatBiblio>('relire_bibliotheque');
 /** « 📋 Copier les livres » : rapport texte des livres affichés. */
 export const rapportLivres = (requete: RequeteLivres, titre: string) => appeler<string>('rapport_livres', { requete, titre });
+
+// « Marquer comme lu / non lu » (lot menu du livre, docs/tauri/ipc-lecture-etat.md).
+export interface LivreIgnoreLecture {
+  id: string;
+  raison: string;
+}
+export interface BilanLecture {
+  /** État demandé : vrai = lu, faux = non lu. */
+  lu: boolean;
+  /** Livres dont la fiche a été écrite. */
+  modifies: string[];
+  /** Livres déjà dans l'état demandé. */
+  inchanges: number;
+  ignores: LivreIgnoreLecture[];
+}
+/** Marque des livres lus (`lu` vrai) ou non lus ; refusé (message lisible) en lecture seule. */
+export const marquerLecture = (ids: string[], lu: boolean) => appeler<BilanLecture>('marquer_lecture', { ids, lu });
