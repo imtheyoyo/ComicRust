@@ -1176,7 +1176,7 @@ pub fn run() {
             // dans le dossier portable. Titre et tailles : celles de l'ancienne configuration.
             let profil = portable::dossier_webview(&data.0);
             let fenetre = tauri::WebviewWindowBuilder::new(&*app, "main", tauri::WebviewUrl::default())
-                .title("ComicRust")
+                .title(fenetre::nom_et_version())
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(800.0, 500.0)
                 .data_directory(profil)

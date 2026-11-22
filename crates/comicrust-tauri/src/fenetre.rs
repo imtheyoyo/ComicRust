@@ -3,7 +3,7 @@
 //! - géométrie mémorisée (section `fenetre` de `data\comicrust-tauri.json`) : restauration au
 //!   démarrage avec contrôle de la position (écran débranché = fenêtre centrée) et sauvegarde
 //!   limitée dans le temps pendant les redimensionnements ([`Suivi`]) ;
-//! - titre dynamique « <livre> — ComicRust » (`update_title` de la version egui) ;
+//! - titre dynamique « <livre> — ComicRust <version> » (`update_title` de la version egui) ;
 //! - analyse de la ligne de commande : `ComicRust.exe [fichier | dossier | liste.cbl]`, compatible
 //!   avec `--mcp`, `--mcp-stdio` et `--attendre-pid <pid>` (`main.rs` de la version egui).
 //!
@@ -183,16 +183,33 @@ impl Suivi {
 
 // ───────────────────────────── Titre ─────────────────────────────
 
-/// Titre de la fenêtre : « <livre> — ComicRust » avec un livre ouvert, « ComicRust » sinon.
-/// Le titre est nettoyé (caractères de contrôle remplacés par une espace) et borné.
+/// Nom de l'application suivi de sa version (`CARGO_PKG_VERSION` du binaire : jamais écrite à la
+/// main, ni dans le front ni dans `tauri.conf.json`), p. ex. « ComicRust 1.0.1 ».
+pub fn nom_et_version() -> String {
+    nom_avec_version(env!("CARGO_PKG_VERSION"))
+}
+
+fn nom_avec_version(version: &str) -> String {
+    format!("ComicRust {version}")
+}
+
+/// Titre de la fenêtre : « <livre> — ComicRust 1.0.1 » avec un livre ouvert, « ComicRust 1.0.1 »
+/// sinon (démarrage, bibliothèque, lecteur fermé). Le repère fixe « ComicRust <version> » est
+/// toujours présent. Le titre du livre est nettoyé (caractères de contrôle remplacés par une espace)
+/// et borné.
 pub fn titre_fenetre(livre: Option<&str>) -> String {
+    titre_avec_version(livre, env!("CARGO_PKG_VERSION"))
+}
+
+fn titre_avec_version(livre: Option<&str>, version: &str) -> String {
+    let nom = nom_avec_version(version);
     let propre: String = livre.unwrap_or("").chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let propre = propre.split_whitespace().collect::<Vec<_>>().join(" ");
     if propre.is_empty() {
-        return "ComicRust".to_string();
+        return nom;
     }
     let borne: String = propre.chars().take(200).collect();
-    format!("{borne} — ComicRust")
+    format!("{borne} — {nom}")
 }
 
 // ───────────────────────────── Ligne de commande ─────────────────────────────
@@ -369,12 +386,22 @@ mod tests {
 
     #[test]
     fn titre_dynamique() {
-        assert_eq!(titre_fenetre(None), "ComicRust");
-        assert_eq!(titre_fenetre(Some("")), "ComicRust");
-        assert_eq!(titre_fenetre(Some("  \n ")), "ComicRust");
-        assert_eq!(titre_fenetre(Some("Thanos 01")), "Thanos 01 — ComicRust");
-        assert_eq!(titre_fenetre(Some("Un\ntitre\t  piégé")), "Un titre piégé — ComicRust");
-        assert!(titre_fenetre(Some(&"x".repeat(500))).chars().count() <= 200 + " — ComicRust".chars().count());
+        let t = |l: Option<&str>| titre_avec_version(l, "1.0.1");
+        assert_eq!(t(None), "ComicRust 1.0.1");
+        assert_eq!(t(Some("")), "ComicRust 1.0.1");
+        assert_eq!(t(Some("  \n ")), "ComicRust 1.0.1");
+        assert_eq!(t(Some("Thanos 01")), "Thanos 01 — ComicRust 1.0.1");
+        assert_eq!(t(Some("Série #3")), "Série #3 — ComicRust 1.0.1");
+        assert_eq!(t(Some("Un\ntitre\t  piégé")), "Un titre piégé — ComicRust 1.0.1");
+        assert!(t(Some(&"x".repeat(500))).chars().count() <= 200 + " — ComicRust 1.0.1".chars().count());
+    }
+
+    #[test]
+    fn titre_porte_la_version_du_paquet() {
+        // La version vient de Cargo : jamais écrite en dur.
+        assert_eq!(titre_fenetre(None), format!("ComicRust {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(nom_et_version(), titre_fenetre(None));
+        assert!(titre_fenetre(Some("Livre")).ends_with(&format!(" — ComicRust {}", env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]
