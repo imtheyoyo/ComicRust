@@ -97,6 +97,13 @@ fn page(chemin: &str) -> Option<(&'static str, String)> {
         "/ajax/resume/album/21" | "/ajax/resume/album/15161" => "resume_21.html",
         "/ajax/resume/album/555" => "resume_555.html",
         "/ajax/resume/album/1002" => "resume_1002.html",
+        // Albums sans résumé (retour au résumé de la série) : réponse « ajax » blanche.
+        "/ajax/resume/album/22" | "/ajax/resume/album/601" | "/ajax/resume/album/602" => "resume_vide.html",
+        "/bd-blacksad-tome-2-arctic-nation-22.html" => "album_blacksad_2_sans_resume.html",
+        "/bd-les-ombres-factices-tome-1-premier-chapitre-601.html" => "album_serie_sans_resume.html",
+        "/serie-600-bd-les-ombres-factices__10000.html" => "serie_sans_resume.html",
+        // Série 602 absente du serveur (404) : page de série illisible.
+        "/bd-serie-disparue-tome-1-premier-essai-602.html" => "album_serie_introuvable.html",
         "/bandes_dessinees_t.html" => "lettre_t.html",
         "/search/tout?rechtexte=thorgal%20monde&rechwhere=7" | "/search/tout?rechtexte=thorgal+monde&rechwhere=7" => {
             "recherche_thorgal.html"
@@ -1170,6 +1177,97 @@ fn scrape_rapide_et_rescrape() {
     assert!(!c.contains_key("Web"));
     assert!(champs(&r, "d").is_empty());
     assert!(hote.questions.lock().unwrap()[0].text.contains("rescrape"));
+}
+
+/// Album sans résumé : résumé de la série à la place (option « Utiliser le résumé de la série si
+/// l'album n'en a pas », activée par défaut) ; série sans résumé, page de série illisible,
+/// plusieurs livres d'une même série (une seule lecture de la page de la série en lien direct).
+#[test]
+fn resume_de_la_serie_si_l_album_n_en_a_pas() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let resume_serie = "Dans une Amérique des années 50 peuplée d'animaux, le détective John Blacksad enquête.";
+
+    // Recherche ordinaire : la page de la série est déjà lue, aucune requête de plus ; le résumé de
+    // la série seul (sans le marqueur « >Titre< » de l'album) ; le tome 1, qui a un résumé, ne
+    // change pas.
+    let hote = Arc::new(Hote::avec(vec![livre("b1", "Blacksad", "1"), livre("b2", "Blacksad", "2")]).reglages(
+        &srv,
+        journaux.path(),
+        json!({"CBNotes": false}),
+    ));
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b1", "b2"]), hote.clone());
+    assert_eq!(r.return_value, json!({"traites": 2, "ignores": 0}), "{}", r.journal_text());
+    assert!(champs(&r, "b1")["Summary"].as_str().unwrap().contains(">Quelque Part Entre Les Ombres< \nJohn Blacksad"));
+    let b2 = champs(&r, "b2");
+    assert_eq!(b2["Title"], json!("Arctic Nation"));
+    assert_eq!(b2["Summary"], json!(resume_serie), "{b2:?}");
+    let chemins = srv.chemins();
+    let n = |c: &str| chemins.iter().filter(|x| x.as_str() == c).count();
+    assert_eq!(n("/ajax/resume/album/22"), 1);
+    assert_eq!(n("/serie-59-bd-blacksad__10000.html"), 2, "une lecture par livre, comme avant : {chemins:?}");
+
+    // « Ne remplacer que les champs vides » : le résumé de la série ne remplace pas un résumé
+    // existant ; option décochée : pas de résumé de série à la place.
+    let mut avec_resume = livre("b2", "Blacksad", "2");
+    avec_resume.summary = Some("Mon résumé".into());
+    let hote = Arc::new(Hote::avec(vec![avec_resume, livre("b3", "Blacksad", "2")]).reglages(
+        &srv,
+        journaux.path(),
+        json!({"ChampsVidesSeulement": true}),
+    ));
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b2", "b3"]), hote.clone());
+    assert!(!champs(&r, "b2").contains_key("Summary"));
+    assert_eq!(champs(&r, "b3")["Summary"], json!(resume_serie));
+    let hote = Arc::new(Hote::avec(vec![livre("b2", "Blacksad", "2")]).reglages(
+        &srv,
+        journaux.path(),
+        json!({"SerieResumeSiAlbumVide": false}),
+    ));
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b2"]), hote.clone());
+    assert!(!champs(&r, "b2").contains_key("Summary"), "option décochée : {:?}", champs(&r, "b2"));
+
+    // Liens directs (rescrape) : la page de la série est suivie depuis la page de l'album, une
+    // seule fois par série pendant l'exécution, même sans résumé (601) ou illisible (602).
+    let lien = |chemin: &str| Some(format!("{}/{chemin}", srv.base));
+    let mut c = livre("c", "Blacksad", "2");
+    c.web = lien("BD-Blacksad-Tome-2-Arctic-Nation-22.html");
+    let mut d = livre("d", "Blacksad", "2");
+    d.web = lien("BD-Blacksad-Tome-2-Arctic-Nation-22.html");
+    let mut e = livre("e", "Les Ombres Factices", "1");
+    e.web = lien("BD-Les-Ombres-Factices-Tome-1-Premier-Chapitre-601.html");
+    let mut g = livre("g", "Serie Disparue", "1");
+    g.web = lien("BD-Serie-Disparue-Tome-1-Premier-Essai-602.html");
+    let mut h = livre("h", "Serie Disparue", "1");
+    h.web = g.web.clone();
+    let hote = Arc::new(
+        Hote::avec(vec![c, d, e, g, h])
+            .reglages(&srv, journaux.path(), json!({"CBRescrape": true, "CBNotes": false}))
+            .confirmations(vec![true]),
+    );
+    srv.releve.lock().unwrap().clear();
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["c", "d", "e", "g", "h"]), hote.clone());
+    assert_eq!(r.return_value, json!({"traites": 5, "ignores": 0}), "{}", r.journal_text());
+    assert_eq!(champs(&r, "c")["Summary"], json!(resume_serie));
+    assert_eq!(champs(&r, "d")["Summary"], json!(resume_serie));
+    // Série sans résumé : rien d'écrit pour le résumé, le reste de la fiche l'est.
+    let e = champs(&r, "e");
+    assert!(!e.contains_key("Summary"), "{e:?}");
+    assert_eq!(e["Title"], json!("Premier Chapitre"));
+    // Page de la série en 404 : avertissement, fiche traitée, pas de nouvelle tentative.
+    for id in ["g", "h"] {
+        let c = champs(&r, id);
+        assert!(!c.contains_key("Summary"), "{c:?}");
+        assert_eq!(c["Title"], json!("Premier Essai"));
+    }
+    let journal = r.journal_text();
+    assert!(journal.contains("Résumé de la série non lu"), "{journal}");
+    let chemins = srv.chemins();
+    let n = |c: &str| chemins.iter().filter(|x| x.as_str() == c).count();
+    assert_eq!(n("/serie-59-bd-blacksad__10000.html"), 1, "{chemins:?}");
+    assert_eq!(n("/serie-600-bd-les-ombres-factices__10000.html"), 1, "{chemins:?}");
+    assert_eq!(n("/serie-602-bd-serie-disparue__10000.html"), 1, "{chemins:?}");
 }
 
 /// Réglages : formulaire à trois onglets, import de l'App.Config de ComicRack, enregistrement.

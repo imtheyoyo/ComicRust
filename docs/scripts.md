@@ -190,6 +190,19 @@ du script **et** du libellé ajouté au résumé (« Info édition: » / « Edit
 données lues sur le site ne changent pas. Un `App.Config` importé en anglais met donc le
 script en anglais : repasser « Français » dans Préférences si besoin.
 
+Résumé de la série (ajout du portage) : quand la page de l'album n'a pas de résumé, le
+résumé de la **série** est écrit à la place dans le champ Résumé (tel quel, sans le marqueur
+`>Titre<` réservé au résumé de l'album ; « Info édition » est ajouté ensuite comme
+d'habitude). Option « Utiliser le résumé de la série si l'album n'en a pas » (onglet
+Données, réglage `SerieResumeSiAlbumVide`, **activée par défaut**, jamais lue dans l'`App.Config`
+de ComicRack). Aucune requête de plus en recherche ordinaire (la page de la série est déjà
+lue) ; en lien direct vers un album (QuickScrape, rescrape), la page de la série est suivie
+depuis le lien de la page de l'album, **une seule fois par série et par exécution** (série
+sans résumé ou page illisible comprises). Série sans résumé : rien n'est écrit. Page de la
+série illisible (réseau, 404, site qui bloque) : avertissement au journal, le reste de la
+fiche est traité normalement. Sans effet si « Résumé » est décoché dans les données à
+récupérer ; « Ne remplir que les champs vides » garde un résumé déjà présent.
+
 Import de l'`App.Config` : un réglage fait seulement d'espaces et de retours à la ligne
 (`<TBTags>⏎  </TBTags>`, écrit ainsi par l'indentation de l'original) est lu vide, comme le
 fait l'original (v0.10.1 : gardé tel quel, ce qui vidait les étiquettes des livres ; un

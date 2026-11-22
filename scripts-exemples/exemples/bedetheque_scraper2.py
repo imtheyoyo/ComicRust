@@ -99,6 +99,8 @@ DEFAUTS = {
     "FORMATARTICLES": True, "PopUpEditionForm": False, "SerieResumeEverywhere": True,
     "PadNumber": "0", "ONESHOTFORMAT": False, "AlwaysChooseSerie": False,
     "AcceptGenericArtists": False,
+    # Ajout du portage : résumé de la série à défaut de résumé de l'album (activé par défaut).
+    "SerieResumeSiAlbumVide": True,
     # Ajouts du portage (absents de l'original) : champs vides seulement ; fenêtres de choix
     # (hauteur des vignettes, couvertures des séries lues sur la page des premières séries).
     "ChampsVidesSeulement": False, "TailleVignettes": 150, "VignettesSeries": True, "NbVignettesSeries": 6,
@@ -108,7 +110,7 @@ TEXTES = {"LANGENFR", "TBTags", "ARTICLES", "SUBPATT", "TIMEOUT", "TIMEOUTS", "T
           "CBStop", "url_base", "dossier_journaux"}
 ENTIERS = {"DBGLOGMAX", "RENLOGMAX", "TailleVignettes", "NbVignettesSeries"}
 # Réglages du portage : jamais lus dans l'App.Config de l'original.
-AJOUTS = {"ChampsVidesSeulement", "TailleVignettes", "VignettesSeries", "NbVignettesSeries", "url_base",
+AJOUTS = {"SerieResumeSiAlbumVide", "ChampsVidesSeulement", "TailleVignettes", "VignettesSeries", "NbVignettesSeries", "url_base",
           "dossier_journaux"}
 
 # Liste « Données » de l'onglet 2 : clé de la liste → (réglage, n° de texte), dans l'ordre
@@ -184,6 +186,11 @@ class _Etat:
         self.PickSeriesLink = ""
         self.serie_rech_prev = None
         self.Serie_Resume = ""
+        # Page de la série du livre déjà lue (son résumé est dans Serie_Resume) ; résumés des
+        # séries lus pendant cette exécution (adresse normalisée → résumé, « » si aucun ou
+        # page illisible : une série n'est demandée qu'une fois).
+        self.serie_lue = False
+        self.resumes_series = {}
         self.SkipAlbum = False
         self.bError = False
         self.nRenamed = 0
@@ -2004,6 +2011,47 @@ def SetAlbumInformation(f, serieUrl, serie, num):
     return False
 
 
+def _resume_page_serie(page):
+    """Résumé de la série d'après le texte de sa page ('' s'il n'y en a pas)."""
+    nameRegex = SERIE_RESUME.search(checkWebChar(page.replace("\r\n", "")), 0)
+    resume = strip_tags(nameRegex.group(1)).strip() if nameRegex else ""
+    resume = SERIE_RESUME_INTRO.sub("", resume, count=2)
+    return checkWebChar(resume).strip()
+
+
+def _cle_serie(url):
+    """Adresse normalisée d'une page de série (clé du cache des résumés)."""
+    u = GetFullURL(url).split("#")[0].lower()
+    return u.replace("__10000.html", ".html")
+
+
+# Lien vers la série dans une page d'album (titre de l'entête) : « …/serie-59-BD-Blacksad.html ».
+LIEN_SERIE_ALBUM = re.compile(r'href="([^"]*?/?serie-\d+[^"]*?\.html)', re.I)
+
+
+def _resume_serie_par_album(albumHTML):
+    """Résumé de la série d'un album dont la page de série n'a pas été lue (lien direct) : page
+    de la série suivie depuis le lien de la page de l'album. Une seule requête par série et par
+    exécution (un échec ou l'absence de résumé sont aussi gardés) ; en cas d'erreur (réseau,
+    site qui bloque) le livre est traité sans résumé de série, un avertissement est noté."""
+    m = LIEN_SERIE_ALBUM.search(albumHTML)
+    if not m or stop():
+        return ""
+    lien = checkWebChar(m.group(1))
+    cle = _cle_serie(lien)
+    if cle in S.resumes_series:
+        debuglog("Résumé de la série déjà lu : " + cle)
+        return S.resumes_series[cle]
+    page = _read_url(lien.split("#")[0].replace(".html", "__10000.html"), False, silencieux=True)
+    resume = _resume_page_serie(page) if page else ""
+    if not stop():
+        S.resumes_series[cle] = resume
+    if not page and not stop():
+        comicrust.log(_t("Résumé de la série non lu (page de la série indisponible) : %s" % lien,
+                         "Series summary not read (series page unavailable): %s" % lien), level="warning")
+    return resume
+
+
 def parseSerieInfo(f, serieUrl, lDirect):
     debuglog("=" * 60)
     debuglog("parseSerieInfo", "a)", serieUrl, "b)", lDirect)
@@ -2025,6 +2073,7 @@ def parseSerieInfo(f, serieUrl, lDirect):
     if not albums and not SERIE_PREMIER.search(request) and not ALBUM_EDITIONS.search(request):
         signaler_structure(_t("série", "series"), GetFullURL(serieUrl), [_t("liste des albums", "album list")])
     Entete = request
+    S.serie_lue = True
     if S.RenameSeries and C("CBSeries"):
         f.Series = titlize(S.RenameSeries)
 
@@ -2049,11 +2098,9 @@ def parseSerieInfo(f, serieUrl, lDirect):
         debuglog(Trans(51), f.Genre)
 
     if C("CBSynopsys"):
-        nameRegex = SERIE_RESUME.search(checkWebChar(Entete.replace("\r\n", "")), 0)
-        resume = strip_tags(nameRegex.group(1)).strip() if nameRegex else ""
-        resume = SERIE_RESUME_INTRO.sub("", resume, count=2)
-        S.Serie_Resume = checkWebChar(resume).strip()
-        debuglog(if_else(resume, Trans(52), Trans(53)))
+        S.Serie_Resume = _resume_page_serie(Entete)
+        S.resumes_series[_cle_serie(serieUrl)] = S.Serie_Resume
+        debuglog(if_else(S.Serie_Resume, Trans(52), Trans(53)))
 
     numero = str(S.dlgNumber or "").lower()
     if C("CBStatus"):
@@ -2544,8 +2591,9 @@ def parseAlbumInfo(f, pageUrl, num, lDirect=False):
             # Le résumé de la page est tronqué : on lit celui de « ajax/resume/album/<id> ».
             if AlbumBDThequeNum:
                 resume = _read_url("ajax/resume/album/" + AlbumBDThequeNum, False)
+            # Réponse blanche (espaces, saut de ligne) : album sans résumé.
+            resume = strip_tags(checkWebChar(resume)).strip() if resume else ""
             if resume:
-                resume = strip_tags(checkWebChar(resume)).strip()
                 PrintSerieResume = True if C("SerieResumeEverywhere") else f.Number == "1"
                 titre = if_else(f.Title, ">" + f.Title + "< \n", "")
                 if S.Serie_Resume and PrintSerieResume and remove_accents(S.Serie_Resume) != remove_accents(resume):
@@ -2555,6 +2603,14 @@ def parseAlbumInfo(f, pageUrl, num, lDirect=False):
                     debuglog(Trans(100))
             else:
                 debuglog(Trans(101))
+                # Album sans résumé : celui de la série (ajout du portage), sans le marqueur
+                # « >Titre< » : il décrit la série, comme en tête du résumé de l'original.
+                if C("SerieResumeSiAlbumVide"):
+                    serie_resume = S.Serie_Resume if S.serie_lue else _resume_serie_par_album(albumHTML)
+                    if serie_resume:
+                        summary = serie_resume
+                        debuglog(_t("Album sans résumé : résumé de la série utilisé",
+                                    "Album without summary: series summary used"))
             nameRegex = ALBUM_INFOEDITION.search(info, 0)
             if nameRegex and nameRegex.group(1) != " &nbsp;":
                 infoedition = strip_tags(checkWebChar(nameRegex.group(1))).strip()
@@ -2600,6 +2656,7 @@ def _preparer(book, separateurs):
     """dlgName, dlgNumber, dlgAltNumber… du livre (début de WorkerThread / QuickScrape)."""
     S.Shadow1 = S.Shadow2 = False
     S.Serie_Resume = ""
+    S.serie_lue = False
     S.couverture = None
     prop_serie, prop_num = None, None
     if book.number:
@@ -3055,7 +3112,7 @@ def _depuis_formulaire(v, cfg):
     out = dict(cfg)
     for k in ("SHOWRENLOG", "SHOWDBGLOG", "DBGONOFF", "ShortWebLink", "CBDefault", "CBRescrape",
               "use_cloudscraper", "COUNTOF", "COUNTFINIE", "TITLEIT", "FORMATARTICLES", "ONESHOTFORMAT",
-              "AlwaysChooseSerie", "AcceptGenericArtists", "ChampsVidesSeulement"):
+              "AlwaysChooseSerie", "AcceptGenericArtists", "ChampsVidesSeulement", "SerieResumeSiAlbumVide"):
         out[k] = bool(v.get(k))
     out["LANGENFR"] = "EN" if v.get("LANGENFR") == "EN" else "FR"
     out["TBTags"] = str(v.get("TBTags") or "")
@@ -3169,6 +3226,8 @@ def BDConfigForm(valeurs):
              ui.checkbox("COUNTOF", Trans(110)),
              ui.checkbox("COUNTFINIE", Trans(126)),
              ui.checkbox("ResumePremierTome", Trans(149)),
+             ui.checkbox("SerieResumeSiAlbumVide", _t("Utiliser le résumé de la série si l'album n'en a pas",
+                                                      "Use the series summary if the album has none")),
              ui.checkbox("ShortWebLink", Trans(48)),
              ui.checkbox("AcceptGenericArtists", Trans(74)),
              ui.separator(),
