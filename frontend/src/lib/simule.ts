@@ -252,9 +252,15 @@ const simuleTests: {
   /** Émet un événement du backend simulé (ex. `scan-termine`). */
   emettre: (nom: string, charge: unknown) => void;
 } = { prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [], edition: [], pilesMasquees: new Set(), themesRefuses, emettre: (n, c) => emettre(n, c) };
+// `?persistance` : les préférences survivent au rechargement de la page (sessionStorage), pour simuler un
+// redémarrage de l'application ; `?prefs=<json>` ne s'applique alors qu'au tout premier chargement.
+const persistance = new URLSearchParams(location.search).has('persistance');
+const CLEF_PERSISTANCE = 'comicrust.simule.prefs';
 try {
   const brut = new URLSearchParams(location.search).get('prefs');
-  if (brut) simuleTests.prefs = JSON.parse(brut) as PreferencesVue;
+  const gardees = persistance ? sessionStorage.getItem(CLEF_PERSISTANCE) : null;
+  if (gardees) simuleTests.prefs = JSON.parse(gardees) as PreferencesVue;
+  else if (brut) simuleTests.prefs = JSON.parse(brut) as PreferencesVue;
 } catch {
   /* paramètre illisible : préférences vides */
 }
@@ -442,6 +448,15 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
         else delete listes[id];
       }
       simuleTests.prefs = { ...simuleTests.prefs, ...m, listes: Object.keys(listes).length ? listes : undefined };
+      // Comme le backend : une chaîne vide efface la dernière liste (retour à la bibliothèque).
+      if (m.derniereListe === '') delete simuleTests.prefs.derniereListe;
+      if (persistance) {
+        try {
+          sessionStorage.setItem(CLEF_PERSISTANCE, JSON.stringify(simuleTests.prefs));
+        } catch {
+          /* stockage indisponible */
+        }
+      }
     }
       return { ...simuleTests.prefs };
     case 'ouvrir_bibliotheque':

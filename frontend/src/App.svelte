@@ -23,7 +23,7 @@
   import { scripts } from './lib/scripts.svelte';
   import { ID_MANQUANTS, NOEUD_MANQUANTS, manquants } from './lib/manquants.svelte';
   import DialogManquants from './components/DialogManquants.svelte';
-  import { chargerPreferences, enregistrerPreference } from './lib/prefs';
+  import { chargerPreferences, enregistrerDerniereListe, enregistrerPreference, preferences, rouvrirDerniereListe } from './lib/prefs';
   import { appliquerTheme, messageTheme, themeMemorise } from './lib/theme';
 
   let etat = $state<EtatBiblio | null>(null);
@@ -61,7 +61,7 @@
       etat = await ouvrirBibliotheque();
       nbLivres = etat.nbLivres;
       if (!etat.premierDemarrage) {
-        void listes.charger();
+        void restaurerDerniereListe();
         listes.demarrer();
         // Scripts (tauri-v0.9.0) : liste et écoute des événements, jamais bloquant.
         void scripts.demarrer();
@@ -72,6 +72,28 @@
     } catch (e) {
       erreur = messageErreur(e);
     }
+  }
+
+  /** Nombre de changements de liste ou de section faits depuis le démarrage : la restauration de la
+   *  dernière liste s'efface devant un choix fait par l'utilisateur pendant le chargement. */
+  let navigations = 0;
+
+  /** Démarrage : charge l'arbre des listes puis, si le réglage « Rouvrir la dernière liste au
+   *  démarrage » est actif (par défaut), revient sur la dernière liste sélectionnée (dossier, liste de
+   *  lecture, liste intelligente), quelle que soit la section ou le lecteur ouvert à la fermeture.
+   *  Aucun livre n'est rouvert. Jamais d'erreur : liste supprimée (identifiant inconnu : autre
+   *  bibliothèque, liste effacée) = bibliothèque entière, et la mémoire est effacée (pas de boucle) ;
+   *  arbre illisible ou indisponible = bibliothèque, la mémoire est gardée pour le prochain démarrage. */
+  async function restaurerDerniereListe() {
+    const avant = navigations;
+    await listes.charger();
+    if (!rouvrirDerniereListe()) return;
+    const id = preferences().derniereListe;
+    if (!id || navigations !== avant || !listes.arbre) return;
+    if (listes.noeud(id)) {
+      listes.devoiler(id); // la ligne est visible dans l'arbre (dossiers parents dépliés)
+      choisirListe(id);
+    } else if (!listes.arbre.etat.erreur) enregistrerDerniereListe(null);
   }
 
   onMount(() => {
@@ -235,6 +257,7 @@
     manquants.masquer();
     section = 'bibliotheque';
     listes.courante = null;
+    enregistrerDerniereListe(null); // autre bibliothèque : l'ancienne liste n'y existe pas
     void listes.charger();
     rafraichir++;
     void scan.lancerAuto();
@@ -249,11 +272,16 @@
 
   function choisirSection(s: Section) {
     manquants.masquer();
+    navigations++;
     section = s;
-    if (s !== 'listes') listes.courante = null;
+    if (s !== 'listes') {
+      listes.courante = null;
+      enregistrerDerniereListe(null);
+    }
   }
 
   function choisirListe(id: string | null) {
+    navigations++;
     // Liste virtuelle « Livres manquants » : aucune liste de l'arbre n'est courante.
     if (id === ID_MANQUANTS) {
       manquants.afficher();
@@ -264,6 +292,8 @@
     manquants.masquer();
     listes.courante = id || null;
     section = id ? 'listes' : 'bibliotheque';
+    // Mémorisée par identifiant stable (debounce et écriture côté backend : prefs.ts).
+    enregistrerDerniereListe(id || null);
   }
 
   /** Fichier reçu de l'extérieur (argument, dépôt) : la vue qui porte le lecteur doit être affichée. */

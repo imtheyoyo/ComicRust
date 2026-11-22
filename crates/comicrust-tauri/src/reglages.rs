@@ -1515,7 +1515,8 @@ mod tests {
             serde_json::json!("x".repeat(101)),
             serde_json::json!(null),
         ] {
-            let v = lire_json(serde_json::json!({"derniereListe": mauvais, "rouvrirDerniereListe": "oui", "zoom": 130}));
+            let v =
+                lire_json(serde_json::json!({"derniereListe": mauvais, "rouvrirDerniereListe": "oui", "zoom": 130}));
             assert_eq!((v.derniere_liste, v.rouvrir_derniere_liste, v.zoom), (None, None, Some(130)));
         }
         let v = lire_json(serde_json::json!({"derniereListe": "{AB-12}", "rouvrirDerniereListe": true}));

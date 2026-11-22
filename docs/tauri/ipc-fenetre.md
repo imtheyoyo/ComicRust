@@ -18,11 +18,22 @@ tolérante (champ invalide ou hors bornes ignoré).
 ## Commandes
 | Commande | Arguments | Résultat |
 |---|---|---|
-| `definir_titre_fenetre` | `titre: string \| null` | titre « <titre> — ComicRust » ou « ComicRust » |
+| `definir_titre_fenetre` | `titre: string \| null` | titre « <titre> — ComicRust 1.0.1 » ou « ComicRust 1.0.1 » (voir ci-dessous) |
 | `lancement_initial` | | `{ chemin, genre } \| null`, **une seule fois** |
 | `classer_chemin` | `chemin` | `'livre' \| 'dossier' \| 'liste' \| 'absent'` |
 | `lire_plantage` | | `{ texte, resume, fichier } \| null` |
 | `acquitter_plantage` | | supprime `data\plantage.txt` |
+
+## Titre de la fenêtre et version
+Le repère fixe « ComicRust <version> » est **toujours** dans le titre : « ComicRust 1.0.1 » au démarrage, dans
+la bibliothèque, dans les Réglages et lecteur fermé ; « <livre> — ComicRust 1.0.1 » avec un livre ouvert dans
+le lecteur (même forme que `update_title` d'egui, avec la version en plus). La version est celle du paquet
+(`env!("CARGO_PKG_VERSION")` dans `fenetre::nom_et_version` / `titre_fenetre`) : elle n'est écrite ni dans le
+front ni dans `tauri.conf.json` (qui ne déclare aucune fenêtre : elle est créée dans `app.rs` avec
+`.title(fenetre::nom_et_version())`, donc le titre est correct dès l'affichage de la fenêtre). Le front envoie
+seulement le titre du livre (`definirLivreOuvert`) ; le backend nettoie (caractères de contrôle, 200 caractères
+au plus) et ajoute le repère. Hors Tauri, `simuleFenetre.ts` imite la commande (`document.title`, version
+`0.0.0-simule`). Tests : `fenetre::tests::titre_dynamique` et `titre_porte_la_version_du_paquet`.
 
 ## Ligne de commande
 `ComicRust-Tauri.exe [fichier | dossier | liste.cbl] [--mcp] [--attendre-pid N]` : le premier argument qui

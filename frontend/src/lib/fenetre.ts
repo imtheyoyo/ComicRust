@@ -17,10 +17,11 @@ export function signalerLecteur(actif: boolean): void {
 
 export const lecteurAffiche = (): boolean => lecteurMonte;
 
-/** Titre du livre ouvert (`null` : aucun) : fenêtre « <livre> — ComicRust », comme `update_title`. */
+/** Titre du livre ouvert (`null` : aucun) : fenêtre « <livre> — ComicRust <version> » ou
+ *  « ComicRust <version> », comme `update_title`. La version est ajoutée par le backend (elle vient de
+ *  Cargo) ; hors Tauri, le backend simulé met à jour `document.title`. */
 export function definirLivreOuvert(titre: string | null): void {
   const propre = titre?.trim() || null;
-  if (!dansTauri()) document.title = propre ? `${propre} — ComicRust` : 'ComicRust';
   void definirTitreFenetre(propre).catch((e) => console.warn('titre de la fenêtre', e));
 }
 

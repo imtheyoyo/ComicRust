@@ -8,7 +8,7 @@
     reinitialiserThemesLivres, revelerDossierThemes, supprimerTheme, type InfosApplication, type ModeBiblio, type ThemeInfo,
   } from '../lib/api';
   import { enregistrerReglagesAnalyse, lireReglagesAnalyse, type ChoixReprise, type ReglagesAnalyse } from '../lib/api';
-  import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
+  import { enregistrerPreference, enregistrerReglagesLecteur, reglagesLecteur, rouvrirDerniereListe } from '../lib/prefs';
   import {
     appliquerTheme, apercuTheme, messageTheme, rechargerThemeCourant, restaurerTheme, THEME_DEFAUT, THEME_SYSTEME, themeApplique,
     themePersiste, themeReel,
@@ -52,9 +52,12 @@
   // ── Bloc « Analyse et suivi » (lot « Scan et dossiers ») : s'applique tout de suite, sans OK ──
   let analyse = $state<ReglagesAnalyse>({ auDemarrage: true, suivreComicrack: true });
   let reprise = $state<ChoixReprise>('demander');
+  /** « Rouvrir la dernière liste au démarrage » (activé par défaut) : enregistré tout de suite. */
+  let rouvrirListe = $state(true);
   let erreurAnalyse = $state('');
   async function chargerAnalyse() {
     reprise = reglagesLecteur().reprise ?? 'demander';
+    rouvrirListe = rouvrirDerniereListe();
     erreurAnalyse = '';
     try {
       analyse = await lireReglagesAnalyse();
@@ -72,6 +75,10 @@
       analyse = avant;
       erreurAnalyse = messageErreur(e);
     }
+  }
+  function changerRouvrirListe(v: boolean) {
+    rouvrirListe = v;
+    enregistrerPreference({ rouvrirDerniereListe: v });
   }
   function changerReprise(v: ChoixReprise) {
     reprise = v;
@@ -388,6 +395,14 @@
       {#if enregistre}<p class="ok" role="status">{enregistre}</p>{/if}
     </fieldset>
   {/if}
+  <fieldset class="comicrack" data-testid="reglage-demarrage">
+    <legend>Démarrage</legend>
+    <label class="case">
+      <input type="checkbox" checked={rouvrirListe} onchange={(e) => changerRouvrirListe(e.currentTarget.checked)} data-testid="rouvrir-derniere-liste" />
+      Rouvrir la dernière liste au démarrage
+    </label>
+    <p class="discret petit">Au lancement, la bibliothèque s'affiche sur la dernière liste sélectionnée (dossier, liste de lecture ou liste intelligente), même si Réglages ou le lecteur étaient ouverts à la fermeture. Aucun livre n'est rouvert. Désactivé, la bibliothèque entière s'affiche à chaque démarrage.</p>
+  </fieldset>
   <fieldset class="comicrack" data-testid="reglage-analyse">
     <legend>Analyse et suivi</legend>
     <label class="case">
