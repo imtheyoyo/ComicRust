@@ -1,0 +1,14 @@
+Essais de la recette v0.10.9 par l'IA (pilotage MCP), 11/11/2026 22:45–22:52
+Copie : F:\Projet REA par Claude\REA ComicRust_test (mode autonome, 5 498 livres), ComicRust-mcp.exe --mcp (port 47801).
+
+- M-02 OK : get_state répond (version 0.10.9, 5 498 livres, bibliothèque chargée) ; screenshot montre
+  la fenêtre ; list_lists donne l'arbre des listes (dossiers ___1, Listes intelligentes…).
+- M-03 OK : select_list « Thanos - Guide complet Crushing Krisis », set_search « thanos » (634 livres
+  dans cette bibliothèque autonome : le chiffre 483 de la recette vaut pour la bibliothèque liée à
+  ComicRack), open_book « Les Chroniques de THANOS #15 » (322 pages), page suivante (2/322), page 5,
+  close_book : la fenêtre suit, aucun gel, aucune erreur de page.
+- M-04 OK : ComicRust-mcp.exe (egui, 47801) et ComicRust-Tauri-mcp.exe (copie autonome, 47802)
+  répondent en même temps, chacun à son serveur MCP (get_state 0.10.9 / infos 0.6.3).
+- M-05 OK : ComicRust-mcp fermé, ComicRust.exe normal lancé seul : port 47801 non à l'écoute
+  (Get-NetTCPConnection : rien ; Test-NetConnection 127.0.0.1 -Port 47801 : TcpTestSucceeded False).
+  ComicRust-mcp.exe --mcp relancé ensuite (get_state répond).

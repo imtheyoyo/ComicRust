@@ -1124,12 +1124,13 @@ dependencies = [
 
 [[package]]
 name = "comicrust"
-version = "0.10.7"
+version = "0.10.9"
 dependencies = [
  "chrono",
  "comicrust-core",
  "eframe",
  "egui",
+ "egui-mcp",
  "egui_extras",
  "image",
  "mysql",
@@ -1146,7 +1147,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust-cli"
-version = "0.10.7"
+version = "0.10.9"
 dependencies = [
  "anyhow",
  "comicrust-core",
@@ -1154,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "comicrust-core"
-version = "0.10.7"
+version = "0.10.9"
 dependencies = [
  "chrono",
  "djvu-rs",
@@ -1995,6 +1996,15 @@ dependencies = [
  "smallvec",
  "unicode-segmentation",
  "web-sys",
+]
+
+[[package]]
+name = "egui-mcp"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "png 0.18.1",
+ "serde_json",
 ]
 
 [[package]]

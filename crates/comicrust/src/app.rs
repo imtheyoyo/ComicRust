@@ -100,6 +100,9 @@ pub struct ComicRustApp {
     pub(crate) info_editor: Option<crate::ui::info_editor::InfoEditor>,
     /// Livres manquants (v0.10.2) : fenêtres et demandes.
     pub(crate) missing_ui: crate::ui::missing_ui::MissingUi,
+    /// Serveur MCP (pilotage par une IA, fonctionnalité `mcp` et option `--mcp`).
+    #[cfg(feature = "mcp")]
+    pub(crate) mcp: Option<egui_mcp::Bridge>,
 }
 
 impl ComicRustApp {
@@ -151,7 +154,14 @@ impl ComicRustApp {
             scripts: crate::scripts::ScriptsState::new(Default::default()),
             info_editor: None,
             missing_ui: Default::default(),
+            #[cfg(feature = "mcp")]
+            mcp: None,
         };
+        #[cfg(feature = "mcp")]
+        match crate::mcp::start(&cc.egui_ctx, app.data_dir.as_deref()) {
+            Ok(b) => app.mcp = b,
+            Err(e) => app.error = Some(e),
+        }
         app.scripts = crate::scripts::ScriptsState::new(app.settings.script_settings.clone());
         crate::update::cleanup_previous_install();
         if app.settings.library_mode == crate::settings::LibraryMode::Unset {
@@ -560,6 +570,14 @@ impl ComicRustApp {
 }
 
 impl eframe::App for ComicRustApp {
+    /// Serveur MCP : événements simulés (clics, touches) injectés avant chaque image.
+    #[cfg(feature = "mcp")]
+    fn raw_input_hook(&mut self, _ctx: &Context, raw_input: &mut egui::RawInput) {
+        if let Some(b) = &mut self.mcp {
+            b.raw_input_hook(raw_input);
+        }
+    }
+
     /// Appelé avant chaque `ui`, et aussi quand la fenêtre est masquée : le
     /// chargement continue donc même fenêtre réduite.
     fn logic(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
@@ -611,6 +629,8 @@ impl eframe::App for ComicRustApp {
 
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        #[cfg(feature = "mcp")]
+        self.mcp_calls(&ctx);
         if std::mem::take(&mut self.save_now) {
             if let Some(storage) = frame.storage_mut() {
                 eframe::App::save(self, storage);
@@ -694,6 +714,9 @@ impl eframe::App for ComicRustApp {
         self.about_window(&ctx);
         self.missing_windows(&ctx);
         self.error_window(&ctx);
+        // Serveur MCP : arbre des widgets de l'image, après toutes les fenêtres.
+        #[cfg(feature = "mcp")]
+        self.mcp_end_frame(&ctx);
         // Les textures nouvellement demandées arriveront par `request_repaint`.
     }
 

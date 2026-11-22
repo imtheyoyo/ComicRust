@@ -791,15 +791,13 @@ impl LibraryState {
             Members::Unknown(_) => Vec::new(),
         };
         self.positions = base.iter().enumerate().map(|(pos, &i)| (i, pos)).collect();
-        let words: Vec<String> = self.search.to_lowercase().split_whitespace().map(str::to_string).collect();
         let stack = self.open_stack.clone();
         let missing_only = self.missing_only;
-        let mut v: Vec<usize> = base
-            .into_iter()
-            .filter(|&i| !missing_only || missing::is_missing(&db.books[i]))
-            .filter(|&i| sorting::matches(&db.books[i], &words))
-            .filter(|&i| stack.as_ref().is_none_or(|s| GroupKey::Series.label(&db.books[i]) == *s))
-            .collect();
+        let candidates: Vec<usize> =
+            base.into_iter().filter(|&i| !missing_only || missing::is_missing(&db.books[i])).collect();
+        // Recherche rapide fidèle à ComicRack (critère « Toutes les propriétés »).
+        let mut v = sorting::filter(&db.books, candidates, &self.search);
+        v.retain(|&i| stack.as_ref().is_none_or(|s| GroupKey::Series.label(&db.books[i]) == *s));
         let positions = &self.positions;
         sorting::sort(&mut v, &db.books, opts, |i| positions.get(&i).copied());
         self.view = v;
@@ -967,10 +965,15 @@ mod tests {
     }
 
     #[test]
-    fn search_all_words_case_insensitive() {
+    fn search_all_words_in_one_field_case_insensitive() {
         let mut s = state();
-        s.search = "starlin THANOS".into();
+        s.search = "THANOS".into();
         assert_eq!(s.view(&series()).len(), 3);
+        s.search = "jim starlin".into();
+        assert_eq!(s.view(&series()).len(), 4);
+        // Comme ComicRack : tous les mots doivent être dans un même champ.
+        s.search = "starlin THANOS".into();
+        assert_eq!(s.view(&series()).len(), 0);
         s.search = "aaron".into();
         assert_eq!(s.view(&series()).len(), 1);
     }

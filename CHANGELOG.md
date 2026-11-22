@@ -542,6 +542,40 @@ fonction de ComicRust n'est encore portée. Voir [`docs/tauri/PLAN.md`](docs/tau
 ### Recette
 [recette/tauri-v0.1.0.md](recette/tauri-v0.1.0.md)
 
+## [v0.10.9] — 2026-11-11
+
+### Nouveautés
+- **Pilotage par une IA pour les tests de débogage (serveur MCP)** : une variante
+  `ComicRust-mcp.exe`, lancée avec `--mcp`, ouvre un serveur [MCP](docs/MCP.md) en boucle
+  locale (port 47801). Une IA (Claude Code, Claude Desktop…) peut alors voir la fenêtre
+  (capture), lister les widgets, cliquer, saisir du texte, appuyer sur des touches, lire le
+  dernier rapport de plantage, et utiliser des outils propres à ComicRust (état, livres,
+  ouverture d'un livre, changement de page, listes, recherche). L'exécutable normal
+  `ComicRust.exe` n'en contient rien. Aucune action destructive n'est exposée.
+  `ComicRust-mcp.exe` est livrée dans le zip (même code que `ComicRust.exe`) ; la variante
+  Tauri a la sienne (`ComicRust-Tauri-mcp.exe`, port 47802), les deux peuvent tourner ensemble.
+
+### Recette
+[`recette/v0.10.9.md`](recette/v0.10.9.md) : variante MCP et non-régression courte.
+
+## [v0.10.8] — 2026-11-03
+
+### Corrections
+- **Recherche rapide de la bibliothèque fidèle à ComicRack** : elle ne regardait qu'une
+  douzaine de champs (série, titre, scénariste, dessinateur, arc, éditeur, personnages,
+  équipes, étiquettes, genre, série alternative, fichier). Les livres où le mot n'apparaît que
+  dans le résumé, les notes, la critique, les lieux, le personnage principal, le groupe de
+  séries, les infos de scan… étaient oubliés (« thanos » : 130 livres au lieu de 483).
+  Elle suit désormais la boîte de recherche de ComicRack en mode « Tout » :
+  - tous les champs de « Toutes les propriétés » sont examinés ;
+  - un livre est retenu si **un même champ** contient **tous** les mots ;
+  - les mots sont séparés par `,` ou `;` s'il y en a, sinon par les espaces
+    (« infinity gauntlet, thanos ») ;
+  - majuscules et minuscules sont confondues, les accents ne le sont pas.
+
+### Recette
+[recette/v0.10.8.md](recette/v0.10.8.md).
+
 ## [v0.10.7] — 2026-11-01
 
 Correctifs de la v0.10.6 (recette NO-GO).
