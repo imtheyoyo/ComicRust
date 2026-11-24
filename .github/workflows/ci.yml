@@ -101,7 +101,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force mcp-exe | Out-Null
           Copy-Item target/mcp/release/ComicRust.exe mcp-exe/ComicRust-mcp.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: runner.os == 'Windows'
         with:
           name: ComicRust-mcp-windows-x64
