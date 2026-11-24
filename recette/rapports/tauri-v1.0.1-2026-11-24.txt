@@ -1,0 +1,11 @@
+Rapport de recette ComicRust tauri-v1.0.1 — 24/11/2026 21:53
+Résultat : 50 OK, 0 échec(s), 0 non testé(s) sur 50.
+Décision proposée : GO possible (bloquants tous OK).
+
+ÉCHECS (0)
+  aucun
+
+VALEURS NOTÉES ET REMARQUES
+- P-01 : 1.0.1/1.0.1
+- JG-02 : 5/47/48
+- PF-01 : 37Mo

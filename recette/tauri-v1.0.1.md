@@ -125,8 +125,10 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants | 18 | 18 | 0 |
+| [M] majeurs | 22 | 22 | 0 |
+| [m] mineurs | 10 | 10 | 0 |
 
-**Décision : (à remplir)**
+Rapport de Yoyo du 24/11/2026 21:53 ([rapport](rapports/tauri-v1.0.1-2026-11-24.txt)) : 50 OK, 0 échec. P-01 : 1.0.1 / 1.0.1 ; JG-02 : 5 / 47 / 48 (rouge / jaune / vert) ; PF-01 : 37 Mo.
+
+**Décision : (en attente du GO explicite de Yoyo)**
