@@ -222,8 +222,8 @@ fn avancement_autonome_ecrit_dans_la_base_une_fois_par_seance() {
     let o = l.ouvrir_livre("livre-1").unwrap();
     assert_eq!(o.page_reprise, 0);
     l.enregistrer_avancement(&o.jeton, 1, false).unwrap();
-    // Mémoire locale tout de suite (numéros de page du livre) ; base pas encore.
-    assert_eq!(crate::avancement::Memoire::nouvelle(data.clone()).lire(&f).map(|a| (a.page, a.page_max)), Some((1, 1)));
+    // Mémoire locale tout de suite (numéros de page du livre ; fichier écrit en différé) ; base pas encore.
+    assert_eq!(l.avancement_de(&f).map(|a| (a.page, a.page_max)), Some((1, 1)));
     let cfg = b.store_autonome().unwrap();
     let relire = || Store::open_existing(&cfg).unwrap().load(None).unwrap().get("livre-1").cloned().unwrap();
     assert_eq!(relire().current_page.unwrap_or(0), 0);
@@ -233,6 +233,8 @@ fn avancement_autonome_ecrit_dans_la_base_une_fois_par_seance() {
     // Page courante 1 ; plus loin 3 (99 borné à la dernière page).
     let livre = relire();
     assert_eq!((livre.current_page, livre.last_page_read), (Some(1), Some(3)));
+    // Fermeture du livre : l'avancement différé est écrit sur le disque.
+    assert_eq!(crate::avancement::Memoire::nouvelle(data.clone()).lire(&f).map(|a| (a.page, a.page_max)), Some((1, 3)));
     assert!(livre.opened.is_some());
     assert_eq!(livre.read_percent(), Some(100));
     // Bibliothèque affichée à jour sans rechargement.
@@ -398,8 +400,18 @@ fn veilleur_repond_504_apres_le_delai() {
     lancer_veilleur(Arc::downgrade(&attentes));
     let (tx, rx) = mpsc::channel();
     let r = Reponse::nouvelle(move |p| tx.send(p.statut).unwrap());
-    attentes.lock().unwrap().push((Instant::now() + Duration::from_millis(50), r.clone()));
+    attentes.liste.lock().unwrap().push((Instant::now() + Duration::from_millis(50), r.clone()));
+    attentes.cv.notify_one();
     assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(504));
+    // Sans sondage : le veilleur dort jusqu'à l'échéance d'une requête arrivée pendant son sommeil.
+    let (tx, rx) = mpsc::channel();
+    let r2 = Reponse::nouvelle(move |p| tx.send(p.statut).unwrap());
+    std::thread::sleep(Duration::from_millis(100));
+    attentes.liste.lock().unwrap().push((Instant::now() + Duration::from_millis(80), r2));
+    attentes.cv.notify_one();
+    let debut = Instant::now();
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(504));
+    assert!(debut.elapsed() < Duration::from_secs(2), "réveil à l'échéance, pas après VEILLE_MAX");
     // Une seule réponse : le fil du livre qui finit plus tard ne répond plus.
     assert!(!r.repondre(ReponsePage::erreur(200, "")));
 }
@@ -447,6 +459,26 @@ fn trop_de_livres_ouverts_le_plus_ancien_ferme() {
     assert!(jetons[1..].iter().all(|j| l.url_page_base(j).is_ok()));
     l.fermer_tout();
     assert!(jetons.iter().all(|j| l.url_page_base(j).is_err()));
+}
+
+/// Les séances de vignettes (onglet Pages) n'évincent jamais la séance du lecteur ; un livre
+/// ouvert dans le lecteur évince d'abord les séances de vignettes.
+#[test]
+fn vignettes_n_evincent_pas_le_lecteur() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("l.cbz");
+    cbz_tailles(&f, 2);
+    let l = Lecteur::nouveau(d.path().join("data"), Biblio::nouvelle(d.path().join("data")));
+    let lecture = l.ouvrir_fichier(&f.to_string_lossy()).unwrap().jeton;
+    std::thread::sleep(Duration::from_millis(5));
+    let vignettes: Vec<String> = (0..SESSIONS_MAX + 2).map(|_| l.ouvrir_vignettes(&f).unwrap().jeton).collect();
+    assert!(l.url_page_base(&lecture).is_ok(), "le livre du lecteur reste ouvert");
+    assert!(l.url_page_base(vignettes.last().unwrap()).is_ok());
+    // Nouveaux livres dans le lecteur : les vignettes partent avant la séance de lecture.
+    let autres: Vec<String> = (0..2).map(|_| l.ouvrir_fichier(&f.to_string_lossy()).unwrap().jeton).collect();
+    assert!(l.url_page_base(&lecture).is_ok(), "vignettes évincées d'abord");
+    assert!(autres.iter().all(|j| l.url_page_base(j).is_ok()));
+    l.fermer_tout();
 }
 
 #[test]

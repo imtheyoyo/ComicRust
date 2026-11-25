@@ -39,7 +39,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
 /// Nom du protocole de ressources des pages.
@@ -373,22 +373,37 @@ impl Reponse {
     }
 }
 
-type Attentes = Mutex<Vec<(Instant, Arc<Reponse>)>>;
+/// Requêtes en attente de réponse, avec leur échéance ; la `Condvar` réveille le veilleur à chaque
+/// nouvelle requête (plus de sondage périodique).
+#[derive(Default)]
+struct Attentes {
+    liste: Mutex<Vec<(Instant, Arc<Reponse>)>>,
+    cv: Condvar,
+}
 
-/// Fil qui répond 504 aux requêtes restées sans réponse au-delà de leur échéance. Il s'arrête
-/// quand le lecteur disparaît.
+/// Sommeil maximal du veilleur sans requête : il vérifie alors que le lecteur existe encore.
+const VEILLE_MAX: Duration = Duration::from_secs(30);
+
+/// Fil qui répond 504 aux requêtes restées sans réponse au-delà de leur échéance. Il dort jusqu'à
+/// la prochaine échéance (ou une nouvelle requête) et s'arrête quand le lecteur disparaît.
 fn lancer_veilleur(attentes: Weak<Attentes>) {
     let _ = std::thread::Builder::new().name("comicrust-pages-delais".into()).spawn(move || loop {
-        std::thread::sleep(Duration::from_millis(100));
         let Some(a) = attentes.upgrade() else { return };
         let echues: Vec<Arc<Reponse>> = {
-            let mut l = a.lock().unwrap_or_else(|e| e.into_inner());
+            let mut l = a.liste.lock().unwrap_or_else(|e| e.into_inner());
             let maintenant = Instant::now();
             l.retain(|(_, r)| !r.deja_repondu());
+            if !l.iter().any(|(t, _)| *t <= maintenant) {
+                let attente =
+                    l.iter().map(|(t, _)| t.saturating_duration_since(maintenant)).min().unwrap_or(VEILLE_MAX);
+                l = a.cv.wait_timeout(l, attente.min(VEILLE_MAX)).unwrap_or_else(|e| e.into_inner()).0;
+            }
+            let maintenant = Instant::now();
             let (echues, restent): (Vec<_>, Vec<_>) = l.drain(..).partition(|(t, _)| *t <= maintenant);
             *l = restent;
             echues.into_iter().map(|(_, r)| r).collect()
         };
+        drop(a);
         for r in echues {
             r.repondre(ReponsePage::erreur(504, "délai dépassé (fichier inaccessible ?)"));
         }
@@ -712,6 +727,8 @@ struct Session {
     /// La dernière page a été vue pendant cette séance.
     fin_vue: bool,
     touchee: Instant,
+    /// Séance de vignettes (onglet Pages) : elle n'évince jamais une séance de lecture.
+    vignettes: bool,
 }
 
 /// Lecture à écrire dans la base (numéros de page du livre).
@@ -777,7 +794,7 @@ impl Session {
 #[derive(Clone)]
 pub struct Lecteur {
     biblio: Biblio,
-    memoire: Arc<Memoire>,
+    memoire: Memoire,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     cache: Arc<Mutex<CachePages>>,
     attentes: Arc<Attentes>,
@@ -785,22 +802,22 @@ pub struct Lecteur {
 }
 
 impl Lecteur {
+    /// Lecteur de l'application : avancement écrit en différé ([`crate::avancement::DELAI_ECRITURE`]),
+    /// et à la fermeture des livres.
     pub fn nouveau(data: PathBuf, biblio: Biblio) -> Self {
-        Self::avec_reglages(data, biblio, CachePages::nouveau(CACHE_OCTETS, CACHE_ENTREES), DELAI_PAGE)
+        let memoire = Memoire::avec_delai(data, crate::avancement::DELAI_ECRITURE);
+        Self::construire(memoire, biblio, CachePages::nouveau(CACHE_OCTETS, CACHE_ENTREES), DELAI_PAGE)
     }
 
-    /// Cache et délai choisis (tests).
+    /// Cache et délai choisis (tests) ; avancement écrit tout de suite.
     pub fn avec_reglages(data: PathBuf, biblio: Biblio, cache: CachePages, delai_page: Duration) -> Self {
+        Self::construire(Memoire::nouvelle(data), biblio, cache, delai_page)
+    }
+
+    fn construire(memoire: Memoire, biblio: Biblio, cache: CachePages, delai_page: Duration) -> Self {
         let attentes: Arc<Attentes> = Arc::default();
         lancer_veilleur(Arc::downgrade(&attentes));
-        Lecteur {
-            biblio,
-            memoire: Arc::new(Memoire::nouvelle(data)),
-            sessions: Arc::default(),
-            cache: Arc::new(Mutex::new(cache)),
-            attentes,
-            delai_page,
-        }
+        Lecteur { biblio, memoire, sessions: Arc::default(), cache: Arc::new(Mutex::new(cache)), attentes, delai_page }
     }
 
     fn verrou(&self) -> MutexGuard<'_, HashMap<String, Session>> {
@@ -945,6 +962,7 @@ impl Lecteur {
             deja_lu,
             fin_vue: false,
             touchee: Instant::now(),
+            vignettes: false,
         };
         self.inserer_session(jeton, session);
         Ok(ouvert)
@@ -975,21 +993,28 @@ impl Lecteur {
             deja_lu: false,
             fin_vue: false,
             touchee: Instant::now(),
+            vignettes: true,
         };
         self.inserer_session(jeton.clone(), session);
         Ok(SeanceVignettes { url_base: url_base(&jeton), jeton, noms: o.noms, doubles: o.doubles })
     }
 
-    /// Ajoute une séance ; trop de livres ouverts : le moins récemment utilisé est fermé
-    /// (lecture enregistrée).
+    /// Ajoute une séance ; trop de livres ouverts : la séance la moins récemment utilisée est fermée
+    /// (lecture enregistrée). Les séances de vignettes partent en premier, et une nouvelle séance de
+    /// vignettes n'évince **que** des séances de vignettes : ouvrir l'onglet Pages ne ferme jamais le
+    /// livre affiché dans le lecteur (au pire, le plafond est dépassé d'une séance de vignettes).
     fn inserer_session(&self, jeton: String, session: Session) {
+        let nouvelle_vignettes = session.vignettes;
         let evinces: Vec<(String, Session)> = {
             let mut g = self.verrou();
             g.insert(jeton.clone(), session);
             let mut ev = Vec::new();
             while g.len() > SESSIONS_MAX {
-                let Some(vieux) =
-                    g.iter().filter(|(j, _)| **j != jeton).min_by_key(|(_, s)| s.touchee).map(|(j, _)| j.clone())
+                let Some(vieux) = g
+                    .iter()
+                    .filter(|(j, s)| **j != jeton && (s.vignettes || !nouvelle_vignettes))
+                    .min_by_key(|(_, s)| (!s.vignettes, s.touchee))
+                    .map(|(j, _)| j.clone())
                 else {
                     break;
                 };
@@ -1044,9 +1069,11 @@ impl Lecteur {
         }
         let reponse = Reponse::nouvelle(repondre);
         self.attentes
+            .liste
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push((Instant::now() + self.delai_page, reponse.clone()));
+        self.attentes.cv.notify_one();
         if tx.send(Commande::Page { index, largeur, reponse: reponse.clone() }).is_err() {
             reponse.repondre(ReponsePage::erreur(500, "le fil du livre s'est arrêté"));
         }
@@ -1114,6 +1141,12 @@ impl Lecteur {
     pub fn fermer_livre(&self, jeton: &str) -> Result<(), String> {
         let s = self.verrou().remove(jeton);
         self.cache.lock().unwrap_or_else(|e| e.into_inner()).purger(jeton);
+        // Écriture finale de l'avancement différé (la page courante de ce livre).
+        if s.as_ref().is_some_and(|s| !s.vignettes) {
+            if let Err(e) = self.memoire.vider() {
+                eprintln!("ComicRust : avancement non enregistré : {e}");
+            }
+        }
         match s.and_then(|mut s| s.a_ecrire()) {
             Some(e) => self.ecrire_base(e),
             None => Ok(()),
@@ -1133,6 +1166,9 @@ impl Lecteur {
             if let Err(e) = self.fermer_livre(&j) {
                 eprintln!("ComicRust : lecture non enregistrée : {e}");
             }
+        }
+        if let Err(e) = self.memoire.vider() {
+            eprintln!("ComicRust : avancement non enregistré : {e}");
         }
     }
 
