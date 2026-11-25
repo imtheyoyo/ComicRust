@@ -540,6 +540,10 @@ impl Biblio {
     /// « premier démarrage » sans rien ouvrir. Rappelable pour recharger.
     pub fn ouvrir(&self) -> Result<EtatBiblio, String> {
         self.refuser_pendant_analyse()?;
+        // Anciens réglages avec un mot de passe MySQL en clair : rechiffrés tout de suite.
+        if let Err(e) = reglages::rechiffrer_mots_de_passe(&self.data) {
+            eprintln!("mots de passe des réglages non rechiffrés : {e}");
+        }
         let r = reglages::lire(&self.data)?;
         let Some(mode) = r.mode else {
             return Ok(EtatBiblio {
