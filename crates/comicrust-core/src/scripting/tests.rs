@@ -76,6 +76,23 @@ fn en_tete_enabled() {
     assert_eq!(actifs, ["b", "c", "d"]);
 }
 
+/// `#@Key` en double (script copié sans changer sa clé) : le premier est gardé, le suivant
+/// ignoré avec un avertissement (relecture v1.0.2 : le menu de la copie lançait l'original).
+#[test]
+fn cle_en_double_signalee() {
+    let d = tempfile::tempdir().unwrap();
+    let code = "#@Name N\n#@Hook Books\n#@Key nettoyer\ndef f(books): pass\n";
+    std::fs::create_dir_all(d.path().join("exemples")).unwrap();
+    std::fs::write(d.path().join("exemples/nettoyage.py"), code).unwrap();
+    std::fs::write(d.path().join("mon_nettoyage.py"), code.replace("#@Name N", "#@Name Copie")).unwrap();
+    let (e, w) = discover_with_warnings(d.path());
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0].rel_path, "exemples/nettoyage.py");
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].file.ends_with("mon_nettoyage.py"));
+    assert!(w[0].message.contains("« nettoyer » déjà utilisé"), "{}", w[0].message);
+}
+
 #[test]
 fn decouverte_dossier() {
     let dir = tempfile::tempdir().unwrap();
