@@ -73,7 +73,8 @@
   const champs = $derived.by(() => {
     const d = detail;
     if (!d) return [] as Array<[string, string]>;
-    const date = d.annee ? (d.mois ? `${MOIS[d.mois - 1]} ${d.annee}` : String(d.annee)) : '';
+    // Mois hors de 1..12 (fiche abîmée) : seulement l'année (relecture B7).
+    const date = d.annee ? (d.mois && d.mois >= 1 && d.mois <= 12 ? `${MOIS[d.mois - 1]} ${d.annee}` : String(d.annee)) : '';
     const lignes: Array<[string, string | undefined]> = [
       ['Série', d.serie],
       ['Numéro', d.numero],

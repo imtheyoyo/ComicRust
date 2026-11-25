@@ -40,7 +40,8 @@ export function numeroVolume(l: Pick<LivreResume, 'numero' | 'volume'>): string 
 /** Colonne « Parution » : `03/1991`, `1991` ou vide. */
 export function parution(l: Pick<LivreResume, 'annee' | 'mois'>): string {
   if (!l.annee || l.annee <= 0) return '';
-  return l.mois && l.mois > 0 ? `${String(l.mois).padStart(2, '0')}/${l.annee}` : String(l.annee);
+  // Mois hors de 1..12 (fiche abîmée) : seulement l'année.
+  return l.mois && l.mois >= 1 && l.mois <= 12 ? `${String(l.mois).padStart(2, '0')}/${l.annee}` : String(l.annee);
 }
 
 /** Les 11 colonnes, dans l'ordre d'egui. */

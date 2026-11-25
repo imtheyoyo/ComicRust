@@ -205,7 +205,7 @@
   role="listbox"
   tabindex="0"
   aria-label="Piles de livres par série"
-  aria-activedescendant={courant >= 0 ? `pile-${courant}` : undefined}
+  aria-activedescendant={courant >= 0 && indices.includes(courant) ? `pile-${courant}` : undefined}
   aria-multiselectable="true"
   data-testid="grille-piles"
 >
