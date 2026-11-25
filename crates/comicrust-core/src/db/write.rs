@@ -434,6 +434,9 @@ fn check_chars(s: &str, what: &str) -> Result<(), Error> {
     }
 }
 
+/// Échappe un texte d'élément. `\r` est écrit `&#xD;` (comme `lists_edit::xml`) : un
+/// retour chariot brut serait ramené à `\n` par tout lecteur XML (normalisation des fins
+/// de ligne), le texte relu par ComicRack ne serait plus celui écrit.
 fn escape_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -441,6 +444,7 @@ fn escape_text(s: &str) -> String {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
+            '\r' => out.push_str("&#xD;"),
             c => out.push(c),
         }
     }

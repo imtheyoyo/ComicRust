@@ -193,6 +193,15 @@ fn insertion_follows_xmlserializer_order() {
     assert_eq!(out, r#"<ComicBook Id="a" File="f"/>"#);
 }
 
+/// Retour chariot (résumé collé depuis Windows) : écrit `&#xD;`, relu à l'identique
+/// (brut, un lecteur XML l'aurait ramené à `\n`).
+#[test]
+fn carriage_return_is_kept() {
+    let out = patch(CE, edit().set("Summary", Value::Text("Ligne 1\r\nLigne 2".into())));
+    assert!(out.contains("<Summary>Ligne 1&#xD;\nLigne 2</Summary>"), "{out}");
+    assert_eq!(LibraryBook::from_xml(&out).unwrap().summary.as_deref(), Some("Ligne 1\r\nLigne 2"));
+}
+
 #[test]
 fn special_characters_are_escaped() {
     let out = patch(
