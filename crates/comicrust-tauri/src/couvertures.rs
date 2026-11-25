@@ -87,63 +87,119 @@ pub const DELAI_PRODUCTION: Duration = Duration::from_secs(25);
 
 #[derive(Default)]
 struct File {
+    /// Tâches courtes (lecture du cache disque) : prises avant les autres, et par un fil réservé.
+    rapides: VecDeque<(Instant, Tache)>,
     taches: VecDeque<(Instant, Tache)>,
     fermee: bool,
 }
 
+/// Exécute une tâche en rattrapant sa panique : le fil de travail survit (sinon chaque panique
+/// d'un décodeur retirerait définitivement un fil au pool).
+fn executer_protege(depuis: Instant, tache: Tache) {
+    let perime = depuis.elapsed() > ATTENTE_MAX;
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || tache(perime))).is_err() {
+        eprintln!("ComicRust : panique dans une tâche des couvertures (rattrapée)");
+    }
+}
+
 /// Groupe de fils qui exécutent des tâches, **les plus récentes d'abord** (ce qui vient
 /// d'apparaître à l'écran passe devant ; ce qui a défilé hors de vue attend, puis est périmé).
+///
+/// Deux files : les tâches **rapides** ([`Pool::executer_rapide`] : lecture du petit JPEG en cache)
+/// passent avant les productions (lecture d'une archive, parfois sur un NAS lent), et un fil leur
+/// est réservé : une couverture déjà en cache s'affiche même quand tous les autres fils attendent
+/// un NAS muet. Le fil de la WebView ne fait plus aucune lecture de disque.
 pub struct Pool {
     partage: Arc<(Mutex<File>, Condvar)>,
 }
 
 impl Pool {
+    /// `fils` fils de production (qui prennent aussi les tâches rapides), plus un fil réservé aux
+    /// tâches rapides.
     pub fn nouveau(fils: usize) -> Self {
         let partage: Arc<(Mutex<File>, Condvar)> = Arc::default();
-        for n in 0..fils.max(1) {
+        for n in 0..=fils.max(1) {
             let partage = partage.clone();
+            let rapide_seulement = n == 0;
+            let nom = if rapide_seulement { "comicrust-couv-cache".to_string() } else { format!("comicrust-couv-{n}") };
             std::thread::Builder::new()
-                .name(format!("comicrust-couv-{n}"))
+                .name(nom)
                 .spawn(move || loop {
                     let (depuis, tache) = {
                         let (verrou, cv) = &*partage;
-                        let Ok(mut f) = verrou.lock() else { return };
+                        let mut f = verrou.lock().unwrap_or_else(|e| e.into_inner());
                         loop {
                             if f.fermee {
                                 return;
                             }
-                            if let Some(t) = f.taches.pop_back() {
+                            if let Some(t) = f.rapides.pop_back() {
                                 break t;
                             }
-                            f = match cv.wait(f) {
-                                Ok(f) => f,
-                                Err(_) => return,
-                            };
+                            if !rapide_seulement {
+                                if let Some(t) = f.taches.pop_back() {
+                                    break t;
+                                }
+                            }
+                            f = cv.wait(f).unwrap_or_else(|e| e.into_inner());
                         }
                     };
-                    tache(depuis.elapsed() > ATTENTE_MAX);
+                    executer_protege(depuis, tache);
                 })
                 .expect("fil des couvertures");
         }
         Pool { partage }
     }
 
-    /// Met une tâche en file.
-    pub fn executer(&self, tache: impl FnOnce(bool) + Send + 'static) {
+    fn mettre(&self, rapide: bool, tache: Tache) {
         let (verrou, cv) = &*self.partage;
-        if let Ok(mut f) = verrou.lock() {
-            f.taches.push_back((Instant::now(), Box::new(tache)));
-            cv.notify_one();
-        }
+        let mut f = verrou.lock().unwrap_or_else(|e| e.into_inner());
+        let file = if rapide { &mut f.rapides } else { &mut f.taches };
+        file.push_back((Instant::now(), tache));
+        // Tous réveillés : seul un fil de production peut prendre une tâche normale.
+        cv.notify_all();
+    }
+
+    /// Met une tâche (production d'une couverture) en file.
+    pub fn executer(&self, tache: impl FnOnce(bool) + Send + 'static) {
+        self.mettre(false, Box::new(tache));
+    }
+
+    /// Met une tâche **courte** en file (lecture du cache disque) : prioritaire, fil réservé.
+    pub fn executer_rapide(&self, tache: impl FnOnce(bool) + Send + 'static) {
+        self.mettre(true, Box::new(tache));
     }
 }
 
 impl Drop for Pool {
     fn drop(&mut self) {
         let (verrou, cv) = &*self.partage;
-        if let Ok(mut f) = verrou.lock() {
-            f.fermee = true;
-            cv.notify_all();
+        let mut f = verrou.lock().unwrap_or_else(|e| e.into_inner());
+        f.fermee = true;
+        cv.notify_all();
+    }
+}
+
+/// Réponse à donner **exactement une fois** au protocole `cr-couv` : si la tâche qui la porte
+/// panique ou est abandonnée sans répondre, la réponse `None` (404) part quand même à sa
+/// destruction (sinon la WebView attendrait l'image indéfiniment).
+pub struct ReponseUnique<F: FnOnce(Option<Vec<u8>>)>(Option<F>);
+
+impl<F: FnOnce(Option<Vec<u8>>)> ReponseUnique<F> {
+    pub fn nouvelle(f: F) -> Self {
+        ReponseUnique(Some(f))
+    }
+
+    pub fn donner(mut self, octets: Option<Vec<u8>>) {
+        if let Some(f) = self.0.take() {
+            f(octets);
+        }
+    }
+}
+
+impl<F: FnOnce(Option<Vec<u8>>)> Drop for ReponseUnique<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f(None);
         }
     }
 }
@@ -230,5 +286,36 @@ mod tests {
             (0..10).map(|_| rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()).collect();
         recus.sort();
         assert_eq!(recus, (0..10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn une_panique_ne_tue_pas_le_fil_et_la_reponse_part_quand_meme() {
+        let pool = Pool::nouveau(1);
+        let (tx, rx) = mpsc::channel();
+        let tx2 = tx.clone();
+        pool.executer(move |_| {
+            let r = ReponseUnique::nouvelle(move |o: Option<Vec<u8>>| tx2.send(o.is_some()).unwrap());
+            if std::hint::black_box(true) {
+                panic!("décodeur en panique (test)");
+            }
+            r.donner(Some(vec![1]));
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(false), "404 malgré la panique");
+        // Le seul fil de production a survécu : la tâche suivante s'exécute.
+        pool.executer(move |_| tx.send(true).unwrap());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(true));
+    }
+
+    #[test]
+    fn le_cache_reste_servi_quand_les_productions_sont_bloquees() {
+        let pool = Pool::nouveau(1);
+        let (libere, attente) = mpsc::channel::<()>();
+        pool.executer(move |_| {
+            let _ = attente.recv_timeout(Duration::from_secs(10)); // NAS muet
+        });
+        let (tx, rx) = mpsc::channel();
+        pool.executer_rapide(move |_| tx.send("cache").unwrap());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)), Ok("cache"), "fil réservé aux lectures du cache");
+        libere.send(()).unwrap();
     }
 }

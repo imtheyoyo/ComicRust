@@ -846,32 +846,47 @@ impl Biblio {
         couvertures::couverture_avec_delai(cache, id, fichier, image, couvertures::DELAI_PRODUCTION)
     }
 
-    /// Sert une couverture au protocole `cr-couv`. Le cache disque et le cache négatif sont
-    /// consultés tout de suite, dans le fil appelant (réponse immédiate, sans file d'attente) ;
-    /// seuls les échecs de cache passent par le pool (tâches récentes d'abord, périmées
-    /// rejetées). `repondre` reçoit les octets JPEG, ou `None` (404).
+    /// Sert une couverture au protocole `cr-couv`. Appelé par le fil de la WebView : il ne fait
+    /// **rien** d'autre que mettre une tâche en file. La tâche rapide (fil réservé du pool :
+    /// recherche du livre, cache négatif, lecture du JPEG dans `data\couvertures`) répond tout de
+    /// suite ; seuls les échecs de cache passent à la production (tâches récentes d'abord,
+    /// périmées rejetées). `repondre` reçoit les octets JPEG, ou `None` (404), exactement une
+    /// fois, même si une tâche panique ([`couvertures::ReponseUnique`]).
     pub fn servir(&self, id: &str, repondre: impl FnOnce(Option<Vec<u8>>) + Send + 'static) {
-        let Ok((cache, id, fichier, image)) = self.plan_couverture(id) else {
-            return repondre(None);
-        };
-        if self.echec_recent(&id) {
-            return repondre(None);
-        }
-        if let Some(octets) = couvertures::depuis_le_cache(&cache, &id, image) {
-            return repondre(Some(octets));
-        }
-        let negatif = self.negatif.clone();
-        self.pool.executer(move |perime| {
+        let repondre = couvertures::ReponseUnique::nouvelle(repondre);
+        let (bib, id) = (self.clone(), id.to_string());
+        self.pool.executer_rapide(move |perime| {
             if perime {
-                return repondre(None); // abandonnée depuis longtemps ; pas d'échec mémorisé
+                return repondre.donner(None);
             }
-            match couvertures::couverture_avec_delai(cache, id.clone(), fichier, image, couvertures::DELAI_PRODUCTION) {
-                Ok(octets) => repondre(Some(octets)),
-                Err(_) => {
-                    negatif.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Instant::now());
-                    repondre(None)
+            let Ok((cache, id, fichier, image)) = bib.plan_couverture(&id) else {
+                return repondre.donner(None);
+            };
+            if bib.echec_recent(&id) {
+                return repondre.donner(None);
+            }
+            if let Some(octets) = couvertures::depuis_le_cache(&cache, &id, image) {
+                return repondre.donner(Some(octets));
+            }
+            let negatif = bib.negatif.clone();
+            bib.pool.executer(move |perime| {
+                if perime {
+                    return repondre.donner(None); // abandonnée depuis longtemps ; pas d'échec mémorisé
                 }
-            }
+                match couvertures::couverture_avec_delai(
+                    cache,
+                    id.clone(),
+                    fichier,
+                    image,
+                    couvertures::DELAI_PRODUCTION,
+                ) {
+                    Ok(octets) => repondre.donner(Some(octets)),
+                    Err(_) => {
+                        negatif.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Instant::now());
+                        repondre.donner(None)
+                    }
+                }
+            });
         });
     }
 
