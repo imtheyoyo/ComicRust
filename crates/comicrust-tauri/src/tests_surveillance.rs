@@ -380,9 +380,10 @@ fn comicrack_saisie_a_la_main_incomplete_refusee() {
 }
 
 #[test]
-fn comicrack_lecture_seule_hors_ligne_garde_les_fichiers_modifiables() {
+fn comicrack_lecture_seule_hors_ligne_refuse_aussi_les_fichiers() {
     // Option « Lecture et écriture » absente : rien n'est écrit dans la base, hors ligne ou non ;
-    // le message reste celui de la lecture seule (pas de faux « base injoignable »).
+    // le message reste celui de la lecture seule (pas de faux « base injoignable »). D1
+    // (25/11/2026) : les fichiers des livres ne sont pas modifiés non plus.
     let d = tempfile::tempdir().unwrap();
     let data = d.path().join("data");
     let b = comicrack_injoignable(&data, config_injoignable());
@@ -396,6 +397,18 @@ fn comicrack_lecture_seule_hors_ligne_garde_les_fichiers_modifiables() {
     assert!(b.motif_hors_ligne().is_some());
     let f = e.lire_fiches(&["a".into()]).unwrap();
     assert_eq!(f.lecture_seule.as_deref(), Some(crate::edition::LECTURE_SEULE_COMICRACK));
+    let ro = crate::edition::LECTURE_SEULE_COMICRACK;
+    assert_eq!(e.ecrire_infos_fichiers(&["a".into()], true, &|_| {}).unwrap_err(), ro);
+    assert_eq!(e.convertir_cbr_cbz(&["a".into()], Some(false), true, &|_| {}).unwrap_err(), ro);
+    let rn = crate::edition::DemandeRenommage {
+        ids: vec!["a".into()],
+        modele: "{series}".into(),
+        dossier_cible: None,
+        apercu: false,
+        confirme: true,
+    };
+    assert_eq!(e.renommer_deplacer(&rn, &|_| {}).unwrap_err(), ro);
+    assert_eq!(e.motif_fichiers(&e.cible()).unwrap_err(), ro);
 }
 
 #[test]

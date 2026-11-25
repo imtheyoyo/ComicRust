@@ -487,12 +487,11 @@ impl Resultat {
 /// Pourquoi les modifications des scripts ne peuvent pas être appliquées maintenant (`None` :
 /// elles le peuvent) : bibliothèque en lecture seule (ComicRack sans « Lecture et écriture »,
 /// ComicDb.xml, aucune bibliothèque), configuration MySQL incomplète ou base hors ligne.
-pub fn motif_lecture_seule(edition: &Edition, biblio: &Biblio) -> Option<String> {
-    match edition.cible() {
-        Cible::LectureSeule(m) => Some(m),
-        Cible::Comicrack(cfg) if !cfg.is_complete() => Some(crate::surveillance::CONFIG_MYSQL_INCOMPLETE.into()),
-        Cible::Store(_) | Cible::Comicrack(_) => biblio.motif_hors_ligne(),
-    }
+///
+/// Même décision que les opérations sur les fichiers ([`Edition::motif_fichiers`], D1) : un script
+/// qui renomme, déplace ou écrit les infos dans les fichiers est refusé en lecture seule.
+pub fn motif_lecture_seule(edition: &Edition, _biblio: &Biblio) -> Option<String> {
+    edition.motif_fichiers(&edition.cible()).err()
 }
 
 /// Cible d'écriture de `edit` (base de ComicRust ouverte, ou base MySQL de ComicRack).

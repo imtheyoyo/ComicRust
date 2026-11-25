@@ -514,17 +514,22 @@ fn comicdb_xml_lecture_seule_pour_les_fiches() {
         apercu: true,
         confirme: false,
     };
-    assert!(e.renommer_deplacer(&rn, &|_| {}).is_err());
-    assert!(e
-        .convertir_cbr_cbz(std::slice::from_ref(&id), Some(true), false, &|_| {})
-        .unwrap_err()
-        .contains("lecture seule"));
-    // Les fichiers restent modifiables (fiche du ComicDb.xml écrite dans le CBZ).
-    let r = e.ecrire_infos_fichiers(std::slice::from_ref(&id), false, &|_| {}).unwrap();
-    assert_eq!(r.livres[0].statut, Statut::Ok, "{}", r.rapport);
+    assert_eq!(e.renommer_deplacer(&rn, &|_| {}).unwrap_err(), LECTURE_SEULE_XML);
+    // D1 (25/11/2026) : aucun fichier de livre n'est modifié en lecture seule, avec ou sans
+    // rangement de l'original.
+    let avant = std::fs::read(&fichier).unwrap();
+    for ranger in [Some(true), Some(false)] {
+        assert_eq!(
+            e.convertir_cbr_cbz(std::slice::from_ref(&id), ranger, false, &|_| {}).unwrap_err(),
+            LECTURE_SEULE_XML
+        );
+    }
+    assert_eq!(e.ecrire_infos_fichiers(std::slice::from_ref(&id), false, &|_| {}).unwrap_err(), LECTURE_SEULE_XML);
+    assert_eq!(std::fs::read(&fichier).unwrap(), avant, "CBZ intact");
     let (x, _) = comic_info(&fichier);
-    assert!(x.contains("<Writer>Jim Starlin</Writer>"), "{x}");
+    assert!(!x.contains("<Writer>Jim Starlin</Writer>"), "{x}");
     assert!(std::fs::read_to_string(&xml).unwrap().contains("<Series>Thanos</Series>"), "ComicDb.xml intact");
+    assert_eq!(Cible::LectureSeule("x".into()).fichiers_modifiables().unwrap_err(), "x");
 }
 
 #[test]
@@ -958,7 +963,7 @@ fn mysql_comicrack_lecture_et_ecriture() {
     let lecteur = Lecteur::nouveau(data.clone(), b.clone());
     let e = Edition::nouvelle(b.clone(), lecteur.clone());
 
-    // Défaut : lecture seule ; les fichiers restent modifiables, rien dans ComicRack.
+    // Défaut : lecture seule ; ni la base ComicRack ni les fichiers ne sont modifiés (D1).
     let f = e.lire_fiches(&[id.to_string()]).unwrap();
     assert_eq!(f.lecture_seule.as_deref(), Some(LECTURE_SEULE_COMICRACK));
     let dm = DemandeModification {
@@ -969,8 +974,7 @@ fn mysql_comicrack_lecture_et_ecriture() {
         confirme: false,
     };
     assert!(e.appliquer_modifications(&dm, &|_| {}).is_err());
-    let r = e.ecrire_infos_fichiers(&[id.to_string()], false, &|_| {}).unwrap();
-    assert_eq!(r.livres[0].statut, Statut::Ok, "{}", r.rapport);
+    assert_eq!(e.ecrire_infos_fichiers(&[id.to_string()], false, &|_| {}).unwrap_err(), LECTURE_SEULE_COMICRACK);
     assert_eq!(data_de(&mut conn).1, 5, "lecture seule : base ComicRack intacte");
     // Lecture en lecture seule : rien dans ComicRack.
     let o = lecteur.ouvrir_livre(id).unwrap();

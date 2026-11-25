@@ -673,9 +673,10 @@
       ...entreesLecture(),
       { id: 'infos', libelle: plusieurs ? `✏ Modifier les infos des ${nbSel.toLocaleString('fr-FR')} livres…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: true },
       { id: 'ecritureInfos', libelle: plusieurs ? 'Écrire les infos dans les fichiers…' : 'Écrire les infos dans le fichier', separe: true,
-        aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
-      { id: 'conversion', libelle: plusieurs ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ', aide: 'Seuls les CBR, CB7 et CBT se convertissent' },
-      { id: 'renommer', libelle: 'Renommer / déplacer…' },
+        desactive: !!raisonFichiers(), aide: raisonFichiers() ?? 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
+      { id: 'conversion', libelle: plusieurs ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ',
+        desactive: !!raisonFichiers(), aide: raisonFichiers() ?? 'Seuls les CBR, CB7 et CBT se convertissent' },
+      { id: 'renommer', libelle: 'Renommer / déplacer…', desactive: !!raisonFichiers(), aide: raisonFichiers() },
       { id: 'dossier', libelle: 'Ouvrir le dossier du fichier', separe: true, desactive: plusieurs,
         aide: plusieurs ? 'Un seul livre à la fois' : 'Montre le fichier dans l\'Explorateur de Windows' },
       ...entreesScriptsMenu(nbSel || (sel.curseur >= 0 ? 1 : 0)),
@@ -683,6 +684,14 @@
       ...entreesManquants(),
     ];
   });
+
+  /** Raison pour laquelle les fichiers des livres ne sont pas modifiables (D1 : bibliothèque ComicRack
+   *  en lecture seule, base injoignable) : « Écrire les infos », « Convertir » et « Renommer » sont
+   *  grisés avec elle. Le backend décide (`Cible::fichiers_modifiables`) ; c'est la même raison que
+   *  celle des fiches, donnée par `etat_manquants`. */
+  function raisonFichiers(): string | undefined {
+    return manquants.raison;
+  }
 
   /** Entrées « livres manquants » du menu contextuel (lot L3) : désactivées si les fiches ne sont pas
    *  modifiables (lecture seule, hors ligne) ; « Retrouver » seulement pour un livre manquant. */
@@ -748,9 +757,10 @@
       ...entreesLecture(),
       { id: 'infos', libelle: n > 1 ? `✏ Modifier les infos ${quoi.replace(/^les /, 'des ')}…` : '✏ Modifier les infos…', raccourci: 'Ctrl+I', separe: np === 1 },
       { id: 'ecritureInfos', libelle: n > 1 ? 'Écrire les infos dans les fichiers…' : 'Écrire les infos dans le fichier', separe: true,
-        aide: 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
-      { id: 'conversion', libelle: n > 1 ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ', aide: 'Seuls les CBR, CB7 et CBT se convertissent' },
-      { id: 'renommer', libelle: 'Renommer / déplacer…' },
+        desactive: !!raisonFichiers(), aide: raisonFichiers() ?? 'Seuls les CBZ reçoivent les infos (convertir d\'abord en CBZ)' },
+      { id: 'conversion', libelle: n > 1 ? 'Convertir les CBR / CB7 / CBT en CBZ…' : 'Convertir en CBZ',
+        desactive: !!raisonFichiers(), aide: raisonFichiers() ?? 'Seuls les CBR, CB7 et CBT se convertissent' },
+      { id: 'renommer', libelle: 'Renommer / déplacer…', desactive: !!raisonFichiers(), aide: raisonFichiers() },
       ...entreesScriptsMenu(n),
       { id: 'ajouter', libelle: `➕ Ajouter ${quoi} à une liste…`, separe: true, desactive: !!raison, aide: raison },
       ...(liste?.type === 'lecture'

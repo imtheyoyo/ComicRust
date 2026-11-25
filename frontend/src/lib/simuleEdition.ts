@@ -451,21 +451,26 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
         }
         return champ('CustomValue:' + cle, ['']);
       }
-      case 'ecrire_infos_fichiers':
+      case 'ecrire_infos_fichiers': {
+        // D1 : aucun fichier modifié en lecture seule (comme le backend).
+        const ro = lectureSeule();
+        if (ro) throw new Error(ro);
         return lot('ecritureInfos', args.ids as string[], args.confirme as boolean | undefined, (l) => {
           if (!l.fichierPresent) return { statut: 'erreur', message: 'fichier introuvable' };
           if (!cbz(l)) return { statut: 'ignore', message: 'seuls les CBZ reçoivent les infos' };
           aEcrire.delete(l.id);
           return { statut: 'ok' };
         });
+      }
       case 'convertir_cbr_cbz': {
         const ranger = (args.rangerOriginal as boolean | undefined) ?? reglages.rangerOriginal;
-        if (ranger && lectureSeule()) throw new Error('Bibliothèque en lecture seule : l\'original ne peut pas être rangé (il reste en place).');
+        const ro = lectureSeule();
+        if (ro) throw new Error(ro);
         return lot('conversion', args.ids as string[], args.confirme as boolean | undefined, (l) => {
           if (!l.fichierPresent) return { statut: 'erreur', message: 'fichier introuvable' };
           if (!/\.(cbr|rar|cb7|7z|cbt|tar)$/i.test(l.fichier)) return { statut: 'ignore', message: 'déjà au format CBZ ou format non convertible' };
           const cible = l.fichier.replace(/\.[^.]+$/, '.cbz');
-          if (!lectureSeule()) l.fichier = cible;
+          l.fichier = cible;
           return { statut: 'ok', fichier: cible, message: ranger ? 'original rangé dans « _originaux »' : undefined };
         });
       }
