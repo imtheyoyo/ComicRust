@@ -165,7 +165,56 @@ pub fn is_image_name(name: &str) -> bool {
 
 /// Tri "naturel" des noms de pages (page2 < page10), comme ComicRack.
 pub fn sort_pages(names: &mut [String]) {
-    names.sort_by(|a, b| natord::compare_ignore_case(a, b));
+    names.sort_by(|a, b| compare_natural(a, b));
+}
+
+/// Comparaison « naturelle » de ComicRack : sans casse, les suites de chiffres comparées
+/// **par leur valeur** (`img_9` < `img_010`, zéros de tête ignorés pour la valeur), les
+/// espaces comptent comme des caractères. À valeur égale (`9` et `09`), le nombre le plus
+/// court passe d'abord, puis l'ordre des octets départage : l'ordre est total et stable.
+///
+/// (`natord` comparait `010` à `9` comme des décimales, « 0,10 » < « 0,9 » : `img_010`
+/// passait avant `img_9`, et ignorait les espaces.)
+pub fn compare_natural(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    // Premier écart de longueur entre nombres de même valeur (départage final).
+    let mut zeros = Ordering::Equal;
+    loop {
+        match (x.peek().copied(), y.peek().copied()) {
+            (None, None) => break,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut s = String::new();
+                    while let Some(c) = it.peek().copied().filter(char::is_ascii_digit) {
+                        s.push(c);
+                        it.next();
+                    }
+                    s
+                };
+                let (n, m) = (take(&mut x), take(&mut y));
+                let (vn, vm) = (n.trim_start_matches('0'), m.trim_start_matches('0'));
+                let ord = vn.len().cmp(&vm.len()).then_with(|| vn.cmp(vm));
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                if zeros == Ordering::Equal {
+                    zeros = n.len().cmp(&m.len());
+                }
+            }
+            (Some(c), Some(d)) => {
+                let ord = c.to_lowercase().cmp(d.to_lowercase());
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                x.next();
+                y.next();
+            }
+        }
+    }
+    zeros.then_with(|| a.cmp(b))
 }
 
 /// Taille maximale d'une entrée d'archive (page) lue en mémoire : au-delà, l'archive est
@@ -431,6 +480,22 @@ mod tests {
         assert!(read_bounded(&mut data.as_slice(), u64::MAX, 1000, "p.jpg").is_err());
         assert_eq!(entry_limit("Sub/ComicInfo.xml"), MAX_INFO_SIZE);
         assert_eq!(entry_limit("p.jpg"), MAX_ENTRY_SIZE);
+    }
+
+    /// D3b : nombres comparés par valeur, comme ComicRack.
+    #[test]
+    fn natural_order_compares_numbers_by_value() {
+        let mut v: Vec<String> = ["img_010.jpg", "img_9.jpg", "img_011.jpg", "img_2.jpg"].map(String::from).to_vec();
+        sort_pages(&mut v);
+        assert_eq!(v, ["img_2.jpg", "img_9.jpg", "img_010.jpg", "img_011.jpg"]);
+        use std::cmp::Ordering::*;
+        assert_eq!(compare_natural("p9", "p09"), Less, "même valeur : le plus court d'abord");
+        assert_eq!(compare_natural("P1", "p1"), Less, "même texte sans casse : ordre des octets");
+        assert_eq!(compare_natural("Chap 2/01.jpg", "Chap 10/01.jpg"), Less);
+        assert_eq!(compare_natural("p 2.jpg", "p1.jpg"), Less, "l'espace compte");
+        assert_eq!(compare_natural("a", "a1"), Less);
+        assert_eq!(compare_natural("x99999999999999999999999", "x100000000000000000000000"), Less, "grands nombres");
+        assert_eq!(compare_natural("abc", "abc"), Equal);
     }
 
     #[test]

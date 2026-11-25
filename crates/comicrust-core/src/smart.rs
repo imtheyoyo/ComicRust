@@ -1016,7 +1016,7 @@ impl SmartQuery {
                         .cmp(&shadow_series(y).to_lowercase())
                         .then(x.shadow_format().cmp(&y.shadow_format()))
                         .then(x.shadow_volume().cmp(&y.shadow_volume()))
-                        .then_with(|| natord::compare(&shadow_number(x), &shadow_number(y)))
+                        .then_with(|| crate::providers::compare_natural(&shadow_number(x), &shadow_number(y)))
                 }),
                 Selection::Random => {
                     out.sort_by(|&a, &b| books[a].id.cmp(&books[b].id));
