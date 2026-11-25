@@ -785,10 +785,7 @@ pub(super) fn drop_tables(db_cfg: &DbConfig) {
 /// connexion d'une base de test. Supprime et recrée uniquement les tables `comicrust_*`.
 #[test]
 fn mysql_store() {
-    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-        eprintln!("COMICRUST_TEST_MYSQL absent : test MySQL du store ignoré");
-        return;
-    };
+    let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL du store ignoré") else { return };
     let db_cfg = DbConfig::from_connection_string(&url).unwrap();
     let cfg = StoreConfig::MySql(db_cfg.clone());
     {

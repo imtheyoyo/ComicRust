@@ -329,10 +329,7 @@ fn comicrack_write(conn: &mut Conn, id: &str, data: &str) {
 
 #[test]
 fn mysql_write() {
-    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-        eprintln!("COMICRUST_TEST_MYSQL absent : test d'écriture MySQL ignoré");
-        return;
-    };
+    let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test d'écriture MySQL ignoré") else { return };
     let _lock = mysql_lock();
     let cfg = DbConfig::from_connection_string(&url).unwrap();
     let mut conn = connect(&cfg).unwrap();
@@ -481,10 +478,7 @@ fn mysql_write() {
 /// et suppression de fiches comme `ComicStorageBaseSql.Delete`, vues par une autre instance.
 #[test]
 fn mysql_relocate_and_delete() {
-    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-        eprintln!("COMICRUST_TEST_MYSQL absent : test de suppression MySQL ignoré");
-        return;
-    };
+    let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test de suppression MySQL ignoré") else { return };
     let _lock = mysql_lock();
     let cfg = DbConfig::from_connection_string(&url).unwrap();
     let mut conn = connect(&cfg).unwrap();

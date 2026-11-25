@@ -432,6 +432,37 @@ pub(crate) mod tests {
         LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Chaîne de connexion de la base de test (`COMICRUST_TEST_MYSQL`), seulement si la base
+    /// est sans danger : ces tests **suppriment** les tables `comics` / `changes`. Base
+    /// absente, `comickrack_demo` ou nom sans « test » : `None`, le test est ignoré.
+    pub(crate) fn test_mysql_url(absent: &str) -> Option<String> {
+        let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
+            eprintln!("{absent}");
+            return None;
+        };
+        let database = DbConfig::from_connection_string(&url).map(|c| c.database).unwrap_or_default();
+        if !safe_test_database(&database) {
+            eprintln!("COMICRUST_TEST_MYSQL vise la base « {database} » (nom sans « test ») : test MySQL ignoré");
+            return None;
+        }
+        assert_ne!(database, "comickrack_demo", "jamais la base de démonstration");
+        Some(url)
+    }
+
+    /// Nom de base acceptable pour les tests destructeurs.
+    pub(crate) fn safe_test_database(name: &str) -> bool {
+        name != "comickrack_demo" && name.to_lowercase().contains("test")
+    }
+
+    #[test]
+    fn destructive_tests_only_on_a_test_database() {
+        assert!(safe_test_database("comicrust_test"));
+        assert!(safe_test_database("TestBD"));
+        assert!(!safe_test_database("comickrack_demo"), "jamais la base de démonstration");
+        assert!(!safe_test_database("comicrack"), "vraie bibliothèque");
+        assert!(!safe_test_database(""));
+    }
+
     /// Fiche au format exact de ComicRack CE (`XmlUtility.ToString(ComicBook)`).
     pub const SAMPLE: &str = r#"<?xml version="1.0"?>
 <ComicBook xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Id="30815f16-abb9-4c38-8c24-ecae11e25b1b" File="Z:\04_2011_2016\COSMIC COLLECTION #224 2012_05 - Thanos Rising 1-5 (Jason Aaron)(2013).cbz">
@@ -468,10 +499,7 @@ pub(crate) mod tests {
     /// chaîne de connexion d'une base de test (créée et remplie par le test).
     #[test]
     fn mysql_server() {
-        let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-            eprintln!("COMICRUST_TEST_MYSQL absent : test MySQL ignoré");
-            return;
-        };
+        let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL ignoré") else { return };
         let _lock = mysql_lock();
         let cfg = DbConfig::from_connection_string(&url).unwrap();
         let mut conn = connect(&cfg).unwrap();
