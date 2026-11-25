@@ -291,6 +291,10 @@ fn replace_with(
                 std::thread::sleep(delays[attempt]);
                 attempt += 1;
             }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let _ = std::fs::remove_file(tmp);
+                return Err(Error::Archive(format!("{} existe déjà", path.display())));
+            }
             Err(e) => {
                 let _ = std::fs::remove_file(tmp);
                 let tries = if attempt > 0 { format!(", {} tentatives", attempt + 1) } else { String::new() };
@@ -309,8 +313,41 @@ fn check_not_rewritten(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Taille et date de modification d'un fichier : relevées avant la lecture et comparées
+/// juste avant le remplacement (un autre programme, ComicRack par exemple, a pu réécrire
+/// le fichier entre-temps : sa version ne doit pas être écrasée).
+fn file_stamp(path: &Path) -> Result<(u64, Option<std::time::SystemTime>), Error> {
+    let m = std::fs::metadata(path)?;
+    Ok((m.len(), m.modified().ok()))
+}
+
+/// Texte d'un `ComicInfo.xml` selon sa marque d'ordre des octets : UTF-16 (petit ou gros
+/// boutiste), UTF-8 avec ou sans BOM. Sans BOM, UTF-8 (caractères invalides remplacés).
+fn decode_xml_bytes(bytes: &[u8]) -> String {
+    let utf16 = |be: bool| {
+        let units: Vec<u16> = bytes[2..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| if be { u16::from_be_bytes(*c) } else { u16::from_le_bytes(*c) })
+            .collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xFF, 0xFE, ..] => utf16(false),
+        [0xFE, 0xFF, ..] => utf16(true),
+        _ => String::from_utf8_lossy(bytes).trim_start_matches('\u{feff}').to_string(),
+    }
+}
+
 /// Écrit dans le `ComicInfo.xml` d'un CBZ les infos de la fiche `record` (base ComicRack).
 pub fn write_comic_info(path: &Path, record: &str) -> Result<Outcome, Error> {
+    write_comic_info_with(path, record, &mut || {})
+}
+
+/// [`write_comic_info`] avec un point d'arrêt juste avant le contrôle final de
+/// l'original (tests : fichier modifié pendant l'écriture).
+fn write_comic_info_with(path: &Path, record: &str, before_replace: &mut dyn FnMut()) -> Result<Outcome, Error> {
     check_not_rewritten(path)?;
     match BookFormat::detect(path) {
         Some(BookFormat::Zip) => {}
@@ -324,15 +361,16 @@ pub fn write_comic_info(path: &Path, record: &str) -> Result<Outcome, Error> {
     }
     let tmp = temp_path(path);
     let result = (|| {
+        let before = file_stamp(path)?;
         let mut zip = zip::ZipArchive::new(File::open(path)?)?;
         let (_, info_name) = providers::index_entries(zip.file_names().map(str::to_string));
         let existing = match &info_name {
             Some(name) => {
-                let mut text = String::new();
                 let mut bytes = Vec::new();
                 zip.by_name(name)?.read_to_end(&mut bytes)?;
-                text.push_str(&String::from_utf8_lossy(&bytes));
-                Some(text)
+                // UTF-16 (écrit par certains logiciels) : décodé, sinon ses éléments
+                // inconnus de ComicRack seraient perdus.
+                Some(decode_xml_bytes(&bytes))
             }
             None => None,
         };
@@ -358,7 +396,9 @@ pub fn write_comic_info(path: &Path, record: &str) -> Result<Outcome, Error> {
         w.start_file(new_name.as_str(), opts)?;
         w.write_all(xml.as_bytes())?;
         w.set_raw_comment(zip.comment().to_vec().into_boxed_slice());
-        w.finish()?;
+        // Données sur le disque avant le remplacement : sinon une coupure de courant juste
+        // après le `rename` peut laisser un CBZ vide ou tronqué à la place de l'original.
+        w.finish()?.sync_all()?;
         drop(zip); // fermer l'original avant de le remplacer (Windows)
 
         // Vérification : toutes les entrées présentes et ComicInfo.xml relisible.
@@ -370,6 +410,14 @@ pub fn write_comic_info(path: &Path, record: &str) -> Result<Outcome, Error> {
         check.by_name(&new_name)?.read_to_string(&mut written)?;
         ComicInfo::from_xml(&written)?;
         drop(check);
+        before_replace();
+        // Original modifié pendant la copie (ComicRack, autre programme) : on abandonne.
+        check_not_rewritten(path)?;
+        if file_stamp(path)? != before {
+            return Err(Error::Archive(
+                "le fichier a été modifié pendant l'écriture (ComicRack ?) : rien n'a été changé, réessayer".into(),
+            ));
+        }
         replace(&tmp, path)?;
         Ok(Outcome::Written)
     })();
@@ -448,7 +496,7 @@ pub fn convert_to_cbz(src: &Path, record: Option<&str>) -> Result<Converted, Err
             w.start_file("ComicInfo.xml", opts)?;
             w.write_all(xml.as_bytes())?;
         }
-        w.finish()?;
+        w.finish()?.sync_all()?;
         drop(book);
         // Vérification : mêmes pages, dans le même ordre.
         let check = providers::open_book(&tmp)?;
@@ -460,10 +508,10 @@ pub fn convert_to_cbz(src: &Path, record: Option<&str>) -> Result<Converted, Err
             )));
         }
         drop(check);
-        if dest.exists() {
-            return Err(Error::Archive(format!("{} existe déjà", dest.display())));
-        }
-        replace(&tmp, &dest)?;
+        // Sans jamais écraser un CBZ apparu entre-temps (`rename_no_replace`).
+        let delays: Vec<std::time::Duration> =
+            REPLACE_RETRY_DELAYS_MS.iter().map(|&ms| std::time::Duration::from_millis(ms)).collect();
+        replace_with(&tmp, &dest, &delays, crate::edit::files::rename_no_replace)?;
         Ok(Converted { path: dest.clone(), pages: names.len() })
     })();
     if result.is_err() {
@@ -723,5 +771,115 @@ mod tests {
         let mut cbz = providers::open_book(&done.path).unwrap();
         assert_eq!(cbz.comic_info().unwrap().unwrap().series.as_deref(), Some("Thanos"));
         assert!(!can_convert(&done.path));
+    }
+
+    /// Fiche ComicRack avec une page de publicité (`Advertisment`) et un type combiné :
+    /// l'écriture des infos dans le CBZ réussit (refusée avant la v1.0.2).
+    const RECORD_ADS: &str = r#"<?xml version="1.0"?>
+<ComicBook xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Id="30815f16-abb9-4c38-8c24-ecae11e25b1b" File="Z:\BD\Thanos 01.cbz">
+  <Series>Thanos</Series>
+  <Number>1</Number>
+  <Pages>
+    <Page Image="0" Type="FrontCover, Story" />
+    <Page Image="1" Type="Advertisment" />
+    <Page Image="2" />
+  </Pages>
+</ComicBook>"#;
+
+    #[test]
+    fn writes_comicrack_page_types() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.cbz");
+        cbz(&path, None);
+        assert_eq!(write_comic_info(&path, RECORD_ADS).unwrap(), Outcome::Written);
+        let mut book = providers::open_book(&path).unwrap();
+        let info = book.comic_info().unwrap().unwrap();
+        let p = info.pages.unwrap().page;
+        assert_eq!(p[1].page_type.as_str(), "Advertisment");
+        assert_eq!(p[0].page_type.as_str(), "FrontCover, Story");
+        drop(book);
+        // L'analyse lit aussi ce ComicInfo.xml (il était ignoré en entier).
+        let b = crate::scanner::book_from_file(&path, "x".into()).unwrap();
+        assert_eq!(b.series.as_deref(), Some("Thanos"));
+        assert_eq!(b.pages.page[1].kind.as_deref(), Some("Advertisment"));
+    }
+
+    /// ComicInfo.xml existant en UTF-16 (avec BOM) : décodé, ses éléments inconnus de
+    /// ComicRack sont gardés (ils étaient perdus).
+    #[test]
+    fn utf16_comic_info_keeps_unknown_elements() {
+        for be in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("b.cbz");
+            let text = "<?xml version=\"1.0\" encoding=\"utf-16\"?><ComicInfo><Series>Ancien</Series><GTIN>978</GTIN></ComicInfo>";
+            let mut bytes = if be { vec![0xFE, 0xFF] } else { vec![0xFF, 0xFE] };
+            bytes.extend(text.encode_utf16().flat_map(|u| if be { u.to_be_bytes() } else { u.to_le_bytes() }));
+            let mut w = zip::ZipWriter::new(File::create(&path).unwrap());
+            w.start_file("p01.png", zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(&png(0)).unwrap();
+            w.start_file("ComicInfo.xml", zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(&bytes).unwrap();
+            w.finish().unwrap();
+            assert_eq!(write_comic_info(&path, RECORD).unwrap(), Outcome::Written);
+            let mut zip = zip::ZipArchive::new(File::open(&path).unwrap()).unwrap();
+            let mut s = String::new();
+            zip.by_name("ComicInfo.xml").unwrap().read_to_string(&mut s).unwrap();
+            assert!(s.contains("<GTIN>978</GTIN>") && s.contains("Thanos &amp; Cie"), "{s}");
+        }
+    }
+
+    /// Original réécrit par un autre programme pendant l'écriture : rien n'est remplacé
+    /// (sa version n'est pas écrasée) et le fichier temporaire est supprimé.
+    #[test]
+    fn original_modified_during_write_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.cbz");
+        cbz(&path, None);
+        let err = write_comic_info_with(&path, RECORD, &mut || {
+            std::fs::write(&path, b"version de ComicRack").unwrap();
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("modifié pendant l'écriture"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"version de ComicRack");
+        assert!(!temp_path(&path).exists());
+    }
+
+    /// Conversion : un CBZ apparu juste avant le remplacement n'est jamais écrasé.
+    #[test]
+    fn conversion_never_overwrites_an_existing_cbz() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tmp, dest) = (dir.path().join("x.cbz.comicrust.tmp"), dir.path().join("x.cbz"));
+        std::fs::write(&tmp, b"converti").unwrap();
+        std::fs::write(&dest, b"apparu entre-temps").unwrap();
+        let err = replace_with(&tmp, &dest, &[], crate::edit::files::rename_no_replace).unwrap_err().to_string();
+        assert!(err.contains("existe déjà"), "{err}");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"apparu entre-temps");
+        assert!(!tmp.exists());
+    }
+
+    /// Archive CBT dont le ComicInfo.xml a été écrit par ComicRack (publicité, types
+    /// combinés, nombre vide) : la conversion en CBZ réussit et garde les types.
+    #[test]
+    fn converts_archive_with_comicrack_page_types() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("t.cbt");
+        let info = r#"<ComicInfo><Series>Thanos</Series><Count></Count><Pages><Page Image="0" Type="FrontCover, Story"/><Page Image="1" Type="Advertisment"/></Pages></ComicInfo>"#;
+        let mut t = tar::Builder::new(File::create(&src).unwrap());
+        for (name, data) in [("p01.png", png(0)), ("p02.png", png(40)), ("ComicInfo.xml", info.as_bytes().to_vec())] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            t.append_data(&mut h, name, data.as_slice()).unwrap();
+        }
+        t.into_inner().unwrap();
+        let done = convert_to_cbz(&src, None).unwrap();
+        assert_eq!(done.pages, 2);
+        let mut cbz = providers::open_book(&done.path).unwrap();
+        let ci = cbz.comic_info().unwrap().unwrap();
+        assert_eq!(ci.series.as_deref(), Some("Thanos"));
+        let p = ci.pages.unwrap().page;
+        assert_eq!((p[0].page_type.as_str(), p[1].page_type.as_str()), ("FrontCover, Story", "Advertisment"));
     }
 }
