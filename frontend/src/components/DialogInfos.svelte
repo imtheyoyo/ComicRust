@@ -44,6 +44,8 @@
   let onglet = $state(0);
   let ecrireFichier = $state(false);
   let chargement = $state(true);
+  /** Passage au livre précédent / suivant en cours. */
+  let navigation = $state(false);
   let enregistrement = $state(false);
   let progression = $state<ProgressionEdition | null>(null);
   let bilan = $state<BilanOperation | null>(null);
@@ -74,10 +76,14 @@
     clearTimeout(minuterieVerif);
   });
 
+  /** Jeton des lectures de fiches : seule la dernière demandée s'affiche (relecture B9). */
+  let sequenceFiches = 0;
   async function charger(cible: string[], garderOnglet = true) {
+    const n = ++sequenceFiches;
     chargement = true;
     try {
       const f = await lireFiches(cible);
+      if (n !== sequenceFiches) return;
       fiche = f;
       ids = f.ids;
       textes = Object.fromEntries(f.champs.map((c) => [c.nom, c.valeur]));
@@ -87,9 +93,9 @@
       const pagesPossibles = !f.multiple && !!f.livres[0]?.fichier;
       if (!garderOnglet || onglet > f.onglets.length || (onglet === f.onglets.length && !pagesPossibles)) onglet = 0;
     } catch (e) {
-      message = { texte: messageErreur(e), erreur: true };
+      if (n === sequenceFiches) message = { texte: messageErreur(e), erreur: true };
     } finally {
-      chargement = false;
+      if (n === sequenceFiches) chargement = false;
     }
   }
 
@@ -213,11 +219,18 @@
   async function apres(suite: 'fermer' | 'rester' | -1 | 1) {
     if (suite === 'fermer') { fermer(); return; }
     if (suite === 'rester') return;
-    const voisin = await onvoisin?.(suite);
-    if (voisin) {
-      message = null;
-      bilan = null;
-      await charger([voisin]);
+    // Précédent / Suivant bloqués jusqu'à l'affichage du voisin : un double clic avançait de deux
+    // livres et deux lectures se croisaient (relecture B9).
+    navigation = true;
+    try {
+      const voisin = await onvoisin?.(suite);
+      if (voisin) {
+        message = null;
+        bilan = null;
+        await charger([voisin]);
+      }
+    } finally {
+      navigation = false;
     }
   }
 
@@ -313,7 +326,7 @@
   }
 
   const peutEnregistrer = $derived(modifiable && sale && nbErreurs === 0);
-  const peutOk = $derived(!enregistrement && !confirmation && !chargement && (!sale || peutEnregistrer));
+  const peutOk = $derived(!enregistrement && !confirmation && !chargement && !navigation && (!sale || peutEnregistrer));
   const raisonBlocage = $derived(
     nbErreurs > 0
       ? `Valeur(s) refusée(s) : ${Object.keys(erreurs).map((n) => champsParNom.get(n)?.libelle ?? n).join(', ')}`

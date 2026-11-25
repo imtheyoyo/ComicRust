@@ -74,7 +74,11 @@
   });
 
   /** Lit (ou relit après « Appliquer ») les pages : nouvelle séance, vignettes relues du fichier. */
+  /** Jeton des lectures : une réponse dépassée (Précédent / Suivant rapprochés) est refermée sans
+   *  s'afficher, pour que la liste des pages soit toujours celle du livre `id` (relecture B9). */
+  let sequenceLecture = 0;
   export async function charger() {
+    const n = ++sequenceLecture;
     const ancien = livre?.jeton;
     const garder = livre?.id === id ? new Set(selection) : new Set<number>();
     if (livre && livre.id !== id) {
@@ -87,6 +91,10 @@
     erreur = '';
     try {
       const l = await lirePages(id, ancien);
+      if (n !== sequenceLecture) {
+        void fermerPages(l.jeton).catch(() => {});
+        return;
+      }
       livre = l;
       original = l.pages;
       pages = l.pages;
@@ -95,12 +103,13 @@
       apercu = null;
       favori = null;
     } catch (e) {
+      if (n !== sequenceLecture) return;
       erreur = messageErreur(e);
       livre = null;
       pages = [];
       original = [];
     } finally {
-      chargement = false;
+      if (n === sequenceLecture) chargement = false;
     }
   }
 
