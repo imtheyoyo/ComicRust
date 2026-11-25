@@ -680,15 +680,24 @@ pub fn search_folder(
         for e in entries.flatten() {
             let Ok(t) = e.file_type() else { continue };
             if t.is_dir() {
-                stack.push(e.path());
+                // Corbeilles (`#recycle`, `.Trash…`, `$RECYCLE.BIN`), `@eaDir`, originaux de la
+                // conversion en CBZ : comme l'analyse des dossiers, jamais parcourus (une BD
+                // envoyée à la corbeille serait sinon proposée « même nom et même taille »).
+                if !crate::scanner::is_ignored_dir(&e.file_name().to_string_lossy()) {
+                    stack.push(e.path());
+                }
             } else if let Ok(m) = e.metadata() {
                 if m.is_file() {
                     files.push((e.path(), m.len()));
+                    // Parcours : fichiers trouvés (fait = total, la fin n'est pas connue).
                     progress.total.fetch_add(1, Ordering::Relaxed);
+                    progress.done.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
     }
+    // Puis un pas par livre cherché : `done` et `total` comptent la même chose.
+    progress.total.fetch_add(wanted.len(), Ordering::Relaxed);
     files.sort();
     files.retain(|(p, _)| !known.contains(p));
     report.files_seen = files.len();
@@ -1154,6 +1163,29 @@ mod tests {
         assert_eq!((r.found.len(), r.not_found.as_slice()), (1, ["2".to_string()].as_slice()));
         assert_eq!(r.found[0].kind, MatchKind::Name);
         assert!(r.found[0].sure());
+    }
+
+    /// Les corbeilles et les originaux de conversion ne sont jamais parcourus ; l'avancement
+    /// finit à `done == total` (il comptait des fichiers d'un côté, des livres de l'autre).
+    #[test]
+    fn search_skips_recycle_bins_and_progress_is_consistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        touch(&d.join("#recycle/BD/Thanos 01.cbz"), 50);
+        touch(&d.join("_originaux/Thanos 01.cbz"), 50);
+        touch(&d.join(".Trash-1000/files/Thanos 01.cbz"), 50);
+        touch(&d.join("Série/Warlock 09.cbz"), 7);
+        let wanted = vec![
+            Wanted { id: "t".into(), file: r"Z:\BD\Thanos 01.cbz".into(), size: Some(50) },
+            Wanted { id: "w".into(), file: r"Z:\BD\Warlock 09.cbz".into(), size: Some(7) },
+        ];
+        let p = Progress::default();
+        let r = search_folder(d, &wanted, &KnownFiles::new([]), &p, &AtomicBool::new(false));
+        assert_eq!(r.found.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["w"]);
+        assert_eq!(r.not_found, ["t"]);
+        assert_eq!(r.files_seen, 1);
+        let (done, total) = p.get();
+        assert_eq!(done, total);
     }
 
     /// « Tome 01.cbz » dans plusieurs séries : le candidat de même taille d'abord, sinon celui

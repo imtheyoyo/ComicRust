@@ -492,9 +492,12 @@ pub fn refresh_book(existing: &LibraryBook, fresh: LibraryBook) -> LibraryBook {
     out.missing = existing.missing.map(|_| false);
     out.proposed_cache = Default::default();
     // `ComicBook.SetInfo` : page courante et dernière page lue restent dans le livre.
+    // Borne : la dernière page, ou 1 pour un livre d'une page (valeur « lu » de ComicRack,
+    // `last_page_read_when_read`), sinon une relecture rendrait « non lu » un livre lu.
     if let Some(n) = out.page_count.filter(|n| *n > 0) {
-        out.current_page = out.current_page.map(|p| p.min(n - 1));
-        out.last_page_read = out.last_page_read.map(|p| p.min(n - 1));
+        let max = crate::library::last_page_read_when_read(n);
+        out.current_page = out.current_page.map(|p| p.min(max));
+        out.last_page_read = out.last_page_read.map(|p| p.min(max));
     }
     out
 }
@@ -554,16 +557,24 @@ fn walk(roots: &[PathBuf], progress: &ScanProgress, cancel: &AtomicBool) -> Opti
                     continue;
                 }
             };
+            // Liste du dossier lue d'abord : les noms servent à reconnaître les fichiers en
+            // cours de réécriture (`x.cbz` + `x.cbz.tmp`) sans un accès disque par fichier
+            // (un aller-retour réseau chacun sur un NAS).
+            let mut entries = Vec::new();
             for entry in rd {
-                let entry = match entry {
-                    Ok(e) => e,
+                match entry {
+                    Ok(e) => entries.push(e),
                     Err(e) => {
                         // Liste incomplète : prudence pour les manquants de ce dossier.
                         w.unreadable.push(path_key(&dir.to_string_lossy()));
                         w.errors.push((dir.clone(), format!("lecture du dossier : {e}")));
                         break;
                     }
-                };
+                }
+            }
+            let names: HashSet<String> =
+                entries.iter().map(|e| e.file_name().to_string_lossy().to_lowercase()).collect();
+            for entry in entries {
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let ft = match entry.file_type() {
@@ -600,7 +611,7 @@ fn walk(roots: &[PathBuf], progress: &ScanProgress, cancel: &AtomicBool) -> Opti
                     }
                 };
                 let key = path_key(&path.to_string_lossy());
-                if providers::is_being_rewritten(&path) {
+                if names.contains(&format!("{}.tmp", name.to_lowercase())) {
                     w.busy.insert(key);
                     continue;
                 }
@@ -718,11 +729,13 @@ pub fn scan_batched(
     let in_scope =
         |key: &str| roots.iter().any(|r| is_under(key, r)) && !walk.unreadable.iter().any(|d| is_under(key, d));
 
-    // Livres connus par chemin (le premier en cas de doublon).
-    let mut by_key: HashMap<String, &LibraryBook> = HashMap::new();
+    // Livres connus par chemin. Plusieurs fiches peuvent désigner le même fichier (base
+    // importée, chemin écrit avec une autre casse) : toutes sont « vues », sinon les suivantes
+    // seraient déclarées manquantes alors que leur fichier existe.
+    let mut by_key: HashMap<String, Vec<&LibraryBook>> = HashMap::new();
     for b in known {
         if let Some(f) = b.file.as_deref() {
-            by_key.entry(path_key(f)).or_insert(b);
+            by_key.entry(path_key(f)).or_default().push(b);
         }
     }
 
@@ -732,15 +745,26 @@ pub fn scan_batched(
     let mut seen_ids: HashSet<&str> = HashSet::new();
     for f in &walk.found {
         match by_key.get(f.key.as_str()) {
-            Some(b) => {
-                seen_ids.insert(b.id.as_str());
-                if b.missing == Some(true) {
-                    report.back.push(b.id.clone());
+            Some(books) => {
+                let mut refresh = 0;
+                for b in books {
+                    seen_ids.insert(b.id.as_str());
+                    if b.missing == Some(true) {
+                        report.back.push(b.id.clone());
+                    }
+                    if b.file_size != Some(f.meta.len()) || modified_differs(b.file_modified_time.as_deref(), &f.meta) {
+                        jobs.push(Job::Refresh(b, f));
+                        refresh += 1;
+                    }
                 }
-                if b.file_size != Some(f.meta.len()) || modified_differs(b.file_modified_time.as_deref(), &f.meta) {
-                    jobs.push(Job::Refresh(b, f));
-                } else {
-                    progress.done.fetch_add(1, Ordering::Relaxed);
+                match refresh {
+                    0 => {
+                        progress.done.fetch_add(1, Ordering::Relaxed);
+                    }
+                    // Une lecture par fiche : l'avancement compte chacune.
+                    n => {
+                        progress.total.fetch_add(n - 1, Ordering::Relaxed);
+                    }
                 }
             }
             None => new_files.push(f),
@@ -1046,6 +1070,44 @@ mod tests {
         let added = parse_iso_secs(b.added.as_deref().unwrap()).unwrap();
         assert!((chrono::Utc::now().timestamp() - added).abs() < 60);
         assert!(b.current_page.is_none() && b.opened.is_none() && b.missing.is_none());
+    }
+
+    /// D3c : relire un livre d'une page marqué lu par ComicRack (`LastPageRead = 1`) le
+    /// laisse lu (la borne « dernière page » le ramenait à 0, donc « non lu »).
+    #[test]
+    fn refresh_keeps_one_page_book_read() {
+        let existing = LibraryBook {
+            id: "x".into(),
+            page_count: Some(1),
+            current_page: Some(1),
+            last_page_read: Some(1),
+            ..Default::default()
+        };
+        let fresh = LibraryBook { id: "x".into(), page_count: Some(1), ..Default::default() };
+        let b = refresh_book(&existing, fresh);
+        assert_eq!((b.current_page, b.last_page_read, b.read_percent()), (Some(1), Some(1), Some(100)));
+        // Livre de 3 pages : bornées à la dernière page.
+        let existing = LibraryBook { last_page_read: Some(9), page_count: Some(10), ..existing };
+        let b = refresh_book(&existing, LibraryBook { page_count: Some(3), ..Default::default() });
+        assert_eq!(b.last_page_read, Some(2));
+    }
+
+    /// Deux fiches pour le même fichier (casse différente, base importée) : aucune n'est
+    /// déclarée manquante (la seconde l'était, et la vérification des manquants la remettait
+    /// présente à chaque fois).
+    #[test]
+    fn duplicate_records_of_one_file_are_not_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("A.cbz");
+        cbz(&path, 2, None);
+        let first = book_from_file(&path, "un".into()).unwrap();
+        let mut second = first.clone();
+        second.id = "deux".into();
+        second.file = Some(path.to_string_lossy().to_uppercase());
+        let progress = ScanProgress::default();
+        let r = scan(&[dir.path().to_path_buf()], &[first, second], &progress, &AtomicBool::new(false), ids());
+        assert!(r.missing.is_empty() && r.updated.is_empty() && r.added.is_empty(), "{}", r.summary());
+        assert_eq!(progress.get(), (1, 1));
     }
 
     #[test]

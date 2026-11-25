@@ -326,16 +326,21 @@ impl LibraryBook {
     }
 
     /// Pourcentage lu (0–100) d'après la dernière page lue enregistrée par ComicRack.
+    ///
+    /// Formule de `ComicBook.ReadPercentage` (IL de ComicRack.Engine.dll relu avec REA) :
+    /// `PageCount <= 0 || LastPageRead <= 0 ? 0 : clamp((LastPageRead + 1) * 100 / PageCount, 1, 100)`.
+    /// `LastPageRead = 0` vaut donc « non lu ». Pour un livre d'**une seule page**,
+    /// `ComicBook.MarkAsRead` écrit `LastPageRead = 1` (et non 0, qui serait « non lu ») :
+    /// voir [`last_page_read_when_read`], 200 % ramené à 100 %.
     pub fn read_percent(&self) -> Option<u32> {
         let (read, total) = (self.last_page_read?, self.page_count?);
         if total == 0 {
             return None;
         }
-        // ComicRack compte la dernière page lue à partir de 0 ; 0 = jamais ouvert.
         if read == 0 {
             return Some(0);
         }
-        Some((((read + 1) * 100) / total).clamp(1, 100))
+        Some((read.saturating_add(1).saturating_mul(100) / total).clamp(1, 100))
     }
 
     /// Fiche d'un livre telle que stockée dans la colonne `data` de MySQL.
@@ -347,6 +352,17 @@ impl LibraryBook {
 
     pub fn from_xml(xml: &str) -> Result<Self, crate::Error> {
         Ok(quick_xml::de::from_str(xml.trim_start_matches('\u{feff}'))?)
+    }
+}
+
+/// `LastPageRead` (et `CurrentPage`) qu'écrit `ComicBook.MarkAsRead` de ComicRack pour un
+/// livre de `page_count` pages : la dernière page (`page_count - 1`), sauf pour un livre
+/// d'une seule page : `1`, car `0` signifie « non lu » ([`LibraryBook::read_percent`]).
+pub fn last_page_read_when_read(page_count: u32) -> u32 {
+    if page_count == 1 {
+        1
+    } else {
+        page_count.saturating_sub(1)
     }
 }
 
@@ -394,24 +410,31 @@ impl Library {
 
     /// Résout une liste CBL contre la bibliothèque : par GUID d'abord, puis
     /// par (série normalisée, numéro, volume). Renvoie pour chaque entrée le
-    /// livre trouvé ou `None` (= numéro manquant).
+    /// livre trouvé ou `None` (= numéro manquant). À égalité, le premier livre de la
+    /// bibliothèque. Index construit une fois (la normalisation de série passe par des
+    /// expressions régulières : une fois par livre, et non une fois par livre et par entrée).
     pub fn resolve<'a>(&'a self, list: &ReadingList) -> Vec<Option<&'a LibraryBook>> {
+        use std::collections::HashMap;
+        let mut by_id: HashMap<String, &LibraryBook> = HashMap::new();
+        let mut by_key: HashMap<(String, String), Vec<&LibraryBook>> = HashMap::new();
+        for b in &self.books.book {
+            by_id.entry(b.id.to_ascii_lowercase()).or_insert(b);
+            if let (Some(s), Some(n)) = (b.series.as_deref(), b.number.as_deref()) {
+                by_key.entry((normalize_series(s), normalize_number(n))).or_default().push(b);
+            }
+        }
         list.books
             .book
             .iter()
             .map(|e| {
-                if let Some(id) = &e.id {
-                    if let Some(b) = self.books.book.iter().find(|b| b.id.eq_ignore_ascii_case(id)) {
-                        return Some(b);
-                    }
+                if let Some(b) = e.id.as_ref().and_then(|id| by_id.get(&id.to_ascii_lowercase())) {
+                    return Some(*b);
                 }
-                let s = normalize_series(&e.series);
-                let n = normalize_number(&e.number);
-                self.books.book.iter().find(|b| {
-                    b.series.as_deref().map(normalize_series).as_deref() == Some(s.as_str())
-                        && b.number.as_deref().map(normalize_number).as_deref() == Some(n.as_str())
-                        && (e.volume.is_none() || b.volume.is_none() || e.volume == b.volume)
-                })
+                by_key
+                    .get(&(normalize_series(&e.series), normalize_number(&e.number)))?
+                    .iter()
+                    .copied()
+                    .find(|b| e.volume.is_none() || b.volume.is_none() || e.volume == b.volume)
             })
             .collect()
     }
@@ -497,6 +520,20 @@ mod tests {
         assert!(info.contains(r#"Bookmark="Ici""#), "{info}");
     }
 
+    /// D3c : un livre d'une page marqué lu par ComicRack (`LastPageRead = 1`) est lu à 100 %.
+    #[test]
+    fn one_page_book_read_like_comicrack() {
+        let b = |lu: Option<u32>, n: u32| LibraryBook { last_page_read: lu, page_count: Some(n), ..Default::default() };
+        assert_eq!(last_page_read_when_read(1), 1);
+        assert_eq!(last_page_read_when_read(20), 19);
+        assert_eq!(b(Some(1), 1).read_percent(), Some(100), "lu (MarkAsRead)");
+        assert_eq!(b(Some(0), 1).read_percent(), Some(0), "non lu");
+        assert_eq!(b(None, 1).read_percent(), None);
+        assert_eq!(b(Some(19), 20).read_percent(), Some(100));
+        assert_eq!(b(Some(9), 20).read_percent(), Some(50));
+        assert_eq!(b(Some(u32::MAX), 20).read_percent(), Some(100), "pas de débordement");
+    }
+
     #[test]
     fn normalize() {
         assert_eq!(normalize_series("The Avengers Vol. 3"), "avengers");
@@ -520,6 +557,20 @@ mod tests {
         .unwrap();
         let r = lib.resolve(&cbl);
         assert_eq!(r[0].unwrap().id, "AAA");
+        // GUID d'abord (sans casse), puis volume départageant deux livres de même numéro.
+        let lib2 = Library::from_xml(
+            r#"<ComicDatabase><Books>
+  <Book Id="V1"><Series>Thor</Series><Number>1</Number><Volume>1966</Volume></Book>
+  <Book Id="V2"><Series>Thor</Series><Number>1</Number><Volume>1998</Volume></Book>
+</Books></ComicDatabase>"#,
+        )
+        .unwrap();
+        let cbl2 = ReadingList::from_xml(
+            r#"<ReadingList><Name>T</Name><Books><Book Series="Thor" Number="1" Volume="1998"/><Book Series="X" Number="9"><Id>v1</Id></Book></Books></ReadingList>"#,
+        )
+        .unwrap();
+        let r2: Vec<_> = lib2.resolve(&cbl2).iter().map(|b| b.map(|b| b.id.as_str())).collect();
+        assert_eq!(r2, [Some("V2"), Some("V1")]);
         assert_eq!(r[1].unwrap().id, "BBB");
         assert!(r[2].is_none());
     }

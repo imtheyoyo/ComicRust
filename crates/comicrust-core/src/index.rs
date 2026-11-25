@@ -209,7 +209,11 @@ fn collect_books(root: &Path) -> Vec<PathBuf> {
         for entry in rd.flatten() {
             let path = entry.path();
             if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                stack.push(path);
+                // Mêmes dossiers ignorés que l'analyse : corbeilles, `@eaDir`, et surtout
+                // `_originaux` (sinon l'original converti pouvait être choisi à la place du CBZ).
+                if !crate::scanner::is_ignored_dir(&entry.file_name().to_string_lossy()) {
+                    stack.push(path);
+                }
             } else if is_book_path(&path) {
                 out.push(path);
             }
@@ -240,26 +244,37 @@ impl FileIndex {
             p.done.store(0, Ordering::Relaxed);
         }
 
-        // Lecture en parallèle : sur un partage réseau, la latence domine.
+        // Lecture en parallèle : sur un partage réseau, la latence domine. Même nombre de fils
+        // que l'analyse des dossiers (`SCAN_THREADS`) : davantage n'accélère rien sur un NAS.
         let cached = &cache_file.files;
-        let results: Vec<Scanned> = paths
-            .into_par_iter()
-            .map(|path| {
-                let key = path.to_string_lossy().into_owned();
-                let stamp = file_stamp(&path);
-                let hit = stamp.and_then(|(size, mtime)| {
-                    cached.get(&key).filter(|e| e.size == size && e.mtime == mtime).map(|e| e.info.clone())
-                });
-                let (info, from_cache) = match hit {
-                    Some(info) => (info, true),
-                    None => (read_comic_info_quick(&path), false),
-                };
-                if let Some(p) = progress {
-                    p.done.fetch_add(1, Ordering::Relaxed);
-                }
-                Scanned { path, stamp, info, from_cache }
-            })
-            .collect();
+        let work = || -> Vec<Scanned> {
+            paths
+                .into_par_iter()
+                .map(|path| {
+                    let key = path.to_string_lossy().into_owned();
+                    let stamp = file_stamp(&path);
+                    let hit = stamp.and_then(|(size, mtime)| {
+                        cached.get(&key).filter(|e| e.size == size && e.mtime == mtime).map(|e| e.info.clone())
+                    });
+                    let (info, from_cache) = match hit {
+                        Some(info) => (info, true),
+                        None => (read_comic_info_quick(&path), false),
+                    };
+                    if let Some(p) = progress {
+                        p.done.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Scanned { path, stamp, info, from_cache }
+                })
+                .collect()
+        };
+        let results = match rayon::ThreadPoolBuilder::new()
+            .num_threads(crate::scanner::SCAN_THREADS)
+            .thread_name(|i| format!("comicrust-index-{i}"))
+            .build()
+        {
+            Ok(pool) => pool.install(work),
+            Err(_) => work(),
+        };
 
         let mut idx = FileIndex::default();
         for Scanned { path, stamp, info, from_cache } in results {
@@ -477,6 +492,22 @@ mod tests {
         assert!(found[0].as_deref().unwrap().starts_with("COSMIC COLLECTION #224"));
         assert!(found[2].as_deref().unwrap().starts_with("COSMIC COLLECTION #061"));
         assert!(found[1].is_none() && found[5].is_none());
+    }
+
+    /// Les originaux rangés par la conversion (`_originaux`) et les corbeilles ne sont pas
+    /// indexés : le CBZ converti est toujours choisi.
+    #[test]
+    fn originals_and_recycle_bins_are_not_indexed() {
+        let dir = tempfile::tempdir().unwrap();
+        let serie = dir.path().join("série");
+        for sub in ["_originaux", "#recycle"] {
+            std::fs::create_dir_all(serie.join(sub)).unwrap();
+            cbz(&serie.join(sub).join("thanos 01.cbz"), None);
+        }
+        cbz(&serie.join("thanos 01.cbz"), None);
+        let idx = FileIndex::scan(dir.path());
+        assert_eq!(idx.stats.files, 1);
+        assert_eq!(idx.find("Thanos", "1", None, None).unwrap(), &serie.join("thanos 01.cbz"));
     }
 
     #[test]
