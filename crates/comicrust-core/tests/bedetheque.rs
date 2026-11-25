@@ -87,6 +87,10 @@ fn page(chemin: &str) -> Option<(&'static str, String)> {
         "/bandes_dessinees_i.html" => "lettre_i.html",
         "/search/tout?rechtexte=spirou&rechwhere=7" => "recherche_spirou.html",
         "/search/tout?rechtexte=inconnue&rechwhere=7" => "recherche_vide.html",
+        // Noms avec « & », « # » et une lettre accentuée non simplifiée : texte encodé.
+        "/search/tout?rechtexte=tif%20%26%20tondu&rechwhere=7"
+        | "/search/tout?rechtexte=sillage%20%231&rechwhere=7"
+        | "/search/tout?rechtexte=to%c3%b1o&rechwhere=7" => "recherche_vide.html",
         "/serie-59-bd-blacksad__10000.html" | "/serie-500-bd-blacksad__10000.html" => "serie_blacksad.html",
         "/serie-1-bd-spirou-et-fantasio__10000.html" => "serie_spirou.html",
         "/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html"
@@ -1206,7 +1210,8 @@ fn resume_de_la_serie_si_l_album_n_en_a_pas() {
     let chemins = srv.chemins();
     let n = |c: &str| chemins.iter().filter(|x| x.as_str() == c).count();
     assert_eq!(n("/ajax/resume/album/22"), 1);
-    assert_eq!(n("/serie-59-bd-blacksad__10000.html"), 2, "une lecture par livre, comme avant : {chemins:?}");
+    // Page de la série gardée en mémoire pendant l'exécution (v1.0.2) : une seule lecture.
+    assert_eq!(n("/serie-59-bd-blacksad__10000.html"), 1, "page de la série lue une fois : {chemins:?}");
 
     // « Ne remplacer que les champs vides » : le résumé de la série ne remplace pas un résumé
     // existant ; option décochée : pas de résumé de série à la place.
@@ -1901,4 +1906,126 @@ def create_scraper(**kw):
     let bloque: Vec<&String> = messages.iter().filter(|m| m.contains("même avec cloudscraper")).collect();
     assert_eq!(bloque.len(), 1, "{messages:?}");
     assert!(bloque[0].contains("réessayez plus tard"), "{}", bloque[0]);
+}
+
+// ---------------------------------------------------------------------------------------
+// Correctifs de la relecture v1.0.2
+// ---------------------------------------------------------------------------------------
+
+/// Recherche du site : nom encodé. « Tif & Tondu » cherchait « tif » (le « & » coupait la
+/// requête) et « Sillage #1 » perdait la suite de l'adresse (« # » pris pour une ancre).
+#[test]
+fn recherche_nom_avec_esperluette_diese_et_accent() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("t", "Tif & Tondu", "1"), livre("s", "Sillage #1", "2"), livre("n", "Toño", "1")])
+            .reglages(&srv, journaux.path(), json!({})),
+    );
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["t", "s", "n"]), hote.clone());
+    assert_eq!(r.return_value, json!({"traites": 0, "ignores": 3}), "{}", r.journal_text());
+    let chemins = srv.chemins();
+    for attendu in [
+        "/search/tout?rechtexte=tif%20%26%20tondu&rechwhere=7",
+        "/search/tout?rechtexte=sillage%20%231&rechwhere=7",
+        "/search/tout?rechtexte=to%c3%b1o&rechwhere=7",
+    ] {
+        assert!(chemins.iter().any(|c| c == attendu), "{attendu} absent : {chemins:?}");
+    }
+    // Recherches abouties (sans résultat) : aucune erreur de lecture.
+    let messages = hote.messages.lock().unwrap();
+    assert!(!messages.iter().any(|m| m.contains("Erreur")), "{messages:?}");
+}
+
+/// Pages gardées en mémoire pendant l'exécution : index par lettre, recherche et page de la
+/// série lus une seule fois pour plusieurs livres d'une même série (au lieu d'une fois par
+/// livre).
+#[test]
+fn pages_lues_une_fois_par_execution() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let hote = Arc::new(
+        Hote::avec(vec![
+            livre("b1", "Blacksad", "1"),
+            livre("b2", "Blacksad", "2"),
+            livre("b3", "Blacksad", "1"),
+            livre("i1", "Inconnue", "1"),
+            livre("i2", "Inconnue", "2"),
+        ])
+        .reglages(&srv, journaux.path(), json!({})),
+    );
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b1", "b2", "b3", "i1", "i2"]), hote);
+    assert_eq!(r.return_value, json!({"traites": 3, "ignores": 2}), "{}", r.journal_text());
+    let chemins = srv.chemins();
+    let n = |c: &str| chemins.iter().filter(|x| *x == c).count();
+    assert_eq!(n("/bandes_dessinees_b.html"), 1, "{chemins:?}");
+    assert_eq!(n("/serie-59-bd-blacksad__10000.html") + n("/serie-500-bd-blacksad__10000.html"), 1, "{chemins:?}");
+    assert_eq!(n("/bandes_dessinees_i.html"), 1, "{chemins:?}");
+    assert_eq!(n("/search/tout?rechtexte=inconnue&rechwhere=7"), 1, "{chemins:?}");
+    // Les pages d'album, elles, sont propres à chaque livre (album 1 lu pour b1 et b3).
+    assert!(n("/bd-blacksad-tome-1-quelque-part-entre-les-ombres-21.html") >= 1, "{chemins:?}");
+}
+
+/// Erreur imprévue sur un livre (ici, valeur de la page qui n'est pas un nombre, d'après un
+/// motif de l'utilisateur) : ce livre est ignoré et noté au journal, les suivants sont
+/// traités (avant : tout le lot s'arrêtait).
+#[test]
+fn erreur_sur_un_livre_n_arrete_pas_le_lot() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    // « 7 » (Blacksad) ne correspond pas : texte vide, int("") échoue ; « 56 » (Spirou) passe.
+    let tmp = data_avec_motifs(json!({
+        "version": "1.9",
+        "motifs": {"SERIE_COUNT": {"motif": "title=\"Nombre de tomes de la série\">((?:\\d\\d)?)", "options": "IMD"}}
+    }));
+    let hote = Arc::new(
+        Hote::avec(vec![livre("b1", "Blacksad", "1"), livre("s2", "Spirou", "2")])
+            .reglages(&srv, journaux.path(), json!({"COUNTOF": false, "COUNTFINIE": false}))
+            .choix(vec![Choix::Rang(0)]),
+    );
+    let r = lancer_dans(&py, "Bedetheque2", livres_ctx(Hook::Books, &["b1", "s2"]), hote, &module_dans(tmp.path()));
+    assert_eq!(r.return_value, json!({"traites": 1, "ignores": 1}), "{}", r.journal_text());
+    assert!(r.journal_text().contains("ValueError"), "{}", r.journal_text());
+    assert!(champs(&r, "b1").is_empty(), "livre en erreur : rien de demandé");
+    assert_eq!(champs(&r, "s2")["Count"], json!(56));
+}
+
+/// Numéro « 1e999 » (trop grand pour un nombre réel) : plus d'OverflowError qui arrêtait
+/// le lot ; articles de l'utilisateur avec un caractère spécial d'expression régulière.
+#[test]
+fn numero_demesure_et_articles_speciaux() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("x", "Blacksad", "1e999"), livre("b1", "Blacksad", "1")])
+            .reglages(&srv, journaux.path(), json!({"ARTICLES": "Le,La,Les,L',(Les"}))
+            .choix(vec![Choix::Annuler]),
+    );
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["x", "b1"]), hote);
+    assert_eq!(r.return_value, json!({"traites": 1, "ignores": 1}), "{}", r.journal_text());
+    assert!(!r.journal_text().contains("Erreur :"), "{}", r.journal_text());
+    assert_eq!(champs(&r, "b1")["Title"], json!("Quelque Part Entre Les Ombres"));
+}
+
+/// Réseau coupé (pages introuvables) : une seule fenêtre bloquante d'erreur par exécution,
+/// les erreurs suivantes vont au journal (avant : deux ou trois fenêtres par livre).
+#[test]
+fn une_seule_fenetre_d_erreur_de_lecture() {
+    let py = need_python!();
+    let srv = serveur();
+    let journaux = tempfile::tempdir().unwrap();
+    let hote = Arc::new(
+        Hote::avec(vec![livre("x", "Bouncer", "1"), livre("y", "Murena", "2"), livre("z", "Zorro", "3")])
+            .reglages(&srv, journaux.path(), json!({})),
+    );
+    let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["x", "y", "z"]), hote.clone());
+    assert_eq!(r.return_value, json!({"traites": 0, "ignores": 3}), "{}", r.journal_text());
+    let messages = hote.messages.lock().unwrap();
+    let erreurs = messages.iter().filter(|m| m.contains("Erreur HTTP")).count();
+    assert_eq!(erreurs, 1, "{messages:?}");
+    assert!(r.journal_text().matches("HTTP 404").count() >= 3, "{}", r.journal_text());
 }
