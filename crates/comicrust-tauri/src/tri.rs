@@ -239,6 +239,55 @@ fn cmp_clef(clef: ClefTri, a: &LibraryBook, b: &LibraryBook, desc: bool) -> Orde
     }
 }
 
+/// Clés de comparaison d'un livre, calculées **une fois** avant le tri (le tri compare chaque livre
+/// une dizaine de fois : sans elles, chaque comparaison allouait une demi-douzaine de chaînes).
+#[derive(Default)]
+struct Cles {
+    /// Série affichée en minuscules, volume affiché, numéro affiché, titre en minuscules
+    /// (ordre de [`cmp_serie`]).
+    serie: String,
+    volume: i32,
+    numero: String,
+    titre: String,
+    /// Texte en minuscules de la clé de tri textuelle choisie (éditeur, fichier), sinon vide.
+    texte: String,
+}
+
+impl Cles {
+    fn de(b: &LibraryBook, clef: ClefTri) -> Self {
+        Cles {
+            serie: b.shadow_series().to_lowercase(),
+            volume: b.shadow_volume(),
+            numero: b.shadow_number(),
+            titre: minuscules(&b.title),
+            texte: match clef {
+                ClefTri::Editeur => minuscules(&b.publisher),
+                ClefTri::Fichier => minuscules(&b.file),
+                _ => String::new(),
+            },
+        }
+    }
+
+    /// Même ordre que [`cmp_serie`].
+    fn cmp_serie(&self, o: &Cles) -> Ordering {
+        self.serie
+            .cmp(&o.serie)
+            .then(self.volume.cmp(&o.volume))
+            .then_with(|| natord::compare(&self.numero, &o.numero))
+            .then_with(|| self.titre.cmp(&o.titre))
+    }
+}
+
+/// Comme [`cmp_clef`], avec les clés précalculées pour les clés textuelles.
+fn cmp_clef_cles(clef: ClefTri, a: &LibraryBook, b: &LibraryBook, ka: &Cles, kb: &Cles, desc: bool) -> Ordering {
+    match clef {
+        ClefTri::Serie | ClefTri::Ordre => sens(ka.cmp_serie(kb), desc),
+        ClefTri::Titre => sens(ka.titre.cmp(&kb.titre), desc),
+        ClefTri::Editeur | ClefTri::Fichier => sens(ka.texte.cmp(&kb.texte), desc),
+        _ => cmp_clef(clef, a, b, desc),
+    }
+}
+
 /// Trie `v` (indices dans `livres`) : par groupe, puis par la clé choisie, puis par série.
 /// `rang` donne la position d'un livre dans la liste affichée (clé [`ClefTri::Ordre`]).
 ///
@@ -253,7 +302,7 @@ pub fn trier(
     groupe: Regroupement,
     rang: &dyn Fn(usize) -> Option<usize>,
 ) {
-    // Titre de groupe calculé une fois par livre affiché (le tri compare beaucoup).
+    // Titre de groupe et clés calculés une fois par livre affiché (le tri compare beaucoup).
     let groupes: Vec<String> = if groupe == Regroupement::Aucun {
         Vec::new()
     } else {
@@ -263,6 +312,10 @@ pub fn trier(
         }
         g
     };
+    let mut cles: Vec<Cles> = (0..livres.len()).map(|_| Cles::default()).collect();
+    for &i in v.iter() {
+        cles[i] = Cles::de(&livres[i], clef);
+    }
     // Ordre de la liste : rang du premier livre de chaque groupe.
     let mut premier: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     if clef == ClefTri::Ordre && !groupes.is_empty() {
@@ -275,6 +328,7 @@ pub fn trier(
     }
     v.sort_by(|&x, &y| {
         let (a, b) = (&livres[x], &livres[y]);
+        let (ka, kb) = (&cles[x], &cles[y]);
         let mut o = if groupes.is_empty() {
             Ordering::Equal
         } else if premier.is_empty() {
@@ -284,9 +338,9 @@ pub fn trier(
             cmp_opt(r(x), r(y), desc).then_with(|| sens(groupes[x].cmp(&groupes[y]), desc))
         };
         if o == Ordering::Equal {
-            o = if clef == ClefTri::Ordre { cmp_opt(rang(x), rang(y), desc) } else { cmp_clef(clef, a, b, desc) };
+            o = if clef == ClefTri::Ordre { cmp_opt(rang(x), rang(y), desc) } else { cmp_clef_cles(clef, a, b, ka, kb, desc) };
         }
-        o.then_with(|| cmp_serie(a, b))
+        o.then_with(|| ka.cmp_serie(kb))
     });
 }
 
@@ -534,5 +588,50 @@ mod tests {
         let mut v = vec![0, 1, 2];
         trier(&mut v, &l, ClefTri::Ordre, false, Regroupement::Scenariste, &|i| Some(pos[i]));
         assert_eq!(v, [1, 0, 2], "Z d'abord (premier de la liste), puis A");
+    }
+
+    /// Relecture tauri-v1.0.2 : le tri à clés précalculées donne exactement l'ordre de l'ancienne
+    /// comparaison (calculée à chaque comparaison), pour toutes les clés, sens et groupes.
+    #[test]
+    fn cles_precalculees_meme_ordre_que_la_comparaison_directe() {
+        let l: Vec<LibraryBook> = (0..300)
+            .map(|i| LibraryBook {
+                id: format!("{i}"),
+                series: (i % 3 != 0).then(|| ["Zeta", "alpha", "Alpha", "Béta"][i % 4].to_string()),
+                number: (i % 5 != 0).then(|| format!("{}", (i * 7) % 23)),
+                volume: (i % 4 == 0).then_some((i % 3) as i32),
+                title: (i % 2 == 0).then(|| format!("Titre {}", (i * 13) % 17)),
+                publisher: (i % 6 != 0).then(|| ["Marvel", "dargaud", "DC"][i % 3].to_string()),
+                file: Some(format!("D:\\BD\\Serie {} #{:02}.cbz", i % 7, i % 11)),
+                year: (i % 5 != 0).then_some(1990 + (i % 9) as i32),
+                page_count: Some((i % 40) as u32),
+                ..Default::default()
+            })
+            .collect();
+        let rang = |i: usize| (i % 4 != 0).then_some((i * 31) % 97);
+        let reference = |v: &mut Vec<usize>, clef: ClefTri, desc: bool, groupe: Regroupement| {
+            // Ancienne implémentation (sans le cas « premier livre du groupe », non utilisé ici).
+            v.sort_by(|&x, &y| {
+                let (a, b) = (&l[x], &l[y]);
+                let g = |i: usize| groupe.titre(&l[i]).to_lowercase();
+                let mut o = if groupe == Regroupement::Aucun { Ordering::Equal } else { sens(g(x).cmp(&g(y)), desc) };
+                if o == Ordering::Equal {
+                    o = if clef == ClefTri::Ordre { cmp_opt(rang(x), rang(y), desc) } else { cmp_clef(clef, a, b, desc) };
+                }
+                o.then_with(|| cmp_serie(a, b))
+            });
+        };
+        use ClefTri::*;
+        for clef in [Serie, Titre, Editeur, Parution, Ajout, Lecture, Note, Pages, Avancement, Taille, Fichier] {
+            for desc in [false, true] {
+                for groupe in [Regroupement::Aucun, Regroupement::Serie, Regroupement::Editeur, Regroupement::Annee] {
+                    let mut attendu: Vec<usize> = (0..l.len()).rev().collect();
+                    reference(&mut attendu, clef, desc, groupe);
+                    let mut v: Vec<usize> = (0..l.len()).rev().collect();
+                    trier(&mut v, &l, clef, desc, groupe, &rang);
+                    assert_eq!(v, attendu, "{clef:?} desc={desc} {groupe:?}");
+                }
+            }
+        }
     }
 }
