@@ -540,10 +540,19 @@ impl Scripts {
         };
         let r = verrou(&self.0.reglages.r).clone();
         let motif = self.motif_lecture_seule();
-        let g = self.etat();
+        // Copie sous le verrou, images lues et encodées après : une lecture de fichier ne
+        // bloque pas les autres commandes (réponses aux questions d'un script…).
+        let (entrees, erreur_dossier, avert, en_cours) = {
+            let g = self.etat();
+            (
+                g.entrees.clone(),
+                g.erreur_dossier.clone(),
+                g.avertissements.clone(),
+                g.interactif.as_ref().filter(|x| x.occupee()).map(|x| x.run_id.clone()),
+            )
+        };
         let dossier = &self.0.config.dossier;
-        let scripts = g
-            .entrees
+        let scripts = entrees
             .iter()
             .map(|e| InfoScript {
                 id: e.id(),
@@ -554,15 +563,14 @@ impl Scripts {
                 fichier: e.rel_path.clone(),
                 actif: est_actif(&r, e),
                 image: e.image.as_deref().and_then(image_menu),
-                reglages: g
-                    .entrees
+                reglages: entrees
                     .iter()
                     .find(|c| c.has_hook(Hook::ConfigScript) && c.settings_key() == e.settings_key())
                     .map(ScriptEntry::id),
             })
             .collect();
-        let mut avertissements: Vec<String> = g.erreur_dossier.iter().cloned().collect();
-        avertissements.extend(g.avertissements.iter().map(|w| {
+        let mut avertissements: Vec<String> = erreur_dossier.into_iter().collect();
+        avertissements.extend(avert.iter().map(|w| {
             let f = w.file.strip_prefix(dossier).unwrap_or(&w.file).display().to_string();
             if w.line > 0 {
                 format!("{f}:{} : {}", w.line, w.message)
@@ -578,7 +586,7 @@ impl Scripts {
             ecriture_autorisee: motif.is_none(),
             motif_lecture_seule: motif,
             dossier: dossier.display().to_string(),
-            execution_en_cours: g.interactif.as_ref().filter(|x| x.occupee()).map(|x| x.run_id.clone()),
+            execution_en_cours: en_cours,
         }
     }
 
