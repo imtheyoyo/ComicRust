@@ -23,6 +23,8 @@ use std::time::{Duration, Instant};
 
 /// Fenêtre maximale d'un `lister_livres`.
 pub const NOMBRE_MAX: usize = 5000;
+/// Chargements au plus par `ouvrir` quand les fiches changent pendant le chargement.
+const ESSAIS_CHARGEMENT: u32 = 3;
 /// Période d'émission de `scan-progression`.
 const PERIODE_PROGRESSION: Duration = Duration::from_millis(200);
 
@@ -399,9 +401,9 @@ impl EvenementScan {
 
 // ───────────────────────────── État ─────────────────────────────
 
-/// Clé du cache de vue : recherche normalisée, tri, sens, groupe, génération de la base, liste
-/// affichée et version des listes.
-type CleVue = (String, ClefTri, bool, Regroupement, u64, Option<String>, u64);
+/// Clé du cache de vue : recherche normalisée, tri, sens, groupe, génération de la base, révision
+/// des fiches (le contenu des listes intelligentes en dépend), liste affichée et version des listes.
+type CleVue = (String, ClefTri, bool, Regroupement, u64, u64, Option<String>, u64);
 
 /// Vue calculée : livres affichés (indices dans la base) et rang de chaque livre dans la liste
 /// affichée (`u32::MAX` : hors de la liste).
@@ -473,6 +475,12 @@ pub struct Biblio {
     pub(crate) listes: Arc<Mutex<crate::listes::CacheListes>>,
     /// État de la connexion à la base et écritures à signaler à la surveillance.
     pub(crate) connexion: Arc<crate::surveillance::Connexion>,
+    /// Livres manquants (liste virtuelle), pour `(génération, révision des fiches)`.
+    pub(crate) manquants_en_cache: Arc<Mutex<Option<((u64, u64), Arc<Vec<String>>)>>>,
+    /// Tests : appelé une fois par `ouvrir` entre le chargement et l'installation de la base
+    /// (simule une écriture concurrente).
+    #[cfg(test)]
+    pub(crate) crochet_chargement: Arc<Mutex<Option<Box<dyn FnMut() + Send>>>>,
 }
 
 /// Durée pendant laquelle un échec de couverture n'est pas retenté.
@@ -512,6 +520,9 @@ impl Biblio {
             revisions: Arc::default(),
             listes: Arc::default(),
             connexion: Arc::default(),
+            manquants_en_cache: Arc::default(),
+            #[cfg(test)]
+            crochet_chargement: Arc::default(),
         }
     }
 
@@ -564,12 +575,59 @@ impl Biblio {
                 base_absente: Some(chemin.display().to_string()),
             });
         }
-        let (base, store, cr) = charger(&self.data, &r)?;
-        let nb = base.len();
-        let source = source_de(&store, &cr);
-        self.installer(mode, base, store);
-        self.verrou().comicrack = cr;
+        // Le chargement (MySQL : plusieurs secondes) se fait sans verrou : une écriture faite
+        // entre-temps (lecture notée à la fermeture du lecteur, édition) serait écrasée par la base
+        // lue avant elle. Si les fiches ont changé pendant le chargement, on recharge (au plus
+        // `ESSAIS_CHARGEMENT` fois, puis la dernière base lue est installée).
+        let mut essai = 1;
+        let (nb, source) = loop {
+            let avant = self.etat_contenu();
+            let (base, store, cr) = charger(&self.data, &r)?;
+            #[cfg(test)]
+            if let Some(mut f) = self.crochet_chargement.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                f();
+            }
+            let (nb, source) = (base.len(), source_de(&store, &cr));
+            let force = essai >= ESSAIS_CHARGEMENT;
+            if self.installer_si(mode, base, store, cr, (!force).then_some(avant)) {
+                break (nb, source);
+            }
+            essai += 1;
+        };
         Ok(EtatBiblio { mode, nb_livres: nb, premier_demarrage: false, source, base_absente: None })
+    }
+
+    /// `(génération, révision des fiches)` de la bibliothèque ouverte (`(0, 0)` : aucune).
+    fn etat_contenu(&self) -> (u64, u64) {
+        let g = self.verrou();
+        (g.generation, g.contenu)
+    }
+
+    /// Installe la base chargée, seulement si la bibliothèque n'a pas changé depuis `attendu`
+    /// (`None` : sans condition). Renvoie faux si elle a changé (rien n'est installé).
+    fn installer_si(
+        &self,
+        mode: Mode,
+        base: ComicDatabase,
+        store: Option<StoreConfig>,
+        cr: Option<DbConfig>,
+        attendu: Option<(u64, u64)>,
+    ) -> bool {
+        {
+            let mut g = self.verrou();
+            if attendu.is_some_and(|a| a != (g.generation, g.contenu)) {
+                return false;
+            }
+            g.mode = Some(mode);
+            g.base = Some(Arc::new(base));
+            g.store = store;
+            g.comicrack = cr;
+            g.generation += 1;
+            g.contenu += 1;
+            g.vue = None;
+        }
+        self.negatif.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        true
     }
 
     /// Enregistre le choix du premier démarrage et ouvre la bibliothèque. Rien n'est écrit dans
@@ -771,6 +829,23 @@ impl Biblio {
         let recherche = req.recherche.as_deref().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
         let recherche = recherche.to_lowercase();
         let liste = req.liste.as_deref().map(str::trim).filter(|l| !l.is_empty()).map(str::to_ascii_lowercase);
+        let virtuelle = liste.as_deref().is_some_and(|l| l.eq_ignore_ascii_case(crate::manquants::ID_LISTE_MANQUANTS));
+        // Cache consulté d'abord, avec la version des listes déjà lues : une fenêtre de plus (défilement)
+        // ne relit ni les réglages ni `ComicDb.xml`. Les listes sont relues au premier calcul, et par
+        // `etat_listes` / `arbre_listes` (appelés régulièrement par le front).
+        let version_connue = if liste.is_some() && !virtuelle { self.listes_lues().1 } else { 0 };
+        let contenu_avant = {
+            let g = self.verrou();
+            let base = g.base.clone().ok_or("aucune bibliothèque ouverte")?;
+            let cle: CleVue =
+                (recherche.clone(), clef, desc, groupe, g.generation, g.contenu, liste.clone(), version_connue);
+            if let Some((c, v)) = &g.vue {
+                if *c == cle {
+                    return Ok((base, v.clone()));
+                }
+            }
+            g.contenu
+        };
         // Livres de la liste (dans l'ordre de la liste) et version des listes, avant le verrou de
         // la bibliothèque (le calcul des listes intelligentes le prend lui-même).
         let (membres, version) = match &liste {
@@ -780,19 +855,10 @@ impl Biblio {
             }
             None => (None, 0),
         };
-        let (base, vue, generation) = {
+        let (base, generation) = {
             let g = self.verrou();
-            let base = g.base.clone().ok_or("aucune bibliothèque ouverte")?;
-            let cle: CleVue = (recherche.clone(), clef, desc, groupe, g.generation, liste.clone(), version);
-            let vue = match &g.vue {
-                Some((c, v)) if *c == cle => Some(v.clone()),
-                _ => None,
-            };
-            (base, vue, g.generation)
+            (g.base.clone().ok_or("aucune bibliothèque ouverte")?, g.generation)
         };
-        if let Some(v) = vue {
-            return Ok((base, v));
-        }
         // Calcul hors du verrou : un tri de 5 000 livres ne bloque pas les couvertures.
         let n = base.books.len();
         let ordre: Vec<usize> = match &membres {
@@ -817,11 +883,22 @@ impl Biblio {
         tri::trier(&mut indices, &base.books, clef, desc, groupe, &rang);
         let vue = Arc::new(Vue { indices, rangs });
         let mut g = self.verrou();
-        // Enregistrée seulement si la base n'a pas été remplacée entre-temps.
-        if g.generation == generation && Arc::ptr_eq(g.base.as_ref().unwrap_or(&base), &base) {
-            g.vue = Some(((recherche, clef, desc, groupe, generation, liste, version), vue.clone()));
+        // Enregistrée seulement si ni la base ni ses fiches n'ont changé entre-temps (membres d'une
+        // liste intelligente calculés sur l'ancien contenu : jamais gardés).
+        if g.generation == generation
+            && g.contenu == contenu_avant
+            && Arc::ptr_eq(g.base.as_ref().unwrap_or(&base), &base)
+        {
+            g.vue = Some(((recherche, clef, desc, groupe, generation, contenu_avant, liste, version), vue.clone()));
         }
         Ok((base, vue))
+    }
+
+    /// Tests : change la révision des fiches **sans** vider le cache de vue (course simulée entre
+    /// le calcul des membres d'une liste et une écriture).
+    #[cfg(test)]
+    pub(crate) fn changer_contenu_sans_vider_la_vue(&self) {
+        self.verrou().contenu += 1;
     }
 
     /// Fiche complète d'un livre.
@@ -1086,6 +1163,11 @@ impl Biblio {
         sortie(EvenementScan::Progression { fait, total });
         // Rechargement complet : plus sûr que d'appliquer les changements un par un.
         let neuve = Store::open_existing(cfg).and_then(|mut s| s.load(None)).map_err(|e| e.to_string())?;
+        // Fichiers modifiés (même chemin, autre contenu) : leurs couvertures sont à refaire (le
+        // cache disque ne connaît que l'identifiant ; la révision change aussi l'URL).
+        for b in &rapport.updated {
+            self.oublier_couverture(&b.id, b.front_cover_image());
+        }
         {
             let mut g = self.verrou();
             // Remplacée seulement si la bibliothèque affichée est toujours celle qui a été

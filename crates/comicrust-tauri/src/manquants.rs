@@ -468,12 +468,24 @@ fn etat_fichier(chemin: &Path) -> std::io::Result<FileState> {
 // ───────────────────────────── Liste virtuelle ─────────────────────────────
 
 impl Biblio {
-    /// Contenu de la liste virtuelle « Livres manquants » (version 0 : le contenu est relu à
-    /// chaque calcul de la vue, invalidée à chaque changement de marque).
+    /// Contenu de la liste virtuelle « Livres manquants » (version 0 : la vue est invalidée à
+    /// chaque changement de marque, sa clé comprenant la révision des fiches).
+    ///
+    /// Gardé en cache pour l'état de la base `(génération, révision des fiches)` : une marque
+    /// « manquant » posée ou retirée change la révision, donc le contenu est recalculé.
     pub(crate) fn membres_manquants(&self) -> Result<(Members, u64), String> {
-        let base = self.base()?;
-        let ids = base.books.iter().filter(|b| est_manquant(b)).map(|b| b.id.clone()).collect();
-        Ok((Members::Ids(ids), 0))
+        let (base, cle) = self.base_et_contenu().ok_or("aucune bibliothèque ouverte")?;
+        let mut cache = self.manquants_en_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let ids = match cache.as_ref().filter(|(c, _)| *c == cle) {
+            Some((_, ids)) => ids.clone(),
+            None => {
+                let ids: Arc<Vec<String>> =
+                    Arc::new(base.books.iter().filter(|b| est_manquant(b)).map(|b| b.id.clone()).collect());
+                *cache = Some((cle, ids.clone()));
+                ids
+            }
+        };
+        Ok((Members::Ids(ids.as_ref().clone()), 0))
     }
 }
 
