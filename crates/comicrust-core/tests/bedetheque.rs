@@ -2019,8 +2019,11 @@ fn une_seule_fenetre_d_erreur_de_lecture() {
     let srv = serveur();
     let journaux = tempfile::tempdir().unwrap();
     let hote = Arc::new(
-        Hote::avec(vec![livre("x", "Bouncer", "1"), livre("y", "Murena", "2"), livre("z", "Zorro", "3")])
-            .reglages(&srv, journaux.path(), json!({})),
+        Hote::avec(vec![livre("x", "Bouncer", "1"), livre("y", "Murena", "2"), livre("z", "Zorro", "3")]).reglages(
+            &srv,
+            journaux.path(),
+            json!({}),
+        ),
     );
     let r = lancer(&py, "Bedetheque2", livres_ctx(Hook::Books, &["x", "y", "z"]), hote.clone());
     assert_eq!(r.return_value, json!({"traites": 0, "ignores": 3}), "{}", r.journal_text());
