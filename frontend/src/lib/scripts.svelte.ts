@@ -12,6 +12,8 @@ import {
 
 /** Nombre maximal de lignes gardées dans le journal d'une exécution (les plus anciennes partent). */
 const MAX_JOURNAL = 5000;
+/** Lignes en trop retirées d'un coup du journal d'une exécution (voir ajouterJournal). */
+const MARGE_JOURNAL = 500;
 /** Nombre maximal de lignes gardées dans le journal des automatismes. */
 const MAX_AUTO = 1000;
 
@@ -60,9 +62,12 @@ export class ExecutionScript {
     return !this.fin && !this.erreur;
   }
 
+  /** Ajout sans recopier tout le journal à chaque ligne (coût O(n²) quand un script écrit en
+   *  boucle) : ajout en fin, puis les plus anciennes lignes partent par paquets de
+   *  `MARGE_JOURNAL` (au plus MAX_JOURNAL + MARGE_JOURNAL - 1 lignes gardées). */
   ajouterJournal(genre: GenreJournal, texte: string) {
-    const l = { n: this.n++, genre, texte };
-    this.journal = this.journal.length >= MAX_JOURNAL ? [...this.journal.slice(-MAX_JOURNAL + 1), l] : [...this.journal, l];
+    this.journal.push({ n: this.n++, genre, texte });
+    if (this.journal.length >= MAX_JOURNAL + MARGE_JOURNAL) this.journal.splice(0, this.journal.length - MAX_JOURNAL);
   }
 }
 
