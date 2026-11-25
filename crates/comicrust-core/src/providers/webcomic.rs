@@ -51,6 +51,27 @@ use crate::{ComicInfo, Error};
 /// Garde-fou : nombre maximal de pages visitées par un scraper de navigation.
 const MAX_BROWSE_PAGES: usize = 20_000;
 
+/// Garde-fou : nombre maximal d'adresses produites par une plage `[format:début-fin]`.
+const MAX_RANGE: u64 = 100_000;
+
+/// Garde-fou : côté maximal (pixels) d'une page composée, bordure comprise.
+const MAX_PAGE_SIDE: i64 = 30_000;
+
+/// Garde-fou : nombre maximal de pixels d'une page composée (≈ 1,6 Go en RGBA).
+const MAX_PAGE_PIXELS: i64 = 400_000_000;
+
+/// Garde-fou : bordure maximale (en % de la diagonale).
+const MAX_BORDER_PERCENT: i32 = 100;
+
+/// Garde-fou : images par page (`Rows` × `Columns`) au plus.
+const MAX_PER_PAGE: i32 = 1_000;
+
+/// Délai maximal d'un téléchargement (page web ou image).
+const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Mémoire maximale gardée en cache pour les images téléchargées.
+const MAX_CACHED_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Default, Clone, Deserialize)]
 struct Variable {
     #[serde(rename = "@Key")]
@@ -103,6 +124,16 @@ impl Default for Compositing {
 }
 
 impl Compositing {
+    /// Bordure, bornée à [`MAX_BORDER_PERCENT`] % de la diagonale.
+    fn border_percent(&self) -> i32 {
+        self.border_width.clamp(0, MAX_BORDER_PERCENT)
+    }
+
+    /// Images par page (`Rows` × `Columns`, au moins 1), bornée à [`MAX_PER_PAGE`].
+    fn per_page(&self) -> i32 {
+        self.rows.clamp(1, MAX_PER_PAGE).saturating_mul(self.columns.clamp(1, MAX_PER_PAGE)).min(MAX_PER_PAGE)
+    }
+
     fn page_size_empty(&self) -> bool {
         self.page_width == 0 && self.page_height == 0
     }
@@ -126,6 +157,10 @@ impl Compositing {
         };
         let hex = |s: &str| u8::from_str_radix(s, 16).ok();
         if let Some(h) = c.strip_prefix('#') {
+            // Découpage par octets ci-dessous : un caractère non ASCII n'est pas une couleur.
+            if !h.is_ascii() {
+                return white;
+            }
             let rgb = match h.len() {
                 6 => (hex(&h[0..2]), hex(&h[2..4]), hex(&h[4..6])),
                 3 => {
@@ -260,18 +295,42 @@ impl WebPage {
 /// Lecture des pages web et des images, avec cache (une ouverture = une lecture).
 pub struct Fetcher {
     base_dir: PathBuf,
+    /// Pages web lues pendant l'ouverture (scrapers) ; vidé ensuite ([`Fetcher::forget_texts`]).
     texts: HashMap<String, String>,
+    /// Images téléchargées, les plus anciennes oubliées au-delà de [`MAX_CACHED_BYTES`].
     bytes: HashMap<String, Vec<u8>>,
+    /// Ordre d'arrivée des images en cache.
+    order: std::collections::VecDeque<String>,
+    cached: usize,
+    agent: ureq::Agent,
+}
+
+/// Reste d'une adresse `file://…` (préfixe sans casse), sinon `None`.
+fn strip_file_scheme(url: &str) -> Option<&str> {
+    url.get(..7).filter(|p| p.eq_ignore_ascii_case("file://")).map(|_| &url[7..])
 }
 
 impl Fetcher {
     pub fn new(base_dir: &Path) -> Self {
-        Self { base_dir: base_dir.to_path_buf(), texts: HashMap::new(), bytes: HashMap::new() }
+        let agent = ureq::Agent::config_builder().timeout_global(Some(HTTP_TIMEOUT)).build().into();
+        Self {
+            base_dir: base_dir.to_path_buf(),
+            texts: HashMap::new(),
+            bytes: HashMap::new(),
+            order: Default::default(),
+            cached: 0,
+            agent,
+        }
+    }
+
+    /// Oublie les pages web lues (elles ne servent qu'à trouver les images, à l'ouverture).
+    pub fn forget_texts(&mut self) {
+        self.texts = HashMap::new();
     }
 
     fn file_path(&self, url: &str) -> Option<PathBuf> {
-        if url.len() >= 7 && url[..7].eq_ignore_ascii_case("file://") {
-            let rest = url[7..].replace('\\', "/");
+        if let Some(rest) = strip_file_scheme(url) {
+            let rest = rest.replace('\\', "/");
             if let Ok(u) = url::Url::parse(&format!("file://{rest}")) {
                 if let Ok(p) = u.to_file_path() {
                     return Some(p);
@@ -291,7 +350,9 @@ impl Fetcher {
         if let Some(p) = self.file_path(url) {
             return Ok(std::fs::read(p)?);
         }
-        let resp = ureq::get(url)
+        let resp = self
+            .agent
+            .get(url)
             .header("User-Agent", concat!("ComicRust/", env!("CARGO_PKG_VERSION")))
             .call()
             .map_err(|e| Error::Network(format!("{url} : {e}")))?;
@@ -307,7 +368,18 @@ impl Fetcher {
             return Ok(b.clone());
         }
         let b = self.download(url)?;
-        self.bytes.insert(url.to_string(), b.clone());
+        // Cache borné : les images les plus anciennes sont oubliées (relues au besoin).
+        if b.len() <= MAX_CACHED_BYTES {
+            while self.cached + b.len() > MAX_CACHED_BYTES {
+                let Some(old) = self.order.pop_front() else { break };
+                if let Some(v) = self.bytes.remove(&old) {
+                    self.cached -= v.len();
+                }
+            }
+            self.cached += b.len();
+            self.order.push_back(url.to_string());
+            self.bytes.insert(url.to_string(), b.clone());
+        }
         Ok(b)
     }
 
@@ -333,8 +405,8 @@ fn is_web(url: &str) -> bool {
 
 /// Forme « URL » d'une adresse : chemins `file://` normalisés pour la résolution des liens.
 fn parse_url(s: &str) -> Option<url::Url> {
-    if s.len() >= 7 && s[..7].eq_ignore_ascii_case("file://") {
-        let rest = s[7..].replace('\\', "/");
+    if let Some(rest) = strip_file_scheme(s) {
+        let rest = rest.replace('\\', "/");
         let rest = if rest.as_bytes().get(1) == Some(&b':') { format!("/{rest}") } else { rest };
         return url::Url::parse(&format!("file://{rest}")).ok();
     }
@@ -563,7 +635,7 @@ impl WebComic {
                 let text = scraper.fetch.text(&start)?;
                 scraper.index_pages(&start, &text, &parts[1..], trackback, &mut out)?;
             }
-            _ => out.extend(expand_numbering(parts[0].pattern.trim())),
+            _ => out.extend(expand_numbering(parts[0].pattern.trim())?),
         }
         Ok(out)
     }
@@ -587,7 +659,7 @@ impl WebComic {
             }
             for url in Self::image_urls(link, &vars, fetch, &mut trackback)? {
                 if comp.page_size_empty() {
-                    let per_page = comp.rows.max(1) * comp.columns.max(1);
+                    let per_page = comp.per_page();
                     cur.links.push(Placed { url, left: 0, top: 0 });
                     if cur.links.len() as i32 >= per_page {
                         pages.push(std::mem::replace(&mut cur, WebPage::new(&comp)));
@@ -602,10 +674,10 @@ impl WebComic {
                     p.compositing.page_height = p.compositing.page_height.max(h);
                 };
                 grow(&mut cur);
-                while x + w > cur.compositing.page_width {
+                while x.saturating_add(w) > cur.compositing.page_width {
                     // Rangée suivante si l'image y tient en entier (ComicRack ne vérifie que
                     // le haut de la rangée, et l'image peut alors déborder de la page).
-                    if y + row_h + h <= cur.compositing.page_height {
+                    if y.saturating_add(row_h).saturating_add(h) <= cur.compositing.page_height {
                         y += row_h;
                         x = 0;
                         row_h = 0;
@@ -618,7 +690,7 @@ impl WebComic {
                     }
                 }
                 cur.links.push(Placed { url, left: x, top: y });
-                x += w;
+                x = x.saturating_add(w);
                 row_h = row_h.max(h);
             }
         }
@@ -630,17 +702,24 @@ impl WebComic {
 }
 
 /// Plage numérotée `[format:début-fin]` (le format .NET « 000 » donne trois chiffres).
-fn expand_numbering(url: &str) -> Vec<String> {
+/// Erreur au-delà de [`MAX_RANGE`] adresses (fichier aberrant : des millions d'adresses).
+fn expand_numbering(url: &str) -> Result<Vec<String>, Error> {
     static RX: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let rx = RX.get_or_init(|| regex::Regex::new(r"\[(?<format>\d+):(?<start>\d+)-(?<end>\d+)\]").unwrap());
     match rx.captures(url) {
-        None => vec![url.to_string()],
+        None => Ok(vec![url.to_string()]),
         Some(c) => {
-            let pad = c["format"].chars().filter(|&ch| ch == '0').count().max(1);
+            let pad = c["format"].chars().filter(|&ch| ch == '0').count().clamp(1, 20);
             let (Ok(start), Ok(end)) = (c["start"].parse::<u64>(), c["end"].parse::<u64>()) else {
-                return vec![url.to_string()];
+                return Ok(vec![url.to_string()]);
             };
-            (start..=end).map(|i| rx.replace(url, format!("{i:0pad$}").as_str()).into_owned()).collect()
+            if end >= start && end - start >= MAX_RANGE {
+                return Err(Error::Decode(format!(
+                    "WebComic : plage de {} images trop grande (au plus {MAX_RANGE}) : {url}",
+                    end - start + 1
+                )));
+            }
+            Ok((start..=end).map(|i| rx.replace(url, format!("{i:0pad$}").as_str()).into_owned()).collect())
         }
     }
 }
@@ -656,10 +735,21 @@ fn image_size(bytes: &[u8]) -> Option<(i32, i32)> {
 }
 
 /// `OnRetrieveSourceByteImage` : assemble les images d'une page composée.
-fn compose(page: &WebPage, images: &[(Placed, PageImage)]) -> PageImage {
+/// Toile vide de `w` × `h` pixels, refusée au-delà de [`MAX_PAGE_SIDE`] et
+/// [`MAX_PAGE_PIXELS`] (attributs aberrants : sinon allocation impossible, processus arrêté).
+fn canvas(w: i64, h: i64, bg: image::Rgba<u8>) -> Result<PageImage, Error> {
+    let (w, h) = (w.max(1), h.max(1));
+    if w > MAX_PAGE_SIDE || h > MAX_PAGE_SIDE || w.saturating_mul(h) > MAX_PAGE_PIXELS {
+        return Err(Error::Decode(format!("WebComic : page composée trop grande ({w} × {h} pixels)")));
+    }
+    Ok(PageImage::from_pixel(w as u32, h as u32, bg))
+}
+
+fn compose(page: &WebPage, images: &[(Placed, PageImage)]) -> Result<PageImage, Error> {
     let c = &page.compositing;
     let bg = c.back_color();
-    let border = |w: i64, h: i64| ((((w * w + h * h) as f64).sqrt()) * c.border_width as f64 / 100.0) as i64;
+    let pct = c.border_percent() as f64;
+    let border = |w: i64, h: i64| ((((w as f64).powi(2) + (h as f64).powi(2)).sqrt()) * pct / 100.0) as i64;
     let draw = |canvas: &mut PageImage, img: &PageImage, x: i64, y: i64| {
         image::imageops::overlay(canvas, img, x, y);
     };
@@ -671,7 +761,7 @@ fn compose(page: &WebPage, images: &[(Placed, PageImage)]) -> PageImage {
             height += row.iter().map(|(_, i)| i.height() as i64).max().unwrap_or(0);
         }
         let b = border(width, height);
-        let mut canvas = PageImage::from_pixel((width + 2 * b).max(1) as u32, (height + 2 * b).max(1) as u32, bg);
+        let mut canvas = canvas(width + 2 * b, height + 2 * b, bg)?;
         let mut ty = b;
         for row in images.chunks(cols) {
             let mut tx = b;
@@ -683,12 +773,12 @@ fn compose(page: &WebPage, images: &[(Placed, PageImage)]) -> PageImage {
             }
             ty += row.iter().map(|(_, i)| i.height() as i64).max().unwrap_or(0);
         }
-        canvas
+        Ok(canvas)
     } else {
         let (pw, ph) = (c.page_width as i64, c.page_height as i64);
         let b = border(pw, ph);
         let (cw, ch) = (pw + 2 * b, ph + 2 * b);
-        let mut canvas = PageImage::from_pixel(cw.max(1) as u32, ch.max(1) as u32, bg);
+        let mut canvas = canvas(cw, ch, bg)?;
         let (mut r0, mut r1) = ((i64::MAX, i64::MAX), (i64::MIN, i64::MIN));
         for (p, img) in images {
             r0 = (r0.0.min(p.left as i64), r0.1.min(p.top as i64));
@@ -699,7 +789,7 @@ fn compose(page: &WebPage, images: &[(Placed, PageImage)]) -> PageImage {
             let x = if c.right_to_left { cw - ox - p.left as i64 - img.width() as i64 } else { ox + p.left as i64 };
             draw(&mut canvas, img, x, oy + p.top as i64);
         }
-        canvas
+        Ok(canvas)
     }
 }
 
@@ -715,6 +805,7 @@ impl WebComicProvider {
         let wc = WebComic::from_xml(&std::fs::read_to_string(path)?)?;
         let mut fetch = Fetcher::new(path.parent().unwrap_or(Path::new(".")));
         let pages = wc.pages(path, &mut fetch)?;
+        fetch.forget_texts();
         let names = pages.iter().map(WebPage::name).collect();
         Ok(Self { info: wc.info, pages, names, fetch })
     }
@@ -732,7 +823,7 @@ impl WebComicProvider {
         if images.is_empty() {
             return Err(last_err.unwrap_or(Error::PageOutOfRange(index)));
         }
-        Ok(compose(&page, &images))
+        compose(&page, &images)
     }
 }
 
@@ -921,10 +1012,80 @@ mod tests {
     fn helpers() {
         assert_eq!(make_absolute("https://ex.org/bd/index.html", "../img/1.png", None), "https://ex.org/img/1.png");
         assert_eq!(make_absolute("https://ex.org/a/b.html", "c.html", Some("/x/")), "https://ex.org/x/c.html");
-        assert_eq!(expand_numbering("p[00:8-10].jpg"), ["p08.jpg", "p09.jpg", "p10.jpg"]);
+        assert_eq!(expand_numbering("p[00:8-10].jpg").unwrap(), ["p08.jpg", "p09.jpg", "p10.jpg"]);
         let c = Compositing { background_color: Some("#f0a".into()), ..Default::default() };
         assert_eq!(c.back_color().0, [255, 0, 170, 255]);
         assert!(Compositing::default().is_empty());
         assert!(!Compositing { columns: 2, ..Default::default() }.is_empty());
+    }
+
+    /// Fichiers aberrants ou piégés : erreurs claires, sans panique ni arrêt du processus.
+    #[test]
+    fn hostile_files_are_refused_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        // Chemin relatif français : le 7e octet coupe « é » (panique `url[..7]` avant).
+        std::fs::create_dir(dir.path().join("dessiné")).unwrap();
+        std::fs::write(dir.path().join("dessiné/p.png"), png(5)).unwrap();
+        let mut book = open(dir.path(), r#"<Image Url="dessiné/p.png"/>"#);
+        assert_eq!(book.render_page(0).unwrap().get_pixel(0, 0).0, [5, 250, 128, 255]);
+        assert!(make_absolute("dessiné/x.html", "y.html", None).ends_with("y.html"));
+
+        // Couleur de fond non ASCII : blanc par défaut (panique de découpage avant).
+        for c in ["#aé123", "#é1"] {
+            let comp = Compositing { background_color: Some(c.into()), ..Default::default() };
+            assert_eq!(comp.back_color().0, [255, 255, 255, 255], "{c}");
+        }
+
+        // Bordure démesurée : bornée à 100 % de la diagonale (allocation de 3·10¹⁶ octets avant).
+        std::fs::write(dir.path().join("q.png"), png(6)).unwrap();
+        let mut book = open(
+            dir.path(),
+            r#"<Image Url="q.png"><Compositing Columns="2" BorderWidth="2000000000"/></Image><Image Url="q.png"/>"#,
+        );
+        let p = book.render_page(0).unwrap();
+        assert!(p.width() < 100 && p.height() < 100, "{:?}", p.dimensions());
+
+        // Page de taille fixe démesurée : refusée.
+        let mut book = open(
+            dir.path(),
+            r#"<Image Url="q.png"><Compositing PageWidth="2000000000" PageHeight="2000000000"/></Image>"#,
+        );
+        assert!(book.render_page(0).unwrap_err().to_string().contains("trop grande"));
+
+        // Lignes × colonnes qui débordent un i32 : bornées.
+        let c = Compositing { rows: i32::MAX, columns: i32::MAX, ..Default::default() };
+        assert_eq!(c.per_page(), MAX_PER_PAGE);
+
+        // Plage de 5 millions d'adresses : refusée à l'ouverture (1,4 Go et 2,4 s avant).
+        let path = dir.path().join("plage.cbw");
+        std::fs::write(&path, r#"<WebComic><Images><Image Url="p[0:1-5000000].png"/></Images></WebComic>"#).unwrap();
+        let err = WebComicProvider::open(&path).err().expect("refusé").to_string();
+        assert!(err.contains("trop grande"), "{err}");
+    }
+
+    /// Le cache des images est borné ; les pages web sont oubliées après l'ouverture.
+    #[test]
+    fn caches_are_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = vec![1u8; MAX_CACHED_BYTES / 3 + 1];
+        for i in 0..4 {
+            std::fs::write(dir.path().join(format!("{i}.bin")), &big).unwrap();
+        }
+        let mut f = Fetcher::new(dir.path());
+        for i in 0..4 {
+            f.bytes(&format!("{i}.bin")).unwrap();
+            assert!(f.cached <= MAX_CACHED_BYTES);
+        }
+        assert_eq!(f.bytes.len(), 2, "les plus anciennes oubliées");
+        assert!(!f.bytes.contains_key("0.bin"));
+        assert_eq!(f.bytes("0.bin").unwrap().len(), big.len(), "relue au besoin");
+
+        site(dir.path());
+        let book = open(
+            dir.path(),
+            r#"<Image Url="?{ComicFilePath}/strip1.html|id=.strip. src=.(?&lt;link&gt;[^&quot;]+)|rel=.next. href=.(?&lt;link&gt;[^&quot;]+)"/>"#,
+        );
+        assert_eq!(book.pages().len(), 3);
+        assert!(book.fetch.texts.is_empty());
     }
 }
