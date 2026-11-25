@@ -18,8 +18,8 @@ Réponse `BilanLecture` :
 { "lu": true, "modifies": ["id1"], "inchanges": 1, "ignores": [{ "id": "id2", "raison": "nombre de pages inconnu" }] }
 ```
 
-- Raisons d'`ignores` : « ouvert dans le lecteur » (la fermeture réécrirait la page courante), « livre d'une
-  seule page » (lu indiscernable de non lu), « nombre de pages inconnu », « absent de la base » (Store) /
+- Raisons d'`ignores` : « ouvert dans le lecteur » (la fermeture réécrirait la page courante), « nombre de
+  pages inconnu », « absent de la base » (Store) /
   « absent de la base ComicRack », « modifié par ailleurs », erreur SQL, et « avancement local non mis à jour »
   (échec d'écriture de `avancement.json` : le livre est alors **à la fois** dans `modifies`, sa fiche est écrite,
   et dans `ignores`).
@@ -43,10 +43,16 @@ Réponse `BilanLecture` :
   le lecteur (`edition_lecture_comicrack`).
 - Chemin autonome : fiche relue (`Store::get`) puis `Store::upsert`, et non `set_progress`, car celui-ci
   incrémente `OpenCount` et change `Opened` (ce n'est pas une ouverture) et n'écrit pas `PageCount`.
-- **Lu** : `CurrentPage = LastPageRead = pages - 1` (100 % selon `LibraryBook::read_percent`). Le nombre de
-  pages vient de la fiche (`PageCount`), à défaut de l'avancement local ; sinon le livre est ignoré.
-- **Non lu** : `CurrentPage = LastPageRead = 0`.
-- `Opened` et `OpenCount` ne changent pas (ce n'est pas une ouverture).
+- **Lu** : `CurrentPage = LastPageRead = pages - 1` (100 % selon `LibraryBook::read_percent`), comme
+  `ComicBook.MarkAsRead` de ComicRack ; **livre d'une seule page : `1`** (ComicRack écrit 1, car
+  `LastPageRead = 0` vaut « non lu » : `ReadPercentage = LastPageRead <= 0 ? 0 : (LastPageRead + 1) × 100 /
+  PageCount`, borné à 1–100). Avant la 1.0.2, ces livres étaient ignorés (« livre d'une seule page »). Le
+  nombre de pages vient de la fiche (`PageCount`), à défaut de l'avancement local ; sinon le livre est ignoré.
+  L'avancement local garde une position valide (page 0 pour un livre d'une page).
+- **Non lu** : `CurrentPage = LastPageRead = 0` (`MarkAsNotRead`).
+- `Opened` et `OpenCount` ne changent pas (ce n'est pas une ouverture). Écart connu : ComicRack, lui, met
+  `OpenedCount` à 1 au moins et `OpenedTime` à maintenant dans `MarkAsRead`, et les remet à zéro dans
+  `MarkAsNotRead` ; sans effet sur « lu / non lu ».
 - L'avancement local (`data\avancement.json`) est aligné : fixé à « lu » (`Memoire::fixer`) ou **oublié**
   pour « non lu » (sinon le détail, qui garde le plus avancé de la fiche et de la mémoire locale,
   contredirait la fiche). La relecture en cours est effacée dans les deux cas.

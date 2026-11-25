@@ -45,6 +45,8 @@ fn ids(v: &[&str]) -> Vec<String> {
 fn pages_a_ecrire() {
     assert_eq!(pages_cibles(true, 20), (19, 19));
     assert_eq!(pages_cibles(true, 2), (1, 1));
+    // Une seule page : 1, comme ComicBook.MarkAsRead (0 vaudrait « non lu »).
+    assert_eq!(pages_cibles(true, 1), (1, 1));
     assert_eq!(pages_cibles(false, 20), (0, 0));
 }
 
@@ -174,13 +176,24 @@ fn page_count_renseigne_depuis_l_avancement_local() {
     assert_eq!(Store::open_existing(&cfg).unwrap().get(&ids(&["a"])).unwrap()[0].page_count, Some(12));
 }
 
+/// D3c : un livre d'une seule page se marque lu (100 %, « Lu » comme dans ComicRack) puis non lu.
 #[test]
-fn livre_d_une_seule_page_ignore() {
+fn livre_d_une_seule_page_lu_puis_non_lu() {
     let d = tempfile::tempdir().unwrap();
-    let (b, e, l) = autonome(&d.path().join("data"), vec![livre("a", Some(1), None)]);
+    let data = d.path().join("data");
+    let (b, e, l) = autonome(&data, vec![livre("a", Some(1), None)]);
     let bilan = marquer_lecture(&b, &e, &l, &ids(&["a"]), true).unwrap();
-    assert!(bilan.modifies.is_empty());
-    assert_eq!(bilan.ignores[0].raison, "livre d'une seule page");
+    assert_eq!(bilan.modifies, ids(&["a"]), "{bilan:?}");
+    let f = b.livre("a").unwrap();
+    assert_eq!((f.current_page, f.last_page_read, f.read_percent()), (Some(1), Some(1), Some(100)));
+    // Avancement local : position sur la seule page, livre lu.
+    let a = Memoire::nouvelle(data.clone()).lire(Path::new("/BD/a.cbz")).unwrap();
+    assert_eq!((a.page, a.pourcentage()), (0, Some(100)));
+    // Déjà lu : rien à écrire.
+    assert_eq!(marquer_lecture(&b, &e, &l, &ids(&["a"]), true).unwrap().inchanges, 1);
+    let bilan = marquer_lecture(&b, &e, &l, &ids(&["a"]), false).unwrap();
+    assert_eq!(bilan.modifies, ids(&["a"]));
+    assert_eq!(b.livre("a").unwrap().read_percent(), Some(0));
 }
 
 #[test]
