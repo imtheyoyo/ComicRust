@@ -270,13 +270,13 @@ fn is_transient_refusal(e: &std::io::Error) -> bool {
 /// Remplace `path` par `tmp` (même dossier). Sous Windows, échoue si le fichier est ouvert
 /// par un autre programme : quelques nouvelles tentatives courtes sont faites, puis le
 /// fichier temporaire est supprimé.
-fn replace(tmp: &Path, path: &Path) -> Result<(), Error> {
+pub(crate) fn replace_file(tmp: &Path, path: &Path) -> Result<(), Error> {
     let delays: Vec<std::time::Duration> =
         REPLACE_RETRY_DELAYS_MS.iter().map(|&ms| std::time::Duration::from_millis(ms)).collect();
     replace_with(tmp, path, &delays, |a, b| std::fs::rename(a, b))
 }
 
-/// [`replace`] avec ses attentes et sa fonction de renommage (tests).
+/// [`replace_file`] avec ses attentes et sa fonction de renommage (tests).
 fn replace_with(
     tmp: &Path,
     path: &Path,
@@ -418,7 +418,7 @@ fn write_comic_info_with(path: &Path, record: &str, before_replace: &mut dyn FnM
                 "le fichier a été modifié pendant l'écriture (ComicRack ?) : rien n'a été changé, réessayer".into(),
             ));
         }
-        replace(&tmp, path)?;
+        replace_file(&tmp, path)?;
         Ok(Outcome::Written)
     })();
     if result.is_err() {

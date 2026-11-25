@@ -137,10 +137,21 @@ fn bloc<'a>(texte: &'a str, balise: &str) -> &'a str {
     &texte[a..b]
 }
 
+/// Dossier des sauvegardes de ComicDb.xml : `data\sauvegardes\comicdb` (jamais chez ComicRack).
+fn dossier_sauvegardes(dossier: &Path) -> PathBuf {
+    comicrust_core::lists_edit::comicdb::backup_dir(&dossier.join("data"))
+}
+
 fn sauvegardes(dossier: &Path) -> (Vec<String>, Vec<String>) {
     let mut origine = Vec::new();
     let mut autres = Vec::new();
+    // Rien à côté de ComicDb.xml (dossier de ComicRack).
     for e in std::fs::read_dir(dossier).unwrap() {
+        let n = e.unwrap().file_name().to_string_lossy().into_owned();
+        assert!(!n.ends_with(".xml.bak"), "sauvegarde écrite chez ComicRack : {n}");
+    }
+    let Ok(lecture) = std::fs::read_dir(dossier_sauvegardes(dossier)) else { return (origine, autres) };
+    for e in lecture {
         let n = e.unwrap().file_name().to_string_lossy().into_owned();
         if n.starts_with("ComicDb.comicrust-origine-") && n.ends_with(".xml.bak") {
             origine.push(n);
@@ -290,7 +301,7 @@ fn ecriture_comicdb_sure() {
     let apres = std::fs::read_to_string(&xml).unwrap();
     let (o, _) = sauvegardes(d.path());
     assert_eq!(o.len(), 1, "sauvegarde d'origine");
-    assert_eq!(std::fs::read_to_string(d.path().join(&o[0])).unwrap(), original);
+    assert_eq!(std::fs::read_to_string(dossier_sauvegardes(d.path()).join(&o[0])).unwrap(), original);
     let hors = |t: &str| {
         let a = t.find("<ComicLists>").unwrap();
         let z = t.find("</ComicLists>").unwrap();

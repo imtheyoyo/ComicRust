@@ -23,14 +23,20 @@
 //!    avant toute écriture : en cas d'écart ou d'erreur, rien n'est écrit.
 //!    Contrôle aussi qu'aucun caractère interdit en XML 1.0 n'est écrit
 //!    (`XmlSerializer` refuserait tout le fichier).
-//! 4. Sauvegarde du fichier d'origine à côté de lui :
+//! 4. Sauvegarde du fichier d'origine dans le dossier donné par l'appelant, **dans le
+//!    `data\` de ComicRust** (version portable : rien n'est écrit dans le dossier de
+//!    ComicRack hormis `ComicDb.xml` lui-même), voir [`backup_dir`] :
 //!    `ComicDb.comicrust-AAAAMMJJ-HHMMSS.xml.bak` (les 10 plus récentes sont gardées), et
 //!    la toute première sauvegarde faite par ComicRust, gardée à part et jamais supprimée :
 //!    `ComicDb.comicrust-origine-AAAAMMJJ-HHMMSS.xml.bak`. Une sauvegarde impossible
 //!    empêche l'écriture ; une ancienne sauvegarde impossible à supprimer est signalée
-//!    ([`SaveReport::warnings`]).
+//!    ([`SaveReport::warnings`]). Les sauvegardes faites à côté de `ComicDb.xml` par les
+//!    versions antérieures à la v1.0.2 ne sont ni déplacées ni supprimées.
 //! 5. Nouvelle vérification que ComicRack n'est pas lancé, écriture dans un fichier
-//!    temporaire du même dossier, puis remplacement atomique (`rename`).
+//!    temporaire du même dossier que `ComicDb.xml` (le `rename` exige le même volume),
+//!    synchronisé sur le disque, puis remplacement atomique (`rename`, avec quelques
+//!    nouvelles tentatives si un antivirus tient le fichier) ; le fichier temporaire est
+//!    supprimé en cas d'échec.
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -41,6 +47,12 @@ use quick_xml::Reader;
 use super::{assemble_lists, split_lists, ListRow};
 use crate::comic_lists::{local, parse_comic_lists, xml_err};
 use crate::Error;
+
+/// Dossier des sauvegardes de `ComicDb.xml` dans le dossier `data` de ComicRust :
+/// `data\sauvegardes\comicdb`.
+pub fn backup_dir(data: &Path) -> PathBuf {
+    data.join("sauvegardes").join("comicdb")
+}
 
 /// Nombre de sauvegardes `*.comicrust-*.xml.bak` gardées.
 pub const BACKUPS_KEPT: usize = 10;
@@ -217,14 +229,16 @@ impl ComicDbLists {
     }
 
     /// Enregistre `rows` dans le fichier (voir le module) ; refuse si ComicRack est lancé.
-    pub fn save(&self, rows: &[ListRow]) -> Result<SaveReport, Error> {
-        self.save_checked(rows, comicrack_running)
+    /// `backups` : dossier des sauvegardes ([`backup_dir`] du dossier `data`), créé si besoin.
+    pub fn save(&self, rows: &[ListRow], backups: &Path) -> Result<SaveReport, Error> {
+        self.save_checked(rows, backups, comicrack_running)
     }
 
     /// Comme [`ComicDbLists::save`], avec la détection de ComicRack fournie (tests).
     pub fn save_checked(
         &self,
         rows: &[ListRow],
+        backups: &Path,
         running: impl Fn() -> Result<bool, String>,
     ) -> Result<SaveReport, Error> {
         ensure_comicrack_closed(&running)?;
@@ -249,7 +263,7 @@ impl ComicDbLists {
             ));
         }
         super::xml::check_xml_document(&new_text, "ComicDb.xml")?;
-        let (backup, warnings) = backup(&self.path, &bytes)?;
+        let (backup, warnings) = backup(&self.path, &bytes, backups)?;
         // ComicRack a pu être lancé pendant la préparation : dernière vérification.
         write_atomic(&self.path, new_text.as_bytes(), &|| ensure_comicrack_closed(&running))?;
         Ok(SaveReport { backup, warnings })
@@ -263,11 +277,16 @@ fn file_stem(path: &Path) -> String {
 /// Préfixe (en minuscules) de la première sauvegarde, jamais supprimée.
 const ORIGIN: &str = "origine-";
 
-/// Copie `bytes` (contenu de `path`) dans `<nom>.comicrust-AAAAMMJJ-HHMMSS.xml.bak` et
+/// Copie `bytes` (contenu de `path`) dans `dir/<nom>.comicrust-AAAAMMJJ-HHMMSS.xml.bak` et
 /// ne garde que les [`BACKUPS_KEPT`] plus récentes ; la première sauvegarde de ComicRust
 /// est gardée à part ([`origin_backup`]). Renvoie la sauvegarde et les avertissements.
-fn backup(path: &Path, bytes: &[u8]) -> Result<(PathBuf, Vec<String>), Error> {
-    let dir = path.parent().unwrap_or(Path::new("."));
+fn backup(path: &Path, bytes: &[u8], dir: &Path) -> Result<(PathBuf, Vec<String>), Error> {
+    std::fs::create_dir_all(dir).map_err(|e| {
+        Error::Database(format!(
+            "dossier de sauvegarde {} impossible à créer : {e} — rien n'a été modifié",
+            dir.display()
+        ))
+    })?;
     let stem = file_stem(path);
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let mut warnings = Vec::new();
@@ -360,8 +379,10 @@ fn prune_backups(dir: &Path, stem: &str, keep: usize) -> Vec<String> {
 }
 
 /// Écrit dans un fichier temporaire du même dossier puis remplace `path` (`rename` :
-/// atomique sur un même volume, `MoveFileEx` avec remplacement sous Windows).
-/// `before_replace` est appelé juste avant le remplacement : une erreur l'annule.
+/// atomique sur un même volume, `MoveFileEx` avec remplacement sous Windows ; quelques
+/// nouvelles tentatives si le fichier est tenu un instant, comme pour les archives).
+/// `before_replace` est appelé juste avant le remplacement : une erreur l'annule. Le
+/// fichier temporaire est supprimé en cas d'échec.
 fn write_atomic(path: &Path, bytes: &[u8], before_replace: &dyn Fn() -> Result<(), Error>) -> Result<(), Error> {
     use std::io::Write;
     let dir = path.parent().unwrap_or(Path::new("."));
@@ -372,8 +393,7 @@ fn write_atomic(path: &Path, bytes: &[u8], before_replace: &dyn Fn() -> Result<(
         f.sync_all()?;
         drop(f);
         before_replace()?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+        crate::writer::replace_file(&tmp, path)
     })();
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
