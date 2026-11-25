@@ -148,6 +148,10 @@ struct TestHost {
     /// Bilan rendu à `applied_renames` (clé des réglages reçue notée).
     applied: Value,
     applied_keys: Mutex<Vec<String>>,
+    /// Lignes de journal transmises à l'hôte (`log`).
+    logs: Mutex<usize>,
+    /// Durée de chaque application au fil de l'eau (hôte lent : partage réseau…).
+    live_delay: Duration,
 }
 
 impl ScriptHost for TestHost {
@@ -173,7 +177,11 @@ impl ScriptHost for TestHost {
         self.saved.lock().unwrap().push((key.into(), s.clone()));
         Ok(())
     }
+    fn log(&self, _line: &JournalLine) {
+        *self.logs.lock().unwrap() += 1;
+    }
     fn apply_live(&self, changes: &[ScriptChange]) -> Result<(), String> {
+        std::thread::sleep(self.live_delay);
         self.live.lock().unwrap().extend_from_slice(changes);
         Ok(())
     }
@@ -443,6 +451,27 @@ fn exception_python_lisible() {
     assert_eq!(r.state, RunState::Finished, "{:?}", r.failure);
 }
 
+/// Texte avec un « surrogate » isolé (nom de fichier mal encodé) dans le journal, l'erreur ou
+/// la valeur rendue : le message arrive (U+FFFD), au lieu de « Python s'est arrêté sans
+/// réponse » (relecture v1.0.2).
+#[test]
+fn surrogate_isole_ne_perd_pas_le_message() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let ctx = || RunContext::new(Hook::Startup, vec![]);
+    let r =
+        fx.run("def f():\n    raise ValueError('fichier \\udc80.cbz')\n", "f", ctx(), Arc::new(TestHost::default()));
+    assert_eq!(r.state, RunState::Failed);
+    let f = r.failure.unwrap();
+    assert_eq!(f.kind, "ValueError", "{}", f.message);
+    assert_eq!(f.message, "fichier \u{fffd}.cbz");
+    let code = "import comicrust\ndef f():\n    comicrust.log('journal \\udc80')\n    return 'nom \\udc80'\n";
+    let r = fx.run(code, "f", ctx(), Arc::new(TestHost::default()));
+    assert_eq!(r.state, RunState::Finished, "{:?}", r.failure);
+    assert_eq!(r.return_value, json!("nom \u{fffd}"));
+    assert!(r.journal_text().contains("journal \u{fffd}"), "{}", r.journal_text());
+}
+
 #[test]
 fn champ_non_modifiable() {
     let py = need_python!();
@@ -544,6 +573,61 @@ fn delai_depasse() {
     );
     assert_eq!(r.state, RunState::TimedOut);
     assert!(r.failure.unwrap().message.contains("délai"));
+}
+
+/// Le délai maximum d'un automatisme ne compte pas le temps passé par l'hôte (application au
+/// fil de l'eau lente) : seul le script est limité (relecture v1.0.2).
+#[test]
+fn delai_sans_le_temps_de_l_hote() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let mut o = fx.options();
+    o.timeout = Some(Duration::from_millis(1500));
+    let mut host = library(3);
+    host.live_delay = Duration::from_millis(1200);
+    let code =
+        "import comicrust\ndef f(books):\n    for b in books:\n        b.notes = 'x'\n        comicrust.flush()\n";
+    let r = fx.run_with(code, "f", RunContext::new(Hook::NewBooks, ids(3)), Arc::new(host), o);
+    assert_eq!(r.state, RunState::Finished, "{:?}", r.failure);
+    assert_eq!(r.changes.len(), 3);
+}
+
+/// Au-delà de la taille maximale du journal, plus aucune ligne n'est transmise à l'interface
+/// (seul l'avertissement « journal tronqué » part) (relecture v1.0.2).
+#[test]
+fn journal_tronque_sans_flot_d_evenements() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let mut o = fx.options();
+    o.max_journal_bytes = 1000;
+    let host = Arc::new(TestHost::default());
+    let code = "import comicrust\ndef f():\n    for i in range(3000):\n        print('ligne %d' % i)\n        comicrust.log('info %d' % i)\n";
+    let r = fx.run_with(code, "f", RunContext::new(Hook::Startup, vec![]), host.clone(), o);
+    assert_eq!(r.state, RunState::Finished, "{:?}", r.failure);
+    let n = *host.logs.lock().unwrap();
+    assert!(n < 200, "{n} lignes transmises malgré la limite du journal");
+    assert!(r.journal_text().contains("journal tronqué"));
+}
+
+/// Un processus fils qui garde le canal du protocole (fork) n'empêche pas la fin de
+/// l'exécution (relecture v1.0.2 : la boucle n'attendait que la fin du flux).
+#[cfg(unix)]
+#[test]
+fn fin_sans_fermeture_du_canal() {
+    let py = need_python!();
+    let fx = Fixture::new(py);
+    let mut o = fx.options();
+    o.grace = Duration::from_millis(500);
+    let code = "import os, time\ndef f():\n    if os.fork() == 0:\n        time.sleep(30)\n        os._exit(0)\n    return 7\n";
+    let debut = Instant::now();
+    let entry = fx.script(code, "f", Hook::Startup);
+    let mut h =
+        ScriptRunner::new(o).start(&entry, RunContext::new(Hook::Startup, vec![]), Arc::new(TestHost::default()));
+    assert!(h.wait_timeout(Duration::from_secs(10)), "exécution jamais terminée");
+    let r = h.wait();
+    assert_eq!(r.state, RunState::Finished, "{:?}", r.failure);
+    assert_eq!(r.return_value, json!(7));
+    assert!(debut.elapsed() < Duration::from_secs(10));
 }
 
 #[test]

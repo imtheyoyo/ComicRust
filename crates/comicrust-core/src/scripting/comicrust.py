@@ -104,7 +104,14 @@ class _Channel:
     def send(self, msg):
         # allow_nan=False : NaN et l'infini ne sont pas du JSON (ComicRust refuserait tout
         # le message) ; les modifications sont vérifiées avant (Book.set).
-        data = (json.dumps(msg, ensure_ascii=False, default=_json_default, allow_nan=False) + "\n").encode("utf-8")
+        text = json.dumps(msg, ensure_ascii=False, default=_json_default, allow_nan=False) + "\n"
+        try:
+            data = text.encode("utf-8")
+        except UnicodeEncodeError:
+            # « Surrogate » isolé (nom de fichier mal encodé…) : ni encodable en UTF-8, ni
+            # accepté par ComicRust sous forme d'échappement JSON (« \udc80 ») ; remplacé par
+            # U+FFFD pour que le message (fin du script, erreur, journal) arrive quand même.
+            data = text.encode("utf-16", "surrogatepass").decode("utf-16", "replace").encode("utf-8")
         with self._lock:
             self._out.write(data)
             self._out.flush()
