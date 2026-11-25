@@ -6,20 +6,106 @@
 use serde::{Deserialize, Serialize};
 
 /// Type de page (attribut `Type` d'un `<Page>`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum PageType {
-    FrontCover,
-    InnerCover,
-    Roundup,
-    #[default]
-    Story,
-    Advertisement,
-    Editorial,
-    Letters,
-    Preview,
-    BackCover,
-    Other,
-    Deleted,
+/// Type d'une page (`ComicPageType` de ComicRack), gardé **en texte brut**.
+///
+/// ComicRack écrit une énumération à drapeaux (`[Flags]`) : un type peut être combiné
+/// (`FrontCover, Story`) et la publicité s'écrit `Advertisment` (orthographe de
+/// ComicRack). Une énumération Rust stricte refusait ces fiches et, avec elles, tout le
+/// `ComicInfo.xml` (écriture des infos, conversion en CBZ, analyse) : le texte est donc
+/// gardé tel quel (espaces de début et de fin retirés ; vide = `Story`).
+///
+/// `Debug` rend le texte brut (sans guillemets) : `format!("{:?}", type)` donne le texte
+/// à écrire, comme le faisait l'ancienne énumération. Préférer [`PageType::as_str`].
+#[derive(Clone, PartialEq, Eq)]
+pub struct PageType(std::borrow::Cow<'static, str>);
+
+#[allow(non_upper_case_globals)]
+impl PageType {
+    pub const FrontCover: PageType = PageType::fixed("FrontCover");
+    pub const InnerCover: PageType = PageType::fixed("InnerCover");
+    pub const Roundup: PageType = PageType::fixed("Roundup");
+    pub const Story: PageType = PageType::fixed("Story");
+    pub const Advertisement: PageType = PageType::fixed("Advertisement");
+    /// Orthographe de ComicRack (`ComicPageType.Advertisment`).
+    pub const Advertisment: PageType = PageType::fixed("Advertisment");
+    pub const Editorial: PageType = PageType::fixed("Editorial");
+    pub const Letters: PageType = PageType::fixed("Letters");
+    pub const Preview: PageType = PageType::fixed("Preview");
+    pub const BackCover: PageType = PageType::fixed("BackCover");
+    pub const Other: PageType = PageType::fixed("Other");
+    pub const Deleted: PageType = PageType::fixed("Deleted");
+
+    const fn fixed(s: &'static str) -> Self {
+        PageType(std::borrow::Cow::Borrowed(s))
+    }
+
+    /// Type d'après le texte de l'attribut `Type` (vide : `Story`).
+    pub fn new(text: &str) -> Self {
+        let t = text.trim();
+        if t.is_empty() || t == "Story" {
+            PageType::Story
+        } else {
+            PageType(std::borrow::Cow::Owned(t.to_string()))
+        }
+    }
+
+    /// Texte de l'attribut `Type` (`FrontCover`, `FrontCover, Story`, `Advertisment`…).
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for PageType {
+    fn default() -> Self {
+        PageType::Story
+    }
+}
+
+impl std::fmt::Debug for PageType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Serialize for PageType {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for PageType {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(PageType::new(&String::deserialize(d)?))
+    }
+}
+
+/// Lecture tolérante d'un champ facultatif : pour un nombre, une valeur vide
+/// (`<Count></Count>`, `ImageSize=""`) ou illisible donne `None` au lieu de faire
+/// échouer tout le `ComicInfo.xml` ; un texte est rendu tel quel.
+pub trait Lenient: Sized {
+    fn from_text(text: Option<String>) -> Self;
+}
+
+impl Lenient for Option<String> {
+    fn from_text(text: Option<String>) -> Self {
+        text
+    }
+}
+
+macro_rules! lenient_number {
+    ($($t:ty),*) => {$(
+        impl Lenient for Option<$t> {
+            fn from_text(text: Option<String>) -> Self {
+                text.and_then(|t| t.trim().parse().ok())
+            }
+        }
+    )*};
+}
+lenient_number!(i32, u32, u64, f32);
+
+/// `#[serde(deserialize_with = "lenient")]` (voir [`Lenient`]).
+pub fn lenient<'de, D: serde::Deserializer<'de>, T: Lenient>(d: D) -> Result<T, D::Error> {
+    Ok(T::from_text(Option::<String>::deserialize(d)?))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -30,13 +116,13 @@ pub struct PageInfo {
     pub page_type: PageType,
     #[serde(rename = "@DoublePage", default, skip_serializing_if = "is_false")]
     pub double_page: bool,
-    #[serde(rename = "@ImageSize", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "@ImageSize", default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub image_size: Option<u64>,
     #[serde(rename = "@Key", default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
-    #[serde(rename = "@ImageWidth", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "@ImageWidth", default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub image_width: Option<u32>,
-    #[serde(rename = "@ImageHeight", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "@ImageHeight", default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub image_height: Option<u32>,
     /// Signet (favori) posé sur la page.
     #[serde(rename = "@Bookmark", default, skip_serializing_if = "Option::is_none")]
@@ -71,7 +157,7 @@ macro_rules! comic_info {
         #[serde(rename = "ComicInfo")]
         pub struct ComicInfo {
             $(
-                #[serde(rename = $xml, default, skip_serializing_if = "Option::is_none")]
+                #[serde(rename = $xml, default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
                 pub $field: $ty,
             )*
             #[serde(rename = "Pages", default, skip_serializing_if = "Option::is_none")]
@@ -192,5 +278,39 @@ mod tests {
         assert_eq!(ci.caption(), "The Infinity Gauntlet #1 - Infinity Gauntlet");
         let only_title = ComicInfo { title: Some("Silver Surfer 03".into()), ..Default::default() };
         assert_eq!(only_title.caption(), "Silver Surfer 03");
+    }
+
+    /// Fiche écrite par ComicRack : page de publicité (`Advertisment`, orthographe de
+    /// ComicRack), types combinés (`[Flags]`) et nombres vides. Avant la v1.0.2, tout le
+    /// `ComicInfo.xml` était refusé.
+    #[test]
+    fn comicrack_page_types_and_empty_numbers() {
+        let xml = r#"<?xml version="1.0"?>
+<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Series>Thanos</Series>
+  <Count></Count>
+  <Volume> 2 </Volume>
+  <Year/>
+  <CommunityRating></CommunityRating>
+  <Pages>
+    <Page Image="0" Type="FrontCover, Story" ImageSize="" />
+    <Page Image="1" Type="Advertisment" ImageWidth="800" />
+    <Page Image="2" />
+  </Pages>
+</ComicInfo>"#;
+        let ci = ComicInfo::from_xml(xml).unwrap();
+        assert_eq!(ci.series.as_deref(), Some("Thanos"));
+        assert_eq!((ci.count, ci.volume, ci.year, ci.community_rating), (None, Some(2), None, None));
+        let p = &ci.pages.as_ref().unwrap().page;
+        assert_eq!(p[0].page_type.as_str(), "FrontCover, Story");
+        assert_eq!(p[0].image_size, None);
+        assert_eq!(p[1].page_type, PageType::Advertisment);
+        assert_eq!(format!("{:?}", p[1].page_type), "Advertisment", "Debug = texte brut");
+        assert_eq!(p[1].image_width, Some(800));
+        assert_eq!(p[2].page_type, PageType::Story);
+        // Aller-retour : types gardés tels quels.
+        let again = ComicInfo::from_xml(&ci.to_xml().unwrap()).unwrap();
+        assert_eq!(again, ci);
+        assert!(ci.to_xml().unwrap().contains(r#"Type="FrontCover, Story""#));
     }
 }
