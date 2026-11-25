@@ -873,7 +873,18 @@ impl Manquants {
                 self.biblio.signaler_ecriture_autonome(w.books.iter().map(|b| b.id.clone()), Some(w.counter));
                 w.books
             }
-            Cible::Comicrack(cfg) => self.relocaliser_comicrack(cfg, &livres)?,
+            Cible::Comicrack(cfg) => {
+                let (ecrites, erreur) = self.relocaliser_comicrack(cfg, &livres)?;
+                if let Some(e) = erreur {
+                    // Écriture partielle : les fiches réellement écrites sont reportées et signalées
+                    // avant de rendre l'erreur (déjà signalées à la surveillance, elles ne
+                    // reviendraient jamais d'elles-mêmes).
+                    let ids = self.biblio.remplacer_fiches(&ecrites, true);
+                    self.signaler(ids, 0);
+                    return Err(e);
+                }
+                ecrites
+            }
             Cible::LectureSeule(m) => return Err(m.clone()),
         };
         // Couvertures refaites : le fichier a changé.
@@ -890,11 +901,13 @@ impl Manquants {
         Ok(BilanOperation { nb: n, info, erreur: None })
     }
 
+    /// Fiches écrites dans la base MySQL de ComicRack et, si une partie a échoué, l'erreur (les
+    /// fiches écrites le sont quand même : voir [`fiches_et_erreur`]).
     fn relocaliser_comicrack(
         &self,
         cfg: &DbConfig,
         livres: &[(LibraryBook, PathBuf)],
-    ) -> Result<Vec<LibraryBook>, String> {
+    ) -> Result<(Vec<LibraryBook>, Option<String>), String> {
         let mut editions = Vec::new();
         for (b, chemin) in livres {
             let f = etat_fichier(chemin).map_err(|e| format!("{} : {e}", chemin.display()))?;
@@ -903,10 +916,7 @@ impl Manquants {
         let rapport = db::update_books(cfg, &editions)
             .map_err(|e| format!("base ComicRack inaccessible, fiches non modifiées : {e}"))?;
         self.biblio.signaler_rapport_comicrack(&rapport);
-        if let Some((id, m)) = rapport.failed.first() {
-            return Err(format!("{id} : {m}"));
-        }
-        Ok(rapport.written.iter().map(|w| w.book.clone()).collect())
+        Ok(fiches_et_erreur(&rapport))
     }
 
     // ───────────── Retirer de la bibliothèque ─────────────
@@ -977,6 +987,13 @@ impl Manquants {
         }
         Ok(BilanOperation { nb: k, info, erreur: retrait.erreur })
     }
+}
+
+/// Bilan d'une écriture MySQL de ComicRack : fiches écrites (toujours rendues, même si d'autres ont
+/// échoué) et première erreur éventuelle.
+pub(crate) fn fiches_et_erreur(rapport: &db::WriteReport) -> (Vec<LibraryBook>, Option<String>) {
+    let ecrites = rapport.written.iter().map(|w| w.book.clone()).collect();
+    (ecrites, rapport.failed.first().map(|(id, m)| format!("{id} : {m}")))
 }
 
 /// Fiches supprimées d'une base.

@@ -294,6 +294,26 @@ fn suggestions_depuis_la_bibliotheque() {
     assert_eq!(jeton_courant("a, b", true), "b");
 }
 
+/// Relecture tauri-v1.0.2 : les suggestions suivent une fiche modifiée sur place (le cache était
+/// indexé par l'adresse de la base, inchangée après une modification).
+#[test]
+fn suggestions_suivent_une_modification() {
+    let d = tempfile::tempdir().unwrap();
+    bd(&d.path().join("BD"));
+    let (b, e) = autonome(&d.path().join("data"), &d.path().join("BD"));
+    assert!(e.proposer_valeurs("Writer", "zo", false, None).unwrap().is_empty());
+    let dm = DemandeModification {
+        ids: vec![id_par_fichier(&b, "Thanos 02.cbz")],
+        champs: vec![modif("Writer", "Zorro Nouveau")],
+        pages: None,
+        ecrire_dans_fichier: false,
+        confirme: false,
+    };
+    e.appliquer_modifications(&dm, &|_| {}).unwrap();
+    let p = e.proposer_valeurs("Writer", "zo", false, None).unwrap();
+    assert_eq!(p.iter().map(|x| x.valeur.as_str()).collect::<Vec<_>>(), ["Zorro Nouveau"]);
+}
+
 #[test]
 fn garde_fou_au_dela_du_seuil() {
     let d = tempfile::tempdir().unwrap();

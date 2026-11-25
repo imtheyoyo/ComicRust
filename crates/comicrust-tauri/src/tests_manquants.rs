@@ -579,3 +579,26 @@ fn contrat_json_de_l_etat_et_des_resumes() {
     assert_eq!(charge["origine"], "manquants");
     assert_eq!(charge["supprimes"], 2);
 }
+
+/// Relecture tauri-v1.0.2 : écriture MySQL de ComicRack partielle — les fiches écrites sont
+/// rendues avec l'erreur (avant, l'erreur seule : fiches écrites jamais reportées à l'affichage).
+#[test]
+fn ecriture_comicrack_partielle_rend_les_fiches_ecrites() {
+    use comicrust_core::db::{Record, WriteReport, Written};
+    let livre = LibraryBook { id: "a".into(), file: Some("D:/BD/a.cbz".into()), ..Default::default() };
+    let rapport = WriteReport {
+        written: vec![Written {
+            id: "a".into(),
+            record: Record { data: String::new(), counter: 2 },
+            book: livre.clone(),
+            retries: 0,
+        }],
+        failed: vec![("b".into(), "valeur refusée".into())],
+        ..Default::default()
+    };
+    let (ecrites, erreur) = fiches_et_erreur(&rapport);
+    assert_eq!(ecrites.iter().map(|b| (b.id.as_str(), b.file.as_deref())).collect::<Vec<_>>(), [("a", livre.file.as_deref())]);
+    assert_eq!(erreur.as_deref(), Some("b : valeur refusée"));
+    let (_, aucune) = fiches_et_erreur(&WriteReport::default());
+    assert!(aucune.is_none());
+}

@@ -28,7 +28,7 @@
 //! Aucune dépendance à Tauri : tout est testé ici (SQLite autonome ; MySQL réel seulement si
 //! `COMICRUST_TEST_MYSQL` est définie). Contrat : `docs/tauri/ipc-surveillance.md`.
 
-use crate::biblio::{Biblio, SourceBiblio};
+use crate::biblio::{Biblio, Ecartees, SourceBiblio};
 use comicrust_core::db::{Changes, Watcher, WriteReport};
 use comicrust_core::store::{StoreConfig, StoreWatcher};
 use serde::Serialize;
@@ -219,6 +219,9 @@ enum Veilleur {
 /// Un sondage à la fois ; reconstruit quand la bibliothèque est rechargée ou change de source.
 pub struct Sondeur {
     biblio: Biblio,
+    /// Tests : appelé entre l'interrogation de la base et l'application des modifications.
+    #[cfg(test)]
+    pub(crate) crochet_avant_application: Option<Box<dyn FnMut() + Send>>,
     /// (génération de la base, source) pour lesquelles `veilleur` a été créé.
     cle: Option<(u64, SourceBiblio, bool)>,
     veilleur: Option<Veilleur>,
@@ -228,7 +231,14 @@ pub struct Sondeur {
 
 impl Sondeur {
     pub fn nouveau(biblio: Biblio) -> Self {
-        Sondeur { biblio, cle: None, veilleur: None, dernier: None }
+        Sondeur {
+            biblio,
+            #[cfg(test)]
+            crochet_avant_application: None,
+            cle: None,
+            veilleur: None,
+            dernier: None,
+        }
     }
 
     /// Un sondage. Renvoie les événements à émettre (état changé, modifications appliquées).
@@ -277,15 +287,25 @@ impl Sondeur {
             match resultat {
                 Ok(Some(ch)) => {
                     connexion.revenir_en_ligne();
-                    if let Some((ap, ids)) = self.biblio.appliquer_changements(inst.generation, ch) {
-                        if ap.added + ap.modified + ap.removed > 0 {
-                            evenements.push(EvenementBase::Modifiee {
-                                ids,
-                                ajoutes: ap.added,
-                                modifies: ap.modified,
-                                supprimes: ap.removed,
-                            });
+                    #[cfg(test)]
+                    if let Some(f) = self.crochet_avant_application.as_mut() {
+                        f();
+                    }
+                    match self.biblio.appliquer_changements(inst.generation, ch) {
+                        Ok((ap, ids)) => {
+                            if ap.added + ap.modified + ap.removed > 0 {
+                                evenements.push(EvenementBase::Modifiee {
+                                    ids,
+                                    ajoutes: ap.added,
+                                    modifies: ap.modified,
+                                    supprimes: ap.removed,
+                                });
+                            }
                         }
+                        // Le surveillant les croit vues : reconstruit (d'après la base affichée) au
+                        // sondage suivant, il les retrouvera au lieu de les perdre.
+                        Err(Ecartees::Occupee) => self.cle = None,
+                        Err(Ecartees::Rechargee) => {}
                     }
                 }
                 Ok(None) => connexion.revenir_en_ligne(),

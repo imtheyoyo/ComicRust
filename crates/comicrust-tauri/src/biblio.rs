@@ -1338,6 +1338,7 @@ impl Biblio {
 mod manquants_biblio;
 #[path = "biblio_surveillance.rs"]
 mod surveillance_biblio;
+pub(crate) use surveillance_biblio::Ecartees;
 
 // ───────────────────────────── Fonctions utilitaires ─────────────────────────────
 

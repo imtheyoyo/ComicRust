@@ -952,8 +952,10 @@ fn textes_renommage(de: &Path, vers: &Path) -> (String, String) {
 
 // ───────────────────────────── Service ─────────────────────────────
 
-/// Suggestions mises en cache : (bibliothèque pour laquelle elles valent, par champ).
-type CacheSuggestions = Option<(usize, HashMap<&'static str, Arc<Vec<String>>>)>;
+/// Suggestions mises en cache : (état de la bibliothèque `(génération, révision des fiches)` pour
+/// lequel elles valent, par champ). L'adresse de la base ne suffit pas : une fiche modifiée sur
+/// place la garde.
+type CacheSuggestions = Option<((u64, u64), HashMap<&'static str, Arc<Vec<String>>>)>;
 
 /// Service d'édition, partageable entre les commandes (clonage bon marché).
 #[derive(Clone)]
@@ -1115,8 +1117,7 @@ impl Edition {
         max: Option<usize>,
     ) -> Result<Vec<Proposition>, String> {
         let Some(def) = edit::field(champ).filter(|d| a_des_suggestions(d)) else { return Ok(Vec::new()) };
-        let base = self.biblio.base()?;
-        let cle = Arc::as_ptr(&base) as usize;
+        let (base, cle) = self.biblio.base_et_contenu().ok_or("aucune bibliothèque ouverte")?;
         let toutes = {
             let mut c = self.suggestions.lock().unwrap_or_else(|e| e.into_inner());
             if c.as_ref().is_none_or(|(k, _)| *k != cle) {

@@ -498,3 +498,27 @@ fn mysql_comicrack_sondage_et_hors_ligne() {
         assert!(!serde_json::to_string(&etat).unwrap().contains(&cfg.password));
     }
 }
+
+/// Relecture tauri-v1.0.2 : une édition commencée pendant le sondage fait écarter les
+/// modifications extérieures trouvées ; le surveillant est reconstruit et les retrouve au sondage
+/// suivant (avant : perdues jusqu'au prochain rechargement).
+#[test]
+fn modification_exterieure_ecartee_pendant_une_edition_retrouvee_ensuite() {
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("data");
+    let b = autonome(&data, &[livre("a", "Alpha"), livre("b", "Bravo")]);
+    let mut s = Sondeur::nouveau(b.clone());
+    s.sonder();
+    ailleurs(&data).upsert(&[livre("a", "Alpha 2")]).unwrap();
+    // L'édition commence entre l'interrogation de la base et l'application.
+    let b2 = b.clone();
+    s.crochet_avant_application = Some(Box::new(move || b2.occuper_pour_test(true)));
+    assert!(modifiee(&s.sonder()).is_none(), "écartée pendant l'édition");
+    assert_eq!(titres(&b), ["Alpha", "Bravo"]);
+    s.crochet_avant_application = None;
+    b.occuper_pour_test(false);
+    let ev = s.sonder();
+    let (_, modifies, _, ids) = modifiee(&ev).expect("retrouvée au sondage suivant");
+    assert!(modifies >= 1 && ids.contains(&"a".to_string()), "{ev:?}");
+    assert_eq!(titres(&b), ["Alpha 2", "Bravo"]);
+}
