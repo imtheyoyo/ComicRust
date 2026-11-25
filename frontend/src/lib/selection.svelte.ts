@@ -163,6 +163,23 @@ export class Selection {
     this.ancre = a;
   }
 
+  /** Sélection reconstruite après une relecture de la vue (livres retrouvés par identifiant) :
+   *  `indices` dans n'importe quel ordre ; `curseur` -1 = dernier sélectionné (ou aucun). */
+  definir(indices: number[], curseur: number): void {
+    this.intervalles = normaliser(indices.map((i) => [i, i] as Intervalle));
+    const dernier = this.intervalles[this.intervalles.length - 1];
+    this.curseur = curseur >= 0 ? curseur : dernier ? dernier[1] : -1;
+    this.ancre = this.curseur;
+    this.recaler();
+  }
+
+  /** Place le livre courant (et l'ancre) sans changer la sélection (Ctrl+A retrouvé après relecture). */
+  placerCurseur(i: number): void {
+    this.curseur = i;
+    this.ancre = i;
+    this.recaler();
+  }
+
   /** Ctrl+A. */
   tout(total: number): void {
     if (total <= 0) return;

@@ -4,7 +4,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import {
     ajouterLivresListe, creerListe, decalerGroupeListe, decalerLivresListe, decalerPileListe, deplacerGroupesListe, deplacerLivresListe, deplacerPilesListe, ecouter,
-    dansTauri, groupesVue, marquerLecture, messageErreur, ouvrirDossierFichier, retirerLivresListe,
+    dansTauri, groupesVue, marquerLecture, messageErreur, ouvrirDossierFichier, rangsVue, retirerLivresListe,
     type BibliothequeModifiee, type ClefTri, type LivreResume, type Groupe, type Pile, type VueListe, type NoeudListe, type RequeteLivres, type SourceLecteur,
   } from '../lib/api';
   import { GlisserLivres } from '../lib/glisserLivres.svelte';
@@ -13,6 +13,7 @@
   import { Bibliotheque, TAILLE_PAGE, type SuiviScan } from '../lib/bibliotheque.svelte';
   import { enregistrerPreference, enregistrerVueListe, preferences, vueListe } from '../lib/prefs';
   import { Selection } from '../lib/selection.svelte';
+  import { memoriser, retrouver } from '../lib/suiviSelection';
   import DialogInfos from './DialogInfos.svelte';
   import { fermerModale, modale } from '../lib/modale';
   import { demanderOuvertureFichier, enregistrerOuvreur } from '../lib/fenetre';
@@ -231,7 +232,7 @@
     // Fiches modifiées par l'édition : liste rechargée sans perdre défilement ni sélection.
     let desabonner: (() => void) | undefined;
     void ecouter<BibliothequeModifiee>('bibliotheque-modifiee', () => {
-      void bib.reinitialiser(false);
+      void relire();
       fichesModifiees++;
     }).then((f) => (desabonner = f));
     // MODE SIMULÉ seulement : ouverture d'un autre livre (indice dans la vue) alors que le lecteur
@@ -252,6 +253,9 @@
     return () => {
       clearTimeout(minuterie);
       desabonner?.();
+      manquants.surRouvrir = () => {}; // la vue (et son lecteur) n'existe plus
+      glisser.detruire();
+      glisserPile.detruire();
     };
   });
 
@@ -350,7 +354,7 @@
   let versionListes = untrack(() => listes.version);
   $effect(() => {
     const v = listes.version;
-    if (v !== versionListes && untrack(() => bib.params.liste)) void bib.reinitialiser(false);
+    if (v !== versionListes && untrack(() => bib.params.liste)) void relire();
     versionListes = v;
   });
 
@@ -358,12 +362,13 @@
   let derniereVersion = -1;
   $effect(() => {
     const v = rafraichir;
-    if (derniereVersion >= 0 && v !== derniereVersion) void bib.reinitialiser(false);
+    if (derniereVersion >= 0 && v !== derniereVersion) void relire();
     derniereVersion = v;
   });
 
   $effect(() => {
-    if (bib.params.recherche === '' && !bib.params.liste) nbLivres = bib.total;
+    // Bibliothèque entière seulement : ni recherche, ni liste, ni pile ouverte, ni erreur (B4).
+    if (bib.params.recherche === '' && !bib.params.liste && bib.params.serie === undefined && !bib.erreur) nbLivres = bib.total;
     sel.borner(bib.total);
     selPiles.borner(bib.piles.length);
   });
@@ -372,6 +377,23 @@
   type VueListeComplete = Required<VueListe>;
   function memeVue(a: VueListeComplete, b: VueListeComplete) {
     return a.tri === b.tri && a.sensTri === b.sensTri && a.groupe === b.groupe && a.vue === b.vue && a.empiler === b.empiler;
+  }
+
+  /** Relecture en cours (la dernière) : « Infos du livre ▸ Suivant » l'attend avant de chercher le voisin. */
+  let relectureEnCours: Promise<void> = Promise.resolve();
+  let relectures = 0;
+  /** Relit la vue (même requête) SANS perdre défilement ni sélection : la sélection est suivie par
+   *  identifiant (lib/suiviSelection.ts, relecture B1), plus par rang. */
+  function relire(): Promise<void> {
+    const n = ++relectures;
+    const memo = memoriser(sel, bib.total, (i) => bib.livre(i));
+    const p = (async () => {
+      if (!(await bib.reinitialiser(false)) || n !== relectures) return;
+      const req = requete();
+      await retrouver(sel, memo, { total: bib.total, indexDansPages: (ids) => bib.indexDansPages(ids), rangs: (ids) => rangsVue(req, ids) });
+    })();
+    relectureEnCours = p.catch(() => {});
+    return relectureEnCours;
   }
 
   /** Change la requête : sélection vidée, première page rechargée (promesse : chargement fini).
@@ -383,7 +405,7 @@
       selPiles.vider();
       memoPiles = null;
     }
-    return bib.reinitialiser();
+    return bib.reinitialiser().then(() => {});
   }
 
   function recherche(v: string) {
@@ -507,7 +529,7 @@
    *  défilement) et le détail du livre affiché : même id, donc sans le compteur le panneau gardait
    *  l'ancien détail (recette tauri-v0.7.1, D-02 ; tauri-v0.7.2, C-06). */
   function lectureFinie() {
-    void bib.reinitialiser(false);
+    void relire();
     fichesModifiees++;
     jauges.rafraichir(); // la lecture notée change les non lus / nouveaux des listes
   }
@@ -635,6 +657,12 @@
     }
   }
 
+  // Page du livre courant toujours chargée (Détails), même s'il a changé de rang à une relecture.
+  $effect(() => {
+    const c = sel.curseur;
+    void bib.total;
+    untrack(() => bib.epingler(c));
+  });
   const livreSelectionne = $derived(sel.curseur >= 0 ? bib.livre(sel.curseur) : undefined);
   const nbSel = $derived(sel.nombre);
   /** Résumé des piles sélectionnées pour le panneau de détails (undefined hors vue empilée). */
@@ -950,7 +978,11 @@
       if (s) void scripts.lancer(s, 'Books', ids);
       return;
     }
-    if (id === 'infos') infosDe = ids;
+    if (id === 'infos') {
+      infosDe = ids;
+      infosCourant = null;
+      if (ids.length === 1 && !pilesAffichees && bib.livre(sel.curseur)?.id === ids[0]) void suivreInfos(ids[0], sel.curseur);
+    }
     else if (id === 'conversion' || id === 'ecritureInfos') operation = { type: id, ids };
     else if (id === 'renommer') renommerDe = ids;
     else if (id === 'dossier') {
@@ -973,17 +1005,54 @@
     }
   }
 
+  /** « Infos du livre » d'un seul livre : livre affiché et ses voisins dans la vue AU MOMENT où il y
+   *  est devenu courant. Précédent / Suivant vont à ces livres-là, retrouvés par identifiant : une
+   *  fiche enregistrée qui déplace le livre (série changée, vue triée par série) ne fait plus sauter
+   *  un livre, et la fenêtre et la sélection de la vue restent sur le même livre (relecture B1). */
+  let infosCourant = $state<{ id: string; prec: string | null; suiv: string | null } | null>(null);
+
+  async function suivreInfos(id: string, i: number) {
+    const [p, s] = await Promise.all([
+      i > 0 ? bib.livresDe([i - 1]) : Promise.resolve([]),
+      i + 1 < bib.total ? bib.livresDe([i + 1]) : Promise.resolve([]),
+    ]);
+    infosCourant = { id, prec: p[0]?.id ?? null, suiv: s[0]?.id ?? null };
+  }
+
+  /** Rang actuel d'un livre dans la vue (pages chargées, sinon backend), null s'il n'y est plus. */
+  async function rangDe(id: string): Promise<number | null> {
+    const i = bib.indexDansPages([id]).get(id);
+    if (i !== undefined) return i;
+    const [r] = await rangsVue(requete(), [id]);
+    return typeof r === 'number' ? r : null;
+  }
+
   /** Précédent / Suivant de « Infos du livre » : la sélection suit, comme dans ComicRack. */
   async function voisin(pas: -1 | 1): Promise<string | null> {
-    const i = sel.curseur + pas;
-    if (sel.curseur < 0 || i < 0 || i >= bib.total) return null;
-    const [l] = await bib.livresDe([i]);
-    if (!l) return null;
+    await relectureEnCours; // vue relue après l'enregistrement de la fiche : rangs à jour
+    const c = infosCourant;
+    let cible = c ? (pas < 0 ? c.prec : c.suiv) : null;
+    let i = cible ? await rangDe(cible) : null;
+    if (i === null) {
+      // Voisin sorti de la vue (ou inconnu) : rang du livre affiché ± 1.
+      const base = c ? await rangDe(c.id) : sel.curseur;
+      if (base === null || base < 0) return null;
+      i = base + pas;
+      if (i < 0 || i >= bib.total) return null;
+      const [l] = await bib.livresDe([i]);
+      if (!l) return null;
+      cible = l.id;
+    }
+    if (!cible) return null;
     sel.unique(i);
     document.querySelector(`[data-index="${i}"]`)?.scrollIntoView({ block: 'nearest' });
-    return l.id;
+    await suivreInfos(cible, i);
+    return cible;
   }
-  const avoisin = (pas: -1 | 1) => sel.curseur >= 0 && sel.curseur + pas >= 0 && sel.curseur + pas < bib.total;
+  const avoisin = (pas: -1 | 1) =>
+    infosCourant
+      ? !!(pas < 0 ? infosCourant.prec : infosCourant.suiv)
+      : sel.curseur >= 0 && sel.curseur + pas >= 0 && sel.curseur + pas < bib.total;
 
   // ───── Listes (étape 5) : glisser-déposer, en-têtes de groupe, ajout à une liste ─────
 
@@ -1028,8 +1097,7 @@
   /** Sélectionne tout le groupe (série) qui contient `i` (Ctrl ou Maj : ajouté à la sélection). */
   async function selectionnerGroupe(i: number, m: Modificateurs) {
     try {
-      const a = await bib.debutDuGroupe(i);
-      const b = await bib.finGroupe(a);
+      const [a, b] = await bib.bornesGroupe(i);
       sel.plage(a, b, m.ctrl || m.maj);
     } catch (e) {
       erreurAction = messageErreur(e);
@@ -1183,6 +1251,7 @@
 
   async function fenetreFermee() {
     infosDe = null;
+    infosCourant = null;
     operation = null;
     renommerDe = null;
     await tick();
@@ -1250,7 +1319,7 @@
     >Détails</button>
     <button onclick={() => void demanderOuvertureFichier()} title="Lire un fichier qui n'est pas dans la bibliothèque" data-testid="ouvrir-fichier">Ouvrir un fichier…</button>
     <MenuRecents onouvrir={ouvrirChemin} />
-    <BoutonsRapport type="relire" onrelu={() => { void bib.reinitialiser(false); void listes.charger(); }} />
+    <BoutonsRapport type="relire" onrelu={() => { void relire(); void listes.charger(); }} />
     <button onclick={ouvrirMenuScripts} aria-haspopup="menu" aria-expanded={!!menuScripts && !menuScripts.ids} title="Scripts Python (bibliothèque, livres sélectionnés, gestion)" data-testid="menu-scripts">📜 Scripts ▾</button>
   </header>
 

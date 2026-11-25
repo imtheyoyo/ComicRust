@@ -216,7 +216,14 @@ const emettre = (nom: string, charge: unknown) => bus.dispatchEvent(new CustomEv
 export function ecouterSimule(nom: string, rappel: (c: unknown) => void): () => void {
   const f = (e: Event) => rappel((e as CustomEvent).detail);
   bus.addEventListener(nom, f);
-  return () => bus.removeEventListener(nom, f);
+  simuleTests.ecoutes[nom] = (simuleTests.ecoutes[nom] ?? 0) + 1;
+  let retire = false;
+  return () => {
+    if (retire) return;
+    retire = true;
+    simuleTests.ecoutes[nom]--;
+    bus.removeEventListener(nom, f);
+  };
 }
 
 // Analyse des dossiers, arrêt, bilan, analyse du démarrage et réglages : voir simuleScan.ts.
@@ -251,7 +258,14 @@ const simuleTests: {
   themesRefuses: Set<string>;
   /** Émet un événement du backend simulé (ex. `scan-termine`). */
   emettre: (nom: string, charge: unknown) => void;
-} = { prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [], edition: [], pilesMasquees: new Set(), themesRefuses, emettre: (n, c) => emettre(n, c) };
+  /** Taille de chaque demande `rangs_vue` (suivi de la sélection par identifiant). */
+  rangs: number[];
+  /** Écoutes actives par événement (fuites d'abonnement). */
+  ecoutes: Record<string, number>;
+  /** Retards (ms) appliqués APRÈS le calcul de la réponse, un par appel de la commande : une
+   *  réponse calculée tôt arrive tard (réponses périmées, courses entre requêtes). */
+  retardsApres: Record<string, number[]>;
+} = { rangs: [], ecoutes: {}, retardsApres: {}, prefs: {}, requetes: [], avancements: [], ouverts: [], fermes: [], edition: [], pilesMasquees: new Set(), themesRefuses, emettre: (n, c) => emettre(n, c) };
 // `?persistance` : les préférences survivent au rechargement de la page (sessionStorage), pour simuler un
 // redémarrage de l'application ; `?prefs=<json>` ne s'applique alors qu'au tout premier chargement.
 const persistance = new URLSearchParams(location.search).has('persistance');
@@ -415,6 +429,13 @@ const lectureEtat = creerLectureEtatSimulee({
 });
 
 export async function appelerSimule(commande: string, args: Record<string, unknown>): Promise<unknown> {
+  const r = await appelerSimuleBrut(commande, args);
+  const retard = simuleTests.retardsApres[commande]?.shift();
+  if (retard) await pause(retard);
+  return r;
+}
+
+async function appelerSimuleBrut(commande: string, args: Record<string, unknown>): Promise<unknown> {
   await pause(LATENCE_MS);
   const rl = lectureEtat.appeler(commande, args);
   if (rl !== undefined) return rl;
@@ -505,6 +526,13 @@ export async function appelerSimule(commande: string, args: Record<string, unkno
         livres: liste.slice(q.debut, q.debut + q.nombre).map((l) => (rangs ? { ...resume(l, q.groupe), rang: rangs.get(l.id) } : resume(l, q.groupe))),
       };
       return rep;
+    }
+    case 'rangs_vue': {
+      // Même vue que lister_livres (cmd_vue.rs) : rang de chaque identifiant, null s'il est absent.
+      const q = args.requete as RequeteLivres;
+      simuleTests.rangs.push((args.ids as string[]).length);
+      const rangs = new Map(ordonnerPile(q).map((l, i) => [l.id, i]));
+      return (args.ids as string[]).map((id) => rangs.get(id) ?? null);
     }
     case 'lister_piles': {
       const q = args.requete as RequeteLivres;

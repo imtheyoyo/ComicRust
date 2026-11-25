@@ -224,6 +224,11 @@ export class GlisserLivres {
 
   private annuler = () => this.terminer();
 
+  /** Vue démontée pendant un glisser : écouteurs de la fenêtre, minuterie et curseur retirés. */
+  detruire(): void {
+    this.terminer();
+  }
+
   private clavier = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && this.actif) {
       e.preventDefault();
