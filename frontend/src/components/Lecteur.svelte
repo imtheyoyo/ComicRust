@@ -19,6 +19,7 @@
   } from '../lib/lecteur';
   import { enregistrerReglagesLecteur, reglagesLecteur } from '../lib/prefs';
   import { definirLivreOuvert, pleinEcranFenetreActif, signalerLecteur } from '../lib/fenetre';
+  import { isoler } from '../lib/isolement';
 
   interface Props {
     /** Livre de la bibliothèque (`{id}` = LivreResume.id) ou fichier hors bibliothèque (`{chemin}`). */
@@ -659,6 +660,8 @@
 
   onMount(() => {
     signalerLecteur(true);
+    // Tout le reste de l'application est inerte tant que le lecteur est affiché (focus piégé, B2).
+    const leverIsolement = racine ? isoler(racine) : () => {};
     racine?.focus();
     montrerBarres();
     let vivant = true;
@@ -695,6 +698,7 @@
     document.addEventListener('fullscreenchange', pleinEcranDoc);
     return () => {
       vivant = false;
+      leverIsolement();
       signalerLecteur(false);
       definirLivreOuvert(null);
       // Lecteur démonté sans passer par `fermer` (autre livre ouvert à sa place, vue quittée) :
