@@ -11,7 +11,6 @@
 //! cache (chemin + taille + date) : une deuxième recherche ne relit aucune archive.
 
 use std::collections::HashMap;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
@@ -182,8 +181,10 @@ pub fn read_comic_info_quick(path: &Path) -> Option<InfoSummary> {
                 })
                 .min_by_key(|n| n.len())?
                 .to_string();
-            let mut buf = Vec::new();
-            zip.by_name(&name).ok()?.take(4 * 1024 * 1024).read_to_end(&mut buf).ok()?;
+            let mut entry = zip.by_name(&name).ok()?;
+            let declared = entry.size();
+            let buf =
+                crate::providers::read_bounded(&mut entry, declared, crate::providers::MAX_INFO_SIZE, &name).ok()?;
             crate::providers::parse_comic_info(&buf).ok()?
         }
         BookFormat::Tar => TarProvider::open(path).ok()?.comic_info().ok()??,

@@ -65,7 +65,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs::Metadata;
-use std::io::Read;
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
@@ -93,7 +93,7 @@ pub use crate::mass_guard::{MASS_MISSING_ABS, MASS_MISSING_MIN};
 pub const ADD_BATCH: usize = 200;
 
 /// Taille maximale lue pour un ComicInfo.xml (protection contre une entrée aberrante).
-const MAX_INFO_SIZE: u64 = 8 * 1024 * 1024;
+use crate::providers::MAX_INFO_SIZE;
 
 /// Bilan d'un [`scan`], à appliquer à la bibliothèque.
 #[derive(Debug, Default)]
@@ -195,15 +195,23 @@ fn info_from_bytes(bytes: Result<Vec<u8>, Error>) -> (Option<ComicInfo>, Option<
     }
 }
 
-fn read_zip(path: &Path) -> Result<FileMeta, Error> {
-    let mut zip = ::zip::ZipArchive::new(std::fs::File::open(path)?)?;
+/// `file` : le fichier déjà ouvert par la détection du format (sinon il est ouvert ici).
+fn read_zip(path: &Path, file: Option<std::fs::File>) -> Result<FileMeta, Error> {
+    let file = match file {
+        Some(mut f) => {
+            f.seek(SeekFrom::Start(0))?;
+            f
+        }
+        None => std::fs::File::open(path)?,
+    };
+    let mut zip = ::zip::ZipArchive::new(file)?;
     let (pages, info_entry) = index_entries(zip.file_names().map(str::to_string));
     let (info, info_error) = match info_entry {
         None => (None, None),
         Some(name) => info_from_bytes((|| {
-            let mut buf = Vec::new();
-            zip.by_name(&name)?.take(MAX_INFO_SIZE).read_to_end(&mut buf)?;
-            Ok(buf)
+            let mut entry = zip.by_name(&name)?;
+            let declared = entry.size();
+            Ok(providers::read_bounded(&mut entry, declared, MAX_INFO_SIZE, &name)?)
         })()),
     };
     Ok(FileMeta { page_count: Some(pages.len() as u32), info, info_error })
@@ -230,6 +238,10 @@ fn read_rar(path: &Path) -> Result<FileMeta, Error> {
             let mut archive = Archive::new(path).open_for_processing().map_err(rar_err)?;
             while let Some(header) = archive.read_header().map_err(rar_err)? {
                 if header.entry().is_file() && entry_name(&header.entry().filename) == wanted {
+                    // Taille vérifiée avant de décompresser en mémoire.
+                    if header.entry().unpacked_size > MAX_INFO_SIZE {
+                        return Err(Error::Io(providers::too_big(&wanted, MAX_INFO_SIZE)));
+                    }
                     return Ok(header.read().map_err(rar_err)?.0);
                 }
                 archive = header.skip().map_err(rar_err)?;
@@ -254,20 +266,41 @@ fn read_7z(path: &Path) -> Result<FileMeta, Error> {
         .map(|e| (e.name.replace('\\', "/"), e.name.clone()))
         .collect();
     let (pages, info_entry) = index_entries(raw.keys().cloned());
-    let (info, info_error) = match info_entry {
-        None => (None, None),
-        Some(name) => info_from_bytes(reader.read_file(&raw[&name]).map_err(err)),
-    };
+    let solid = reader.archive().is_solid;
+    let info_size = info_entry
+        .as_ref()
+        .and_then(|n| reader.archive().files.iter().find(|e| e.name == raw[n]))
+        .map_or(0, |e| e.size);
+    let (info, info_error) =
+        match info_entry {
+            None => (None, None),
+            Some(name) if info_size > MAX_INFO_SIZE => {
+                (None, Some(format!("ComicInfo.xml illisible : {}", providers::too_big(&name, MAX_INFO_SIZE))))
+            }
+            // Archive solide : `read_file` garderait en mémoire tout ce qui précède le
+            // ComicInfo.xml ; la passe bornée saute ces entrées et s'arrête après lui.
+            Some(name) if solid => {
+                let wanted: HashSet<String> = [name.clone()].into();
+                info_from_bytes(providers::sevenz_read_entries(&mut reader, &wanted, Some(&name)).and_then(|mut m| {
+                    m.remove(&name).ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))
+                }))
+            }
+            // Bloc propre au fichier : lecture bornée par la taille déclarée (vérifiée ci-dessus).
+            Some(name) => info_from_bytes(reader.read_file(&raw[&name]).map_err(err)),
+        };
     Ok(FileMeta { page_count: Some(pages.len() as u32), info, info_error })
 }
 
 /// Lit le minimum d'un fichier (voir l'en-tête du module).
 fn read_meta(path: &Path) -> Result<FileMeta, Error> {
-    let format = BookFormat::detect(path).ok_or_else(|| {
+    // Le fichier ouvert pour reconnaître le format sert aussi à lire un ZIP (le cas courant) :
+    // une seule ouverture par livre sur le NAS.
+    let (format, file) = BookFormat::detect_file(path);
+    let format = format.ok_or_else(|| {
         Error::Unsupported(path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "?".into()))
     })?;
     match format {
-        BookFormat::Zip => read_zip(path),
+        BookFormat::Zip => read_zip(path, file),
         BookFormat::Rar => read_rar(path),
         BookFormat::SevenZip => read_7z(path),
         BookFormat::WebComic => {
