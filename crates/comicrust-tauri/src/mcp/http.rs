@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::protocol::Server;
+use crate::garde_mcp;
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
 
@@ -79,16 +80,6 @@ fn respond(stream: &mut TcpStream, status: &str, ctype: &str, body: &[u8], keep:
     stream.flush()
 }
 
-/// Origine acceptée : absente, ou provenant de la machine elle-même.
-fn origin_ok(origin: Option<&String>) -> bool {
-    let Some(o) = origin else { return true };
-    let o = o.to_ascii_lowercase();
-    o == "null"
-        || ["http://127.0.0.1", "http://localhost", "https://127.0.0.1", "https://localhost", "http://[::1]"]
-            .iter()
-            .any(|p| o == *p || o.starts_with(&format!("{p}:")))
-}
-
 fn handle(stream: TcpStream, server: &Server) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(120)))?;
     let mut writer = stream.try_clone()?;
@@ -96,20 +87,10 @@ fn handle(stream: TcpStream, server: &Server) -> io::Result<()> {
     while let Some(req) = read_request(&mut reader)? {
         let keep = !req.headers.get("connection").is_some_and(|c| c.eq_ignore_ascii_case("close"));
         let json = "application/json";
-        if !origin_ok(req.headers.get("origin")) {
-            respond(&mut writer, "403 Forbidden", "text/plain", b"origine refusee", false)?;
+        // Origine, hôte, jeton (facultatif) et type du corps : voir `crate::garde_mcp`.
+        if let Err(refus) = garde_mcp::controler(&req.method, &req.headers, server.options().token.as_deref()) {
+            respond(&mut writer, refus.statut, "text/plain", refus.message.as_bytes(), false)?;
             return Ok(());
-        }
-        if let Some(token) = &server.options().token {
-            let bearer = req
-                .headers
-                .get("authorization")
-                .and_then(|a| a.strip_prefix("Bearer ").or_else(|| a.strip_prefix("bearer ")));
-            let ok = bearer == Some(token.as_str()) || req.headers.get("x-mcp-token") == Some(token);
-            if !ok {
-                respond(&mut writer, "401 Unauthorized", "text/plain", b"jeton manquant ou invalide", false)?;
-                return Ok(());
-            }
         }
         let path = req.path.split('?').next().unwrap_or_default();
         if path != "/mcp" && path != "/" {
@@ -162,18 +143,4 @@ pub fn post(addr: SocketAddr, token: Option<&str>, body: &str) -> io::Result<(u1
     let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
     let status = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
     Ok((status, body.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::origin_ok;
-
-    #[test]
-    fn origins() {
-        assert!(origin_ok(None));
-        assert!(origin_ok(Some(&"http://localhost:3000".into())));
-        assert!(origin_ok(Some(&"http://127.0.0.1".into())));
-        assert!(!origin_ok(Some(&"http://localhost.evil.com".into())));
-        assert!(!origin_ok(Some(&"https://example.org".into())));
-    }
 }
