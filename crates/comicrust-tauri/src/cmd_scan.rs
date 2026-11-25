@@ -38,13 +38,13 @@ pub fn lancer_scan_auto(
 }
 
 /// Réglages « Analyse et suivi » (valeurs par défaut appliquées).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lire_reglages_analyse(biblio: tauri::State<'_, Biblio>) -> Result<ReglagesAnalyseComplets, String> {
     reglages::lire_reglages_analyse(biblio.data())
 }
 
 /// Enregistre (fusionne) les réglages « Analyse et suivi » ; renvoie l'ensemble à jour.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn enregistrer_reglages_analyse(
     biblio: tauri::State<'_, Biblio>,
     reglages: ReglagesAnalyse,

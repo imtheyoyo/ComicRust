@@ -164,6 +164,21 @@ pub fn url_base(jeton: &str) -> String {
     }
 }
 
+/// Origines de la page de l'application (WebView2 : `http://tauri.localhost` ; autres systèmes :
+/// `tauri://localhost`) ; en développement, aussi le serveur Vite (`devUrl`).
+const ORIGINES_APPLICATION: [&str; 3] = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"];
+const ORIGINE_DEVELOPPEMENT: &str = "http://localhost:5173";
+
+/// Valeur de `Access-Control-Allow-Origin` des protocoles `cr-page` et `cr-couv` : l'origine de la
+/// requête si c'est la page de l'application, sinon rien (plus de `*` : une page étrangère chargée
+/// dans la WebView ne peut pas lire les pages des livres).
+pub fn origine_cors(origine: Option<&str>) -> Option<&'static str> {
+    let o = origine?.trim();
+    ORIGINES_APPLICATION.iter().copied().find(|a| a.eq_ignore_ascii_case(o)).or_else(|| {
+        (cfg!(debug_assertions) && o.eq_ignore_ascii_case(ORIGINE_DEVELOPPEMENT)).then_some(ORIGINE_DEVELOPPEMENT)
+    })
+}
+
 /// Jeton, index et largeur maximale d'une requête `cr-page` (`/<jeton>/<index>`, `l=<largeur>`).
 /// `None` si le chemin est mal formé. `l` absent, nul ou illisible : taille d'origine.
 pub fn analyser_uri(chemin: &str, requete: Option<&str>) -> Option<(String, usize, Option<u32>)> {

@@ -63,25 +63,25 @@ fn importer_theme(data: tauri::State<'_, DossierData>, nom: String, css: String)
 }
 
 /// CSS assaini d'un thème, avec un en-tête de commentaire, pour l'exporter.
-#[tauri::command]
+#[tauri::command(async)]
 fn exporter_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<String, String> {
     themes::exporter_theme(&portable::dossier_themes(&data.0), &id).map_err(|e| e.to_string())
 }
 
 /// Supprime un thème (refusé pour un thème livré).
-#[tauri::command]
+#[tauri::command(async)]
 fn supprimer_theme(data: tauri::State<'_, DossierData>, id: String) -> Result<(), String> {
     themes::supprimer_theme(&portable::dossier_themes(&data.0), &id).map_err(|e| e.to_string())
 }
 
 /// Recopie les thèmes livrés ; un fichier différent est conservé en `<id>.css.avant`.
-#[tauri::command]
+#[tauri::command(async)]
 fn reinitialiser_themes_livres(data: tauri::State<'_, DossierData>) -> Result<Vec<String>, String> {
     themes::reinitialiser_themes_livres(&portable::dossier_themes(&data.0)).map_err(|e| e.to_string())
 }
 
 /// Ouvre `data\themes` dans l'explorateur de fichiers.
-#[tauri::command]
+#[tauri::command(async)]
 fn reveler_dossier_themes(data: tauri::State<'_, DossierData>) -> Result<(), String> {
     themes::reveler_dossier(&portable::dossier_themes(&data.0))
 }
@@ -229,7 +229,7 @@ fn lancer_scan(
 // Contrat : docs/tauri/ipc-surveillance.md. Le fil de sondage est démarré dans `setup`.
 
 /// État de la connexion à la base (en ligne / hors ligne), pour l'affichage initial.
-#[tauri::command]
+#[tauri::command(async)]
 fn etat_base(biblio: tauri::State<'_, Biblio>) -> EtatBase {
     biblio.etat_base()
 }
@@ -735,9 +735,11 @@ fn annuler_transfert(transfert: tauri::State<'_, Transfert>) {
 // ───────────────────────────── Mise à jour ─────────────────────────────
 // Contrat : docs/tauri/ipc-maj.md (module `maj`). Vérification et installation dans des fils à
 // part ; résultat et progression par les événements `maj://statut` et `maj://progression`.
+// Commandes qui lisent ou écrivent `data\comicrust-tauri.json` ou lancent un programme : `async`
+// (jamais sur le fil de la fenêtre).
 
 /// Version, réglages, statut courant, installation possible ou non.
-#[tauri::command]
+#[tauri::command(async)]
 fn maj_etat(maj: tauri::State<'_, Maj>) -> EtatMaj {
     maj.etat()
 }
@@ -755,8 +757,8 @@ fn maj_installer(maj: tauri::State<'_, Maj>, tag: String) -> Result<(), String> 
 }
 
 /// Relance le même exe avec les mêmes arguments puis ferme l'application (la lecture des livres
-/// ouverts est enregistrée par `RunEvent::Exit`).
-#[tauri::command]
+/// ouverts est enregistrée par `RunEvent::Exit`). Refusé pendant l'installation.
+#[tauri::command(async)]
 fn maj_redemarrer(app: tauri::AppHandle, maj: tauri::State<'_, Maj>) -> Result<(), String> {
     maj.redemarrer()?;
     app.exit(0);
@@ -765,14 +767,14 @@ fn maj_redemarrer(app: tauri::AppHandle, maj: tauri::State<'_, Maj>) -> Result<(
 
 /// Ouvre une page de `https://github.com/imtheyoyo/ComicRust/` dans le navigateur par défaut
 /// (page de la release, liens des notes de version) ; toute autre adresse est refusée.
-#[tauri::command]
+#[tauri::command(async)]
 fn maj_ouvrir_page(url: String) -> Result<(), String> {
     maj::ouvrir_page(&url)
 }
 
 /// Enregistre `verifierAuDemarrage` et/ou `versionIgnoree` (champ absent = inchangé, `null` efface
 /// la version ignorée) : arguments lus dans le JSON brut de l'appel pour distinguer absent et `null`.
-#[tauri::command]
+#[tauri::command(async)]
 fn maj_regler(maj: tauri::State<'_, Maj>, request: tauri::ipc::Request<'_>) -> Result<EtatMaj, String> {
     let demande = match request.body() {
         tauri::ipc::InvokeBody::Json(v) => maj::analyser_demande_reglage(v)?,
@@ -892,37 +894,69 @@ fn script_reglages_ecrire(
 }
 
 /// Réponse HTTP du protocole `cr-page`.
-fn reponse_page(p: ReponsePage) -> tauri::http::Response<Vec<u8>> {
+/// `origine` : valeur de `Access-Control-Allow-Origin` ([`lecteur::origine_cors`]) ; `None` : aucun
+/// en-tête CORS (seule la page de l'application peut lire les octets).
+fn reponse_page(p: ReponsePage, origine: Option<&'static str>) -> tauri::http::Response<Vec<u8>> {
     // Une URL de page ne vaut que pour une séance (jeton) : gardée par la WebView tant que
     // la séance dure ; les erreurs (404, 504…) ne sont jamais gardées.
     let cache = if p.statut == 200 { "private, max-age=3600" } else { "no-store" };
-    tauri::http::Response::builder()
+    let mut r = tauri::http::Response::builder()
         .status(p.statut)
         .header("Cache-Control", cache)
         .header("Content-Type", p.mime)
-        .header("Access-Control-Allow-Origin", "*")
-        .body(p.octets)
-        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+        .header("Vary", "Origin");
+    if let Some(o) = origine {
+        r = r.header("Access-Control-Allow-Origin", o);
+    }
+    r.body(p.octets).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// En-tête `Origin` d'une requête des protocoles de ressources.
+fn origine_de(requete: &tauri::http::Request<Vec<u8>>) -> Option<&'static str> {
+    lecteur::origine_cors(requete.headers().get("origin").and_then(|v| v.to_str().ok()))
 }
 
 /// Réponse HTTP du protocole `cr-couv`.
-fn reponse_couverture(statut: u16, jpeg: Vec<u8>) -> tauri::http::Response<Vec<u8>> {
+fn reponse_couverture(statut: u16, jpeg: Vec<u8>, origine: Option<&'static str>) -> tauri::http::Response<Vec<u8>> {
     // 200 : couverture gardée par la WebView une heure ; 404 : jamais gardée.
     let cache = if statut == 200 { "private, max-age=3600" } else { "no-store" };
-    tauri::http::Response::builder()
+    let mut r = tauri::http::Response::builder()
         .status(statut)
         .header("Cache-Control", cache)
         .header("Content-Type", "image/jpeg")
-        .header("Access-Control-Allow-Origin", "*")
-        .body(jpeg)
-        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+        .header("Vary", "Origin");
+    if let Some(o) = origine {
+        r = r.header("Access-Control-Allow-Origin", o);
+    }
+    r.body(jpeg).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// Greffon `single-instance` : une deuxième instance a été lancée sur le même dossier `data\`.
+/// La fenêtre passe au premier plan ; le fichier, dossier ou `.cbl` passé en argument (relatif
+/// au dossier courant de la deuxième instance) est transmis au front comme un dépôt de fichier
+/// (événement `tauri://drag-drop` de la fenêtre principale) : même traitement qu'un glisser-déposer
+/// (`DepotFichiers.svelte` : livre ouvert dans le lecteur, `.cbl` importé, dossier proposé).
+fn deuxieme_lancement(app: &tauri::AppHandle, args: Vec<String>, dossier_courant: String) {
+    if let Some(f) = app.get_webview_window("main") {
+        let _ = f.unminimize();
+        let _ = f.show();
+        let _ = f.set_focus();
+    }
+    let lancement = fenetre::analyser_arguments(args.into_iter().skip(1).map(std::ffi::OsString::from));
+    if let Some(chemin) = lancement.chemin {
+        let chemin = if chemin.is_relative() { PathBuf::from(dossier_courant).join(chemin) } else { chemin };
+        let chemin = fenetre::rendre_absolu(&chemin);
+        let charge = serde_json::json!({ "paths": [chemin.display().to_string()], "position": { "x": 0, "y": 0 } });
+        let _ = app.emit_to("main", "tauri://drag-drop", charge);
+    }
 }
 
 /// Lance l'application.
 pub fn run() {
-    // Relance après une mise à jour (`--attendre-pid <pid>`) : attendre (10 s au plus) que
-    // l'ancienne instance ait libéré le profil WebView2 et le port MCP. Tout au début.
-    maj::traiter_attendre_pid();
+    // Relance après une mise à jour (`--attendre-pid <pid>`) : attendre (60 s au plus) que
+    // l'ancienne instance ait libéré le profil WebView2 et le port MCP. Tout au début. `false` :
+    // elle tourne encore (fermeture très lente) ; cette instance ne se renvoie alors pas vers elle.
+    let ancienne_terminee = maj::traiter_attendre_pid();
     // `--mcp-stdio` : passerelle pour les clients MCP qui lancent un programme (Claude Desktop).
     #[cfg(feature = "mcp")]
     if crate::mcp::passerelle_stdio() {
@@ -945,13 +979,23 @@ pub fn run() {
         panic!("plantage simulé (COMICRUST_SIMULER_PLANTAGE)");
     }
     let initial = fenetre::analyser_arguments(std::env::args_os().skip(1)).chemin.map(|p| fenetre::rendre_absolu(&p));
-    // Mise à jour précédente : suppression des `.old` notés dans `data\maj\anciens.txt` et des
-    // téléchargements, avant la création de la fenêtre.
+    // Instance unique par dossier `data\` (exe normal et exe `-mcp` compris) : deux instances
+    // sur les mêmes fichiers perdaient des écritures (avancement, réglages). L'identifiant de
+    // l'application devient propre au dossier : deux copies portables restent indépendantes.
+    let mut contexte = tauri::generate_context!();
+    let cle_instance = portable::cle_instance(&contexte.config().identifier, &data);
+    contexte.config_mut().identifier = cle_instance.clone();
+    let (premiere, _garde_instance) = portable::premiere_instance(&cle_instance);
     let dossier_app = portable::exe_dir();
-    maj::cleanup(&dossier_app);
-    // Premier lancement : relevé des scripts livrés présents (`data\scripts-livres.txt`), pour que
-    // la mise à jour distingue les scripts modifiés par l'utilisateur.
-    maj::assurer_manifeste_scripts(&dossier_app);
+    if premiere {
+        // Mise à jour précédente : suppression des `.old` notés dans `data\maj\anciens.txt` et des
+        // téléchargements, avant la création de la fenêtre. Jamais depuis une deuxième instance
+        // (elle supprimerait le téléchargement en cours de la première).
+        maj::cleanup(&dossier_app);
+        // Premier lancement : relevé des scripts livrés présents (`data\scripts-livres.txt`), pour
+        // que la mise à jour distingue les scripts modifiés par l'utilisateur.
+        maj::assurer_manifeste_scripts(&dossier_app);
+    }
     // Profil WebView2 dans `data\webview2` : à positionner AVANT la création de la fenêtre,
     // sinon WebView2 écrit dans %LOCALAPPDATA%. Sans effet hors Windows.
     let webview = portable::dossier_webview(&data);
@@ -960,7 +1004,14 @@ pub fn run() {
 
     let bibliotheque = Biblio::nouvelle(data.clone());
     let lecteur = Lecteur::nouveau(data.clone(), bibliotheque.clone());
-    tauri::Builder::default()
+    let mut constructeur = tauri::Builder::default();
+    if ancienne_terminee {
+        // Deuxième lancement (« Ouvrir avec », double-clic sur un .cbz…) : le greffon arrête ce
+        // processus et transmet ses arguments à l'instance ouverte, qui ouvre le fichier et passe
+        // au premier plan. En premier, comme le demande le greffon.
+        constructeur = constructeur.plugin(tauri_plugin_single_instance::init(deuxieme_lancement));
+    }
+    constructeur
         // Dialogues natifs de fichiers (Ouvrir, dossier, Enregistrer sous) : docs/tauri/ipc-dialogue.md.
         .plugin(tauri_plugin_dialog::init())
         .manage(Edition::nouvelle(bibliotheque.clone(), lecteur.clone()))
@@ -977,10 +1028,12 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(biblio::PROTOCOLE_COUVERTURES, |ctx, requete, reponse| {
             let bib = ctx.app_handle().state::<Biblio>().inner().clone();
             let id = biblio::id_depuis_uri(requete.uri().path(), requete.uri().host());
+            let origine = origine_de(&requete);
+            // Aucune lecture de disque ici (fil de la WebView) : tout passe par le pool.
             bib.servir(&id, move |jpeg| {
                 reponse.respond(match jpeg {
-                    Some(jpeg) => reponse_couverture(200, jpeg),
-                    None => reponse_couverture(404, Vec::new()),
+                    Some(jpeg) => reponse_couverture(200, jpeg, origine),
+                    None => reponse_couverture(404, Vec::new(), origine),
                 });
             });
         })
@@ -990,15 +1043,19 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(lecteur::PROTOCOLE_PAGES, |ctx, requete, reponse| {
             let lect = ctx.app_handle().state::<Lecteur>().inner().clone();
             let uri = requete.uri();
+            let origine = origine_de(&requete);
             match lecteur::analyser_uri(uri.path(), uri.query()) {
                 Some((jeton, index, largeur)) => {
-                    lect.servir(&jeton, index, largeur, move |p| reponse.respond(reponse_page(p)))
+                    lect.servir(&jeton, index, largeur, move |p| reponse.respond(reponse_page(p, origine)))
                 }
-                None => reponse.respond(reponse_page(ReponsePage {
-                    statut: 404,
-                    mime: "text/plain; charset=utf-8",
-                    octets: b"adresse de page invalide".to_vec(),
-                })),
+                None => reponse.respond(reponse_page(
+                    ReponsePage {
+                        statut: 404,
+                        mime: "text/plain; charset=utf-8",
+                        octets: b"adresse de page invalide".to_vec(),
+                    },
+                    origine,
+                )),
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1205,12 +1262,22 @@ pub fn run() {
             app.state::<Maj>().verifier_au_demarrage();
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(contexte)
         .expect("erreur au lancement de ComicRust-Tauri")
         .run(|app, evenement| match evenement {
             // Fermeture demandée : scripts et automatismes annulés, attente de 8 s au plus (une
             // application en cours finit le livre en cours : jamais de fichier sans sa fiche).
-            tauri::RunEvent::ExitRequested { .. } => {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                // Installation d'une mise à jour en cours : la fermeture attend sa fin (une copie
+                // interrompue laisserait une installation incomplète). La fenêtre reste ouverte.
+                if app.try_state::<Maj>().is_some_and(|m| m.installation_en_cours()) {
+                    api.prevent_exit();
+                    if let Some(f) = app.get_webview_window("main") {
+                        let _ = f.show();
+                        let _ = f.set_focus();
+                    }
+                    return;
+                }
                 if let Some(s) = app.try_state::<Scripts>() {
                     s.fermer(scripts::ATTENTE_FERMETURE);
                 }

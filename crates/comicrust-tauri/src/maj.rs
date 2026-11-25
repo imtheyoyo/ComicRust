@@ -28,7 +28,7 @@
 //!    - un fichier livré puis supprimé par l'utilisateur n'est pas réinstallé ;
 //!    - un nouveau fichier livré est ajouté.
 //! 4. **Redémarrage** : le même exe est relancé avec les mêmes arguments (`--mcp=47803`…) et
-//!    `--attendre-pid <pid>` : la nouvelle instance attend (10 s au plus) la fin de l'ancienne,
+//!    `--attendre-pid <pid>` : la nouvelle instance attend (60 s au plus) la fin de l'ancienne,
 //!    qui libère le profil WebView2 et le port MCP.
 //!
 //! Variables d'environnement (recette, tests) :
@@ -56,8 +56,9 @@ pub const EXE_PRINCIPAL: &str = "ComicRust-Tauri.exe";
 pub const VERSION_ACTUELLE: &str = env!("CARGO_PKG_VERSION");
 /// Option interne passée à la nouvelle instance après une mise à jour.
 pub const ARG_ATTENDRE_PID: &str = "--attendre-pid";
-/// Attente maximale de la fin de l'ancienne instance.
-pub const DELAI_ATTENTE_PID: Duration = Duration::from_secs(10);
+/// Attente maximale de la fin de l'ancienne instance (sa fermeture enregistre la lecture et
+/// laisse finir les scripts : elle peut dépasser quelques secondes).
+pub const DELAI_ATTENTE_PID: Duration = Duration::from_secs(60);
 /// Sous-dossier de `data\` : téléchargements, extraction, liste des `.old`.
 pub const DOSSIER_MAJ: &str = "maj";
 /// Suffixe des fichiers remplacés.
@@ -636,12 +637,15 @@ pub fn relancer(exe: &Path, args: impl IntoIterator<Item = String>) -> Result<()
 }
 
 /// À appeler tout au début : si la ligne de commande contient `--attendre-pid <pid>`, attend
-/// (au plus [`DELAI_ATTENTE_PID`]) la fin de ce processus. Renvoie le pid attendu.
-pub fn traiter_attendre_pid() -> Option<u32> {
+/// (au plus [`DELAI_ATTENTE_PID`]) la fin de ce processus. Renvoie `false` seulement si l'ancienne
+/// instance tourne encore après le délai (l'application ne doit alors pas se considérer comme une
+/// « deuxième instance » à renvoyer vers elle : elle est en train de se fermer).
+pub fn traiter_attendre_pid() -> bool {
     let (pid, _) = retirer_attendre_pid(std::env::args().skip(1));
-    let pid = pid.filter(|p| *p != std::process::id())?;
-    attendre_fin_processus(pid, DELAI_ATTENTE_PID);
-    Some(pid)
+    match pid.filter(|p| *p != std::process::id()) {
+        Some(pid) => attendre_fin_processus(pid, DELAI_ATTENTE_PID),
+        None => true,
+    }
 }
 
 /// Attend la fin du processus `pid` (au plus `delai`) ; vrai s'il est terminé (ou inconnu).

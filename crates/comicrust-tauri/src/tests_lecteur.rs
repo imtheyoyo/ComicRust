@@ -717,3 +717,15 @@ fn c05_detail_du_premier_livre_apres_un_second_comicrack() {
     let det = scenario_c05(&b, &l, "a", "b");
     assert_eq!((det.page_lue, det.progression), (Some(5), Some(50)));
 }
+
+#[test]
+fn cors_limite_a_l_origine_de_l_application() {
+    assert_eq!(origine_cors(Some("http://tauri.localhost")), Some("http://tauri.localhost"));
+    assert_eq!(origine_cors(Some("tauri://localhost")), Some("tauri://localhost"));
+    assert_eq!(origine_cors(Some("https://evil.example")), None);
+    assert_eq!(origine_cors(Some("http://tauri.localhost.evil.example")), None);
+    assert_eq!(origine_cors(Some("null")), None);
+    assert_eq!(origine_cors(None), None);
+    // Tests compilés en mode debug : le serveur Vite est admis (jamais dans la version livrée).
+    assert_eq!(origine_cors(Some("http://localhost:5173")), Some("http://localhost:5173"));
+}
