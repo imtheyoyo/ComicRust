@@ -348,9 +348,11 @@ pub(crate) fn book_from_row(row: Vec<Val>) -> (LibraryBook, i64) {
     (b, counter)
 }
 
-/// Longueur de l'index préfixe sur `file` en MySQL : 191 × 4 octets (utf8mb4) = 764,
-/// sous la limite de 767 octets des anciens MySQL / MariaDB.
-pub(crate) const MYSQL_FILE_INDEX_CHARS: usize = 191;
+/// Ancien index sur `file` (jusqu'à la v1.0.1), jamais utilisé par une requête : retiré
+/// des bases existantes par [`ensure`]. Ce retrait ne change pas `schema_version` : une
+/// version précédente de ComicRust ouvre toujours la base (en SQLite, elle recrée l'index,
+/// retiré de nouveau à l'ouverture suivante par celle-ci).
+pub(crate) const FILE_INDEX: &str = "comicrust_books_file";
 
 /// Colonnes de `comicrust_folders` en MySQL (schéma 2).
 const MYSQL_FOLDERS_COLUMNS: &str = "`path_hash` CHAR(64) CHARACTER SET ascii NOT NULL PRIMARY KEY, \
@@ -365,7 +367,6 @@ pub(crate) fn create_statements(engine: Engine) -> Vec<String> {
                 "CREATE TABLE IF NOT EXISTS {BOOKS} (\n  `id` TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,\n  \
                  `update_counter` INTEGER NOT NULL DEFAULT 0,\n  `pages` TEXT{fields}\n)"
             ),
-            format!("CREATE INDEX IF NOT EXISTS {BOOKS}_file ON {BOOKS}(`file`)"),
             format!("CREATE INDEX IF NOT EXISTS {BOOKS}_counter ON {BOOKS}(`update_counter`)"),
             format!("CREATE TABLE IF NOT EXISTS {FOLDERS} (`path` TEXT NOT NULL PRIMARY KEY)"),
             format!("CREATE TABLE IF NOT EXISTS {META} (`key` TEXT NOT NULL PRIMARY KEY, `value` TEXT)"),
@@ -376,12 +377,13 @@ pub(crate) fn create_statements(engine: Engine) -> Vec<String> {
             ),
             format!("CREATE INDEX IF NOT EXISTS {LISTS}_parent ON {LISTS}(`parent`)"),
         ],
-        // MySQL : pas d'index sur un TEXT sans longueur → index préfixe (non unique)
-        // sur `file`, qui peut dépasser 255 caractères.
+        // Pas d'index sur `file` (v1.0.2) : aucune requête ne le cherchait tel quel (les
+        // fichiers sont comparés sans casse ni différence `\` / `/`, voir `new_books`) ; il
+        // ne faisait que ralentir les écritures. Celui des bases existantes est retiré par
+        // `ensure` ([`FILE_INDEX`]).
         //
         // Compatibilité avec les anciens serveurs (MySQL 5.5 / 5.6, MariaDB < 10.2 : clé
         // d'index InnoDB limitée à 767 octets, soit 191 caractères utf8mb4 de 4 octets) :
-        // - index préfixe `file`(191) (764 octets) ;
         // - `comicrust_folders` : un chemin peut dépasser 191 caractères, la clé primaire
         //   est donc `path_hash` = SHA-256 du chemin en hexadécimal (64 octets ASCII),
         //   calculé par le serveur (`SHA2(?, 256)`) ; `path` est un `TEXT` en
@@ -390,7 +392,6 @@ pub(crate) fn create_statements(engine: Engine) -> Vec<String> {
             format!(
                 "CREATE TABLE IF NOT EXISTS {BOOKS} (\n  `id` VARCHAR(64) NOT NULL PRIMARY KEY,\n  \
                  `update_counter` BIGINT NOT NULL DEFAULT 0,\n  `pages` MEDIUMTEXT{fields},\n  \
-                 INDEX {BOOKS}_file (`file`({MYSQL_FILE_INDEX_CHARS})),\n  \
                  INDEX {BOOKS}_counter (`update_counter`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             ),
             format!(
@@ -437,6 +438,12 @@ pub(crate) fn ensure(conn: &mut Conn) -> Result<(), Error> {
             conn.batch(&format!("ALTER TABLE {BOOKS} ADD COLUMN `{name}` {}", kind.sql_type(engine)))?;
         }
     }
+    if file_index_present(conn)? {
+        conn.batch(&match engine {
+            Engine::Sqlite => format!("DROP INDEX IF EXISTS {FILE_INDEX}"),
+            Engine::MySql => format!("ALTER TABLE {BOOKS} DROP INDEX {FILE_INDEX}"),
+        })?;
+    }
     let ins = engine.insert_ignore();
     for (key, value) in
         [("schema_version", SCHEMA_VERSION), ("update_counter", 0), ("delete_counter", 0), ("lists_counter", 0)]
@@ -460,6 +467,47 @@ pub(crate) fn ensure(conn: &mut Conn) -> Result<(), Error> {
         )?;
     }
     Ok(())
+}
+
+/// L'ancien index [`FILE_INDEX`] existe-t-il ?
+fn file_index_present(conn: &mut Conn) -> Result<bool, Error> {
+    let rows = match conn.engine() {
+        Engine::Sqlite => conn.query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+            &[Val::Text(FILE_INDEX.into())],
+        )?,
+        Engine::MySql => conn.query(
+            "SELECT index_name FROM information_schema.statistics \
+             WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            &[Val::Text(BOOKS.into()), Val::Text(FILE_INDEX.into())],
+        )?,
+    };
+    Ok(!rows.is_empty())
+}
+
+/// Le schéma est-il complet et à jour (tables, colonnes, clés de `comicrust_meta`, version,
+/// ancien index retiré) ? Lecture seule, sans transaction : à l'ouverture, [`ensure`] (qui
+/// prend le verrou d'écriture, `BEGIN IMMEDIATE` en SQLite) n'est lancé que si besoin.
+/// Toute erreur (table absente…) répond « non ».
+pub(crate) fn up_to_date(conn: &mut Conn) -> bool {
+    (|| -> Result<bool, Error> {
+        let have: Vec<String> = existing_columns(conn)?.iter().map(|c| c.to_ascii_lowercase()).collect();
+        if FIELD_COLUMNS.iter().any(|(n, _)| !have.iter().any(|c| c == n)) {
+            return Ok(false);
+        }
+        for t in [FOLDERS, LISTS] {
+            conn.query(&format!("SELECT 1 FROM {t} LIMIT 1"), &[])?;
+        }
+        let keys = conn.query(
+            &format!(
+                "SELECT `key` FROM {META} WHERE `key` IN \
+                 ('schema_version', 'update_counter', 'delete_counter', 'lists_counter')"
+            ),
+            &[],
+        )?;
+        Ok(keys.len() == 4 && meta_int(conn, "schema_version")? == SCHEMA_VERSION && !file_index_present(conn)?)
+    })()
+    .unwrap_or(false)
 }
 
 /// Passage du schéma `from` au schéma `from + 1`.

@@ -1,7 +1,7 @@
 //! Tests du module `store` : SQLite dans un dossier temporaire ; MySQL seulement si
 //! `COMICRUST_TEST_MYSQL` est définie (même convention que `db::tests::mysql_server`).
 
-use super::schema::{LISTS, META};
+use super::schema::{BOOKS, LISTS, META};
 use super::*;
 use crate::db::Applied;
 use crate::library::{PageInfo, PageList};
@@ -703,6 +703,47 @@ fn sqlite_schema_1_is_migrated() {
     assert_eq!(s.folders().unwrap(), [PathBuf::from("/srv/bd")]);
 }
 
+/// Base à jour : l'ouverture ne prend pas le verrou d'écriture. Avant la v1.0.2, chaque
+/// ouverture faisait `BEGIN IMMEDIATE` et attendait (15 s, puis erreur) qu'un autre
+/// écrivain (analyse, autre ComicRust) ait fini.
+#[test]
+fn opening_an_up_to_date_base_does_not_wait_for_writers() {
+    let (_dir, cfg) = temp_cfg();
+    Store::open(&cfg).unwrap().upsert(&[simple(1)]).unwrap();
+    let path = cfg.sqlite_path().unwrap().unwrap();
+    let mut writer = Conn::open_sqlite(&path).unwrap();
+    writer.batch("BEGIN IMMEDIATE").unwrap();
+    let t = std::time::Instant::now();
+    let mut s = Store::open_existing(&cfg).unwrap();
+    assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
+    assert_eq!(s.count().unwrap(), 1, "lecture possible pendant l'écriture");
+    writer.batch("COMMIT").unwrap();
+}
+
+/// Ancien index `comicrust_books_file` (jamais utilisé) : retiré à l'ouverture, sans changer
+/// la version du schéma (une version précédente ouvre toujours la base).
+#[test]
+fn unused_file_index_is_removed() {
+    let (_dir, cfg) = temp_cfg();
+    drop(Store::open(&cfg).unwrap());
+    let path = cfg.sqlite_path().unwrap().unwrap();
+    let index_count = |c: &mut Conn| {
+        c.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'comicrust_books_file'", &[])
+            .unwrap()
+            .len()
+    };
+    let mut c = Conn::open_sqlite(&path).unwrap();
+    assert_eq!(index_count(&mut c), 0, "plus créé");
+    // Base d'une version précédente.
+    c.batch(&format!("CREATE INDEX comicrust_books_file ON {BOOKS}(`file`)")).unwrap();
+    assert!(!schema::up_to_date(&mut c));
+    drop(c);
+    let mut s = Store::open_existing(&cfg).unwrap();
+    assert_eq!(index_count(&mut s.conn), 0, "retiré");
+    assert!(schema::up_to_date(&mut s.conn));
+    assert_eq!(schema::meta_int(&mut s.conn, "schema_version").unwrap(), SCHEMA_VERSION);
+}
+
 #[test]
 fn open_existing_refuses_a_missing_sqlite_file() {
     let (dir, cfg) = temp_cfg();
@@ -719,7 +760,7 @@ fn open_existing_refuses_a_missing_sqlite_file() {
 fn mysql_statements_fit_old_servers() {
     use super::conn::Engine;
     let sql = schema::create_statements(Engine::MySql).join("\n");
-    assert!(sql.contains("`file`(191)"), "{sql}");
+    assert!(!sql.contains("comicrust_books_file"), "index inutile retiré (v1.0.2) : {sql}");
     assert!(!sql.contains("VARCHAR(700)"));
     let folders = schema::create_statements(Engine::MySql).into_iter().find(|s| s.contains(FOLDERS)).unwrap();
     assert!(folders.contains("`path_hash` CHAR(64) CHARACTER SET ascii NOT NULL PRIMARY KEY"), "{folders}");

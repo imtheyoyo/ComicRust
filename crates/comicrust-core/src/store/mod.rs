@@ -173,7 +173,12 @@ impl Store {
             StoreConfig::MySql(c) => Conn::open_mysql(c)?,
             _ => Conn::open_sqlite(&cfg.sqlite_path()?.unwrap_or_default())?,
         };
-        conn.write_tx(schema::ensure)?;
+        // Schéma à jour (cas courant) : pas de transaction d'écriture à chaque ouverture
+        // (surveillance, opérations sur les listes…), qui attendait le verrou d'un autre
+        // écrivain jusqu'à 15 s en SQLite.
+        if !schema::up_to_date(&mut conn) {
+            conn.write_tx(schema::ensure)?;
+        }
         Ok(Store { conn })
     }
 
