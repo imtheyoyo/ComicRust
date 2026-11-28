@@ -478,8 +478,8 @@ fn folder_combine_mode() {
 fn comicdb_save() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ComicDb.xml");
-    let bak = comicdb::backup_dir(&dir.path().join("data"));
     std::fs::write(&path, COMICDB).unwrap();
+    let bak = comicdb::backup_dir(&dir.path().join("data"), &path);
     let db = ComicDbLists::read(&path).unwrap();
     let mut e = ListsEditor::new(db.rows.clone());
     e.rename(L1, "Renommée").unwrap();
@@ -523,6 +523,38 @@ fn comicdb_save() {
     assert_eq!(kept.len(), BACKUPS_KEPT);
     assert!(kept.contains(&report.backup));
     assert!(std::fs::read_dir(dir.path()).unwrap().flatten().all(|f| !f.file_name().to_string_lossy().contains("tmp")));
+}
+
+/// Deux `ComicDb.xml` (deux bibliothèques ComicRack) : deux sous-dossiers de sauvegarde
+/// distincts sous `data\sauvegardes\comicdb`, chacun avec sa propre sauvegarde « origine » ;
+/// clé stable (même fichier, même dossier ; casse et `..` sans effet).
+#[test]
+fn backups_of_two_comicdb_files_are_kept_apart() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let (a, b) = (dir.path().join("A").join("ComicDb.xml"), dir.path().join("B").join("ComicDb.xml"));
+    for p in [&a, &b] {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, COMICDB).unwrap();
+    }
+    let (bak_a, bak_b) = (comicdb::backup_dir(&data, &a), comicdb::backup_dir(&data, &b));
+    assert_ne!(bak_a, bak_b);
+    assert_eq!(bak_a.parent(), Some(comicdb::backup_root(&data).as_path()));
+    assert_eq!(bak_a, comicdb::backup_dir(&data, &dir.path().join("B").join("..").join("A").join("ComicDb.xml")));
+    let cle = comicdb::library_key(&a);
+    assert!(cle.len() == 16 && cle.chars().all(|c| c.is_ascii_hexdigit()), "{cle}");
+    for (p, bak) in [(&a, &bak_a), (&b, &bak_b)] {
+        let db = ComicDbLists::read(p).unwrap();
+        let mut e = ListsEditor::new(db.rows.clone());
+        e.rename(L1, "Renommée").unwrap();
+        db.save_checked(e.rows(), bak, || Ok(false)).unwrap();
+    }
+    for bak in [&bak_a, &bak_b] {
+        let noms: Vec<String> =
+            std::fs::read_dir(bak).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(noms.iter().filter(|n| n.contains("comicrust-origine-")).count(), 1, "{noms:?}");
+        assert_eq!(noms.len(), 2, "origine + une sauvegarde : {noms:?}");
+    }
 }
 
 #[test]
@@ -616,8 +648,8 @@ fn forbidden_xml_characters_are_never_written() {
 fn comicdb_save_refuses_forbidden_characters() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ComicDb.xml");
-    let bak = comicdb::backup_dir(&dir.path().join("data"));
     std::fs::write(&path, COMICDB).unwrap();
+    let bak = comicdb::backup_dir(&dir.path().join("data"), &path);
     let db = ComicDbLists::read(&path).unwrap();
     // Ligne fabriquée à la main (contournant l'éditeur) avec une référence interdite.
     let mut rows = db.rows.clone();
@@ -729,8 +761,8 @@ fn unknown_matcher_members_survive_rewrites() {
 fn comicrack_detection_checked_twice_and_unknown_refused() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ComicDb.xml");
-    let bak = comicdb::backup_dir(&dir.path().join("data"));
     std::fs::write(&path, COMICDB).unwrap();
+    let bak = comicdb::backup_dir(&dir.path().join("data"), &path);
     let db = ComicDbLists::read(&path).unwrap();
     let mut e = ListsEditor::new(db.rows.clone());
     e.rename(L1, "Renommée").unwrap();
@@ -765,8 +797,8 @@ fn comicrack_detection_checked_twice_and_unknown_refused() {
 fn origin_backup_is_kept_forever() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ComicDb.xml");
-    let bak = comicdb::backup_dir(&dir.path().join("data"));
     std::fs::write(&path, COMICDB).unwrap();
+    let bak = comicdb::backup_dir(&dir.path().join("data"), &path);
     // Première écriture : sauvegarde d'origine + sauvegarde ordinaire.
     let db = ComicDbLists::read(&path).unwrap();
     let mut e = ListsEditor::new(db.rows.clone());
@@ -794,8 +826,8 @@ fn origin_backup_is_kept_forever() {
 fn oldest_previous_backup_becomes_origin() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ComicDb.xml");
-    let bak = comicdb::backup_dir(&dir.path().join("data"));
     std::fs::write(&path, COMICDB).unwrap();
+    let bak = comicdb::backup_dir(&dir.path().join("data"), &path);
     std::fs::create_dir_all(&bak).unwrap();
     std::fs::write(bak.join("ComicDb.comicrust-20200101-000000.xml.bak"), "ancienne").unwrap();
     std::fs::write(bak.join("ComicDb.comicrust-20210101-000000.xml.bak"), "moins ancienne").unwrap();
@@ -813,8 +845,8 @@ fn backup_failure_prevents_writing() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ComicDb.xml");
-    let bak = comicdb::backup_dir(&dir.path().join("data"));
     std::fs::write(&path, COMICDB).unwrap();
+    let bak = comicdb::backup_dir(&dir.path().join("data"), &path);
     let db = ComicDbLists::read(&path).unwrap();
     let mut e = ListsEditor::new(db.rows.clone());
     e.rename(L1, "Un").unwrap();
@@ -839,8 +871,8 @@ fn backup_failure_prevents_writing() {
 fn comicdb_replace_failure_removes_temp_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ComicDb.xml");
-    let bak = comicdb::backup_dir(&dir.path().join("data"));
     std::fs::write(&path, COMICDB).unwrap();
+    let bak = comicdb::backup_dir(&dir.path().join("data"), &path);
     let db = ComicDbLists::read(&path).unwrap();
     let mut e = ListsEditor::new(db.rows.clone());
     e.rename(L1, "Un").unwrap();

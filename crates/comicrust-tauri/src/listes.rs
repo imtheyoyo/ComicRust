@@ -718,8 +718,9 @@ impl Biblio {
                         return Ok((lists, issue, None));
                     }
                     let d = detecteur.clone();
-                    // Sauvegardes dans data\sauvegardes\comicdb (portable), pas chez ComicRack.
-                    let sauvegardes = comicrust_core::lists_edit::comicdb::backup_dir(self.data());
+                    // Sauvegardes dans data\sauvegardes\comicdb\<clé du fichier> (portable), pas
+                    // chez ComicRack ; un sous-dossier par ComicDb.xml.
+                    let sauvegardes = comicrust_core::lists_edit::comicdb::backup_dir(self.data(), p);
                     let rapport = fichier.save_checked(ed.rows(), &sauvegardes, move || d())?;
                     Ok((lists, issue, Some(rapport)))
                 })()

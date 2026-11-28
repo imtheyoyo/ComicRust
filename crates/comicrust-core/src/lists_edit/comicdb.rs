@@ -25,7 +25,8 @@
 //!    (`XmlSerializer` refuserait tout le fichier).
 //! 4. Sauvegarde du fichier d'origine dans le dossier donné par l'appelant, **dans le
 //!    `data\` de ComicRust** (version portable : rien n'est écrit dans le dossier de
-//!    ComicRack hormis `ComicDb.xml` lui-même), voir [`backup_dir`] :
+//!    ComicRack hormis `ComicDb.xml` lui-même), un sous-dossier par `ComicDb.xml`, voir
+//!    [`backup_dir`] (synchronisée sur le disque avant le remplacement) :
 //!    `ComicDb.comicrust-AAAAMMJJ-HHMMSS.xml.bak` (les 10 plus récentes sont gardées), et
 //!    la toute première sauvegarde faite par ComicRust, gardée à part et jamais supprimée :
 //!    `ComicDb.comicrust-origine-AAAAMMJJ-HHMMSS.xml.bak`. Une sauvegarde impossible
@@ -48,10 +49,36 @@ use super::{assemble_lists, split_lists, ListRow};
 use crate::comic_lists::{local, parse_comic_lists, xml_err};
 use crate::Error;
 
-/// Dossier des sauvegardes de `ComicDb.xml` dans le dossier `data` de ComicRust :
+/// Racine des sauvegardes de `ComicDb.xml` dans le dossier `data` de ComicRust :
 /// `data\sauvegardes\comicdb`.
-pub fn backup_dir(data: &Path) -> PathBuf {
+pub fn backup_root(data: &Path) -> PathBuf {
     data.join("sauvegardes").join("comicdb")
+}
+
+/// Dossier des sauvegardes d'**un** `ComicDb.xml` : `data\sauvegardes\comicdb\<clé>`, la clé
+/// étant propre au fichier ([`library_key`]). Deux bibliothèques ComicRack ne mélangent ainsi
+/// jamais leurs sauvegardes, et chacune a sa propre sauvegarde « origine ».
+pub fn backup_dir(data: &Path, comicdb: &Path) -> PathBuf {
+    backup_root(data).join(library_key(comicdb))
+}
+
+/// Clé stable d'un `ComicDb.xml` : FNV-1a 64 bits (16 chiffres hexadécimaux) de son chemin
+/// canonique, sans le préfixe `\\?\` de Windows et en minuscules (Windows ignore la casse).
+/// Chemin introuvable (`canonicalize` en échec) : le texte du chemin tel quel. Stable d'une
+/// version de Rust à l'autre (contrairement à `DefaultHasher`).
+pub fn library_key(comicdb: &Path) -> String {
+    let canonique = std::fs::canonicalize(comicdb).unwrap_or_else(|_| comicdb.to_path_buf());
+    let texte = canonique.to_string_lossy();
+    let texte = match texte.strip_prefix(r"\\?\UNC\") {
+        Some(reste) => format!(r"\\{reste}"),
+        None => texte.strip_prefix(r"\\?\").unwrap_or(&texte).to_string(),
+    };
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in texte.to_lowercase().bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 /// Nombre de sauvegardes `*.comicrust-*.xml.bak` gardées.
@@ -236,7 +263,7 @@ impl ComicDbLists {
 
     /// Ancienne forme, gardée pour la version egui archivée (`crates/comicrust`, non
     /// modifiable) : sauvegardes à côté de `ComicDb.xml`. L'application Tauri passe par
-    /// [`save_checked`](Self::save_checked) avec le dossier `data\sauvegardes\comicdb`.
+    /// [`save_checked`](Self::save_checked) avec le dossier [`backup_dir`] (`data\sauvegardes\comicdb\<clé>`).
     pub fn save(&self, rows: &[ListRow]) -> Result<SaveReport, Error> {
         let dir = self.path.parent().unwrap_or(Path::new(".")).to_path_buf();
         self.save_in(rows, &dir)
@@ -298,8 +325,16 @@ fn backup(path: &Path, bytes: &[u8], dir: &Path) -> Result<(PathBuf, Vec<String>
     let stem = file_stem(path);
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let mut warnings = Vec::new();
+    // Sauvegarde écrite puis synchronisée sur le disque avant de toucher à `ComicDb.xml` : une
+    // coupure juste après le remplacement ne laisse jamais une sauvegarde vide.
     let write = |target: &Path| -> Result<(), Error> {
-        std::fs::write(target, bytes).map_err(|e| {
+        let ecrire = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::File::create(target)?;
+            f.write_all(bytes)?;
+            f.sync_all()
+        };
+        ecrire().map_err(|e| {
             Error::Database(format!(
                 "sauvegarde de {} impossible ({}) : {e} — rien n'a été modifié",
                 path.display(),
