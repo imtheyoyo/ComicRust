@@ -813,7 +813,7 @@ impl Biblio {
             });
             let p = &mut piles[k];
             p.nb_livres += 1;
-            p.nb_lus += usize::from(b.read_percent() == Some(100));
+            p.nb_lus += usize::from(b.has_been_read());
             p.ids.push(b.id.clone());
         }
         Ok(PagePiles { total_livres: vue.indices.len(), piles })
@@ -1580,7 +1580,7 @@ fn resume(b: &LibraryBook) -> LivreResume {
         fichier: non_vide(&b.file),
         avancement: b.read_percent().filter(|p| *p > 0),
         pages: b.page_count.unwrap_or(0),
-        lu: b.read_percent() == Some(100),
+        lu: b.has_been_read(),
         url_couverture: url_couverture(&b.id),
         groupe: None,
         rang: None,
@@ -1600,7 +1600,7 @@ pub fn fusionner_lecture(d: &mut LivreDetail, local: Option<crate::avancement::A
     if let Some(pct) = a.pourcentage() {
         if pct > d.progression.unwrap_or(0) {
             d.progression = Some(pct);
-            d.lu = pct == 100;
+            d.lu = pct >= comicrust_core::library::READ_THRESHOLD;
             d.page_lue = Some(((a.page_max + 1) as u32).min(d.pages.max(a.pages as u32).max(1)));
             d.source_lecture = Some("comicrust".to_string());
         }
@@ -1636,7 +1636,7 @@ fn detail(b: &LibraryBook) -> LivreDetail {
         editeur: non_vide(&b.publisher),
         collection: non_vide(&b.imprint),
         pages: b.page_count.unwrap_or(0),
-        lu: b.read_percent() == Some(100),
+        lu: b.has_been_read(),
         progression: b.read_percent(),
         page_courante: b.last_page_read,
         page_lue: b.last_page_read.filter(|p| *p > 0).map(|p| p + 1),

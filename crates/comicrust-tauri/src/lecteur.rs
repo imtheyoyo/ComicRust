@@ -894,8 +894,8 @@ impl Lecteur {
         let crust = local.map(|a| a.page).filter(|p| *p > 0);
         // Déjà lu avant cette séance : ce qui sera lu maintenant est une relecture (le livre reste
         // « lu », la position est notée à part : `Avancement::relecture`).
-        let deja_lu = fiche.as_ref().and_then(|f| f.read_percent()) == Some(100)
-            || local.and_then(|a| a.pourcentage()) == Some(100);
+        let deja_lu = fiche.as_ref().is_some_and(|f| f.has_been_read())
+            || local.and_then(|a| a.pourcentage()).is_some_and(|p| p >= comicrust_core::library::READ_THRESHOLD);
         let crack = fiche.as_ref().and_then(|f| f.current_page).map(|p| p as usize).filter(|p| *p > 0);
         let (reprise, autre) = match (crack, crust) {
             (Some(a), Some(b)) if a != b => (b, Some(a)),

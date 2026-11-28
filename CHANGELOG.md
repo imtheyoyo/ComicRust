@@ -24,13 +24,15 @@ et des décisions de Yoyo du 25/11/2026.
   autre poste ; un ancien mot de passe en clair est rechiffré ; réutilisé seulement pour le même serveur.
 - **Mise à jour intégrée** « tout ou rien » (retour arrière complet en cas d'erreur), fermeture bloquée pendant
   l'installation, redirections HTTPS uniquement (effectif à partir de la mise à jour suivante).
-- **Instance unique** par dossier : ouvrir un livre alors que ComicRust tourne l'ouvre dans la fenêtre existante.
+- **Instance unique** par dossier : ouvrir un livre alors que ComicRust tourne l'ouvre dans la fenêtre existante ;
+  fermer la fenêtre pendant une installation de mise à jour reporte la fermeture à la fin de l'installation.
 - **Sélection** suivie par livre (et non par rang) quand la vue est relue : plus d'action sur un autre livre
   après « Marquer comme lu », une analyse ou la fermeture du lecteur.
 - **Lecteur** : le clavier ne peut plus atteindre les boutons cachés de la bibliothèque.
 - **Serveur MCP** : requêtes venant d'une page web refusées (origine `null`, type et hôte contrôlés).
 - **Parité ComicRack** : expression régulière des listes intelligentes sans casse ; pages triées par valeur
-  numérique (2, 9, 010, 011) ; livre d'une seule page « lu » (et « Marquer comme lu » accepté).
+  numérique (2, 9, 010, 011) ; livre d'une seule page « lu » (et « Marquer comme lu » accepté) ; un livre est
+  « lu » dès **95 %** (règle `HasBeenRead` de ComicRack) pour la pastille, les jauges et les regroupements.
 - **Bedetheque Scraper 2** : séries avec « & » ou « # » trouvées ; une erreur sur un livre n'arrête plus le lot ;
   une seule fenêtre d'erreur réseau par exécution.
 - Divers : fiches en double et corbeilles du NAS à l'analyse et dans la recherche des manquants, couverture

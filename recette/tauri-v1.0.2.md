@@ -46,6 +46,8 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 - [ ] **SL-01 [M]** **Expression régulière sans casse** : liste intelligente « Série correspond à l'expression régulière `cosmic` » → contient les livres de « COSMIC COLLECTION » (comme ComicRack).
 - [ ] **TP-01 [M]** **Ordre des pages** : « Test ordre des pages.cbz » s'affiche dans l'ordre **2, 9, 010, 011** (comme ComicRack).
 - [ ] **LU-01 [M]** **Livre d'une page** : « Test une page.cbz » → « Marquer comme lu » le rend **Lu / 100 %** ; « non lu » le remet à 0 ; un livre d'une page marqué lu dans ComicRack apparaît lu dans ComicRust.
+- [ ] **LU-02 [M]** **Seuil « lu » à 95 %** (comme ComicRack) : un livre lu à 95 % ou plus (ex. 19 pages sur 20) est « Lu » (pastille, panneau Détails, jauge jaune, regroupement « État de lecture ») ; à 90 % il est « en cours » ; compare un livre à 95-99 % avec ComicRack.
+- [ ] **IU-02 [M]** **Fermeture pendant une mise à jour** (à partir de la prochaine mise à jour, voir limites) : non testable dans cette recette ; noter seulement qu'aucun processus `ComicRust-Tauri.exe` ne reste dans le Gestionnaire des tâches après fermeture normale.
 - [ ] **CB-01 [M]** **Couverture à jour** (copie autonome) : remplace un CBZ par une autre version au même chemin, lance l'analyse → la nouvelle couverture s'affiche.
 - [ ] **BQ-01 [M]** **Bedetheque Scraper 2** : une série au nom avec « & » (« Tif & Tondu », « Blake & Mortimer ») est trouvée ; sur un lot de plusieurs livres, un livre introuvable ou en erreur n'arrête pas les suivants ; une coupure réseau n'affiche qu'**une** fenêtre d'erreur.
 - [ ] **GR-01 [m]** Clic droit ▸ « Sélectionner tout le groupe » (regroupement par éditeur, grande bibliothèque) : quasi instantané.
@@ -132,7 +134,9 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 - Mêmes limites que la [tauri-v1.0.1](tauri-v1.0.1.md).
 - La mise à jour « tout ou rien », le blocage de la fermeture pendant l'installation et les redirections HTTPS seulement ne s'appliquent qu'**à partir de la 1.0.2** (la mise à jour 1.0.1 → 1.0.2 utilise l'ancien installateur).
-- Un livre « lu » reste à 100 % dans ComicRust (ComicRack le considère lu dès 95 %) ; « Marquer comme lu / non lu » ne modifie pas le nombre d'ouvertures (ComicRack, si).
+- « Marquer comme lu / non lu » ne modifie pas le nombre d'ouvertures (ComicRack, si).
+- Lire jusqu'au bout un livre d'**une seule page** dans le lecteur ne le marque pas lu (comme ComicRack) : utiliser « Marquer comme lu ».
+- Après la mise à jour, une ancienne couverture peut rester affichée jusqu'à une heure (cache de WebView2) ; l'avancement des 2 dernières secondes peut être perdu en cas de plantage ou d'arrêt forcé.
 - Instance unique par dossier `data\` : une 2ᵉ instance sur le même dossier transmet son fichier et s'arrête.
 - Non traités dans cette version : signature cryptographique des mises à jour, base SQLite en mode WAL, écritures MySQL par lots, couverture PDF rendue directement à la taille de la miniature, onglet Pages qui mémorise encore sa vue dans le profil WebView2.
 

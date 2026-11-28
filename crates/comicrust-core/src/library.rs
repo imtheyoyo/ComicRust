@@ -343,6 +343,12 @@ impl LibraryBook {
         Some((read.saturating_add(1).saturating_mul(100) / total).clamp(1, 100))
     }
 
+    /// Livre « lu » au sens de ComicRack (`ComicBook.HasBeenRead` : `ReadPercentage >= 95`,
+    /// IL relu avec REA) : seuil [`READ_THRESHOLD`], décision de Yoyo du 28/11/2026.
+    pub fn has_been_read(&self) -> bool {
+        self.read_percent().is_some_and(|p| p >= READ_THRESHOLD)
+    }
+
     /// Fiche d'un livre telle que stockée dans la colonne `data` de MySQL.
     /// Fiche au format de ComicRack (`<ComicBook Id=".." File="..">…`), comme la colonne
     /// `data` de MySQL : sert à écrire les infos dans un fichier quelle que soit la base.
@@ -354,6 +360,9 @@ impl LibraryBook {
         Ok(quick_xml::de::from_str(xml.trim_start_matches('\u{feff}'))?)
     }
 }
+
+/// Pourcentage à partir duquel un livre est « lu » (`ComicBook.HasBeenRead` de ComicRack).
+pub const READ_THRESHOLD: u32 = 95;
 
 /// `LastPageRead` (et `CurrentPage`) qu'écrit `ComicBook.MarkAsRead` de ComicRack pour un
 /// livre de `page_count` pages : la dernière page (`page_count - 1`), sauf pour un livre
@@ -532,6 +541,12 @@ mod tests {
         assert_eq!(b(Some(19), 20).read_percent(), Some(100));
         assert_eq!(b(Some(9), 20).read_percent(), Some(50));
         assert_eq!(b(Some(u32::MAX), 20).read_percent(), Some(100), "pas de débordement");
+        // Seuil « lu » de ComicRack : 95 % (HasBeenRead).
+        assert!(b(Some(18), 20).has_been_read(), "19/20 = 95 % : lu");
+        assert!(!b(Some(17), 20).has_been_read(), "18/20 = 90 % : pas lu");
+        assert!(b(Some(1), 1).has_been_read());
+        assert!(!b(Some(0), 1).has_been_read());
+        assert!(!b(None, 1).has_been_read());
     }
 
     #[test]

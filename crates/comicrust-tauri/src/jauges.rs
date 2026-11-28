@@ -60,7 +60,7 @@ fn jour(v: &Option<String>) -> Option<NaiveDate> {
 
 /// `(nouveau, non lu)` d'un livre au jour `aujourdhui` : nouveau = ajouté dans ]aujourdhui - 7 j ; aujourdhui].
 pub fn etat_livre(b: &LibraryBook, aujourdhui: NaiveDate) -> (bool, bool) {
-    let non_lu = b.read_percent() != Some(100);
+    let non_lu = !b.has_been_read();
     let jamais_ouvert = jour(&b.opened).is_none()
         && b.open_count.unwrap_or(0) == 0
         && b.last_page_read.unwrap_or(0) == 0

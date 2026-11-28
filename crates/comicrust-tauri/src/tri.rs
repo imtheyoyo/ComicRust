@@ -137,7 +137,7 @@ impl Regroupement {
             Regroupement::Format => texte(&b.format, "(sans format)"),
             Regroupement::EtatLecture => match b.read_percent() {
                 None | Some(0) => "Non lu".into(),
-                Some(100) => "Lu".into(),
+                _ if b.has_been_read() => "Lu".into(),
                 Some(_) => "En cours".into(),
             },
         }

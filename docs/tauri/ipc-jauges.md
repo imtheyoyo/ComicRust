@@ -12,7 +12,7 @@ camelCase, **aucune logique métier côté front**.
 | Compte | Règle |
 |---|---|
 | **total** (vert) | livres de la liste présents dans la base : **exactement** le `nbLivres` de `arbre_listes` (livres manquants compris : leur fiche reste dans la base ; identifiants de liste absents de la base ignorés). |
-| **non lus** (jaune) | livres dont la lecture est à moins de 100 % (`LibraryBook::read_percent() != 100`, comme la pastille « lu » de la vue et « Marquer comme lu / non lu »). Les livres en cours comptent donc comme non lus ; nombre de pages inconnu : non lu. |
+| **non lus** (jaune) | livres qui ne sont pas « lus » au sens de ComicRack, soit lus à moins de 95 % (`!LibraryBook::has_been_read()`, seuil `READ_THRESHOLD` = `ComicBook.HasBeenRead` ; même règle que la pastille « lu » et le regroupement par état de lecture). Les livres en cours comptent donc comme non lus ; nombre de pages inconnu : non lu. |
 | **nouveaux** (rouge) | livres non lus **jamais ouverts** (ni `Opened`, ni `OpenCount`, ni page lue) et **ajoutés il y a moins de 7 jours** (`Added`, constante `JOURS_NOUVEAU`, comparaison stricte : un livre ajouté il y a 7 jours n'est plus nouveau). Sans date d'ajout, ou avec un `Added` dans le futur (horloge déréglée, `ComicDb.xml`) : jamais nouveau. Un nouveau est toujours aussi compté dans les non lus. |
 
 **Limite connue** : le premier scan d'une collection existante donne à tous ses livres une date d'ajout récente ; tant qu'ils sont jamais ouverts, ils sont tous « nouveaux » pendant une semaine.

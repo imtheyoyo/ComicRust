@@ -53,7 +53,7 @@
     const d = detail;
     if (!d) return null;
     const pct = Math.round(d.progression ?? 0);
-    const lu = d.lu || pct >= 100;
+    const lu = d.lu; // seuil « lu » décidé côté backend (95 %, comme ComicRack)
     const origine = d.sourceLecture === 'comicrust' ? ' dans ComicRust' : '';
     // Relecture d'un livre lu : il reste « Lu », la barre suit la relecture (C-06, tauri-v0.7.3).
     const r = d.relecture;
