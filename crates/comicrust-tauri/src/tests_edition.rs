@@ -936,12 +936,11 @@ fn fiche_ce(id: &str, fichier: &Path) -> String {
 #[test]
 fn mysql_comicrack_lecture_et_ecriture() {
     use mysql::prelude::Queryable;
-    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-        eprintln!("COMICRUST_TEST_MYSQL absent : test MySQL ignoré");
+    // Garde commune du cœur : base « …test… » seulement, jamais comickrack_demo.
+    let Some(url) = comicrust_core::db::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL ignoré") else {
         return;
     };
     let cfg = DbConfig::from_connection_string(&url).unwrap();
-    assert_ne!(cfg.database, "comickrack_demo", "jamais la base de démonstration");
     let opts = mysql::OptsBuilder::new()
         .ip_or_hostname(Some(cfg.host.clone()))
         .tcp_port(cfg.port)

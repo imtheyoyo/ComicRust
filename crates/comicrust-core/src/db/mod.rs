@@ -421,6 +421,38 @@ impl ComicDatabase {
     }
 }
 
+/// Chaîne de connexion de la base MySQL **de test** (variable `COMICRUST_TEST_MYSQL`), pour
+/// les tests destructeurs (ils suppriment et recréent les tables `comics` / `changes`) du cœur
+/// et de l'application Tauri : garde commune, la seule à utiliser.
+///
+/// Renvoie `None` (le test doit alors être ignoré) si la variable est absente (message
+/// `absent` sur la sortie d'erreur) ou si la base visée n'est pas sûre ([`safe_test_database`] :
+/// nom sans « test », ou `comickrack_demo`).
+pub fn test_mysql_url(absent: &str) -> Option<String> {
+    safe_test_url(std::env::var("COMICRUST_TEST_MYSQL").ok(), absent)
+}
+
+/// Cœur de [`test_mysql_url`] : `url` est la valeur de la variable (`None` si absente).
+fn safe_test_url(url: Option<String>, absent: &str) -> Option<String> {
+    let Some(url) = url else {
+        eprintln!("{absent}");
+        return None;
+    };
+    let database = DbConfig::from_connection_string(&url).map(|c| c.database).unwrap_or_default();
+    if !safe_test_database(&database) {
+        eprintln!("COMICRUST_TEST_MYSQL vise la base « {database} » (nom sans « test » ou base de démonstration) : test MySQL ignoré");
+        return None;
+    }
+    Some(url)
+}
+
+/// Nom de base acceptable pour les tests destructeurs : contient « test » (casse ignorée) et
+/// n'est jamais `comickrack_demo` (casse ignorée).
+pub fn safe_test_database(name: &str) -> bool {
+    let n = name.trim().to_lowercase();
+    n != "comickrack_demo" && n.contains("test")
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -432,27 +464,7 @@ pub(crate) mod tests {
         LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Chaîne de connexion de la base de test (`COMICRUST_TEST_MYSQL`), seulement si la base
-    /// est sans danger : ces tests **suppriment** les tables `comics` / `changes`. Base
-    /// absente, `comickrack_demo` ou nom sans « test » : `None`, le test est ignoré.
-    pub(crate) fn test_mysql_url(absent: &str) -> Option<String> {
-        let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-            eprintln!("{absent}");
-            return None;
-        };
-        let database = DbConfig::from_connection_string(&url).map(|c| c.database).unwrap_or_default();
-        if !safe_test_database(&database) {
-            eprintln!("COMICRUST_TEST_MYSQL vise la base « {database} » (nom sans « test ») : test MySQL ignoré");
-            return None;
-        }
-        assert_ne!(database, "comickrack_demo", "jamais la base de démonstration");
-        Some(url)
-    }
-
-    /// Nom de base acceptable pour les tests destructeurs.
-    pub(crate) fn safe_test_database(name: &str) -> bool {
-        name != "comickrack_demo" && name.to_lowercase().contains("test")
-    }
+    pub(crate) use super::{safe_test_database, test_mysql_url};
 
     #[test]
     fn destructive_tests_only_on_a_test_database() {
@@ -461,6 +473,18 @@ pub(crate) mod tests {
         assert!(!safe_test_database("comickrack_demo"), "jamais la base de démonstration");
         assert!(!safe_test_database("comicrack"), "vraie bibliothèque");
         assert!(!safe_test_database(""));
+        assert!(!safe_test_database("ComicKrack_Demo"), "casse ignorée");
+    }
+
+    /// La garde : base sans « test » ou de démonstration refusée, variable absente refusée.
+    #[test]
+    fn test_mysql_url_refuses_unsafe_databases() {
+        let url = |base: &str| Some(format!("Server=localhost;Database={base};Uid=u;"));
+        assert_eq!(super::safe_test_url(url("comickrack_demo"), "absent"), None);
+        assert_eq!(super::safe_test_url(url("COMICKRACK_DEMO"), "absent"), None);
+        assert_eq!(super::safe_test_url(url("comicrack"), "absent"), None);
+        assert_eq!(super::safe_test_url(None, "absent"), None);
+        assert_eq!(super::safe_test_url(url("comicrust_test"), "absent"), url("comicrust_test"));
     }
 
     /// Fiche au format exact de ComicRack CE (`XmlUtility.ToString(ComicBook)`).

@@ -137,9 +137,9 @@ fn bloc<'a>(texte: &'a str, balise: &str) -> &'a str {
     &texte[a..b]
 }
 
-/// Dossier des sauvegardes de ComicDb.xml : `data\sauvegardes\comicdb` (jamais chez ComicRack).
+/// Dossier des sauvegardes de ComicDb.xml : `data\sauvegardes\comicdb\<clé>` (jamais chez ComicRack).
 fn dossier_sauvegardes(dossier: &Path) -> PathBuf {
-    comicrust_core::lists_edit::comicdb::backup_dir(&dossier.join("data"))
+    comicrust_core::lists_edit::comicdb::backup_dir(&dossier.join("data"), &dossier.join("ComicDb.xml"))
 }
 
 fn sauvegardes(dossier: &Path) -> (Vec<String>, Vec<String>) {
@@ -921,12 +921,11 @@ fn cbl_en_lecture_seule() {
 /// l'autre poste pendant une opération fait refuser celle-ci, sans rien écrire.
 #[test]
 fn mysql_deux_postes() {
-    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-        eprintln!("COMICRUST_TEST_MYSQL absent : test MySQL des listes ignoré");
+    // Garde commune du cœur : base « …test… » seulement, jamais comickrack_demo.
+    let Some(url) = comicrust_core::db::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL des listes ignoré") else {
         return;
     };
     let db = comicrust_core::db::DbConfig::from_connection_string(&url).unwrap();
-    assert_ne!(db.database, "comickrack_demo", "jamais la base de démonstration");
     let cfg = StoreConfig::MySql(db);
     let Ok(mut s) = Store::open(&cfg) else {
         eprintln!("MySQL de test injoignable : test ignoré");

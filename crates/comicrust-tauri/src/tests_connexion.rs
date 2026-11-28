@@ -171,12 +171,11 @@ fn ouvrir_lit_le_choix_mysql_enregistre() {
 /// ComicRust y sont créées.
 #[test]
 fn mysql_reel_base_de_comicrust_si_variable_definie() {
-    let Ok(url) = std::env::var("COMICRUST_TEST_MYSQL") else {
-        eprintln!("COMICRUST_TEST_MYSQL absent : test MySQL ignoré");
+    // Garde commune du cœur : base « …test… » seulement, jamais comickrack_demo.
+    let Some(url) = comicrust_core::db::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL ignoré") else {
         return;
     };
     let c = DbConfig::from_connection_string(&url).unwrap();
-    assert_ne!(c.database, "comickrack_demo", "jamais la base de démonstration");
     let p = ParametresMysql {
         serveur: c.host.clone(),
         port: c.port,
