@@ -228,6 +228,48 @@ pub fn depuis_le_cache(cache: &Path, id: &str, image: usize) -> Option<Vec<u8>> 
     std::fs::read(cache.join(nom_cache(id, image))).ok().filter(|o| !o.is_empty())
 }
 
+// ───────────────────────────── Format du cache ─────────────────────────────
+
+/// Format du cache disque (`data\couvertures`). À augmenter quand l'image désignée par un nom de
+/// cache ([`nom_cache`] : identifiant + rang d'image) peut changer. 2 (v1.0.2) : les pages sont
+/// triées par valeur numérique (`img_2` avant `img_010`, comme ComicRack) ; l'image n°`i` d'un
+/// livre n'est plus forcément la même qu'avant.
+pub const FORMAT_CACHE: u32 = 2;
+/// Fichier du format, dans le dossier du cache.
+pub const FICHIER_FORMAT: &str = "format-cache.txt";
+
+/// Vide le cache s'il a été fait par un autre format (une seule fois, au premier lancement d'une
+/// version qui change [`FORMAT_CACHE`]) : seuls les `.jpg` et `.tmp` du dossier sont supprimés,
+/// puis le format est noté. Si un fichier ne peut pas être supprimé, le format n'est pas noté
+/// (nouvel essai au lancement suivant). Renvoie le nombre de fichiers supprimés.
+pub fn migrer_cache(cache: &Path) -> std::io::Result<usize> {
+    let fichier_format = cache.join(FICHIER_FORMAT);
+    if std::fs::read_to_string(&fichier_format).is_ok_and(|t| t.trim() == FORMAT_CACHE.to_string()) {
+        return Ok(0);
+    }
+    let mut supprimes = 0;
+    let mut erreur = None;
+    if let Ok(lecture) = std::fs::read_dir(cache) {
+        for e in lecture.flatten() {
+            let chemin = e.path();
+            let du_cache =
+                chemin.extension().is_some_and(|x| x.eq_ignore_ascii_case("jpg") || x.eq_ignore_ascii_case("tmp"));
+            if du_cache && chemin.is_file() {
+                match std::fs::remove_file(&chemin) {
+                    Ok(()) => supprimes += 1,
+                    Err(err) => erreur = Some(err),
+                }
+            }
+        }
+    }
+    if let Some(err) = erreur {
+        return Err(err);
+    }
+    std::fs::create_dir_all(cache)?;
+    std::fs::write(&fichier_format, format!("{FORMAT_CACHE}\n"))?;
+    Ok(supprimes)
+}
+
 /// CBZ d'une image unie, pour les tests.
 #[cfg(test)]
 pub(crate) fn cbz_de_test(chemin: &Path, couleur: [u8; 4], pages: usize, info: Option<&str>) {
@@ -250,6 +292,35 @@ pub(crate) fn cbz_de_test(chemin: &Path, couleur: [u8; 4], pages: usize, info: O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ordre des pages changé (v1.0.2) : le cache des couvertures et vignettes est vidé une seule
+    /// fois ; les autres fichiers du dossier sont gardés.
+    #[test]
+    fn cache_vide_une_seule_fois_au_changement_de_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join(DOSSIER_COUVERTURES);
+        // Pas encore de cache : rien à supprimer, format noté.
+        assert_eq!(migrer_cache(&cache).unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(cache.join(FICHIER_FORMAT)).unwrap().trim(), FORMAT_CACHE.to_string());
+        // Cache d'une version précédente (sans fichier de format, ou format 1).
+        for format in [None, Some("1\n")] {
+            match format {
+                Some(f) => std::fs::write(cache.join(FICHIER_FORMAT), f).unwrap(),
+                None => std::fs::remove_file(cache.join(FICHIER_FORMAT)).unwrap(),
+            }
+            std::fs::write(cache.join(nom_cache("abc", 0)), b"ancienne").unwrap();
+            std::fs::write(cache.join(nom_cache("abc", 3)), b"ancienne p3").unwrap();
+            std::fs::write(cache.join("x.jpg.0.tmp"), b"").unwrap();
+            std::fs::write(cache.join("autre.txt"), b"garde").unwrap();
+            assert_eq!(migrer_cache(&cache).unwrap(), 3);
+            assert!(!cache.join(nom_cache("abc", 0)).exists() && !cache.join(nom_cache("abc", 3)).exists());
+            assert!(cache.join("autre.txt").exists(), "seuls les .jpg et .tmp sont supprimés");
+        }
+        // Lancements suivants : le cache produit par cette version est gardé.
+        std::fs::write(cache.join(nom_cache("abc", 0)), b"nouvelle").unwrap();
+        assert_eq!(migrer_cache(&cache).unwrap(), 0);
+        assert_eq!(std::fs::read(cache.join(nom_cache("abc", 0))).unwrap(), b"nouvelle");
+    }
 
     #[test]
     fn couverture_faite_une_fois_puis_lue_du_cache() {
