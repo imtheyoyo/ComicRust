@@ -5,7 +5,7 @@ import type {
   PreferencesVue, ClefTri, ChoixMysql, ConnexionsMysql, EtatBiblio, ParametresMysql, LivreDetail, LivreOuvert, LivreResume, PageInfo, RequeteLivres,
   ReponseLivres, ReponsePiles, Pile,
 } from './api';
-import { creerEditionSimulee } from './simuleEdition';
+import { creerEditionSimulee, LECTURE_SEULE_FICHIERS } from './simuleEdition';
 import { creerBaseSimulee } from './simuleBase';
 import { creerListesSimulees } from './simuleListes';
 import { creerTransfertSimule } from './simuleTransfert';
@@ -408,6 +408,14 @@ const mq = creerManquantsSimules({
     if (etat.mode !== 'comicrack') return undefined;
     const r = edition('lire_reglages_edition', {}) as { ecritureComicrack: boolean };
     return r.ecritureComicrack ? undefined : 'Bibliothèque ComicRack en lecture seule (cocher « Lecture et écriture » dans Réglages).';
+  },
+  // Actions sur les fichiers des livres : texte propre aux fichiers (comme `raison_fichiers`).
+  lectureSeuleFichiers: () => {
+    const h = base.motif();
+    if (h) return h;
+    if (etat.mode !== 'comicrack') return undefined;
+    const r = edition('lire_reglages_edition', {}) as { ecritureComicrack: boolean };
+    return r.ecritureComicrack ? undefined : LECTURE_SEULE_FICHIERS;
   },
   emettre,
   pause,

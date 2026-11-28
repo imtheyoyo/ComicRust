@@ -22,6 +22,8 @@ export interface ContexteManquants {
   livres: LivreSimule[];
   /** Motif de lecture seule de la bibliothèque simulée (undefined : fiches modifiables). */
   lectureSeule: () => string | undefined;
+  /** Motif propre aux fichiers des livres (`raisonFichiers`), sinon celui des fiches. */
+  lectureSeuleFichiers?: () => string | undefined;
   emettre: (nom: string, charge: unknown) => void;
   pause: (ms: number) => Promise<unknown>;
   /** Le contenu des vues a changé (cache de l'ordre à recalculer). */
@@ -108,6 +110,7 @@ export function creerManquantsSimules(ctx: ContexteManquants) {
             ...(recherche ? { recherche: { ...recherche } } : {}),
             ...(derniere ? { derniere } : {}),
             ...(raison ? { raisonLectureSeule: raison } : {}),
+            ...(raison ? { raisonFichiers: ctx.lectureSeuleFichiers?.() ?? raison } : {}),
           };
         })();
       case 'verifier_manquants':

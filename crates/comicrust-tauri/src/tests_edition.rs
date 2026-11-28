@@ -993,7 +993,11 @@ fn mysql_comicrack_lecture_et_ecriture() {
         confirme: false,
     };
     assert!(e.appliquer_modifications(&dm, &|_| {}).is_err());
-    assert_eq!(e.ecrire_infos_fichiers(&[id.to_string()], false, &|_| {}).unwrap_err(), LECTURE_SEULE_COMICRACK);
+    // Actions sur les fichiers : la raison parle des fichiers des livres (recette 1.0.2).
+    assert_eq!(
+        e.ecrire_infos_fichiers(&[id.to_string()], false, &|_| {}).unwrap_err(),
+        crate::edition::LECTURE_SEULE_FICHIERS
+    );
     assert_eq!(data_de(&mut conn).1, 5, "lecture seule : base ComicRack intacte");
     // Lecture en lecture seule : rien dans ComicRack.
     let o = lecteur.ouvrir_livre(id).unwrap();

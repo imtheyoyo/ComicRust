@@ -1500,6 +1500,9 @@ export interface EtatManquants {
   derniere?: BilanVerification;
   /** Fiches non modifiables (lecture seule, base injoignable) : raison ; absent : modifiables. */
   raisonLectureSeule?: string;
+  /** Fichiers des livres non modifiables (écrire les infos, convertir, renommer) : raison propre
+   *  aux fichiers, la même que le refus du backend ; absent : modifiables. */
+  raisonFichiers?: string;
 }
 export type EtatFichier = 'present' | 'introuvable' | 'volumeInjoignable';
 export interface SondeLivre {

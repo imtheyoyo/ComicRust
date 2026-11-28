@@ -715,10 +715,10 @@
 
   /** Raison pour laquelle les fichiers des livres ne sont pas modifiables (D1 : bibliothèque ComicRack
    *  en lecture seule, base injoignable) : « Écrire les infos », « Convertir » et « Renommer » sont
-   *  grisés avec elle. Le backend décide (`Cible::fichiers_modifiables`) ; c'est la même raison que
-   *  celle des fiches, donnée par `etat_manquants`. */
+   *  grisés avec elle. Le backend décide (`Cible::fichiers_modifiables`) et donne le texte, propre aux
+   *  fichiers des livres (`raisonFichiers` de `etat_manquants`, même texte que son refus). */
   function raisonFichiers(): string | undefined {
-    return manquants.raison;
+    return manquants.raisonFichiers;
   }
 
   /** Entrées « livres manquants » du menu contextuel (lot L3) : désactivées si les fiches ne sont pas

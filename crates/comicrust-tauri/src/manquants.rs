@@ -161,6 +161,11 @@ pub struct EtatManquants {
     /// absent : « Retrouver » et « Retirer » sont possibles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raison_lecture_seule: Option<String>,
+    /// Pourquoi les fichiers des livres ne sont pas modifiables (écrire les infos, convertir,
+    /// renommer) : même décision que les fiches, texte propre aux fichiers
+    /// ([`crate::edition::raison_fichiers`]). `None` : modifiables.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raison_fichiers: Option<String>,
 }
 
 /// Résultat de l'examen du fichier d'un livre avant son ouverture.
@@ -562,6 +567,13 @@ impl Manquants {
         cible_modifiable(&self.biblio).err()
     }
 
+    /// Pourquoi les fichiers des livres ne sont pas modifiables (entrées grisées « Écrire les
+    /// infos dans le fichier », « Convertir en CBZ », « Renommer / déplacer… ») : même texte que
+    /// le refus du backend ([`crate::edition::Edition::motif_fichiers`]).
+    pub fn raison_fichiers(&self) -> Option<String> {
+        self.raison_lecture_seule().map(|r| crate::edition::raison_fichiers(&r))
+    }
+
     /// Nombre de livres manquants de la bibliothèque ouverte.
     pub fn compter(&self) -> usize {
         self.biblio.base().map_or(0, |b| b.books.iter().filter(|l| est_manquant(l)).count())
@@ -587,6 +599,7 @@ impl Manquants {
             verification,
             recherche,
             derniere,
+            raison_fichiers: self.raison_fichiers(),
             raison_lecture_seule: self.raison_lecture_seule(),
         }
     }

@@ -45,9 +45,27 @@ const PERIODE_PROGRESSION: Duration = Duration::from_millis(100);
 /// Texte du champ d'un livre dont les valeurs diffèrent (affiché par le front).
 pub const VALEURS_MULTIPLES: &str = "(valeurs multiples)";
 
-/// Lecture seule : base ComicRack sans écriture.
+/// Lecture seule : base ComicRack sans écriture (fiches). Depuis la décision D1, les fichiers
+/// des livres ne sont pas modifiés non plus : leur raison est [`LECTURE_SEULE_FICHIERS`].
 pub const LECTURE_SEULE_COMICRACK: &str = "Lecture seule : active l'écriture dans la base ComicRack (Réglages ▸ \
-     Bibliothèque ComicRack, « Lecture et écriture ») pour modifier les fiches. Les fichiers (infos, conversion) restent modifiables.";
+     Bibliothèque ComicRack, « Lecture et écriture ») pour modifier les fiches.";
+/// Lecture seule : base ComicRack sans écriture, pour les opérations sur les **fichiers** des
+/// livres (écrire les infos dans le fichier, convertir en CBZ, renommer / déplacer, scripts).
+pub const LECTURE_SEULE_FICHIERS: &str = "Bibliothèque ComicRack en lecture seule : ComicRust ne modifie ni ses \
+     fiches ni les fichiers des livres. Active « Lecture et écriture » (Réglages ▸ Bibliothèque ComicRack) ou \
+     fais-le dans ComicRack.";
+
+/// Raison montrée pour les opérations sur les fichiers des livres, d'après la raison de lecture
+/// seule des fiches : la base ComicRack sans « Lecture et écriture » parle des fichiers
+/// ([`LECTURE_SEULE_FICHIERS`]) ; les autres raisons (ComicDb.xml, aucune bibliothèque, base
+/// injoignable…) valent telles quelles. Partagée par le refus du backend et les entrées grisées.
+pub fn raison_fichiers(raison: &str) -> String {
+    if raison == LECTURE_SEULE_COMICRACK || raison == crate::manquants::LECTURE_SEULE_MYSQL {
+        LECTURE_SEULE_FICHIERS.to_string()
+    } else {
+        raison.to_string()
+    }
+}
 /// Lecture seule : `ComicDb.xml`.
 pub const LECTURE_SEULE_XML: &str = "Lecture seule : la bibliothèque ComicDb.xml de ComicRack ne se modifie pas \
      depuis ComicRust (ComicRack la réécrit lui-même). Utilise la base MySQL de ComicRack en écriture, ou une \
@@ -763,7 +781,7 @@ impl Cible {
     /// modifié, avec la raison habituelle. Mode autonome et « Lecture et écriture » : permis.
     pub fn fichiers_modifiables(&self) -> Result<(), String> {
         match self {
-            Cible::LectureSeule(m) => Err(m.clone()),
+            Cible::LectureSeule(m) => Err(raison_fichiers(m)),
             Cible::Store(_) | Cible::Comicrack(_) => Ok(()),
         }
     }

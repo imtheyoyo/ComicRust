@@ -522,6 +522,18 @@ fn mysql_comicrack_sans_ecriture_est_en_lecture_seule() {
     let (service, _) = service(&biblio);
     assert_eq!(service.raison_lecture_seule().as_deref(), Some(LECTURE_SEULE_MYSQL));
     assert_eq!(service.retirer(&["x".to_string()], true).unwrap_err(), LECTURE_SEULE_MYSQL);
+    // Entrées grisées des actions sur les fichiers : texte qui parle des fichiers des livres,
+    // le même que le refus du backend (`Cible::fichiers_modifiables`).
+    let e = service.etat();
+    assert_eq!(e.raison_lecture_seule.as_deref(), Some(LECTURE_SEULE_MYSQL));
+    assert_eq!(e.raison_fichiers.as_deref(), Some(crate::edition::LECTURE_SEULE_FICHIERS));
+    assert!(crate::edition::LECTURE_SEULE_FICHIERS.contains("ni ses fiches ni les fichiers des livres"));
+    assert_eq!(
+        crate::manquants::cible_ecriture(&biblio).fichiers_modifiables().unwrap_err(),
+        crate::edition::LECTURE_SEULE_FICHIERS
+    );
+    let j = serde_json::to_value(&e).unwrap();
+    assert_eq!(j["raisonFichiers"], crate::edition::LECTURE_SEULE_FICHIERS);
 }
 
 #[test]

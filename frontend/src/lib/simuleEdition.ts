@@ -29,6 +29,11 @@ export interface ContexteSimule {
 
 const SEUIL = 100;
 
+/** Même texte que `LECTURE_SEULE_FICHIERS` (comicrust-tauri/src/edition.rs). */
+export const LECTURE_SEULE_FICHIERS =
+  'Bibliothèque ComicRack en lecture seule : ComicRust ne modifie ni ses fiches ni les fichiers des livres. ' +
+  'Active « Lecture et écriture » (Réglages ▸ Bibliothèque ComicRack) ou fais-le dans ComicRack.';
+
 // Catalogue des champs (libellés et types de comicrust-core/src/edit/catalog.rs).
 const CATALOGUE: Array<[string, string, TypeChamp, boolean]> = [
   ['Series', 'Série', 'texte', true], ['Number', 'Numéro', 'texte', true], ['Count', 'Nombre de numéros', 'entier', true],
@@ -109,6 +114,10 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
     (ctx.mode() === 'comicrack' && !reglages.ecritureComicrack
       ? "Bibliothèque ComicRack en lecture seule : les fiches ne sont pas modifiées. Pour les modifier, cochez « Lecture et écriture » dans Réglages (de préférence ComicRack fermé)."
       : undefined);
+  /** Actions sur les fichiers des livres (écrire les infos, convertir, renommer) : même décision,
+   *  texte propre aux fichiers (`raison_fichiers` du backend). */
+  const lectureSeuleFichiers = () =>
+    ctx.horsLigne() ?? (ctx.mode() === 'comicrack' && !reglages.ecritureComicrack ? LECTURE_SEULE_FICHIERS : undefined);
   /** Onglet Pages (étape 4) : simulePages.ts. */
   const pagesSim = creerPagesSimulees({ livres, lectureSeule, cbz, pause: ctx.pause });
 
@@ -382,7 +391,7 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
   }
 
   function renommer(d: DemandeRenommage): ResultatRenommage | Promise<ResultatRenommage> {
-    const ro = lectureSeule();
+    const ro = lectureSeuleFichiers();
     if (ro) throw new Error(ro);
     if (!d.modele.trim()) throw new Error('Le modèle de nom est vide.');
     const vus = new Map<string, string>();
@@ -453,7 +462,7 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
       }
       case 'ecrire_infos_fichiers': {
         // D1 : aucun fichier modifié en lecture seule (comme le backend).
-        const ro = lectureSeule();
+        const ro = lectureSeuleFichiers();
         if (ro) throw new Error(ro);
         return lot('ecritureInfos', args.ids as string[], args.confirme as boolean | undefined, (l) => {
           if (!l.fichierPresent) return { statut: 'erreur', message: 'fichier introuvable' };
@@ -464,7 +473,7 @@ export function creerEditionSimulee(ctx: ContexteSimule) {
       }
       case 'convertir_cbr_cbz': {
         const ranger = (args.rangerOriginal as boolean | undefined) ?? reglages.rangerOriginal;
-        const ro = lectureSeule();
+        const ro = lectureSeuleFichiers();
         if (ro) throw new Error(ro);
         return lot('conversion', args.ids as string[], args.confirme as boolean | undefined, (l) => {
           if (!l.fichierPresent) return { statut: 'erreur', message: 'fichier introuvable' };

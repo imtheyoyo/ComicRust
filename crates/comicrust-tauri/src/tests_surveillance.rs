@@ -397,7 +397,8 @@ fn comicrack_lecture_seule_hors_ligne_refuse_aussi_les_fichiers() {
     assert!(b.motif_hors_ligne().is_some());
     let f = e.lire_fiches(&["a".into()]).unwrap();
     assert_eq!(f.lecture_seule.as_deref(), Some(crate::edition::LECTURE_SEULE_COMICRACK));
-    let ro = crate::edition::LECTURE_SEULE_COMICRACK;
+    // Actions sur les fichiers : raison propre aux fichiers des livres.
+    let ro = crate::edition::LECTURE_SEULE_FICHIERS;
     assert_eq!(e.ecrire_infos_fichiers(&["a".into()], true, &|_| {}).unwrap_err(), ro);
     assert_eq!(e.convertir_cbr_cbz(&["a".into()], Some(false), true, &|_| {}).unwrap_err(), ro);
     let rn = crate::edition::DemandeRenommage {

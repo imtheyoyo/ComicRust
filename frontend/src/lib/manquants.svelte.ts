@@ -95,6 +95,11 @@ class Manquants {
   get raison(): string | undefined {
     return this.etat?.raisonLectureSeule;
   }
+  /** Raison pour laquelle les fichiers des livres ne sont pas modifiables (D1) : texte du backend
+   *  propre aux fichiers, sinon la raison des fiches. */
+  get raisonFichiers(): string | undefined {
+    return this.etat?.raisonFichiers ?? this.etat?.raisonLectureSeule;
+  }
   /** Volumes injoignables ou blocages de la dernière vérification (avertissement discret). */
   get avertissements(): string[] {
     const d = this.etat?.derniere;
