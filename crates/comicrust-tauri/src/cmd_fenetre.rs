@@ -134,13 +134,13 @@ pub fn classer_chemin(chemin: String) -> GenreChemin {
 }
 
 /// Rapport de plantage de la session précédente, s'il y en a un.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lire_plantage(etat: tauri::State<'_, EtatFenetre>) -> Option<RapportPlantage> {
     plantage::lire(&etat.data)
 }
 
 /// Le rapport a été vu : le fichier est supprimé.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn acquitter_plantage(etat: tauri::State<'_, EtatFenetre>) -> Result<(), String> {
     plantage::supprimer(&etat.data)
 }

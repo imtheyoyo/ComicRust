@@ -199,23 +199,110 @@ fn extraction_et_remplacement_gardent_data_et_renomment_en_old() {
     data_intact(&app);
 }
 
-/// Un fichier qui ne peut pas être écrit : erreur claire, l'ancien reprend sa place, les `.old`
-/// déjà créés restent notés.
+/// Un fichier qui ne peut pas être écrit : erreur claire et **tout est défait** — les fichiers déjà
+/// remplacés reprennent leur ancienne version, aucun `.old` n'est noté pour suppression.
 #[test]
-fn echec_d_ecriture_remet_l_ancien_fichier() {
+fn echec_d_ecriture_defait_toute_l_installation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = installation(tmp.path());
+    let dll_avant = std::fs::read(app.join("pdfium.dll")).unwrap();
+    let extrait = tmp.path().join("extrait");
+    std::fs::create_dir_all(&extrait).unwrap();
+    std::fs::write(extrait.join("pdfium.dll"), b"dll 2").unwrap();
+    std::fs::write(extrait.join("nouveau.txt"), b"neuf").unwrap();
+    // `ComicRust-Tauri.exe` annoncé mais absent de l'extraction : la copie échoue après le
+    // remplacement de `pdfium.dll` et la création de `nouveau.txt`.
+    let files = [PathBuf::from("pdfium.dll"), PathBuf::from("nouveau.txt"), PathBuf::from("ComicRust-Tauri.exe")];
+    let e = apply(&extrait, &files, &app).unwrap_err();
+    assert!(e.contains("ComicRust-Tauri.exe") && e.contains("annulée"), "{e}");
+    assert_eq!(std::fs::read(app.join("ComicRust-Tauri.exe")).unwrap(), b"exe ancien");
+    assert_eq!(std::fs::read(app.join("pdfium.dll")).unwrap(), dll_avant, "ancienne DLL remise en place");
+    assert!(!app.join("nouveau.txt").exists(), "fichier créé supprimé");
+    assert!(!app.join("ComicRust-Tauri.exe.old").exists() && !app.join("pdfium.dll.old").exists());
+    assert!(!app.join("data/maj/anciens.txt").exists(), "aucun .old noté pour suppression");
+}
+
+/// Preuve de la relecture : le nouvel exe restait en place et l'ancien était supprimé au lancement
+/// suivant. Après correction, l'échec sur le 2e fichier laisse l'ancien exe entier.
+#[test]
+fn echec_apres_l_exe_garde_l_ancien_exe_apres_nettoyage() {
     let tmp = tempfile::tempdir().unwrap();
     let app = installation(tmp.path());
     let extrait = tmp.path().join("extrait");
     std::fs::create_dir_all(&extrait).unwrap();
-    std::fs::write(extrait.join("pdfium.dll"), b"dll 2").unwrap();
-    // `ComicRust-Tauri.exe` annoncé mais absent de l'extraction : la copie échoue.
-    let files = [PathBuf::from("pdfium.dll"), PathBuf::from("ComicRust-Tauri.exe")];
-    let e = apply(&extrait, &files, &app).unwrap_err();
-    assert!(e.contains("ComicRust-Tauri.exe"), "{e}");
+    std::fs::write(extrait.join("ComicRust-Tauri.exe"), b"NOUVEL exe").unwrap();
+    let files = [PathBuf::from("ComicRust-Tauri.exe"), PathBuf::from("pdfium.dll")];
+    assert!(apply(&extrait, &files, &app).is_err());
+    cleanup(&app);
     assert_eq!(std::fs::read(app.join("ComicRust-Tauri.exe")).unwrap(), b"exe ancien");
-    assert!(!app.join("ComicRust-Tauri.exe.old").exists());
-    let liste = std::fs::read_to_string(app.join("data/maj/anciens.txt")).unwrap();
-    assert_eq!(liste.trim(), "pdfium.dll.old");
+}
+
+/// Scripts : un échec défait aussi les `.nouveau` posés et laisse le manifeste inchangé.
+#[test]
+fn echec_defait_les_scripts_et_garde_le_manifeste() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = installation(tmp.path());
+    std::fs::create_dir_all(app.join("scripts")).unwrap();
+    std::fs::write(app.join("scripts/perso.py"), b"a moi").unwrap();
+    let manifeste_avant = std::fs::read_to_string(app.join("data/scripts-livres.txt")).ok();
+    let extrait = tmp.path().join("extrait");
+    std::fs::create_dir_all(extrait.join("scripts")).unwrap();
+    std::fs::write(extrait.join("scripts/perso.py"), b"livre").unwrap();
+    std::fs::write(extrait.join("scripts/neuf.py"), b"neuf").unwrap();
+    let files = [PathBuf::from("scripts/perso.py"), PathBuf::from("scripts/neuf.py"), PathBuf::from("absent.dll")];
+    assert!(apply(&extrait, &files, &app).is_err());
+    assert_eq!(std::fs::read(app.join("scripts/perso.py")).unwrap(), b"a moi");
+    assert!(!app.join("scripts/perso.py.nouveau").exists());
+    assert!(!app.join("scripts/neuf.py").exists());
+    // Le manifeste peut avoir été relevé au premier passage (assurer_manifeste_scripts), jamais
+    // complété par les fichiers d'une installation annulée.
+    let apres = std::fs::read_to_string(app.join("data/scripts-livres.txt")).unwrap_or_default();
+    assert!(!apres.contains("neuf.py"), "{apres}");
+    if let Some(avant) = manifeste_avant {
+        assert_eq!(apres, avant);
+    }
+}
+
+#[test]
+fn redirections_https_obligatoires() {
+    assert!(redirection_permise("https://github.com/x", "https://objects.githubusercontent.com/y"));
+    assert!(redirection_permise("https://github.com/x", "HTTPS://example.org/y"));
+    assert!(!redirection_permise("https://github.com/x", "http://objects.githubusercontent.com/y"));
+    assert!(!redirection_permise("http://127.0.0.1:5/x", "http://evil.example/y"), "local → distant en clair");
+    assert!(!redirection_permise("https://github.com/x", "http://127.0.0.1/y"), "distant → local en clair");
+    assert!(redirection_permise("http://127.0.0.1:5/x", "http://127.0.0.1:5/y"), "faux serveur des tests");
+    assert!(!redirection_permise("https://github.com/x", "file:///C:/x"));
+}
+
+#[test]
+fn redirection_en_clair_refusee_au_telechargement() {
+    let port = serveur(|chemin, _| match chemin {
+        "/sha" => Some(Reponse {
+            statut: 302,
+            entetes: vec![("Location", "http://example.invalid/sha".into())],
+            corps: vec![],
+        }),
+        _ => None,
+    });
+    let rel = Release {
+        tag: "tauri-v9.0.0".into(),
+        nom: "x".into(),
+        notes: String::new(),
+        url_page: String::new(),
+        zip: Some((format!("http://127.0.0.1:{port}/zip"), 10)),
+        sha256_url: Some(format!("http://127.0.0.1:{port}/sha")),
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let app = installation(tmp.path());
+    let e = installer_release(&rel, &app, &app.join("data/maj"), &mut |_| {}).unwrap_err();
+    assert!(e.contains("HTTPS obligatoire"), "{e}");
+}
+
+#[test]
+fn delai_de_reception_selon_la_taille() {
+    assert_eq!(delai_corps(0), std::time::Duration::from_secs(600));
+    // 60 Mo à 20 Ko/s : 3 000 s (une connexion lente aboutit).
+    assert_eq!(delai_corps(60 * 1024 * 1024), std::time::Duration::from_secs(3072));
 }
 
 #[test]
@@ -661,6 +748,11 @@ fn filtre_des_pages_ouvertes() {
 fn tags_tauri_stricts_et_finale_avant_rc() {
     assert!(tag_tauri_valide("tauri-v0.8.0"));
     assert!(tag_tauri_valide("tauri-v1.10.2-rc1"));
+    assert!(tag_tauri_valide("tauri-v1.0.2-beta.2") && tag_tauri_valide("tauri-v1.0.2+build5"));
+    // Le tag sert de nom de dossier dans data\maj : suffixe limité à [A-Za-z0-9.].
+    for t in ["tauri-v1.0.0-a/b", "tauri-v1.0.0-..", "tauri-v1.0.0-a\\b", "tauri-v1.0.0-", "tauri-v1.0.0-a b"] {
+        assert!(!tag_tauri_valide(t), "{t}");
+    }
     for t in ["tauri-vV1.0.0", "tauri-v1", "tauri-v1.0", "v0.10.7", "tauri-v1.0.x", "tauri-v.1.0", "Tauri-v1.0.0"] {
         assert!(!tag_tauri_valide(t), "{t}");
     }

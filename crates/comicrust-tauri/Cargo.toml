@@ -20,7 +20,14 @@ required-features = ["app"]
 [features]
 default = []
 # Application Tauri complète (fenêtre, commandes IPC).
-app = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build", "dep:ureq", "dep:windows-sys"]
+app = [
+    "dep:tauri",
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-single-instance",
+    "dep:tauri-build",
+    "dep:ureq",
+    "dep:windows-sys",
+]
 # Sert le front compilé (frontend/dist) depuis le binaire au lieu du serveur Vite :
 # obligatoire pour la version livrée, absent en développement (`npm run dev`).
 custom-protocol = ["app", "tauri/custom-protocol"]
@@ -41,6 +48,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 tauri = { version = "2", optional = true }
 # Dialogues natifs de fichiers (Ouvrir / Enregistrer / dossier) : lot L8, docs/tauri/ipc-dialogue.md.
 tauri-plugin-dialog = { version = "2", optional = true }
+# Instance unique : un 2e lancement (« Ouvrir avec », double-clic sur un .cbz) transmet son fichier à
+# l'instance déjà ouverte au lieu de partager `data\` avec elle (écritures perdues).
+tauri-plugin-single-instance = { version = "2", optional = true }
 # Mise à jour intégrée (module `maj`) : empreintes et extraction du paquet (noyau testable).
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
@@ -53,7 +63,7 @@ ureq = { version = "3", features = ["platform-verifier", "win-system-proxy"], op
 webview2-com = { version = "0.39", optional = true }
 windows = { version = "0.62", optional = true }
 # Mise à jour : attente de la fin de l'ancienne instance (`--attendre-pid`).
-windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }

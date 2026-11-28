@@ -11,3 +11,10 @@ version = "0.10.9"
 edition = "2021"
 license = "GPL-2.0-or-later"
 repository = "https://github.com/imtheyoyo/ComicRust"
+
+# Version livrée : optimisation inter-crates (exe plus petit et plus rapide). `panic = "unwind"`
+# est gardé (valeur par défaut) : les décodeurs d'images et le pool des couvertures rattrapent
+# les paniques (`catch_unwind`).
+[profile.release]
+lto = "thin"
+codegen-units = 1

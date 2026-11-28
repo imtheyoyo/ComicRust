@@ -13,7 +13,8 @@
 //!    contenir `ComicRust-Tauri.exe`. Windows interdit d'écraser un exe en cours d'exécution mais
 //!    permet de le **renommer** : chaque fichier remplacé (les exe dont `comicrust-cli.exe`, `pdfium.dll`, les `.md`,
 //!    `licences\`, `python\`) devient `nom.old`, noté dans `data\maj\anciens.txt` et supprimé au
-//!    lancement suivant (seuls ceux-là). Aucun fichier du paquet n'est écrit sous `data\`
+//!    lancement suivant (seuls ceux-là). Tout ou rien : une erreur en cours de copie défait tout
+//!    (anciens fichiers remis en place), la version installée reste entière. Aucun fichier du paquet n'est écrit sous `data\`
 //!    (réglages, thèmes, profil WebView2) ; seul le manifeste des scripts livrés
 //!    (`data\scripts-livres.txt`) y est tenu à jour.
 //!
@@ -27,7 +28,7 @@
 //!    - un fichier livré puis supprimé par l'utilisateur n'est pas réinstallé ;
 //!    - un nouveau fichier livré est ajouté.
 //! 4. **Redémarrage** : le même exe est relancé avec les mêmes arguments (`--mcp=47803`…) et
-//!    `--attendre-pid <pid>` : la nouvelle instance attend (10 s au plus) la fin de l'ancienne,
+//!    `--attendre-pid <pid>` : la nouvelle instance attend (60 s au plus) la fin de l'ancienne,
 //!    qui libère le profil WebView2 et le port MCP.
 //!
 //! Variables d'environnement (recette, tests) :
@@ -55,8 +56,9 @@ pub const EXE_PRINCIPAL: &str = "ComicRust-Tauri.exe";
 pub const VERSION_ACTUELLE: &str = env!("CARGO_PKG_VERSION");
 /// Option interne passée à la nouvelle instance après une mise à jour.
 pub const ARG_ATTENDRE_PID: &str = "--attendre-pid";
-/// Attente maximale de la fin de l'ancienne instance.
-pub const DELAI_ATTENTE_PID: Duration = Duration::from_secs(10);
+/// Attente maximale de la fin de l'ancienne instance (sa fermeture enregistre la lecture et
+/// laisse finir les scripts : elle peut dépasser quelques secondes).
+pub const DELAI_ATTENTE_PID: Duration = Duration::from_secs(60);
 /// Sous-dossier de `data\` : téléchargements, extraction, liste des `.old`.
 pub const DOSSIER_MAJ: &str = "maj";
 /// Suffixe des fichiers remplacés.
@@ -168,12 +170,20 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     Some((it.next()??, it.next().flatten().unwrap_or(0), it.next().flatten().unwrap_or(0)))
 }
 
-/// Tag de release Tauri bien formé : « tauri-v » suivi de MAJ.MIN.CORR (suffixe « -… » toléré).
+/// Tag de release Tauri bien formé : « tauri-v » suivi de MAJ.MIN.CORR, puis éventuellement un
+/// suffixe « -… » ou « +… » fait uniquement de lettres, chiffres et points (`-rc1`, `-beta.2`). Le
+/// tag sert de nom de fichier et de dossier dans `data\maj\` : aucun `/`, `\` ni `..` possible.
 pub fn tag_tauri_valide(tag: &str) -> bool {
     let Some(reste) = tag.strip_prefix(PREFIXE_TAG) else { return false };
-    let coeur = reste.split(['-', '+']).next().unwrap_or("");
+    let (coeur, suffixe) = match reste.find(['-', '+']) {
+        Some(i) => (&reste[..i], Some(&reste[i + 1..])),
+        None => (reste, None),
+    };
     let parties: Vec<&str> = coeur.split('.').collect();
-    parties.len() == 3 && parties.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    let coeur_ok = parties.len() == 3 && parties.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+    let suffixe_ok = suffixe
+        .is_none_or(|s| !s.is_empty() && !s.contains("..") && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.'));
+    coeur_ok && suffixe_ok
 }
 
 pub fn is_newer(candidate: &str, current: &str) -> bool {
@@ -385,16 +395,51 @@ fn free_old_name(dst: &Path) -> PathBuf {
     (1..).map(|i| PathBuf::from(format!("{base}.{i}{SUFFIXE_OLD}"))).find(|p| !p.exists()).expect("nom libre")
 }
 
+/// Ce qu'une installation a changé dans `app_dir`, pour pouvoir tout défaire.
+enum Changement {
+    /// `dst` remplacé : l'ancien fichier est en `old`.
+    Remplace { dst: PathBuf, old: PathBuf },
+    /// `dst` créé (n'existait pas).
+    Cree(PathBuf),
+    /// `.nouveau` posé à côté d'un script modifié par l'utilisateur.
+    ACote(PathBuf),
+}
+
+/// Défait les changements, du dernier au premier : fichiers créés supprimés, anciens fichiers remis
+/// à leur place. Renvoie les `.old` qui n'ont pas pu être remis (ils ne sont **jamais** listés pour
+/// suppression : c'est la seule copie de l'ancien fichier).
+fn defaire(changements: Vec<Changement>) -> Vec<PathBuf> {
+    let mut restes = Vec::new();
+    for c in changements.into_iter().rev() {
+        match c {
+            Changement::Remplace { dst, old } => {
+                let _ = std::fs::remove_file(&dst);
+                if std::fs::rename(&old, &dst).is_err() {
+                    restes.push(old);
+                }
+            }
+            Changement::Cree(p) | Changement::ACote(p) => {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+    restes
+}
+
 /// Copie les fichiers extraits dans `app_dir`, en renommant d'abord ceux qui existent
-/// (`x.exe` → `x.exe.old`, noté dans `data\maj\anciens.txt`). Aucun fichier du paquet n'est
-/// écrit sous `data\` (seul le manifeste `data\scripts-livres.txt` est mis à jour) ; `scripts\`
-/// est protégé (voir l'en-tête du module). Un fichier verrouillé arrête l'installation avec une
-/// erreur en français ; les `.old` déjà créés restent notés (supprimés au prochain démarrage).
+/// (`x.exe` → `x.exe.old`). Aucun fichier du paquet n'est écrit sous `data\` (seul le manifeste
+/// `data\scripts-livres.txt` est mis à jour) ; `scripts\` est protégé (voir l'en-tête du module).
+///
+/// **Tout ou rien** : à la première erreur (fichier verrouillé, disque plein…), tous les
+/// changements déjà faits sont défaits dans l'ordre inverse (anciens fichiers remis, nouveaux
+/// supprimés) et le manifeste n'est pas modifié : jamais de mélange ancienne / nouvelle version.
+/// Les `.old` ne sont notés dans `data\maj\anciens.txt` (supprimés au lancement suivant)
+/// qu'après une installation complète.
 pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bilan, String> {
     let mut bilan = Bilan::default();
     assurer_manifeste_scripts(app_dir);
     let mut manifeste = lire_manifeste(app_dir).unwrap_or_default();
-    let mut olds: Vec<PathBuf> = Vec::new();
+    let mut changements: Vec<Changement> = Vec::new();
     let result = (|| -> Result<(), String> {
         for rel in files {
             if dans_dossier(rel, "data") {
@@ -427,6 +472,7 @@ pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bila
                         let a_cote = PathBuf::from(format!("{}{SUFFIXE_NOUVEAU}", dst.display()));
                         std::fs::copy(&src, &a_cote)
                             .map_err(|e| format!("impossible d'écrire {}{SUFFIXE_NOUVEAU} : {e}", rel.display()))?;
+                        changements.push(Changement::ACote(a_cote));
                         bilan.scripts_nouveaux += 1;
                         bilan.chemins_nouveaux.push(format!("{}{SUFFIXE_NOUVEAU}", texte_rel(rel)));
                         continue;
@@ -437,7 +483,6 @@ pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bila
                     continue;
                 }
             }
-            let mut ancien = None;
             if dst.exists() {
                 let old = free_old_name(&dst);
                 std::fs::rename(&dst, &old).map_err(|e| {
@@ -447,19 +492,12 @@ pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bila
                         rel.display()
                     )
                 })?;
-                olds.push(old.strip_prefix(app_dir).map(Path::to_path_buf).unwrap_or_else(|_| old.clone()));
-                ancien = Some(old);
+                changements.push(Changement::Remplace { dst: dst.clone(), old });
+            } else {
+                changements.push(Changement::Cree(dst.clone()));
             }
-            if let Err(e) = std::fs::copy(&src, &dst) {
-                // L'ancien fichier reprend sa place : jamais d'exe manquant.
-                if let Some(old) = ancien {
-                    let _ = std::fs::remove_file(&dst);
-                    if std::fs::rename(&old, &dst).is_ok() {
-                        olds.pop();
-                    }
-                }
-                return Err(format!("impossible d'écrire {} (dossier en lecture seule ?) : {e}", rel.display()));
-            }
+            std::fs::copy(&src, &dst)
+                .map_err(|e| format!("impossible d'écrire {} (dossier en lecture seule ?) : {e}", rel.display()))?;
             if let Some(h) = nouvelle_empreinte {
                 manifeste.insert(cle, (h, texte_rel(rel)));
             }
@@ -467,12 +505,36 @@ pub fn apply(extracted: &Path, files: &[PathBuf], app_dir: &Path) -> Result<Bila
         }
         Ok(())
     })();
-    // Notés même après une erreur : les `.old` déjà créés seront supprimés au lancement suivant,
-    // le manifeste des scripts livrés reste juste.
-    let _ = ecrire_manifeste(app_dir, &manifeste);
-    record_olds(app_dir, &olds);
-    bilan.restes_old = olds.len();
-    result.map(|()| bilan)
+    match result {
+        Ok(()) => {
+            let olds: Vec<PathBuf> = changements
+                .iter()
+                .filter_map(|c| match c {
+                    Changement::Remplace { old, .. } => {
+                        Some(old.strip_prefix(app_dir).map(Path::to_path_buf).unwrap_or_else(|_| old.clone()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let _ = ecrire_manifeste(app_dir, &manifeste);
+            record_olds(app_dir, &olds);
+            bilan.restes_old = olds.len();
+            Ok(bilan)
+        }
+        Err(e) => {
+            let restes = defaire(changements);
+            if restes.is_empty() {
+                Err(format!("{e}. Mise à jour annulée : la version en place n'a pas été modifiée."))
+            } else {
+                let noms: Vec<String> = restes.iter().map(|p| p.display().to_string()).collect();
+                Err(format!(
+                    "{e}. Mise à jour annulée, mais certains anciens fichiers n'ont pas pu être remis en place \
+                     (renommer à la main sans « .old ») : {}",
+                    noms.join(", ")
+                ))
+            }
+        }
+    }
 }
 
 fn old_list_path(app_dir: &Path) -> PathBuf {
@@ -575,12 +637,15 @@ pub fn relancer(exe: &Path, args: impl IntoIterator<Item = String>) -> Result<()
 }
 
 /// À appeler tout au début : si la ligne de commande contient `--attendre-pid <pid>`, attend
-/// (au plus [`DELAI_ATTENTE_PID`]) la fin de ce processus. Renvoie le pid attendu.
-pub fn traiter_attendre_pid() -> Option<u32> {
+/// (au plus [`DELAI_ATTENTE_PID`]) la fin de ce processus. Renvoie `false` seulement si l'ancienne
+/// instance tourne encore après le délai (l'application ne doit alors pas se considérer comme une
+/// « deuxième instance » à renvoyer vers elle : elle est en train de se fermer).
+pub fn traiter_attendre_pid() -> bool {
     let (pid, _) = retirer_attendre_pid(std::env::args().skip(1));
-    let pid = pid.filter(|p| *p != std::process::id())?;
-    attendre_fin_processus(pid, DELAI_ATTENTE_PID);
-    Some(pid)
+    match pid.filter(|p| *p != std::process::id()) {
+        Some(pid) => attendre_fin_processus(pid, DELAI_ATTENTE_PID),
+        None => true,
+    }
 }
 
 /// Attend la fin du processus `pid` (au plus `delai`) ; vrai s'il est terminé (ou inconnu).
@@ -794,6 +859,22 @@ mod reseau {
     /// Intervalle minimal entre deux événements de progression (≤ 10 par seconde).
     const INTERVALLE_PROGRESSION: Duration = Duration::from_millis(100);
 
+    /// Délais des petites requêtes (API, `.sha256`) : appel complet.
+    const DELAI_REQUETE: Duration = Duration::from_secs(60);
+    /// Délais de connexion et d'attente des en-têtes (tous les appels).
+    const DELAI_CONNEXION: Duration = Duration::from_secs(30);
+    const DELAI_EN_TETES: Duration = Duration::from_secs(60);
+    /// Réception du paquet : ureq n'offre pas de délai « par bloc » (`recv_body` est un total).
+    /// Le total est donc calculé d'après la taille annoncée, pour un débit plancher de 20 Ko/s
+    /// (10 minutes au moins) : une connexion lente aboutit, une connexion morte finit par échouer.
+    const DEBIT_PLANCHER: u64 = 20 * 1024;
+    const DELAI_CORPS_MIN: Duration = Duration::from_secs(600);
+
+    /// Délai total de réception d'un paquet de `taille` octets (voir [`DEBIT_PLANCHER`]).
+    pub fn delai_corps(taille: u64) -> Duration {
+        Duration::from_secs(taille / DEBIT_PLANCHER).max(DELAI_CORPS_MIN)
+    }
+
     fn est_local(url: &str) -> bool {
         let reste = url.split_once("://").map_or(url, |(_, r)| r);
         let hote = reste.split(['/', '?']).next().unwrap_or("");
@@ -801,15 +882,22 @@ mod reseau {
         matches!(hote, "127.0.0.1" | "localhost" | "[::1]")
     }
 
-    fn agent(url: &str) -> ureq::Agent {
+    /// `delai_corps` : `None` pour une petite requête (délai global [`DELAI_REQUETE`]), sinon délai
+    /// total de réception du corps (paquet).
+    fn agent(url: &str, delai_corps: Option<Duration>) -> ureq::Agent {
         let mut cfg = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(600)))
+            .timeout_connect(Some(DELAI_CONNEXION))
+            .timeout_recv_response(Some(DELAI_EN_TETES))
             .user_agent(concat!("ComicRust-Tauri/", env!("CARGO_PKG_VERSION")))
             // Certificats du système (magasin Windows) : fonctionne derrière un antivirus
             // ou un proxy d'entreprise qui inspecte le HTTPS.
             .tls_config(ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build())
             // Redirections suivies à la main (voir `get`).
             .max_redirects(0);
+        cfg = match delai_corps {
+            None => cfg.timeout_global(Some(DELAI_REQUETE)),
+            Some(d) => cfg.timeout_recv_body(Some(d)),
+        };
         if est_local(url) {
             // Faux serveur de test sur la machine : jamais par un proxy.
             cfg = cfg.proxy(None);
@@ -832,25 +920,36 @@ mod reseau {
         }
     }
 
+    /// Redirection acceptée : toujours vers `https://`, sauf entre deux adresses de la machine
+    /// (faux serveur des tests). Jamais de repli en HTTP clair vers un hôte distant.
+    pub fn redirection_permise(depuis: &str, vers: &str) -> bool {
+        let https = vers.get(..8).is_some_and(|d| d.eq_ignore_ascii_case("https://"));
+        https || (est_local(depuis) && est_local(vers))
+    }
+
     /// GET qui suit les redirections sans lire le corps des réponses 302 : GitHub renvoie
     /// ses fichiers de release par une 302 vers release-assets.githubusercontent.com, et
     /// certains proxys tronquent ce corps vide, ce qui fait échouer la lecture.
-    fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>, String> {
+    fn get(url: &str, delai_corps: Option<Duration>) -> Result<ureq::http::Response<ureq::Body>, String> {
         let mut url = url.to_string();
         for _ in 0..6 {
-            let resp = agent(&url).get(&url).call().map_err(|e| e.to_string())?;
+            let resp = agent(&url, delai_corps).get(&url).call().map_err(|e| e.to_string())?;
             if !resp.status().is_redirection() {
                 return Ok(resp);
             }
             let location =
                 resp.headers().get("location").and_then(|v| v.to_str().ok()).ok_or("redirection sans adresse")?;
-            url = suivre(&url, location);
+            let suivante = suivre(&url, location);
+            if !redirection_permise(&url, &suivante) {
+                return Err(format!("redirection refusée (HTTPS obligatoire) : {suivante}"));
+            }
+            url = suivante;
         }
         Err("trop de redirections".into())
     }
 
     fn lire_texte(url: &str) -> Result<String, String> {
-        get(url)?.into_body().read_to_string().map_err(|e| e.to_string())
+        get(url, None)?.into_body().read_to_string().map_err(|e| e.to_string())
     }
 
     /// Interroge l'API (`url_api`) et choisit la release Tauri plus récente que `current`.
@@ -861,8 +960,8 @@ mod reseau {
 
     /// Télécharge `url` dans `dest` (via `dest.part`, renommé à la fin) ; `progression`
     /// reçoit le total d'octets reçus après chaque bloc.
-    fn download(url: &str, dest: &Path, progression: &mut dyn FnMut(u64)) -> Result<(), String> {
-        let resp = get(url).map_err(|e| format!("téléchargement impossible : {e}"))?;
+    fn download(url: &str, taille: u64, dest: &Path, progression: &mut dyn FnMut(u64)) -> Result<(), String> {
+        let resp = get(url, Some(delai_corps(taille))).map_err(|e| format!("téléchargement impossible : {e}"))?;
         let mut reader = resp.into_body().into_reader();
         let tmp = dest.with_extension("part");
         let mut out = std::fs::File::create(&tmp).map_err(|e| format!("{} : {e}", tmp.display()))?;
@@ -889,14 +988,14 @@ mod reseau {
         work: &Path,
         progression: &mut dyn FnMut(u64),
     ) -> Result<Bilan, String> {
-        let (zip_url, _) = release.zip.as_ref().ok_or("cette version n'a pas de paquet Windows")?;
+        let (zip_url, taille) = release.zip.as_ref().ok_or("cette version n'a pas de paquet Windows")?;
         let sha_url = release.sha256_url.as_ref().ok_or("empreinte SHA-256 absente de la release")?;
         std::fs::create_dir_all(work).map_err(|e| format!("{} : {e}", work.display()))?;
         let expected = lire_texte(sha_url)
             .map_err(|e| format!("empreinte introuvable : {e}"))
             .and_then(|t| parse_sha256_file(&t).ok_or_else(|| "empreinte SHA-256 illisible".to_string()))?;
         let zip_path = work.join(format!("ComicRust-Tauri-{}.zip", release.tag));
-        download(zip_url, &zip_path, progression)?;
+        download(zip_url, *taille, &zip_path, progression)?;
         let actual = sha256_of(&zip_path).map_err(|e| e.to_string())?;
         if actual != expected {
             let _ = std::fs::remove_file(&zip_path);
@@ -994,6 +1093,13 @@ mod reseau {
         /// Statut courant.
         pub fn statut(&self) -> StatutMaj {
             self.verrou().statut.clone()
+        }
+
+        /// Vrai pendant le téléchargement et la copie des fichiers : la fermeture de l'application
+        /// et le redémarrage sont alors refusés (une copie interrompue laisserait une installation
+        /// incomplète).
+        pub fn installation_en_cours(&self) -> bool {
+            self.verrou().statut.etat == EtatStatut::Installation
         }
 
         /// `maj_etat`.
@@ -1187,6 +1293,9 @@ mod reseau {
         /// `maj_redemarrer` : relance l'exe (mêmes arguments, `--attendre-pid`). L'appelant
         /// ferme ensuite l'application.
         pub fn redemarrer(&self) -> Result<(), String> {
+            if self.installation_en_cours() {
+                return Err("installation en cours : attendre la fin avant de redémarrer".into());
+            }
             let exe = match &self.exe {
                 Some(e) => e.clone(),
                 None => std::env::current_exe().map_err(|e| e.to_string())?,

@@ -118,6 +118,10 @@ mod cmd_manquants;
 mod cmd_scan;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+// Garde des requêtes du serveur MCP (origine, hôte, type du corps) : testable sans WebView2.
+#[cfg(any(test, feature = "mcp"))]
+#[path = "mcp/garde.rs"]
+mod garde_mcp;
 // Logique de la passerelle MCP stdio (testable sans WebView2, donc aussi hors fonction `mcp`).
 #[cfg(any(test, feature = "mcp"))]
 mod pont_mcp;

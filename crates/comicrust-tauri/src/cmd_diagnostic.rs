@@ -34,7 +34,7 @@ pub fn texte_diagnostic(biblio: tauri::State<'_, Biblio>) -> String {
 
 /// Bibliothèque enregistrée (mode, fichier ComicRack, base SQLite) : préremplit l'assistant en mode
 /// « modification ». Ne crée ni ne modifie rien.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn configuration_biblio(biblio: tauri::State<'_, Biblio>) -> Result<ConfigurationBiblio, String> {
     diagnostic::configuration(biblio.data())
 }
