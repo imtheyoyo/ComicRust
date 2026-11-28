@@ -143,9 +143,27 @@ pub fn discover_with_warnings(dir: &Path) -> (Vec<ScriptEntry>, Vec<DiscoveryWar
                 String::from_utf8_lossy(e.as_bytes()).into_owned()
             }
         };
-        let (mut e, w) = parse_script(&text, &file, &rel);
-        entries.append(&mut e);
+        let (e, w) = parse_script(&text, &file, &rel);
         warnings.extend(w);
+        for entry in e {
+            // Identifiant déjà pris (`#@Key` recopiée avec le script) : le menu de la copie
+            // lancerait l'autre script. Le premier (ordre des chemins) est gardé, les suivants
+            // ignorés et signalés.
+            let id = entry.id();
+            if let Some(premier) = entries.iter().find(|x: &&ScriptEntry| x.id() == id) {
+                warnings.push(DiscoveryWarning {
+                    file: entry.file.clone(),
+                    line: entry.line,
+                    message: format!(
+                        "fonction « {} » ignorée : identifiant « {id} » déjà utilisé par {}:{} \
+                         (changer #@Key)",
+                        entry.function, premier.rel_path, premier.function
+                    ),
+                });
+                continue;
+            }
+            entries.push(entry);
+        }
     }
     (entries, warnings)
 }

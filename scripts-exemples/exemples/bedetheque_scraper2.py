@@ -64,6 +64,7 @@ import hashlib
 import html
 import http.cookiejar
 import json
+import math
 import os
 import re
 import ssl
@@ -73,6 +74,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 
 import comicrust
 from comicrust import ui
@@ -165,6 +167,46 @@ COUV_ABSENTE_JOURS = 7
 ACCEPT_IMAGES = "image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8,*/*;q=0.5"
 
 
+# Pages gardées en mémoire pendant une exécution, par sorte (nombre de pages au plus, les
+# moins récemment lues partent) : pour N livres d'une même série, l'index par lettre, la
+# recherche et la page de la série ne sont lus qu'une fois (au lieu de N), ce qui ménage le
+# site (protection anti-robot) et accélère le traitement.
+MEMOIRE_PAGES = (("lettre", re.compile(r"(?i)/bandes_dessinees_[^/]*\.html$"), 8),
+                 ("recherche", re.compile(r"(?i)/search/tout\?"), 20),
+                 ("serie", re.compile(r"(?i)/serie-[^/]*\.html$"), 4))
+
+
+class MemoirePages:
+    """Pages lues pendant l'exécution (voir MEMOIRE_PAGES) : LRU borné par sorte."""
+
+    def __init__(self):
+        self.pages = {sorte: OrderedDict() for sorte, _, _ in MEMOIRE_PAGES}
+
+    @staticmethod
+    def _sorte(url):
+        for sorte, motif, taille in MEMOIRE_PAGES:
+            if motif.search(url):
+                return sorte, taille
+        return None, 0
+
+    def lire(self, url):
+        sorte, _ = self._sorte(url)
+        if sorte is None or url not in self.pages[sorte]:
+            return None
+        self.pages[sorte].move_to_end(url)
+        return self.pages[sorte][url]
+
+    def garder(self, url, page):
+        sorte, taille = self._sorte(url)
+        if sorte is None or not page:
+            return
+        d = self.pages[sorte]
+        d[url] = page
+        d.move_to_end(url)
+        while len(d) > taille:
+            d.popitem(last=False)
+
+
 class _Etat:
     """Variables globales de l'original (dlgName, dlgNumber, RenameSeries, PickSeries…)."""
 
@@ -197,6 +239,9 @@ class _Etat:
         self.nIgnored = 0
         self.images = {}
         self.pages = {}
+        # Pages gardées en mémoire pendant l'exécution (MemoirePages) : index par lettre,
+        # résultats de recherche, dernières pages de série.
+        self.memoire = MemoirePages()
         self.cache = None
         # Dernière requête par sorte (« page », « image ») : pauses des vignettes.
         self.derniere = {}
@@ -1046,7 +1091,9 @@ class Web:
 def url_fix(s):
     scheme, netloc, path, qs, anchor = urllib.parse.urlsplit(s)
     path = urllib.parse.quote(path, "%/:=&~#+$!,?;'@()*[]")
-    qs = urllib.parse.quote_plus(qs, ":&=")
+    # « % » gardé : la requête de recherche est déjà encodée (quote), elle ne doit pas
+    # l'être deux fois (« %26 » → « %2526 »).
+    qs = urllib.parse.quote_plus(qs, ":&=%")
     return urllib.parse.urlunsplit((scheme, netloc, path, qs, anchor))
 
 
@@ -1096,12 +1143,17 @@ def _read_url(url, bSingle, silencieux=False, garder=False):
     if target_url in S.pages:
         debuglog("Page déjà lue : " + target_url)
         return S.pages[target_url] if garder else S.pages.pop(target_url)
+    memorisee = S.memoire.lire(target_url)
+    if memorisee is not None:
+        debuglog("Page déjà lue pendant cette exécution : " + target_url)
+        return memorisee
     debuglog("Final fetcher URL: " + target_url)
     try:
         page = S.web.page(target_url)
         if stop():
             debuglog("Cancelled from _read_url End")
             return ""
+        S.memoire.garder(target_url, page)
         if garder:
             S.pages[target_url] = page
     except NoContentError as nce:
@@ -1120,7 +1172,14 @@ def _read_url(url, bSingle, silencieux=False, garder=False):
         cError = debuglogOnError()
         log_BD("   [" + str(S.dlgName) + "] " + str(S.dlgNumber) + " Alt.No " + str(S.dlgAltNumber) + " -> ",
                cError, 1)
-        comicrust.message(Trans(97) + "\n" + Trans(98) + "%s\n%s" % (target_url, _texte_erreur(e)))
+        texte = Trans(97) + "\n" + Trans(98) + "%s\n%s" % (target_url, _texte_erreur(e))
+        # Une seule fenêtre bloquante par exécution (réseau coupé : sinon deux ou trois par
+        # livre) ; les erreurs suivantes vont au journal.
+        if _une_fois("erreur de lecture"):
+            comicrust.message(texte + "\n\n" + _t("Les erreurs suivantes de cette exécution sont seulement notées au "
+                                                  "journal.", "Further errors in this run are only written to the log."))
+        else:
+            comicrust.log(texte.replace("\n", " "), level="warning")
     return page
 
 
@@ -1452,7 +1511,9 @@ _NOMBRE = re.compile(r"^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$")
 
 
 def isnumeric(nNum):
-    return bool(_NOMBRE.match(str(nNum or "")))
+    """Nombre fini (« 1e999 », trop grand pour un nombre réel, n'en est pas un)."""
+    t = str(nNum or "")
+    return bool(_NOMBRE.match(t)) and math.isfinite(float(t))
 
 
 def isPositiveInt(value):
@@ -1506,7 +1567,8 @@ def if_else(condition, trueVal, falseVal):
 
 
 def _articles():
-    return "|".join(a for a in str(C("ARTICLES")).split(",") if a != "") or "(?!)"
+    # Articles saisis par l'utilisateur : échappés (« L(' » ne casse plus l'expression).
+    return "|".join(re.escape(a) for a in str(C("ARTICLES")).split(",") if a != "") or "(?!)"
 
 
 def cleanARTICLES(s):
@@ -1812,7 +1874,10 @@ def SetSerieId(f, serie, num, nBooksIn):
         ListSeries = []
         debuglog("Nom de Série pour recherche = " + S.dlgNameClean)
         # RechWhere : 0 = tout le site, 7 = toute la bédéthèque, 9 = revues, 10 = séries
-        urlN = "/search/tout?RechTexte=" + remove_accents(S.dlgNameClean.lower().strip()) + "&RechWhere=7"
+        # Texte encodé (« & », « # », « + », lettres accentuées restantes) : collé tel quel,
+        # « Tif & Tondu » cherchait « tif » et « Sillage #1 » perdait la suite de l'adresse.
+        urlN = ("/search/tout?RechTexte=" + urllib.parse.quote(remove_accents(S.dlgNameClean.lower().strip()), safe="")
+                + "&RechWhere=7")
         debuglog(Trans(113), _hote_site() + urlN)
         request = _read_url(urlN, False)
         if stop():
@@ -2833,48 +2898,55 @@ def WorkerThread(books):
                     debuglog("Cancelled from WorkerThread Start")
                 break
             nTIMEDOUT += 1
-            f = Fiche(book)
-            albumNum = _preparer(book, r".,\\/")
-            _avancement(i, nBooks, f)
+            # Un livre qui provoque une erreur imprévue (page inattendue, valeur étrange) est
+            # compté « ignoré » et noté au journal ; les livres suivants sont traités.
+            try:
+                f = Fiche(book)
+                albumNum = _preparer(book, r".,\\/")
+                _avancement(i, nBooks, f)
 
-            RetAlb = False
-            if C("CBRescrape"):
-                if f.Web:
-                    RetAlb = _scrape_lien(f, f.Web)
-            else:
-                alt = if_else(S.dlgAltNumber == "", "", "\tAltNo. = [" + S.dlgAltNumber + "]")
-                debuglog(Trans(9) + S.dlgName + "\tNo = [" + albumNum + "]" + alt)
-                debuglog(Trans(10), S.dlgName)
-                serieUrl = GetFullURL(SetSerieId(f, S.dlgName, albumNum, nBooks))
-                if stop():
-                    debuglog("Cancelled from WorkerThread after SetSerieId return")
-                    f.appliquer(C("ChampsVidesSeulement"))
-                    break
-                if serieUrl:
-                    if "/revue-" not in serieUrl:
-                        serieUrl = serieUrl.lower().replace(".html", "__10000.html")
-                    if S.AlbumNumNum:
-                        debuglog(Trans(11), albumNum + "]", if_else(S.dlgAltNumber == "", "", " - AltNo.: " +
-                                                                     S.dlgAltNumber))
-                    else:
-                        debuglog(Trans(12) + albumNum + "]", if_else(S.dlgAltNumber == "", "", " - AltNo. [" +
-                                                                      S.dlgAltNumber + "]"))
-                    RetAlb = SetAlbumInformation(f, serieUrl, S.dlgName, albumNum)
-                    # SkipAlbum : « Annuler » (ou choix interdit) dans la fenêtre des albums.
-                    if not S.SkipAlbum and not RetAlb and "/revue-" not in serieUrl and not stop():
-                        # Pas de liste d'albums dans la page (ex. « Croisade (Seconde époque: Nomade) »).
-                        RetAlb = parseAlbumInfo(f, serieUrl, albumNum)
+                RetAlb = False
+                if C("CBRescrape"):
+                    if f.Web:
+                        RetAlb = _scrape_lien(f, f.Web)
+                else:
+                    alt = if_else(S.dlgAltNumber == "", "", "\tAltNo. = [" + S.dlgAltNumber + "]")
+                    debuglog(Trans(9) + S.dlgName + "\tNo = [" + albumNum + "]" + alt)
+                    debuglog(Trans(10), S.dlgName)
+                    serieUrl = GetFullURL(SetSerieId(f, S.dlgName, albumNum, nBooks))
+                    if stop():
+                        debuglog("Cancelled from WorkerThread after SetSerieId return")
+                        f.appliquer(C("ChampsVidesSeulement"))
+                        break
+                    if serieUrl:
+                        if "/revue-" not in serieUrl:
+                            serieUrl = serieUrl.lower().replace(".html", "__10000.html")
+                        if S.AlbumNumNum:
+                            debuglog(Trans(11), albumNum + "]", if_else(S.dlgAltNumber == "", "", " - AltNo.: " +
+                                                                         S.dlgAltNumber))
+                        else:
+                            debuglog(Trans(12) + albumNum + "]", if_else(S.dlgAltNumber == "", "", " - AltNo. [" +
+                                                                          S.dlgAltNumber + "]"))
+                        RetAlb = SetAlbumInformation(f, serieUrl, S.dlgName, albumNum)
+                        # SkipAlbum : « Annuler » (ou choix interdit) dans la fenêtre des albums.
+                        if not S.SkipAlbum and not RetAlb and "/revue-" not in serieUrl and not stop():
+                            # Pas de liste d'albums dans la page (ex. « Croisade (Seconde époque: Nomade) »).
+                            RetAlb = parseAlbumInfo(f, serieUrl, albumNum)
 
-            n = f.appliquer(C("ChampsVidesSeulement"))
-            _montrer_couverture()
-            if RetAlb:
-                S.nRenamed += 1
-                log_BD(_libelle_livre(f), Trans(13) + " (%d)" % n, 1)
-            else:
+                n = f.appliquer(C("ChampsVidesSeulement"))
+                _montrer_couverture()
+                if RetAlb:
+                    S.nRenamed += 1
+                    log_BD(_libelle_livre(f), Trans(13) + " (%d)" % n, 1)
+                else:
+                    S.nIgnored += 1
+                    log_BD(_libelle_livre(f), Trans(14) + "\n", 1)
+                debuglog(Trans(125), str(datetime.timedelta(seconds=int(time.monotonic() - TimeBookStart))) + "\n")
+                debuglog("^" * 60)
+            except Exception:
+                cError = debuglogOnError()
+                log_BD("   [" + str(S.dlgName) + "] " + str(S.dlgNumber), cError, 1)
                 S.nIgnored += 1
-                log_BD(_libelle_livre(f), Trans(14) + "\n", 1)
-            debuglog(Trans(125), str(datetime.timedelta(seconds=int(time.monotonic() - TimeBookStart))) + "\n")
-            debuglog("^" * 60)
 
             # Pause entre deux albums (TIMEOUTS secondes).
             if pause and nOrigBooks > S.nIgnored + S.nRenamed and i + 1 < nBooks:
@@ -3088,9 +3160,15 @@ def QuickScrapeBD2(books):
             if not lien:
                 break
             debuglog(Trans(104), lien)
-            ok = _scrape_lien(f, GetFullURL(lien))
-            f.appliquer(C("ChampsVidesSeulement"))
-            _montrer_couverture()
+            # Erreur imprévue sur ce lien : livre ignoré (journal), on passe au suivant.
+            try:
+                ok = _scrape_lien(f, GetFullURL(lien))
+                f.appliquer(C("ChampsVidesSeulement"))
+                _montrer_couverture()
+            except Exception:
+                cError = debuglogOnError()
+                log_BD("   [" + lien + "]", cError, 1)
+                ok = False
             if ok:
                 S.nRenamed += 1
             else:

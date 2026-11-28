@@ -627,7 +627,14 @@ struct Journal {
 }
 
 impl Journal {
-    fn push(&mut self, host: &dyn ScriptHost, kind: JournalKind, mut text: String) {
+    /// Ajoute une ligne ; rend les lignes à transmettre à l'interface ([`ScriptHost::log`]),
+    /// à émettre **hors du verrou** du journal. Au-delà de la taille maximale, plus rien n'est
+    /// transmis (un script qui écrit en boucle n'inonde pas l'interface d'événements) : seul
+    /// l'avertissement « journal tronqué » part, une fois.
+    fn push(&mut self, kind: JournalKind, mut text: String) -> Option<JournalLine> {
+        if self.truncated {
+            return None;
+        }
         if text.len() > MAX_LOG_LINE {
             let mut cut = MAX_LOG_LINE;
             while !text.is_char_boundary(cut) {
@@ -636,20 +643,26 @@ impl Journal {
             text.truncate(cut);
             text.push('…');
         }
-        let line = JournalLine { kind, text };
+        let line = if self.bytes + text.len() > self.max {
+            self.truncated = true;
+            JournalLine { kind: JournalKind::Warning, text: "(journal tronqué : trop de lignes)".into() }
+        } else {
+            self.bytes += text.len();
+            JournalLine { kind, text }
+        };
+        self.lines.push(line.clone());
+        Some(line)
+    }
+}
+
+/// Ajoute une ligne au journal partagé, puis la transmet à l'hôte une fois le verrou rendu.
+fn journaliser(journal: &Mutex<Journal>, host: &dyn ScriptHost, kind: JournalKind, text: String) {
+    let line = match journal.lock() {
+        Ok(mut j) => j.push(kind, text),
+        Err(_) => None,
+    };
+    if let Some(line) = line {
         host.log(&line);
-        if self.bytes + line.text.len() > self.max {
-            if !self.truncated {
-                self.truncated = true;
-                self.lines.push(JournalLine {
-                    kind: JournalKind::Warning,
-                    text: "(journal tronqué : trop de lignes)".into(),
-                });
-            }
-            return;
-        }
-        self.bytes += line.text.len();
-        self.lines.push(line);
     }
 }
 
@@ -682,6 +695,9 @@ struct Session {
     /// Liste de choix ouverte dont les vignettes arrivent après coup : la réponse au script
     /// part quand l'interface a répondu (voir [`Session::poll_choose`]).
     live_choose: Option<LiveChoose>,
+    /// Temps passé à traiter les messages du script (appels à l'hôte : application au fil de
+    /// l'eau, lecture des fiches…) : exclu du délai maximum, qui ne compte que le script.
+    host_time: Duration,
 }
 
 /// Liste de choix ouverte avec des vignettes chargées après coup.
@@ -805,9 +821,7 @@ fn run_inner(
                     Ok(0) | Err(_) => break,
                     Ok(_) => {
                         let text = String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string();
-                        if let Ok(mut j) = journal.lock() {
-                            j.push(&*host, JournalKind::Output, text);
-                        }
+                        journaliser(&journal, &*host, JournalKind::Output, text);
                     }
                 }
             }
@@ -833,6 +847,7 @@ fn run_inner(
         hello: false,
         protocol_error: None,
         live_choose: None,
+        host_time: Duration::ZERO,
     };
     let stop = s.main_loop(&rx, &mut child, &cancel);
     // Fin : stdin fermé (le module s'arrête s'il attendait encore), attente bornée.
@@ -964,9 +979,7 @@ fn wait_or_kill(child: &mut Child, grace: Duration) -> Option<i32> {
 
 impl Session {
     fn log(&self, kind: JournalKind, text: String) {
-        if let Ok(mut j) = self.journal.lock() {
-            j.push(&*self.host, kind, text);
-        }
+        journaliser(&self.journal, &*self.host, kind, text);
     }
 
     fn send(&mut self, v: &Value) {
@@ -984,12 +997,14 @@ impl Session {
         let mut stop: Option<Stop> = None;
         let mut stop_at: Option<Instant> = None;
         let mut end_at: Option<Instant> = None;
+        // Arrêt forcé : instant où le processus a été vu terminé.
+        let mut exited_at: Option<Instant> = None;
         loop {
             // Arrêt demandé ou délai dépassé : annulation polie, puis arrêt forcé.
             if stop.is_none() && self.end.is_none() {
                 if cancel.load(Ordering::SeqCst) {
                     stop = Some(Stop::Cancel);
-                } else if self.opts.timeout.is_some_and(|t| started.elapsed() > t) {
+                } else if self.opts.timeout.is_some_and(|t| started.elapsed().saturating_sub(self.host_time) > t) {
                     stop = Some(Stop::Timeout);
                 } else if !self.hello && started.elapsed() > self.opts.start_timeout {
                     self.protocol_error = Some("Python ne répond pas au démarrage".into());
@@ -1009,9 +1024,22 @@ impl Session {
             if forced {
                 let _ = child.kill();
             }
+            // Processus terminé (fin normale, plantage, arrêt forcé) mais canal jamais fermé : un
+            // processus fils (créé par `os.fork()`, par exemple) en garde une copie. On
+            // n'attend pas la fin du flux au-delà du délai de grâce (messages déjà écrits lus
+            // entre-temps).
+            if exited_at.is_none() && child.try_wait().ok().flatten().is_some() {
+                exited_at = Some(Instant::now());
+            }
+            if exited_at.is_some_and(|t| t.elapsed() > self.opts.grace) {
+                return stop;
+            }
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(Ev::Line(line)) => {
-                    if let Err(e) = self.handle(&line) {
+                    let debut = Instant::now();
+                    let traite = self.handle(&line);
+                    self.host_time += debut.elapsed();
+                    if let Err(e) = traite {
                         self.protocol_error = Some(e);
                         let _ = child.kill();
                         return Some(Stop::Protocol);

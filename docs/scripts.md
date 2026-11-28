@@ -166,7 +166,15 @@ de la ligne survolée ou choisie d'abord), pendant que l'on lit la liste :
   couverture de chaque page déjà lue (60 jours ; 7 jours si la page n'en avait pas) : une
   série déjà proposée n'est plus relue ; image absente du site (404) : plus redemandée
   pendant 7 jours ; 800 images et 120 Mo au plus, jamais dépassés (avant d'écrire, les
-  moins récemment utilisées partent pour faire la place).
+  moins récemment utilisées partent pour faire la place) ;
+- **pages gardées en mémoire pendant l'exécution** (v1.0.2) : index des séries par lettre
+  (8 au plus), résultats de recherche (20) et dernières pages de série (4) ; pour plusieurs
+  livres d'une même série, ces pages ne sont lues qu'une fois (au lieu d'une fois par
+  livre) ;
+- erreurs (v1.0.2) : une **seule** fenêtre d'erreur de lecture par exécution (réseau
+  coupé), les suivantes vont au journal ; un livre qui provoque une erreur imprévue est
+  compté « ignoré » (détail dans `BD2_Debug_Log.txt`) et les livres suivants sont traités ;
+  recherche avec un nom encodé (« Tif & Tondu », « Sillage #1 »).
 
 Réglages ajoutés (onglet Préférences, cadre « Fenêtres de choix (ComicRust) ») : hauteur
 des couvertures (`TailleVignettes`, 150 px), couvertures des séries oui/non
@@ -348,7 +356,7 @@ def nettoyer(books):
 | `#@Name` | Libellé dans les menus (obligatoire). |
 | `#@Hook` | Quand le script est appelé (obligatoire ; plusieurs séparés par des virgules). |
 | `#@Description` | Explication (plusieurs lignes possibles). |
-| `#@Key` | Identifiant stable (sinon `fichier.py:fonction`), utilisé pour activer/désactiver. |
+| `#@Key` | Identifiant stable (sinon `fichier.py:fonction`), utilisé pour activer/désactiver. Unique : une clé déjà prise par un autre script (copie non renommée) est signalée et la fonction ignorée. |
 | `#@Image` | Icône du menu, relative au dossier du script. |
 | `#@Enabled` | `false` : désactivé tant que l'utilisateur ne le coche pas dans « Gérer les scripts » (son choix prime ; conseillé pour un automatisme). Par défaut `true`. |
 
@@ -367,7 +375,7 @@ Hooks :
 Une fonction sans paramètre est appelée sans argument. `BookOpened`, `BookClosed`,
 `NewBooks` et `Startup` sont des **automatismes** : pas de question à l'utilisateur
 (valeurs par défaut), modifications appliquées au fil de l'eau, délai maximum (5 min par
-défaut). Pour `Books` et `Library`, ComicRust montre un **aperçu** des modifications avant
+défaut, temps d'application des modifications par ComicRust non compté). Pour `Books` et `Library`, ComicRust montre un **aperçu** des modifications avant
 de les appliquer.
 
 En-têtes mal formés (sans valeur, hook inconnu, `#@Name` manquant…) : la fonction est
@@ -829,6 +837,10 @@ def ouvert(book):
   voyagent en base64 (un message fait 20 Mo au plus). v0.10.2 (même protocole 3, ajout
   compatible) : vignettes d'une liste de choix envoyées après son ouverture
   (`choose_image`) et lignes attendues signalées au script (`choose_want`).
+- Journal d'une exécution : 1 Mo au plus ; au-delà, les lignes ne sont plus transmises à la
+  fenêtre (« journal tronqué »). Un texte non encodable en UTF-8 (nom de fichier mal encodé)
+  arrive avec le caractère « � » au lieu de faire échouer le message. Python terminé mais
+  canal resté ouvert (processus fils) : l'exécution se termine après le délai de grâce.
 - Le module `comicrust.py` est intégré à ComicRust et écrit à chaque lancement dans
   `data\python\` à côté de `ComicRust.exe` (ComicRust est portable : rien n'est écrit
   hors de son dossier) ; ne pas le modifier.
