@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v1.0.2 (version **corrective** issue de la relecture complète du code du 24/11/2026) |
 | Paquet | `ComicRust-Tauri-tauri-v1.0.2-windows-x64.zip` |
-| SHA-256 | `(à renseigner à la publication)` |
+| SHA-256 | `cd5d66d5ea92a40a72ec00700e4f9acaed5fdd557a0b36f180f95804c5493bcc` |
 | Contenu | défauts de la relecture (archives piégées, écritures sûres, mot de passe conservé, sélection, focus du lecteur, mise à jour tout ou rien, instance unique, MCP…), décisions de Yoyo du 25/11/2026 (lecture seule des fichiers, sauvegardes dans data\, parité regex / ordre des pages / livre d'une page), optimisations |
 | Origine | [recette tauri-v1.0.1](tauri-v1.0.1.md) : **GO** du 24/11/2026 ; relecture complète et décisions de Yoyo |
 
