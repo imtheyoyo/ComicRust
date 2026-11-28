@@ -31,6 +31,9 @@ seulement avec « Lecture et écriture » et une configuration complète ; Comic
 ligne = refus (`motif_hors_ligne`). La raison est exposée par `EtatManquants.raisonLectureSeule` ; les commandes
 d'écriture (`proposer_fichier`, `chercher_manquants`, `appliquer_relocalisations`, `preparer_retrait`,
 `retirer_livres`) la renvoient comme erreur. Aucune écriture, en lecture seule, ni de la base ni des fichiers.
+`EtatManquants.raisonFichiers` donne la même décision avec le texte des actions sur les **fichiers** des livres
+(« Écrire les infos dans le fichier », « Convertir en CBZ », « Renommer / déplacer… ») : le texte du refus de
+`Cible::fichiers_modifiables` (`edition::raison_fichiers`), affiché sur ces entrées grisées.
 
 ## Commandes
 
@@ -56,7 +59,7 @@ d'écriture (`proposer_fichier`, `chercher_manquants`, `appliquer_relocalisation
 
 ```ts
 EtatManquants { nbManquants, verification?: {fait,total}, recherche?: {dossier,fichiers,comparaison},
-                derniere?: BilanVerification, raisonLectureSeule?: string }
+                derniere?: BilanVerification, raisonLectureSeule?: string, raisonFichiers?: string }
 BilanVerification { resume, manquants, presents, injoignables: {racine,livres}[],
                     bloques: {racine,livres,disparus}[], indetermines, interrompu, concluant, avertissement? }
 SondeLivre { id, titre, fichier, etat: 'present'|'introuvable'|'volumeInjoignable', racine?, avertissement? }
