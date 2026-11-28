@@ -81,7 +81,11 @@ impl Biblio {
     /// Applique des modifications faites hors de ComicRust (ComicRack, autre poste) à la
     /// bibliothèque affichée. Renvoie le bilan et les identifiants ajoutés ou modifiés, ou pourquoi
     /// rien n'a été appliqué ([`Ecartees`]).
-    pub(crate) fn appliquer_changements(&self, generation: u64, ch: Changes) -> Result<(Applied, Vec<String>), Ecartees> {
+    pub(crate) fn appliquer_changements(
+        &self,
+        generation: u64,
+        ch: Changes,
+    ) -> Result<(Applied, Vec<String>), Ecartees> {
         let ids: Vec<String> = ch.updated.iter().map(|b| b.id.clone()).collect();
         let (bilan, anciens) = {
             let mut g = self.verrou();

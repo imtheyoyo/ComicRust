@@ -1266,7 +1266,9 @@ mod tests {
         .unwrap();
         let r = lire(d.path()).unwrap();
         assert_eq!(r.store_mysql.as_ref().map(|c| c.password.as_str()), Some(""), "illisible ici");
-        let brut = |d: &Path| -> Value { serde_json::from_str(&std::fs::read_to_string(chemin_reglages(d)).unwrap()).unwrap() };
+        let brut = |d: &Path| -> Value {
+            serde_json::from_str(&std::fs::read_to_string(chemin_reglages(d)).unwrap()).unwrap()
+        };
         // Écriture sans rapport (géométrie de la fenêtre) : le texte chiffré est réécrit tel quel.
         enregistrer_fenetre(d.path(), ReglagesFenetre { largeur: Some(800), ..Default::default() }).unwrap();
         assert_eq!(brut(d.path())["storeMysql"]["password"], chiffre);

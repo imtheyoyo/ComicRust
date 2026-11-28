@@ -597,7 +597,10 @@ fn ecriture_comicrack_partielle_rend_les_fiches_ecrites() {
         ..Default::default()
     };
     let (ecrites, erreur) = fiches_et_erreur(&rapport);
-    assert_eq!(ecrites.iter().map(|b| (b.id.as_str(), b.file.as_deref())).collect::<Vec<_>>(), [("a", livre.file.as_deref())]);
+    assert_eq!(
+        ecrites.iter().map(|b| (b.id.as_str(), b.file.as_deref())).collect::<Vec<_>>(),
+        [("a", livre.file.as_deref())]
+    );
     assert_eq!(erreur.as_deref(), Some("b : valeur refusée"));
     let (_, aucune) = fiches_et_erreur(&WriteReport::default());
     assert!(aucune.is_none());

@@ -338,7 +338,11 @@ pub fn trier(
             cmp_opt(r(x), r(y), desc).then_with(|| sens(groupes[x].cmp(&groupes[y]), desc))
         };
         if o == Ordering::Equal {
-            o = if clef == ClefTri::Ordre { cmp_opt(rang(x), rang(y), desc) } else { cmp_clef_cles(clef, a, b, ka, kb, desc) };
+            o = if clef == ClefTri::Ordre {
+                cmp_opt(rang(x), rang(y), desc)
+            } else {
+                cmp_clef_cles(clef, a, b, ka, kb, desc)
+            };
         }
         o.then_with(|| ka.cmp_serie(kb))
     });
@@ -608,7 +612,7 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        let rang = |i: usize| (i % 4 != 0).then_some((i * 31) % 97);
+        let rang = |i: usize| (!i.is_multiple_of(4)).then_some((i * 31) % 97);
         let reference = |v: &mut Vec<usize>, clef: ClefTri, desc: bool, groupe: Regroupement| {
             // Ancienne implémentation (sans le cas « premier livre du groupe », non utilisé ici).
             v.sort_by(|&x, &y| {
@@ -616,7 +620,11 @@ mod tests {
                 let g = |i: usize| groupe.titre(&l[i]).to_lowercase();
                 let mut o = if groupe == Regroupement::Aucun { Ordering::Equal } else { sens(g(x).cmp(&g(y)), desc) };
                 if o == Ordering::Equal {
-                    o = if clef == ClefTri::Ordre { cmp_opt(rang(x), rang(y), desc) } else { cmp_clef(clef, a, b, desc) };
+                    o = if clef == ClefTri::Ordre {
+                        cmp_opt(rang(x), rang(y), desc)
+                    } else {
+                        cmp_clef(clef, a, b, desc)
+                    };
                 }
                 o.then_with(|| cmp_serie(a, b))
             });

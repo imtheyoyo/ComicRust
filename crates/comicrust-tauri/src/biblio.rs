@@ -448,6 +448,12 @@ struct Interne {
     ajoutes: Vec<String>,
 }
 
+/// Livres manquants en cache : `(génération, révision des fiches)` et identifiants.
+pub(crate) type ManquantsEnCache = Option<((u64, u64), Arc<Vec<String>>)>;
+/// Crochet de test (voir `Biblio::crochet_chargement`).
+#[cfg(test)]
+pub(crate) type Crochet = Box<dyn FnMut() + Send>;
+
 /// D'où vient la bibliothèque ouverte (pour l'édition : où écrire).
 #[derive(Debug, Clone, PartialEq)]
 pub enum SourceBiblio {
@@ -476,11 +482,11 @@ pub struct Biblio {
     /// État de la connexion à la base et écritures à signaler à la surveillance.
     pub(crate) connexion: Arc<crate::surveillance::Connexion>,
     /// Livres manquants (liste virtuelle), pour `(génération, révision des fiches)`.
-    pub(crate) manquants_en_cache: Arc<Mutex<Option<((u64, u64), Arc<Vec<String>>)>>>,
+    pub(crate) manquants_en_cache: Arc<Mutex<ManquantsEnCache>>,
     /// Tests : appelé une fois par `ouvrir` entre le chargement et l'installation de la base
     /// (simule une écriture concurrente).
     #[cfg(test)]
-    pub(crate) crochet_chargement: Arc<Mutex<Option<Box<dyn FnMut() + Send>>>>,
+    pub(crate) crochet_chargement: Arc<Mutex<Option<Crochet>>>,
 }
 
 /// Durée pendant laquelle un échec de couverture n'est pas retenté.
