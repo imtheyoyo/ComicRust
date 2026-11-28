@@ -35,9 +35,14 @@ il n'est pas livré dans le zip.
 
 - **Autonome** : ComicRust a sa propre base locale (`data\`) et surveille les dossiers de BD que vous
   indiquez (« Dossiers surveillés » dans la barre latérale).
-- **Avec ComicRack** : la bibliothèque de ComicRack est lue (en lecture seule) ; réglages → transfert
-  pour la copier dans la base de ComicRust, puis s'en passer. Le transfert peut être relancé sans
-  créer de doublons.
+- **Avec ComicRack** : la bibliothèque de ComicRack est lue, **en lecture seule par défaut** : ComicRust
+  ne modifie alors ni ses fiches ni les **fichiers des livres** (écrire les infos dans le fichier,
+  convertir en CBZ, renommer / déplacer, scripts) ; ces entrées sont grisées avec la raison. Pour
+  modifier, cocher « Lecture et écriture » (Réglages ▸ Bibliothèque ComicRack, de préférence
+  ComicRack fermé). Quand ComicRust modifie les listes d'un `ComicDb.xml`, il en garde des
+  sauvegardes dans `data\sauvegardes\comicdb\` (plus de `.bak` à côté du fichier de ComicRack).
+- **Transfert** : réglages → transfert pour copier la bibliothèque de ComicRack dans la base de
+  ComicRust, puis s'en passer. Le transfert peut être relancé sans créer de doublons.
 
 ## Utilisation
 
@@ -46,20 +51,36 @@ tous les champs des fiches, comme ComicRack), listes (dossiers, listes de lectur
 intelligentes), édition des fiches (menu contextuel et fenêtre d'édition), lecteur de pages (CBZ, CBR,
 CB7, CBT, PDF, DjVu, dossier d'images).
 
+- **Jauges des listes** (comme ComicRack) : à droite de chaque liste et de la Bibliothèque, rouge =
+  nouveaux livres, jaune = non lus, vert = total (réglage « Afficher les jauges des listes »).
+- **Réouverture sur la dernière liste** affichée à chaque démarrage (réglage « Rouvrir la dernière
+  liste au démarrage », activé par défaut). La version figure dans le titre de la fenêtre.
+- **Lu / non lu** : un livre est « lu » dès **95 %** de ses pages, comme ComicRack (pastille, jauges,
+  regroupement « État de lecture »). Clic droit ▸ « Marquer comme lu » / « Marquer comme non lu »
+  (plusieurs livres à la fois), y compris pour un livre d'une seule page (écrit comme ComicRack).
+- **Instance unique par dossier** : relancer ComicRust (par exemple avec un livre glissé sur l'exe)
+  alors qu'il tourne déjà sur ce dossier ramène la fenêtre existante, qui ouvre le livre. L'exe
+  normal et `ComicRust-Tauri-mcp.exe` comptent pour une seule instance : lancé sur un dossier déjà
+  ouvert, l'exe MCP ne démarre pas son serveur (message dans `data\mcp-journal.txt`). Deux copies
+  dans des dossiers différents restent indépendantes.
+
 ## Mises à jour
 
 Réglages → « Rechercher une mise à jour… » (et vérification automatique au démarrage, réglable).
 La mise à jour télécharge le zip de la dernière release `tauri-v*`, **vérifie son empreinte SHA-256**,
 puis remplace les fichiers par renommage (`.old`, supprimés au lancement suivant) et relance
-l'application. `data\` n'est jamais touché ; un script que vous avez modifié n'est jamais écrasé (la
+l'application. L'installation est **« tout ou rien »** : en cas d'erreur, tous les fichiers déjà
+remplacés sont remis en place ; si la fenêtre est fermée pendant l'installation, la fermeture attend
+la fin. `data\` n'est jamais touché ; un script que vous avez modifié n'est jamais écrasé (la
 nouvelle version est posée à côté, en `.nouveau`). `comicrust-cli.exe` est mis à jour avec le reste.
 
 ## Scripts Python
 
 Les scripts `.py` du dossier `scripts\` (à côté de l'exe) ajoutent des commandes aux menus, modifient
 les fiches, renomment ou rangent les fichiers, ou se déclenchent tout seuls. Le Python embarqué est
-utilisé : rien à installer. Les exemples (nettoyage des séries, Comic Vine, Bedetheque, rangement…)
-sont dans `scripts\exemples\`. Documentation complète : `scripts.md`.
+utilisé : rien à installer. Dans le clic droit des livres et des piles, les scripts sont regroupés
+dans le sous-menu **« Scripts ▸ »** (survol, clic ou Flèche droite). Les exemples (nettoyage des
+séries, Comic Vine, Bedetheque, rangement…) sont dans `scripts\exemples\`. Documentation complète : `scripts.md`.
 
 ## Thèmes
 
