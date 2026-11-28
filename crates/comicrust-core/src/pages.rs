@@ -47,22 +47,47 @@ pub const POSITIONS: &[(&str, &str)] = &[("Default", "Par défaut"), ("Near", "P
 /// Nombre maximal de pages acceptées dans une liste (garde-fou).
 pub const MAX_PAGES: usize = 100_000;
 
+/// Synonymes acceptés pour un type de page : (orthographe lue, valeur de [`PAGE_TYPES`]).
+/// ComicRack écrit la publicité `Advertisment` (`ComicPageType.Advertisment`), le schéma
+/// ComicInfo `Advertisement` : les deux désignent le même type. La valeur stockée n'est
+/// jamais réécrite d'office (seule une action de l'utilisateur change une fiche).
+const TYPE_SYNONYMS: &[(&str, &str)] = &[("Advertisment", "Advertisement")];
+
+/// Valeur canonique d'un drapeau de type (`Advertisment` → `Advertisement`), pour les
+/// libellés, les comparaisons et les filtres ; les autres valeurs sont rendues telles quelles.
+pub fn canonical_type(t: &str) -> &str {
+    let t = t.trim();
+    TYPE_SYNONYMS.iter().find(|(s, _)| *s == t).map_or(t, |(_, c)| c)
+}
+
+/// Le drapeau `t` est un type de page connu (synonymes compris).
+pub fn is_known_type(t: &str) -> bool {
+    let t = canonical_type(t);
+    PAGE_TYPES.iter().any(|(v, _, _)| *v == t)
+}
+
+/// Deux drapeaux désignent le même type (synonymes compris).
+pub fn same_type(a: &str, b: &str) -> bool {
+    canonical_type(a) == canonical_type(b)
+}
+
 /// Type de la page (« Story » si absent), tel que ComicRack l'écrit.
 pub fn kind(p: &PageInfo) -> &str {
     p.kind.as_deref().map(str::trim).filter(|k| !k.is_empty()).unwrap_or("Story")
 }
 
-/// La page a le type `t` (parmi ses drapeaux).
+/// La page a le type `t` (parmi ses drapeaux ; synonymes compris).
 pub fn is_type(p: &PageInfo, t: &str) -> bool {
-    kind(p).split(',').any(|x| x.trim() == t)
+    kind(p).split(',').any(|x| same_type(x, t))
 }
 
-/// Libellé français d'un type (drapeaux combinés : libellés joints).
+/// Libellé français d'un type (drapeaux combinés : libellés joints ; synonymes compris).
 pub fn kind_label(k: &str) -> String {
     k.split(',')
         .map(|x| {
             let x = x.trim();
-            PAGE_TYPES.iter().find(|(v, _, _)| *v == x).map_or(x, |(_, l, _)| l).to_string()
+            let c = canonical_type(x);
+            PAGE_TYPES.iter().find(|(v, _, _)| *v == c).map_or(x, |(_, l, _)| l).to_string()
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -126,8 +151,12 @@ pub fn full_list(pages: &[PageInfo], count: usize) -> Vec<PageInfo> {
 pub fn normalize(p: &mut PageInfo) {
     let k = kind(p).to_string();
     let parts: Vec<&str> = k.split(',').map(str::trim).filter(|x| !x.is_empty()).collect();
-    // Ordre des drapeaux de `Enum.ToString()` : ordre des valeurs.
-    let ordered: Vec<&str> = PAGE_TYPES.iter().map(|(v, _, _)| *v).filter(|v| parts.contains(v)).collect::<Vec<_>>();
+    // Ordre des drapeaux de `Enum.ToString()` : ordre des valeurs. Chaque drapeau garde son
+    // orthographe (`Advertisment` n'est pas réécrit en `Advertisement`).
+    let ordered: Vec<&str> = PAGE_TYPES
+        .iter()
+        .filter_map(|(v, _, _)| parts.iter().copied().find(|x| canonical_type(x) == *v))
+        .collect::<Vec<_>>();
     let k = if ordered.len() == parts.len() { ordered.join(", ") } else { k };
     p.kind = (k != "Story").then_some(k);
     if rotation(p) == "None" {
@@ -158,7 +187,7 @@ pub fn validate(pages: &[PageInfo]) -> Result<Vec<PageInfo>, String> {
         let mut p = p.clone();
         normalize(&mut p);
         let k = kind(&p);
-        if let Some(bad) = k.split(',').map(str::trim).find(|x| !PAGE_TYPES.iter().any(|(v, _, _)| v == x)) {
+        if let Some(bad) = k.split(',').map(str::trim).find(|x| !is_known_type(x)) {
             return Err(format!("page {} : type inconnu « {bad} »", p.image));
         }
         if !ROTATIONS.iter().any(|(v, _, _)| *v == rotation(&p)) {
@@ -186,15 +215,16 @@ pub fn validate(pages: &[PageInfo]) -> Result<Vec<PageInfo>, String> {
     Ok(out)
 }
 
-/// Deux listes décrivent les mêmes pages (après normalisation).
+/// Deux listes décrivent les mêmes pages (après normalisation ; `Advertisment` et
+/// `Advertisement` sont le même type).
 pub fn same(a: &[PageInfo], b: &[PageInfo]) -> bool {
-    a.len() == b.len()
-        && a.iter().zip(b).all(|(x, y)| {
-            let (mut x, mut y) = (x.clone(), y.clone());
-            normalize(&mut x);
-            normalize(&mut y);
-            x == y
-        })
+    let canon = |p: &PageInfo| {
+        let mut p = p.clone();
+        normalize(&mut p);
+        p.kind = p.kind.map(|k| k.split(',').map(canonical_type).collect::<Vec<_>>().join(", "));
+        p
+    };
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| canon(x) == canon(y))
 }
 
 fn each_selected(list: &mut [PageInfo], images: &[i32], mut f: impl FnMut(&mut PageInfo)) {
@@ -211,7 +241,7 @@ pub fn set_type(list: &mut [PageInfo], images: &[i32], t: &str) {
 /// « Marquer comme Supprimée » (Suppr) : Supprimée ↔ Histoire (`PagesView.MarkAsDeleted`).
 pub fn toggle_deleted(list: &mut [PageInfo], images: &[i32]) {
     each_selected(list, images, |p| {
-        p.kind = (kind(p) != "Deleted").then(|| "Deleted".to_string());
+        p.kind = (!same_type(kind(p), "Deleted")).then(|| "Deleted".to_string());
     });
 }
 
@@ -269,7 +299,7 @@ pub fn move_to_start(list: &mut Vec<PageInfo>, images: &[i32]) {
 /// la place qui suit leur nombre devient la couverture avant.
 pub fn move_to_end(list: &mut Vec<PageInfo>, images: &[i32]) {
     let selected: Vec<&PageInfo> = list.iter().filter(|p| images.contains(&p.image)).collect();
-    if !selected.is_empty() && selected.iter().all(|p| kind(p) == "FrontCover") {
+    if !selected.is_empty() && selected.iter().all(|p| same_type(kind(p), "FrontCover")) {
         let n = selected.len();
         set_type(list, images, "Other");
         if n < list.len() {
@@ -437,6 +467,22 @@ mod tests {
         set_bookmark(&mut l, 1, Some(""));
         assert_eq!(l[1].bookmark, None, "signet vide = supprimé");
         assert_eq!(kind_label("FrontCover, Story"), "Couverture avant, Histoire");
+    }
+
+    /// `Advertisment` (orthographe de ComicRack) : même type que `Advertisement` pour le
+    /// libellé, les comparaisons et la validation, sans réécriture de la valeur stockée.
+    #[test]
+    fn comicrack_advertisment_spelling_is_a_synonym() {
+        let p = pg(3, Some("Advertisment"));
+        assert_eq!(kind_label(kind(&p)), "Publicité");
+        assert_eq!(kind_label("FrontCover, Advertisment"), "Couverture avant, Publicité");
+        assert!(is_type(&p, "Advertisement") && is_type(&p, "Advertisment"));
+        assert!(!is_type(&p, "Story"));
+        assert!(is_known_type("Advertisment") && !is_known_type("Advert"));
+        let v = validate(&[p.clone(), pg(4, Some("Advertisment, FrontCover"))]).expect("type accepté");
+        assert_eq!(v[0].kind.as_deref(), Some("Advertisment"), "valeur stockée gardée");
+        assert_eq!(v[1].kind.as_deref(), Some("FrontCover, Advertisment"), "ordre .NET, orthographe gardée");
+        assert!(same(&[p], &[pg(3, Some("Advertisement"))]), "même type : rien à enregistrer");
     }
 
     #[test]

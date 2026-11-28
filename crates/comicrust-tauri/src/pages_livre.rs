@@ -204,7 +204,8 @@ fn rotation_de(degres: u16) -> Result<&'static str, String> {
 }
 
 fn verifier_type(t: &str) -> Result<(), String> {
-    if t.split(',').map(str::trim).all(|x| PAGE_TYPES.iter().any(|(v, _, _)| *v == x)) {
+    // Synonymes compris : `Advertisment` (orthographe de ComicRack) est accepté tel quel.
+    if t.split(',').all(pages::is_known_type) {
         Ok(())
     } else {
         Err(format!("type de page inconnu : « {t} »"))
@@ -303,7 +304,7 @@ pub fn transformer(entree: &[PageLivre], op: &OperationPages) -> Result<Vec<Page
         OperationPages::MettreAuDebut { images } => pages::move_to_start(&mut liste, &images32(images)),
         OperationPages::MettreALaFin { images } => pages::move_to_end(&mut liste, &images32(images)),
         OperationPages::Type { images, valeur } => {
-            if !PAGE_TYPES.iter().any(|(v, _, _)| v == valeur) {
+            if !pages::is_known_type(valeur) || valeur.contains(',') {
                 return Err(format!("type de page inconnu : « {valeur} »"));
             }
             pages::set_type(&mut liste, &images32(images), valeur)
@@ -507,6 +508,32 @@ mod tests {
         assert!(p.get("favori").is_some_and(serde_json::Value::is_null), "{p}");
         let m: PageModifiee = serde_json::from_str(r#"{"image":1,"favori":null}"#).unwrap();
         assert_eq!(m.favori, Some(None));
+    }
+
+    /// Page de publicité écrite par ComicRack (`Advertisment`) : libellé « Publicité »,
+    /// opérations acceptées, valeur stockée gardée tant que l'utilisateur ne la change pas.
+    #[test]
+    fn publicite_orthographe_comicrack() {
+        let fiche = vec![
+            PageFiche { image: 0, kind: Some("FrontCover".into()), ..Default::default() },
+            PageFiche { image: 1, kind: Some("Advertisment".into()), ..Default::default() },
+            PageFiche { image: 2, ..Default::default() },
+        ];
+        let l = vers_pages_livre(&fiche, &[], &HashSet::new(), "x");
+        assert_eq!((l[1].type_page.as_str(), l[1].libelle_type.as_str()), ("Advertisment", "Publicité"));
+        let l = transformer(&l, &OperationPages::Deplacer { images: vec![1], position: 3 }).expect("opération acceptée");
+        assert_eq!((l[2].type_page.as_str(), l[2].libelle_type.as_str()), ("Advertisment", "Publicité"));
+        // Liste renvoyée telle quelle : rien à enregistrer.
+        let renvoi: Vec<PageModifiee> = vers_pages_livre(&fiche, &[], &HashSet::new(), "x")
+            .iter()
+            .map(|p| serde_json::from_value(serde_json::to_value(p).unwrap()).unwrap())
+            .collect();
+        assert_eq!(fusionner(&fiche, 3, &renvoi).unwrap(), None);
+        // Seul l'ordre change : l'orthographe stockée est gardée.
+        let mut r2 = renvoi.clone();
+        r2.swap(1, 2);
+        let n = fusionner(&fiche, 3, &r2).unwrap().expect("ordre changé");
+        assert_eq!(n[2].kind.as_deref(), Some("Advertisment"));
     }
 
     #[test]

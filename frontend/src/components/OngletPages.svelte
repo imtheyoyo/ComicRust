@@ -572,7 +572,8 @@
     `${p.double ? '\nPage double' : ''}${p.position !== 'Default' ? `\nPosition en double page : ${libellePosition(p.position)}` : ''}` +
     `${p.favori ? `\nFavori : ${p.favori}` : ''}`;
   const largeurCase = $derived(Math.round(taille * 0.75 + 16));
-  const typeCommun = $derived(commune((p) => p.type));
+  // « Advertisment » (orthographe de ComicRack) = « Advertisement » : même entrée du menu.
+  const typeCommun = $derived(commune((p) => (p.type.trim() === 'Advertisment' ? 'Advertisement' : p.type)));
   const rotationCommune = $derived(commune((p) => p.rotation));
   const positionCommune = $derived(commune((p) => p.position));
   const toutesSupprimees = $derived(nbChoisies > 0 && choisies.every((p) => p.supprimee));

@@ -16,7 +16,9 @@ const ROTATIONS: ChoixPage[] = [['0', 'Aucune', '6'], ['90', '90°', '7'], ['180
 const POSITIONS: ChoixPage[] = [['Default', 'Par défaut'], ['Near', 'Proche'], ['Far', 'Éloignée']]
   .map(([valeur, libelle]) => ({ valeur, libelle }));
 
-const libelle = (t: string) => t.split(',').map((x) => TYPES.find((c) => c.valeur === x.trim())?.libelle ?? x.trim()).join(', ');
+/** Synonymes (comicrust-core/src/pages.rs `canonical_type`) : orthographe de ComicRack. */
+const canonique = (x: string) => (x.trim() === 'Advertisment' ? 'Advertisement' : x.trim());
+const libelle = (t: string) => t.split(',').map((x) => TYPES.find((c) => c.valeur === canonique(x))?.libelle ?? x.trim()).join(', ');
 
 /** Attributs enregistrés d'une page (ce que garde la fiche). */
 interface PageFiche { image: number; type: string; rotation: number; position: string; favori?: string }
