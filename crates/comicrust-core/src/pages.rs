@@ -291,7 +291,7 @@ pub fn reset_order(list: &mut [PageInfo]) {
 pub fn sort_by_name(list: &mut [PageInfo], names: &[String], numeric: bool) {
     let name = |p: &PageInfo| names.get(p.image as usize).map(String::as_str).unwrap_or("");
     list.sort_by(|a, b| {
-        if numeric { natord::compare_ignore_case(name(a), name(b)) } else { name(a).cmp(name(b)) }
+        if numeric { crate::providers::compare_natural(name(a), name(b)) } else { name(a).cmp(name(b)) }
             .then(a.image.cmp(&b.image))
     });
 }

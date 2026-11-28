@@ -45,11 +45,14 @@ pub struct BilanLecture {
     pub ignores: Vec<LivreIgnore>,
 }
 
-/// Page courante et dernière page lue à écrire pour l'état demandé : `(0, 0)` pour « non lu »,
-/// `(n - 1, n - 1)` pour « lu » (100 %, formule de `LibraryBook::read_percent`).
+/// Page courante et dernière page lue à écrire pour l'état demandé, comme `ComicBook.MarkAsRead`
+/// et `MarkAsNotRead` de ComicRack : `(0, 0)` pour « non lu » ; pour « lu », la dernière page
+/// (`n - 1`), sauf pour un livre d'une seule page : `1` (0 voudrait dire « non lu »), voir
+/// `comicrust_core::library::last_page_read_when_read`. Dans les deux cas 100 % selon
+/// `LibraryBook::read_percent`.
 pub fn pages_cibles(lu: bool, nb_pages: u32) -> (u32, u32) {
     if lu {
-        let derniere = nb_pages.saturating_sub(1);
+        let derniere = comicrust_core::library::last_page_read_when_read(nb_pages);
         (derniere, derniere)
     } else {
         (0, 0)
@@ -131,11 +134,6 @@ pub fn marquer_lecture(
             bilan.ignores.push(LivreIgnore { id: b.id.clone(), raison: "nombre de pages inconnu".into() });
             continue;
         }
-        if n == 1 {
-            // Une seule page : « lu » (page 0) est indiscernable de « non lu » dans la fiche.
-            bilan.ignores.push(LivreIgnore { id: b.id.clone(), raison: "livre d'une seule page".into() });
-            continue;
-        }
         if deja_dans_l_etat(b, lu) {
             bilan.inchanges += 1;
         } else {
@@ -209,8 +207,9 @@ pub fn marquer_lecture(
         let valeur = if lu {
             let n = nombre_pages(b, lecteur.avancement_de(Path::new(f)));
             let (courante, derniere) = pages_cibles(true, n);
+            // Position locale : une vraie page (un livre d'une page a `courante` = 1).
             Some(Avancement {
-                page: courante as usize,
+                page: courante.min(n.saturating_sub(1)) as usize,
                 page_max: derniere as usize,
                 pages: n as usize,
                 relecture: false,

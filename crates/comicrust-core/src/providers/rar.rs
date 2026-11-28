@@ -1,15 +1,16 @@
 //! RAR / CBR (RAR 4 et RAR 5) via la bibliothèque UnRAR de RARLAB.
 //!
 //! UnRAR ne lit les entrées que séquentiellement. Pour une archive solide
-//! (cas courant), toutes les pages sont décompressées en mémoire en une passe ;
-//! sinon chaque page est lue en sautant les entrées précédentes (rapide).
+//! (cas courant), la première lecture s'arrête à la page voulue (couverture), puis
+//! toutes les pages sont décompressées en mémoire en une passe ; sinon chaque page est
+//! lue en sautant les entrées précédentes (rapide).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use unrar_ng::Archive;
 
-use super::{index_entries, parse_comic_info, BookFormat, PageProvider};
+use super::{entry_limit, index_entries, parse_comic_info, too_big, BookFormat, PageProvider};
 use crate::{ComicInfo, Error};
 
 pub struct RarProvider {
@@ -18,6 +19,8 @@ pub struct RarProvider {
     pages: Vec<String>,
     info_entry: Option<String>,
     cache: HashMap<String, Vec<u8>>,
+    /// Archive solide : la première passe (partielle) a eu lieu.
+    partial_done: bool,
 }
 
 fn err(e: unrar_ng::error::UnrarError) -> Error {
@@ -40,7 +43,7 @@ impl RarProvider {
             }
         }
         let (pages, info_entry) = index_entries(names);
-        Ok(Self { path: path.to_path_buf(), solid, pages, info_entry, cache: HashMap::new() })
+        Ok(Self { path: path.to_path_buf(), solid, pages, info_entry, cache: HashMap::new(), partial_done: false })
     }
 
     /// Archive « solide » : lire une entrée oblige à décompresser les précédentes.
@@ -48,13 +51,18 @@ impl RarProvider {
         self.solid
     }
 
-    /// Une passe sur l'archive ; lit `target` (ou tout ce qui est utile si solide).
+    /// Une passe sur l'archive ; lit `target`. Archive solide : la première passe (souvent
+    /// la seule : couverture) s'arrête à `target` et ne garde que lui ; les suivantes lisent
+    /// tout ce qui est utile (lecteur), car il faut de toute façon tout décompresser.
     fn scan(&mut self, target: &str) -> Result<(), Error> {
-        let mut wanted: std::collections::HashSet<String> = if self.solid {
+        let mut wanted: HashSet<String> = if self.solid && self.partial_done {
             self.pages.iter().cloned().chain(self.info_entry.clone()).collect()
         } else {
             [target.to_string()].into()
         };
+        if self.solid {
+            self.partial_done = true;
+        }
         wanted.retain(|n| !self.cache.contains_key(n));
         let mut archive = Archive::new(&self.path).open_for_processing().map_err(err)?;
         while let Some(header) = archive.read_header().map_err(err)? {
@@ -63,7 +71,16 @@ impl RarProvider {
             }
             let name = entry_name(&header.entry().filename);
             archive = if header.entry().is_file() && wanted.remove(&name) {
+                // Taille déclarée vérifiée avant de décompresser en mémoire (UnRAR lit
+                // l'entrée entière dans un `Vec`).
+                let max = entry_limit(&name);
+                if header.entry().unpacked_size > max {
+                    return Err(Error::Io(too_big(&name, max)));
+                }
                 let (data, next) = header.read().map_err(err)?;
+                if data.len() as u64 > max {
+                    return Err(Error::Io(too_big(&name, max)));
+                }
                 self.cache.insert(name, data);
                 next
             } else {
@@ -115,6 +132,10 @@ mod tests {
             assert_eq!(BookFormat::detect(&path), Some(BookFormat::Rar), "{fixture}");
             let mut book = RarProvider::open(&path).unwrap();
             check_book(&mut book);
+            // Couverture seule : une page gardée en mémoire, pas toute l'archive.
+            let mut book = RarProvider::open(&path).unwrap();
+            book.read_page(0).unwrap();
+            assert!(book.cache.len() <= 1, "{fixture}");
         }
     }
 }

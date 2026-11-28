@@ -265,10 +265,11 @@ fn shadow_number(b: &LibraryBook) -> String {
 /// Date ComicRack sérialisée (`2019-10-01T12:58:00.123+02:00`).
 fn iso_date(v: &Option<String>) -> Option<NaiveDate> {
     let t = v.as_deref()?;
-    if t.len() < 10 || t.starts_with("0001-01-01") {
+    if t.starts_with("0001-01-01") {
         return None;
     }
-    NaiveDate::parse_from_str(&t[..10], "%Y-%m-%d").ok()
+    // `get` : une date abîmée (caractère non ASCII avant le 10e octet) ne fait pas paniquer.
+    NaiveDate::parse_from_str(t.get(..10)?, "%Y-%m-%d").ok()
 }
 
 fn published(b: &LibraryBook) -> Option<NaiveDate> {
@@ -598,10 +599,15 @@ impl Matcher {
     /// Types de critères non pris en charge (libellés), à ce niveau et en dessous.
     pub fn unsupported(&self, out: &mut Vec<String>) {
         match self {
-            Matcher::Value { kind, value, value2, .. } => {
+            Matcher::Value { kind, op, value, value2, ignore_case, .. } => {
                 let field_ref = |v: &str| v.trim_start().starts_with('{') && v.trim_end().ends_with('}');
                 if getter(kind).is_none() {
                     out.push(describe_kind(kind));
+                } else if *op == 7
+                    && matches!(getter(kind), Some(Getter::Str(_) | Getter::AllProperties))
+                    && build_regex(value, *ignore_case).is_err()
+                {
+                    out.push(format!("{} : expression régulière invalide « {value} »", describe_kind(kind)));
                 } else if matches!(getter(kind), Some(Getter::AllProperties))
                     && AllOption::parse(&self.all_properties_option()).is_none()
                 {
@@ -677,7 +683,7 @@ fn prepare(m: &Matcher, today: NaiveDate) -> Prepared {
             };
             let low = |v: &str| if *ignore_case { v.to_lowercase() } else { v.to_string() };
             let regex = (*op == 7 && matches!(getter, Getter::Str(_) | Getter::AllProperties))
-                .then(|| regex::Regex::new(value).ok())
+                .then(|| build_regex(value, *ignore_case).ok())
                 .flatten();
             Prepared::Value {
                 op: *op,
@@ -695,6 +701,14 @@ fn prepare(m: &Matcher, today: NaiveDate) -> Prepared {
             }
         }
     }
+}
+
+/// Expression régulière d'un critère : « Ignorer la casse » respecté, comme ComicRack
+/// (`RegexOptions.IgnoreCase`). Erreur : syntaxe refusée (souvent une construction .NET
+/// que Rust ne connaît pas, comme les assertions arrière) ; le critère est alors signalé
+/// par [`Matcher::unsupported`].
+fn build_regex(pattern: &str, ignore_case: bool) -> Result<regex::Regex, regex::Error> {
+    regex::RegexBuilder::new(pattern).case_insensitive(ignore_case).build()
 }
 
 /// Comparaison de texte (opérateurs de `ComicBookStringMatcher`) ; `mv`/`parts` sont déjà
@@ -1002,7 +1016,7 @@ impl SmartQuery {
                         .cmp(&shadow_series(y).to_lowercase())
                         .then(x.shadow_format().cmp(&y.shadow_format()))
                         .then(x.shadow_volume().cmp(&y.shadow_volume()))
-                        .then_with(|| natord::compare(&shadow_number(x), &shadow_number(y)))
+                        .then_with(|| crate::providers::compare_natural(&shadow_number(x), &shadow_number(y)))
                 }),
                 Selection::Random => {
                     out.sort_by(|&a, &b| books[a].id.cmp(&books[b].id));
@@ -1012,7 +1026,8 @@ impl SmartQuery {
             match limit.kind {
                 LimitKind::Count => out.truncate(limit.value.max(0) as usize),
                 LimitKind::Mb | LimitKind::Gb => {
-                    let max = limit.value * 1024 * 1024 * if limit.kind == LimitKind::Gb { 1024 } else { 1 };
+                    let unit: i64 = if limit.kind == LimitKind::Gb { 1 << 30 } else { 1 << 20 };
+                    let max = limit.value.saturating_mul(unit);
                     // `TakeWhile` : on s'arrête au premier dépassement.
                     let mut total = 0i64;
                     let cut = out
@@ -1090,6 +1105,33 @@ mod tests {
         assert!(t(v("ComicBookBlackAndWhiteMatcher", 1, "")));
         assert!(t(v("ComicBookSeriesCompleteMatcher", 2, "")), "absent = inconnu");
         assert!(t(v("ComicBookCheckedMatcher", 0, "")), "coché par défaut");
+    }
+
+    /// « Ignorer la casse » s'applique aux expressions régulières (ComicRack : IgnoreCase) ;
+    /// une expression invalide est signalée au lieu de ne jamais correspondre.
+    #[test]
+    fn regex_respects_ignore_case_and_invalid_is_reported() {
+        let b = book();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        assert!(v("ComicBookSeriesMatcher", 7, "cosmic").matches(&b, today), "casse ignorée");
+        assert!(v("ComicBookAllPropertiesMatcher", 7, "^cosmic").matches(&b, today));
+        let strict = Matcher::value("ComicBookSeriesMatcher", 7, "cosmic", "", false, false);
+        assert!(!strict.matches(&b, today), "casse respectée si demandé");
+        let q = SmartQuery { matchers: vec![v("ComicBookSeriesMatcher", 7, "(?<=x)y")], ..Default::default() };
+        assert_eq!(q.unsupported(), ["Series : expression régulière invalide « (?<=x)y »"]);
+        assert!(SmartQuery { matchers: vec![v("ComicBookSeriesMatcher", 7, "^C")], ..Default::default() }
+            .unsupported()
+            .is_empty());
+    }
+
+    /// Date abîmée (caractère non ASCII dans les 10 premiers octets) : absente, sans panique.
+    #[test]
+    fn damaged_date_does_not_panic() {
+        let mut b = book();
+        b.added = Some("2019-01-0\u{e9}1T00:00:00".into());
+        let today = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        assert!(!v("ComicBookAddedMatcher", 1, "2000-01-01").matches(&b, today));
+        assert!(v("ComicBookAddedMatcher", 2, "2000-01-01").matches(&b, today), "absente = avant tout");
     }
 
     #[test]
@@ -1215,6 +1257,9 @@ mod tests {
         let rnd = q(Limit { kind: LimitKind::Count, value: 4, selection: Selection::Random, seed: 7 });
         assert_eq!(rnd.select(&books, 0..10), rnd.select(&books, 0..10), "même graine, même tirage");
         assert!(rnd.is_approximate());
+        // Limite démesurée : pas de débordement (liste vide en release avant).
+        let huge = q(Limit { kind: LimitKind::Gb, value: 9_000_000_000, selection: Selection::Position, seed: 0 });
+        assert_eq!(huge.select(&books, 0..10).len(), 10);
         let f = SmartQuery { filtered: vec!["id1".into()], ..Default::default() };
         assert_eq!(f.select(&books, 0..3), [0, 2]);
     }

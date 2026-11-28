@@ -37,6 +37,7 @@ pub use self::djvu::DjvuProvider;
 pub use self::folder::FolderProvider;
 pub use self::pdf::{pdfium_status, PdfProvider};
 pub use self::rar::RarProvider;
+pub(crate) use self::sevenz::read_entries as sevenz_read_entries;
 pub use self::sevenz::SevenZipProvider;
 pub use self::tar::TarProvider;
 pub use self::webcomic::{WebComic, WebComicProvider};
@@ -111,8 +112,16 @@ impl BookFormat {
         if path.is_dir() {
             return Some(BookFormat::Folder);
         }
+        Self::detect_file(path).0
+    }
+
+    /// Format d'un **fichier** (signature, puis extension), et le fichier resté ouvert
+    /// (position quelconque) pour le lire sans le rouvrir : sur un partage réseau, chaque
+    /// ouverture est un aller-retour. `None` pour le fichier s'il n'a pas pu être ouvert.
+    pub(crate) fn detect_file(path: &Path) -> (Option<Self>, Option<std::fs::File>) {
         let mut head = vec![0u8; 512];
-        if let Ok(mut f) = std::fs::File::open(path) {
+        let mut file = std::fs::File::open(path).ok();
+        if let Some(f) = file.as_mut() {
             let mut n = 0;
             while n < head.len() {
                 match f.read(&mut head[n..]) {
@@ -122,10 +131,10 @@ impl BookFormat {
             }
             head.truncate(n);
             if let Some(fmt) = Self::sniff(&head) {
-                return Some(fmt);
+                return (Some(fmt), file);
             }
         }
-        path.extension().and_then(|e| e.to_str()).and_then(Self::from_extension)
+        (path.extension().and_then(|e| e.to_str()).and_then(Self::from_extension), file)
     }
 }
 
@@ -156,7 +165,99 @@ pub fn is_image_name(name: &str) -> bool {
 
 /// Tri "naturel" des noms de pages (page2 < page10), comme ComicRack.
 pub fn sort_pages(names: &mut [String]) {
-    names.sort_by(|a, b| natord::compare_ignore_case(a, b));
+    names.sort_by(|a, b| compare_natural(a, b));
+}
+
+/// Comparaison « naturelle » de ComicRack : sans casse, les suites de chiffres comparées
+/// **par leur valeur** (`img_9` < `img_010`, zéros de tête ignorés pour la valeur), les
+/// espaces comptent comme des caractères. À valeur égale (`9` et `09`), le nombre le plus
+/// court passe d'abord, puis l'ordre des octets départage : l'ordre est total et stable.
+///
+/// (`natord` comparait `010` à `9` comme des décimales, « 0,10 » < « 0,9 » : `img_010`
+/// passait avant `img_9`, et ignorait les espaces.)
+pub fn compare_natural(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    // Premier écart de longueur entre nombres de même valeur (départage final).
+    let mut zeros = Ordering::Equal;
+    loop {
+        match (x.peek().copied(), y.peek().copied()) {
+            (None, None) => break,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut s = String::new();
+                    while let Some(c) = it.peek().copied().filter(char::is_ascii_digit) {
+                        s.push(c);
+                        it.next();
+                    }
+                    s
+                };
+                let (n, m) = (take(&mut x), take(&mut y));
+                let (vn, vm) = (n.trim_start_matches('0'), m.trim_start_matches('0'));
+                let ord = vn.len().cmp(&vm.len()).then_with(|| vn.cmp(vm));
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                if zeros == Ordering::Equal {
+                    zeros = n.len().cmp(&m.len());
+                }
+            }
+            (Some(c), Some(d)) => {
+                let ord = c.to_lowercase().cmp(d.to_lowercase());
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                x.next();
+                y.next();
+            }
+        }
+    }
+    zeros.then_with(|| a.cmp(b))
+}
+
+/// Taille maximale d'une entrée d'archive (page) lue en mémoire : au-delà, l'archive est
+/// considérée comme corrompue ou piégée (« bombe » ZIP, taille déclarée aberrante).
+pub const MAX_ENTRY_SIZE: u64 = 256 * 1024 * 1024;
+
+/// Taille maximale d'un `ComicInfo.xml` (quelques Ko en pratique).
+pub const MAX_INFO_SIZE: u64 = 8 * 1024 * 1024;
+
+/// Mémoire réservée d'avance au plus pour une entrée (la taille déclarée n'est qu'une
+/// indication : elle peut être fausse).
+const PREALLOC_MAX: u64 = 16 * 1024 * 1024;
+
+/// Taille maximale admise pour l'entrée `name` (ComicInfo.xml ou page).
+pub(crate) fn entry_limit(name: &str) -> u64 {
+    if is_comic_info_name(name) {
+        MAX_INFO_SIZE
+    } else {
+        MAX_ENTRY_SIZE
+    }
+}
+
+/// Erreur « entrée trop volumineuse ».
+pub(crate) fn too_big(name: &str, max: u64) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("entrée d'archive trop volumineuse (plus de {} Mio) : {name}", max >> 20),
+    )
+}
+
+/// Lit une entrée d'archive en mémoire **sans dépasser `max` octets** : refus immédiat si
+/// la taille déclarée dépasse `max`, réservation d'avance plafonnée, lecture coupée à
+/// `max + 1` octets (une entrée qui ment sur sa taille est refusée, pas tronquée).
+pub(crate) fn read_bounded(r: &mut dyn Read, declared: u64, max: u64, name: &str) -> std::io::Result<Vec<u8>> {
+    if declared > max {
+        return Err(too_big(name, max));
+    }
+    let mut buf = Vec::with_capacity(declared.min(PREALLOC_MAX) as usize);
+    r.take(max.saturating_add(1)).read_to_end(&mut buf)?;
+    if buf.len() as u64 > max {
+        return Err(too_big(name, max));
+    }
+    Ok(buf)
 }
 
 pub(crate) fn is_comic_info_name(name: &str) -> bool {
@@ -363,6 +464,38 @@ mod tests {
         assert!(!is_image_name("dir/._p1.jpg"));
         assert!(!is_image_name("readme.txt"));
         assert!(is_image_name("Sub\\p1.WEBP"));
+    }
+
+    /// « Bombe » : l'entrée annonce peu mais en livre bien plus. Lecture coupée et refusée,
+    /// sans tout charger en mémoire.
+    #[test]
+    fn bounded_read_refuses_lying_or_huge_entries() {
+        let data = vec![7u8; 5000];
+        assert_eq!(read_bounded(&mut data.as_slice(), 10, 5000, "p.jpg").unwrap().len(), 5000);
+        let err = read_bounded(&mut data.as_slice(), 10, 1000, "p.jpg").unwrap_err();
+        assert!(err.to_string().contains("trop volumineuse"), "{err}");
+        // Lecture infinie (flux qui ne finit jamais) : s'arrête à la limite.
+        let err = read_bounded(&mut std::io::repeat(0), 0, 1 << 20, "p.jpg").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(read_bounded(&mut data.as_slice(), u64::MAX, 1000, "p.jpg").is_err());
+        assert_eq!(entry_limit("Sub/ComicInfo.xml"), MAX_INFO_SIZE);
+        assert_eq!(entry_limit("p.jpg"), MAX_ENTRY_SIZE);
+    }
+
+    /// D3b : nombres comparés par valeur, comme ComicRack.
+    #[test]
+    fn natural_order_compares_numbers_by_value() {
+        let mut v: Vec<String> = ["img_010.jpg", "img_9.jpg", "img_011.jpg", "img_2.jpg"].map(String::from).to_vec();
+        sort_pages(&mut v);
+        assert_eq!(v, ["img_2.jpg", "img_9.jpg", "img_010.jpg", "img_011.jpg"]);
+        use std::cmp::Ordering::*;
+        assert_eq!(compare_natural("p9", "p09"), Less, "même valeur : le plus court d'abord");
+        assert_eq!(compare_natural("P1", "p1"), Less, "même texte sans casse : ordre des octets");
+        assert_eq!(compare_natural("Chap 2/01.jpg", "Chap 10/01.jpg"), Less);
+        assert_eq!(compare_natural("p 2.jpg", "p1.jpg"), Less, "l'espace compte");
+        assert_eq!(compare_natural("a", "a1"), Less);
+        assert_eq!(compare_natural("x99999999999999999999999", "x100000000000000000000000"), Less, "grands nombres");
+        assert_eq!(compare_natural("abc", "abc"), Equal);
     }
 
     #[test]

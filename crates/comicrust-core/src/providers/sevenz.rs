@@ -1,26 +1,61 @@
 //! 7-Zip / CB7, décodeur pur Rust.
 //!
 //! Les archives 7z de BD sont presque toujours "solides" : extraire la page N
-//! oblige à décompresser tout ce qui précède. On décompresse donc toutes les
-//! pages en mémoire en une seule passe, au premier accès.
+//! oblige à décompresser tout ce qui précède. Voir [`SevenZipProvider::read_entry`] :
+//! une première lecture s'arrête à la page voulue, la suivante décompresse tout.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use sevenz_rust2::{ArchiveReader, Password};
 
-use super::{index_entries, parse_comic_info, BookFormat, PageProvider};
+use super::{entry_limit, index_entries, parse_comic_info, read_bounded, BookFormat, PageProvider};
 use crate::{ComicInfo, Error};
 
 pub struct SevenZipProvider {
     path: PathBuf,
     pages: Vec<String>,
     info_entry: Option<String>,
-    cache: Option<HashMap<String, Vec<u8>>>,
+    /// Entrées déjà décompressées.
+    cache: HashMap<String, Vec<u8>>,
+    /// Toutes les entrées utiles sont dans `cache`.
+    complete: bool,
+    /// Une première lecture partielle a déjà eu lieu (voir [`Self::read_entry`]).
+    partial_done: bool,
 }
 
 fn err(e: sevenz_rust2::Error) -> Error {
     Error::Archive(format!("7z : {e}"))
+}
+
+/// Une passe sur l'archive : garde les entrées de `wanted` (lecture bornée, voir
+/// [`super::read_bounded`]) et saute les autres ; avec `stop_after`, s'arrête dès que cette
+/// entrée est lue (inutile de décompresser la suite pour une couverture).
+pub(crate) fn read_entries(
+    reader: &mut ArchiveReader<std::fs::File>,
+    wanted: &HashSet<String>,
+    stop_after: Option<&str>,
+) -> Result<HashMap<String, Vec<u8>>, Error> {
+    let mut map = HashMap::new();
+    let mut done = false;
+    reader
+        .for_each_entries(|entry, data| {
+            if done {
+                // `for_each_entries` passe aux blocs suivants : on les refuse aussitôt.
+                return Ok(false);
+            }
+            let name = entry.name.replace('\\', "/");
+            if wanted.contains(&name) {
+                let buf = read_bounded(data, entry.size, entry_limit(&name), &name)?;
+                done = stop_after == Some(name.as_str());
+                map.insert(name, buf);
+            } else {
+                std::io::copy(data, &mut std::io::sink())?;
+            }
+            Ok(!done)
+        })
+        .map_err(err)?;
+    Ok(map)
 }
 
 impl SevenZipProvider {
@@ -33,36 +68,43 @@ impl SevenZipProvider {
             .filter(|e| e.has_stream && !e.is_directory)
             .map(|e| e.name.replace('\\', "/"));
         let (pages, info_entry) = index_entries(names);
-        Ok(Self { path: path.to_path_buf(), pages, info_entry, cache: None })
+        Ok(Self {
+            path: path.to_path_buf(),
+            pages,
+            info_entry,
+            cache: HashMap::new(),
+            complete: false,
+            partial_done: false,
+        })
     }
 
-    fn load_all(&mut self) -> Result<&HashMap<String, Vec<u8>>, Error> {
-        if self.cache.is_none() {
-            let mut wanted: std::collections::HashSet<String> = self.pages.iter().cloned().collect();
-            wanted.extend(self.info_entry.clone());
-            let mut map = HashMap::new();
-            let mut reader = ArchiveReader::open(&self.path, Password::empty()).map_err(err)?;
-            reader
-                .for_each_entries(|entry, data| {
-                    let name = entry.name.replace('\\', "/");
-                    let mut buf = Vec::new();
-                    if wanted.contains(&name) {
-                        buf.reserve(entry.size as usize);
-                        data.read_to_end(&mut buf)?;
-                        map.insert(name, buf);
-                    } else {
-                        std::io::copy(data, &mut std::io::sink())?;
-                    }
-                    Ok(true)
-                })
-                .map_err(err)?;
-            self.cache = Some(map);
-        }
-        Ok(self.cache.as_ref().unwrap())
-    }
-
+    /// Les 7z de BD sont presque toujours solides : lire une page oblige à décompresser ce
+    /// qui la précède. Première lecture (souvent la seule : couverture) : passe arrêtée à la
+    /// page voulue, seule cette page est gardée. Lecture suivante d'une page absente du
+    /// cache (lecteur) : une passe complète qui garde toutes les pages.
     fn read_entry(&mut self, name: &str) -> Result<Vec<u8>, Error> {
-        self.load_all()?.get(name).cloned().ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))
+        if let Some(b) = self.cache.get(name) {
+            return Ok(b.clone());
+        }
+        if !self.complete {
+            let mut reader = ArchiveReader::open(&self.path, Password::empty()).map_err(err)?;
+            if self.partial_done {
+                let wanted: HashSet<String> = self
+                    .pages
+                    .iter()
+                    .chain(self.info_entry.as_ref())
+                    .filter(|n| !self.cache.contains_key(*n))
+                    .cloned()
+                    .collect();
+                self.cache.extend(read_entries(&mut reader, &wanted, None)?);
+                self.complete = true;
+            } else {
+                let wanted: HashSet<String> = [name.to_string()].into();
+                self.cache.extend(read_entries(&mut reader, &wanted, Some(name))?);
+                self.partial_done = true;
+            }
+        }
+        self.cache.get(name).cloned().ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))
     }
 }
 
@@ -103,5 +145,14 @@ mod tests {
         sevenz_rust2::compress_to_path(&src, &path).unwrap();
         assert_eq!(BookFormat::detect(&path), Some(BookFormat::SevenZip));
         check_book(&mut SevenZipProvider::open(&path).unwrap());
+        // Couverture seule : passe arrêtée à la page voulue, rien d'autre gardé en mémoire.
+        let mut book = SevenZipProvider::open(&path).unwrap();
+        book.read_page(0).unwrap();
+        assert_eq!(book.cache.len(), 1);
+        assert!(!book.complete);
+        // Page suivante : passe complète.
+        book.read_page(2).unwrap();
+        assert!(book.complete);
+        assert_eq!(book.cache.len(), 4, "3 pages + ComicInfo.xml");
     }
 }

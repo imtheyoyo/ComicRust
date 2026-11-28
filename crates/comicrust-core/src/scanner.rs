@@ -65,7 +65,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs::Metadata;
-use std::io::Read;
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
@@ -93,7 +93,7 @@ pub use crate::mass_guard::{MASS_MISSING_ABS, MASS_MISSING_MIN};
 pub const ADD_BATCH: usize = 200;
 
 /// Taille maximale lue pour un ComicInfo.xml (protection contre une entrée aberrante).
-const MAX_INFO_SIZE: u64 = 8 * 1024 * 1024;
+use crate::providers::MAX_INFO_SIZE;
 
 /// Bilan d'un [`scan`], à appliquer à la bibliothèque.
 #[derive(Debug, Default)]
@@ -195,15 +195,23 @@ fn info_from_bytes(bytes: Result<Vec<u8>, Error>) -> (Option<ComicInfo>, Option<
     }
 }
 
-fn read_zip(path: &Path) -> Result<FileMeta, Error> {
-    let mut zip = ::zip::ZipArchive::new(std::fs::File::open(path)?)?;
+/// `file` : le fichier déjà ouvert par la détection du format (sinon il est ouvert ici).
+fn read_zip(path: &Path, file: Option<std::fs::File>) -> Result<FileMeta, Error> {
+    let file = match file {
+        Some(mut f) => {
+            f.seek(SeekFrom::Start(0))?;
+            f
+        }
+        None => std::fs::File::open(path)?,
+    };
+    let mut zip = ::zip::ZipArchive::new(file)?;
     let (pages, info_entry) = index_entries(zip.file_names().map(str::to_string));
     let (info, info_error) = match info_entry {
         None => (None, None),
         Some(name) => info_from_bytes((|| {
-            let mut buf = Vec::new();
-            zip.by_name(&name)?.take(MAX_INFO_SIZE).read_to_end(&mut buf)?;
-            Ok(buf)
+            let mut entry = zip.by_name(&name)?;
+            let declared = entry.size();
+            Ok(providers::read_bounded(&mut entry, declared, MAX_INFO_SIZE, &name)?)
         })()),
     };
     Ok(FileMeta { page_count: Some(pages.len() as u32), info, info_error })
@@ -230,6 +238,10 @@ fn read_rar(path: &Path) -> Result<FileMeta, Error> {
             let mut archive = Archive::new(path).open_for_processing().map_err(rar_err)?;
             while let Some(header) = archive.read_header().map_err(rar_err)? {
                 if header.entry().is_file() && entry_name(&header.entry().filename) == wanted {
+                    // Taille vérifiée avant de décompresser en mémoire.
+                    if header.entry().unpacked_size > MAX_INFO_SIZE {
+                        return Err(Error::Io(providers::too_big(&wanted, MAX_INFO_SIZE)));
+                    }
                     return Ok(header.read().map_err(rar_err)?.0);
                 }
                 archive = header.skip().map_err(rar_err)?;
@@ -254,20 +266,41 @@ fn read_7z(path: &Path) -> Result<FileMeta, Error> {
         .map(|e| (e.name.replace('\\', "/"), e.name.clone()))
         .collect();
     let (pages, info_entry) = index_entries(raw.keys().cloned());
-    let (info, info_error) = match info_entry {
-        None => (None, None),
-        Some(name) => info_from_bytes(reader.read_file(&raw[&name]).map_err(err)),
-    };
+    let solid = reader.archive().is_solid;
+    let info_size = info_entry
+        .as_ref()
+        .and_then(|n| reader.archive().files.iter().find(|e| e.name == raw[n]))
+        .map_or(0, |e| e.size);
+    let (info, info_error) =
+        match info_entry {
+            None => (None, None),
+            Some(name) if info_size > MAX_INFO_SIZE => {
+                (None, Some(format!("ComicInfo.xml illisible : {}", providers::too_big(&name, MAX_INFO_SIZE))))
+            }
+            // Archive solide : `read_file` garderait en mémoire tout ce qui précède le
+            // ComicInfo.xml ; la passe bornée saute ces entrées et s'arrête après lui.
+            Some(name) if solid => {
+                let wanted: HashSet<String> = [name.clone()].into();
+                info_from_bytes(providers::sevenz_read_entries(&mut reader, &wanted, Some(&name)).and_then(|mut m| {
+                    m.remove(&name).ok_or_else(|| Error::Archive(format!("entrée absente : {name}")))
+                }))
+            }
+            // Bloc propre au fichier : lecture bornée par la taille déclarée (vérifiée ci-dessus).
+            Some(name) => info_from_bytes(reader.read_file(&raw[&name]).map_err(err)),
+        };
     Ok(FileMeta { page_count: Some(pages.len() as u32), info, info_error })
 }
 
 /// Lit le minimum d'un fichier (voir l'en-tête du module).
 fn read_meta(path: &Path) -> Result<FileMeta, Error> {
-    let format = BookFormat::detect(path).ok_or_else(|| {
+    // Le fichier ouvert pour reconnaître le format sert aussi à lire un ZIP (le cas courant) :
+    // une seule ouverture par livre sur le NAS.
+    let (format, file) = BookFormat::detect_file(path);
+    let format = format.ok_or_else(|| {
         Error::Unsupported(path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "?".into()))
     })?;
     match format {
-        BookFormat::Zip => read_zip(path),
+        BookFormat::Zip => read_zip(path, file),
         BookFormat::Rar => read_rar(path),
         BookFormat::SevenZip => read_7z(path),
         BookFormat::WebComic => {
@@ -459,9 +492,12 @@ pub fn refresh_book(existing: &LibraryBook, fresh: LibraryBook) -> LibraryBook {
     out.missing = existing.missing.map(|_| false);
     out.proposed_cache = Default::default();
     // `ComicBook.SetInfo` : page courante et dernière page lue restent dans le livre.
+    // Borne : la dernière page, ou 1 pour un livre d'une page (valeur « lu » de ComicRack,
+    // `last_page_read_when_read`), sinon une relecture rendrait « non lu » un livre lu.
     if let Some(n) = out.page_count.filter(|n| *n > 0) {
-        out.current_page = out.current_page.map(|p| p.min(n - 1));
-        out.last_page_read = out.last_page_read.map(|p| p.min(n - 1));
+        let max = crate::library::last_page_read_when_read(n);
+        out.current_page = out.current_page.map(|p| p.min(max));
+        out.last_page_read = out.last_page_read.map(|p| p.min(max));
     }
     out
 }
@@ -521,16 +557,24 @@ fn walk(roots: &[PathBuf], progress: &ScanProgress, cancel: &AtomicBool) -> Opti
                     continue;
                 }
             };
+            // Liste du dossier lue d'abord : les noms servent à reconnaître les fichiers en
+            // cours de réécriture (`x.cbz` + `x.cbz.tmp`) sans un accès disque par fichier
+            // (un aller-retour réseau chacun sur un NAS).
+            let mut entries = Vec::new();
             for entry in rd {
-                let entry = match entry {
-                    Ok(e) => e,
+                match entry {
+                    Ok(e) => entries.push(e),
                     Err(e) => {
                         // Liste incomplète : prudence pour les manquants de ce dossier.
                         w.unreadable.push(path_key(&dir.to_string_lossy()));
                         w.errors.push((dir.clone(), format!("lecture du dossier : {e}")));
                         break;
                     }
-                };
+                }
+            }
+            let names: HashSet<String> =
+                entries.iter().map(|e| e.file_name().to_string_lossy().to_lowercase()).collect();
+            for entry in entries {
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let ft = match entry.file_type() {
@@ -567,7 +611,7 @@ fn walk(roots: &[PathBuf], progress: &ScanProgress, cancel: &AtomicBool) -> Opti
                     }
                 };
                 let key = path_key(&path.to_string_lossy());
-                if providers::is_being_rewritten(&path) {
+                if names.contains(&format!("{}.tmp", name.to_lowercase())) {
                     w.busy.insert(key);
                     continue;
                 }
@@ -685,11 +729,13 @@ pub fn scan_batched(
     let in_scope =
         |key: &str| roots.iter().any(|r| is_under(key, r)) && !walk.unreadable.iter().any(|d| is_under(key, d));
 
-    // Livres connus par chemin (le premier en cas de doublon).
-    let mut by_key: HashMap<String, &LibraryBook> = HashMap::new();
+    // Livres connus par chemin. Plusieurs fiches peuvent désigner le même fichier (base
+    // importée, chemin écrit avec une autre casse) : toutes sont « vues », sinon les suivantes
+    // seraient déclarées manquantes alors que leur fichier existe.
+    let mut by_key: HashMap<String, Vec<&LibraryBook>> = HashMap::new();
     for b in known {
         if let Some(f) = b.file.as_deref() {
-            by_key.entry(path_key(f)).or_insert(b);
+            by_key.entry(path_key(f)).or_default().push(b);
         }
     }
 
@@ -699,15 +745,26 @@ pub fn scan_batched(
     let mut seen_ids: HashSet<&str> = HashSet::new();
     for f in &walk.found {
         match by_key.get(f.key.as_str()) {
-            Some(b) => {
-                seen_ids.insert(b.id.as_str());
-                if b.missing == Some(true) {
-                    report.back.push(b.id.clone());
+            Some(books) => {
+                let mut refresh = 0;
+                for b in books {
+                    seen_ids.insert(b.id.as_str());
+                    if b.missing == Some(true) {
+                        report.back.push(b.id.clone());
+                    }
+                    if b.file_size != Some(f.meta.len()) || modified_differs(b.file_modified_time.as_deref(), &f.meta) {
+                        jobs.push(Job::Refresh(b, f));
+                        refresh += 1;
+                    }
                 }
-                if b.file_size != Some(f.meta.len()) || modified_differs(b.file_modified_time.as_deref(), &f.meta) {
-                    jobs.push(Job::Refresh(b, f));
-                } else {
-                    progress.done.fetch_add(1, Ordering::Relaxed);
+                match refresh {
+                    0 => {
+                        progress.done.fetch_add(1, Ordering::Relaxed);
+                    }
+                    // Une lecture par fiche : l'avancement compte chacune.
+                    n => {
+                        progress.total.fetch_add(n - 1, Ordering::Relaxed);
+                    }
                 }
             }
             None => new_files.push(f),
@@ -1013,6 +1070,44 @@ mod tests {
         let added = parse_iso_secs(b.added.as_deref().unwrap()).unwrap();
         assert!((chrono::Utc::now().timestamp() - added).abs() < 60);
         assert!(b.current_page.is_none() && b.opened.is_none() && b.missing.is_none());
+    }
+
+    /// D3c : relire un livre d'une page marqué lu par ComicRack (`LastPageRead = 1`) le
+    /// laisse lu (la borne « dernière page » le ramenait à 0, donc « non lu »).
+    #[test]
+    fn refresh_keeps_one_page_book_read() {
+        let existing = LibraryBook {
+            id: "x".into(),
+            page_count: Some(1),
+            current_page: Some(1),
+            last_page_read: Some(1),
+            ..Default::default()
+        };
+        let fresh = LibraryBook { id: "x".into(), page_count: Some(1), ..Default::default() };
+        let b = refresh_book(&existing, fresh);
+        assert_eq!((b.current_page, b.last_page_read, b.read_percent()), (Some(1), Some(1), Some(100)));
+        // Livre de 3 pages : bornées à la dernière page.
+        let existing = LibraryBook { last_page_read: Some(9), page_count: Some(10), ..existing };
+        let b = refresh_book(&existing, LibraryBook { page_count: Some(3), ..Default::default() });
+        assert_eq!(b.last_page_read, Some(2));
+    }
+
+    /// Deux fiches pour le même fichier (casse différente, base importée) : aucune n'est
+    /// déclarée manquante (la seconde l'était, et la vérification des manquants la remettait
+    /// présente à chaque fois).
+    #[test]
+    fn duplicate_records_of_one_file_are_not_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("A.cbz");
+        cbz(&path, 2, None);
+        let first = book_from_file(&path, "un".into()).unwrap();
+        let mut second = first.clone();
+        second.id = "deux".into();
+        second.file = Some(path.to_string_lossy().to_uppercase());
+        let progress = ScanProgress::default();
+        let r = scan(&[dir.path().to_path_buf()], &[first, second], &progress, &AtomicBool::new(false), ids());
+        assert!(r.missing.is_empty() && r.updated.is_empty() && r.added.is_empty(), "{}", r.summary());
+        assert_eq!(progress.get(), (1, 1));
     }
 
     #[test]
