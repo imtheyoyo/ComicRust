@@ -79,24 +79,28 @@ impl<'de> Deserialize<'de> for PageType {
     }
 }
 
-/// Lecture tolérante d'un champ facultatif : pour un nombre, une valeur vide
-/// (`<Count></Count>`, `ImageSize=""`) ou illisible donne `None` au lieu de faire
-/// échouer tout le `ComicInfo.xml` ; un texte est rendu tel quel.
+/// Lecture tolérante d'un champ facultatif : pour un nombre, une valeur **vide**
+/// (`<Count></Count>`, `ImageSize=""`) donne `None` au lieu de faire échouer tout le
+/// `ComicInfo.xml` (espaces autour acceptés) ; un nombre illisible (`<Year>abc</Year>`)
+/// reste une erreur, comme pour ComicRack. Un texte est rendu tel quel.
 pub trait Lenient: Sized {
-    fn from_text(text: Option<String>) -> Self;
+    fn from_text(text: Option<String>) -> Result<Self, String>;
 }
 
 impl Lenient for Option<String> {
-    fn from_text(text: Option<String>) -> Self {
-        text
+    fn from_text(text: Option<String>) -> Result<Self, String> {
+        Ok(text)
     }
 }
 
 macro_rules! lenient_number {
     ($($t:ty),*) => {$(
         impl Lenient for Option<$t> {
-            fn from_text(text: Option<String>) -> Self {
-                text.and_then(|t| t.trim().parse().ok())
+            fn from_text(text: Option<String>) -> Result<Self, String> {
+                match text.as_deref().map(str::trim) {
+                    None | Some("") => Ok(None),
+                    Some(t) => t.parse().map(Some).map_err(|_| format!("nombre invalide : « {t} »")),
+                }
             }
         }
     )*};
@@ -105,7 +109,7 @@ lenient_number!(i32, u32, u64, f32);
 
 /// `#[serde(deserialize_with = "lenient")]` (voir [`Lenient`]).
 pub fn lenient<'de, D: serde::Deserializer<'de>, T: Lenient>(d: D) -> Result<T, D::Error> {
-    Ok(T::from_text(Option::<String>::deserialize(d)?))
+    T::from_text(Option::<String>::deserialize(d)?).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -301,6 +305,8 @@ mod tests {
         let ci = ComicInfo::from_xml(xml).unwrap();
         assert_eq!(ci.series.as_deref(), Some("Thanos"));
         assert_eq!((ci.count, ci.volume, ci.year, ci.community_rating), (None, Some(2), None, None));
+        // Un nombre illisible reste une erreur (fiche réellement abîmée).
+        assert!(ComicInfo::from_xml("<ComicInfo><Year>abc</Year></ComicInfo>").is_err());
         let p = &ci.pages.as_ref().unwrap().page;
         assert_eq!(p[0].page_type.as_str(), "FrontCover, Story");
         assert_eq!(p[0].image_size, None);
