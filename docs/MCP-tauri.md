@@ -114,8 +114,10 @@ points egui là-bas).
 
 ## Sécurité
 
-- Écoute sur `127.0.0.1` uniquement ; requêtes venant d'une page web refusées (en-tête `Origin`).
-- Jeton facultatif.
+- Écoute sur `127.0.0.1` uniquement ; requêtes venant d'une page web refusées (en-tête `Origin`, y compris l'origine `null` d'une iframe isolée).
+- Corps obligatoirement en `Content-Type: application/json` (sinon 415) et en-tête `Host` local (`127.0.0.1`, `localhost` ou `[::1]`, sinon 403) : une page web ne peut pas envoyer de requête « simple » sans pré-vol.
+- Jeton facultatif (`--mcp-token`).
+- Instance unique par dossier `data\` : lancer l'exécutable MCP sur le même dossier qu'une instance déjà ouverte transmet le fichier éventuel à celle-ci et s'arrête ; utiliser une copie (dossier `data\` distinct) pour le débogage en parallèle.
 - `invoke` refuse les commandes qui écrivent (listes, fichiers, base ComicRack). `eval_js` et les
   clics peuvent en revanche tout faire, comme un utilisateur : tester sur une bibliothèque de test.
 - À n'utiliser que pendant les tests.

@@ -203,7 +203,7 @@ fn cmp_serie(a: &LibraryBook, b: &LibraryBook) -> Ordering {
         .to_lowercase()
         .cmp(&b.shadow_series().to_lowercase())
         .then(a.shadow_volume().cmp(&b.shadow_volume()))
-        .then_with(|| natord::compare(&a.shadow_number(), &b.shadow_number()))
+        .then_with(|| comicrust_core::providers::compare_natural(&a.shadow_number(), &b.shadow_number()))
         .then_with(|| minuscules(&a.title).cmp(&minuscules(&b.title)))
 }
 
@@ -273,7 +273,7 @@ impl Cles {
         self.serie
             .cmp(&o.serie)
             .then(self.volume.cmp(&o.volume))
-            .then_with(|| natord::compare(&self.numero, &o.numero))
+            .then_with(|| comicrust_core::providers::compare_natural(&self.numero, &o.numero))
             .then_with(|| self.titre.cmp(&o.titre))
     }
 }

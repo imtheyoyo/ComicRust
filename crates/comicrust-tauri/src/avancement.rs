@@ -270,8 +270,21 @@ static VERROU: Mutex<()> = Mutex::new(());
 fn ecrire_atomique(data: &Path, p: &Path, texte: &str) -> Result<(), String> {
     std::fs::create_dir_all(data).map_err(|e| format!("{} : {e}", data.display()))?;
     let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, texte).map_err(|e| format!("{} : {e}", tmp.display()))?;
-    std::fs::rename(&tmp, p).map_err(|e| format!("{} : {e}", p.display()))
+    let ecrire = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(texte.as_bytes())?;
+        // Données sur le disque avant le renommage : pas de fichier vide après une coupure.
+        f.sync_all()
+    };
+    if let Err(e) = ecrire() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("{} : {e}", tmp.display()));
+    }
+    std::fs::rename(&tmp, p).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{} : {e}", p.display())
+    })
 }
 
 #[cfg(test)]

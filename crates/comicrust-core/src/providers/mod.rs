@@ -303,14 +303,36 @@ pub fn decode_image(bytes: &[u8]) -> Result<PageImage, Error> {
     Ok(img.into_rgba8())
 }
 
+/// Plafond d'allocation du décodage JPEG XL (aligné sur la limite par défaut du crate `image`).
+const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Refuse une image JPEG XL dont les dimensions dépasseraient le plafond de décodage
+/// (4 canaux de `f32` par pixel au pire).
+fn verifier_taille_jxl(w: u32, h: u32) -> Result<(), Error> {
+    let octets = (w as u64).saturating_mul(h as u64).saturating_mul(16);
+    if w == 0 || h == 0 || octets > MAX_DECODE_BYTES {
+        return Err(Error::Decode(format!("JPEG XL : dimensions refusées ({w} × {h})")));
+    }
+    Ok(())
+}
+
 fn decode_jxl(bytes: &[u8]) -> Result<PageImage, Error> {
     let jxl = jxl_oxide::JxlImage::builder()
         .read(std::io::Cursor::new(bytes))
         .map_err(|e| Error::Decode(format!("JPEG XL : {e}")))?;
+    // Dimensions annoncées vérifiées AVANT le rendu : un en-tête forgé ne doit pas
+    // provoquer une allocation démesurée (même plafond que le crate `image`, 512 Mio).
+    verifier_taille_jxl(jxl.width(), jxl.height())?;
     let render = jxl.render_frame(0).map_err(|e| Error::Decode(format!("JPEG XL : {e}")))?;
     let mut stream = render.stream();
     let (w, h, ch) = (stream.width(), stream.height(), stream.channels());
-    let mut buf = vec![0f32; (w * h * ch) as usize];
+    verifier_taille_jxl(w, h)?;
+    let n = (w as u64)
+        .checked_mul(h as u64)
+        .and_then(|p| p.checked_mul(ch as u64))
+        .filter(|n| n.saturating_mul(4) <= MAX_DECODE_BYTES)
+        .ok_or_else(|| Error::Decode(format!("JPEG XL : image trop grande ({w} × {h} × {ch})")))?;
+    let mut buf = vec![0f32; n as usize];
     stream.write_to_buffer(&mut buf);
     let mut out = PageImage::new(w, h);
     for (i, px) in out.pixels_mut().enumerate() {
@@ -448,6 +470,19 @@ pub(crate) mod testutil {
 
     pub fn page_number(name: &str) -> u8 {
         name.trim_end_matches(".png").rsplit('/').next().unwrap().trim_start_matches("._").parse().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests_jxl {
+    use super::*;
+
+    #[test]
+    fn dimensions_jpeg_xl_demesurees_refusees() {
+        assert!(verifier_taille_jxl(100_000, 100_000).is_err());
+        assert!(verifier_taille_jxl(u32::MAX, u32::MAX).is_err());
+        assert!(verifier_taille_jxl(0, 10).is_err());
+        assert!(verifier_taille_jxl(4000, 6000).is_ok());
     }
 }
 
