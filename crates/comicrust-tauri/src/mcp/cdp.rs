@@ -9,6 +9,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 /// Délai maximal d'une réponse de la WebView.
+#[cfg(windows)]
 const DELAI: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Appelle une méthode DevTools sur la fenêtre principale et renvoie son résultat JSON.
