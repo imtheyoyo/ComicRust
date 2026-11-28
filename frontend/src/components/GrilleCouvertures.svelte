@@ -125,7 +125,7 @@
   role="listbox"
   tabindex="0"
   aria-label="Couvertures des livres"
-  aria-activedescendant={sel.curseur >= 0 ? `livre-${sel.curseur}` : undefined}
+  aria-activedescendant={sel.curseur >= 0 && sel.curseur >= indices[0] && sel.curseur <= indices[indices.length - 1] ? `livre-${sel.curseur}` : undefined}
   aria-multiselectable="true"
   data-testid="grille"
 >

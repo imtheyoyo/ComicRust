@@ -829,13 +829,21 @@ export interface ProgressionMaj {
 /** `true` dans la fenêtre Tauri ; `false` dans un navigateur (mode simulé). */
 export const dansTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+/** Hors de la fenêtre Tauri dans un build de production : le mode simulé n'y est pas embarqué. */
+const SANS_SIMULATION = 'Interface ComicRust ouverte hors de l\'application : le mode simulé n\'existe qu\'en développement (npm run dev).';
+
 async function appeler<T>(commande: string, args?: Record<string, unknown>): Promise<T> {
   if (dansTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<T>(commande, args);
   }
-  const { appelerSimule } = await import('./simule');
-  return (await appelerSimule(commande, args ?? {})) as T;
+  // `import.meta.env.DEV` est une constante de Vite : en production le bloc disparaît, et le chunk
+  // simulé (≈ 120 Ko, 5 000 livres factices) n'est plus embarqué dans l'exécutable (relecture O4).
+  if (import.meta.env.DEV) {
+    const { appelerSimule } = await import('./simule');
+    return (await appelerSimule(commande, args ?? {})) as T;
+  }
+  throw new Error(SANS_SIMULATION);
 }
 
 /** Abonnement à un événement du backend (ou de la simulation). Renvoie la fonction de désabonnement. */
@@ -845,8 +853,11 @@ export async function ecouter<T>(nom: string, rappel: (charge: T) => void): Prom
     const cb: EventCallback<T> = (e) => rappel(e.payload);
     return listen<T>(nom, cb);
   }
-  const { ecouterSimule } = await import('./simule');
-  return ecouterSimule(nom, rappel as (c: unknown) => void);
+  if (import.meta.env.DEV) {
+    const { ecouterSimule } = await import('./simule');
+    return ecouterSimule(nom, rappel as (c: unknown) => void);
+  }
+  throw new Error(SANS_SIMULATION);
 }
 
 // ───────────────────────────── Transfert ComicRack → ComicRust (étape 6) ─────────────────────────────
@@ -1022,6 +1033,9 @@ export const deplacerGroupesListe = (id: string, requete: RequeteLivres, groupes
   appeler<ResultatListes>('deplacer_groupes_liste', { id, requete, groupes, insertion });
 export const decalerGroupeListe = (id: string, requete: RequeteLivres, groupe: string, haut: boolean) =>
   appeler<ResultatListes>('decaler_groupe_liste', { id, requete, groupe, haut });
+/** Rang (à partir de 0) de chaque identifiant dans la vue de `requete`, `null` s'il n'y est pas
+ *  (cmd_vue.rs ; au plus 10 000 identifiants). Sert à garder la sélection après une relecture. */
+export const rangsVue = (requete: RequeteLivres, ids: string[]) => appeler<Array<number | null>>('rangs_vue', { requete, ids });
 export const groupesVue = (requete: RequeteLivres) => appeler<GroupeVue[]>('groupes_vue', { requete });
 export const catalogueCriteres = () => appeler<CatalogueCriteres>('catalogue_criteres');
 export const nouveauCritere = (typeCritere: string, ancien?: Critere) => appeler<Critere>('nouveau_critere', { typeCritere, ancien });

@@ -2,7 +2,7 @@
 // Aucune logique métier : recherche, tri et groupement sont faits par le backend (lister_livres).
 import { SvelteMap } from 'svelte/reactivity';
 import {
-  arreterScan, ecouter, lancerScanAuto, listerLivres, listerPiles, messageErreur, type BilanScan, type ClefTri,
+  arreterScan, ecouter, groupesVue, lancerScanAuto, listerLivres, listerPiles, messageErreur, type BilanScan, type ClefTri,
   type ErreurScan, type Groupe, type LivreResume, type Pile, type ProgressionScan, type ResultatScan, type SensTri,
 } from './api';
 
@@ -45,6 +45,8 @@ export class Bibliotheque {
   private generation = 0;
   private enCours = new Set<number>();
   private fenetre = { premier: 0, dernier: 0 };
+  /** Page du livre courant : chargée et jamais évincée (panneau de détails), -1 si aucune. */
+  private epinglee = -1;
 
   livre(i: number): LivreResume | undefined {
     return this.pages.get(Math.floor(i / TAILLE_PAGE))?.[i % TAILLE_PAGE];
@@ -76,23 +78,34 @@ export class Bibliotheque {
   }
 
   /** Nouvelle requête (ou rafraîchissement) : charge la page 0 (et les piles en vue empilée, sauf
-   *  pile ouverte), puis la fenêtre visible. */
-  async reinitialiser(nouvelle = true): Promise<void> {
+   *  pile ouverte), puis la fenêtre visible. Rafraîchissement (`nouvelle = false`) : les pages de la
+   *  fenêtre visible sont demandées EN MÊME TEMPS que la page 0 et le cache est remplacé d'un seul
+   *  coup (relecture B5 : avant, tout sauf la page 0 était vidé et la zone visible repassait en
+   *  squelettes, couvertures redemandées). Renvoie vrai si la réponse a été appliquée (faux : une
+   *  requête plus récente l'a remplacée). */
+  async reinitialiser(nouvelle = true): Promise<boolean> {
     const gen = ++this.generation;
     this.enCours.clear();
+    const params = { ...this.params };
+    const fenetre = nouvelle ? [] : this.pagesFenetre().filter((p) => p !== 0);
+    if (!nouvelle && this.epinglee > 0 && !fenetre.includes(this.epinglee)) fenetre.push(this.epinglee);
     try {
-      const avecPiles = this.empile && this.params.serie === undefined;
-      const [r, p] = await Promise.all([
-        listerLivres({ ...this.params, debut: 0, nombre: TAILLE_PAGE }),
-        avecPiles ? listerPiles({ ...this.params, debut: 0, nombre: 0 }) : Promise.resolve(null),
+      const avecPiles = this.empile && params.serie === undefined;
+      const [r, p, autres] = await Promise.all([
+        listerLivres({ ...params, debut: 0, nombre: TAILLE_PAGE }),
+        avecPiles ? listerPiles({ ...params, debut: 0, nombre: 0 }) : Promise.resolve(null),
+        Promise.all(fenetre.map((k) => listerLivres({ ...params, debut: k * TAILLE_PAGE, nombre: TAILLE_PAGE }))),
       ]);
-      if (gen !== this.generation) return;
+      if (gen !== this.generation) return false;
       this.erreur = '';
       if (p) this.piles = p.piles;
       this.total = r.total;
-      this.listeChargee = this.params.liste;
+      this.listeChargee = params.liste;
       this.pages.clear();
       this.pages.set(0, r.livres);
+      fenetre.forEach((k, j) => {
+        if (autres[j].livres.length > 0) this.pages.set(k, autres[j].livres);
+      });
       if (nouvelle) this.version++;
     } catch (e) {
       if (gen === this.generation) {
@@ -100,11 +113,36 @@ export class Bibliotheque {
         this.total = 0;
         this.piles = [];
         this.pages.clear();
-        this.listeChargee = this.params.liste;
+        this.listeChargee = params.liste;
       }
-      return;
+      return gen === this.generation;
     }
     this.assurer(this.fenetre.premier, this.fenetre.dernier);
+    return true;
+  }
+
+  /** Pages de la fenêtre visible (+ une de chaque côté), d'après le dernier `assurer` et le total connu. */
+  private pagesFenetre(): number[] {
+    if (this.total === 0) return [];
+    const derniere = Math.floor((this.total - 1) / TAILLE_PAGE);
+    const pa = Math.max(0, Math.floor(this.fenetre.premier / TAILLE_PAGE) - 1);
+    const pb = Math.min(derniere, Math.floor(this.fenetre.dernier / TAILLE_PAGE) + 1);
+    const res: number[] = [];
+    for (let p = pa; p <= pb; p++) res.push(p);
+    return res;
+  }
+
+  /** Index, dans les pages chargées, de chaque identifiant demandé qui s'y trouve. */
+  indexDansPages(ids: Iterable<string>): Map<string, number> {
+    const voulus = new Set(ids);
+    const res = new Map<string, number>();
+    if (voulus.size === 0) return res;
+    for (const [p, livres] of this.pages) {
+      livres.forEach((l, k) => {
+        if (voulus.has(l.id)) res.set(l.id, p * TAILLE_PAGE + k);
+      });
+    }
+    return res;
   }
 
   /** Charge les pages couvrant les index [premier, dernier] (+ une page de chaque côté). */
@@ -118,8 +156,16 @@ export class Bibliotheque {
       if (!this.pages.has(p) && !this.enCours.has(p)) void this.chargerPage(p);
     }
     for (const p of [...this.pages.keys()]) {
-      if (p < pa - PAGES_GARDEES || p > pb + PAGES_GARDEES) this.pages.delete(p);
+      if ((p < pa - PAGES_GARDEES || p > pb + PAGES_GARDEES) && p !== this.epinglee) this.pages.delete(p);
     }
+  }
+
+  /** Livre courant `i` (-1 : aucun) : sa page est chargée si besoin et gardée même loin de la fenêtre
+   *  visible (livre suivi par identifiant jusqu'à un autre rang après une relecture, ou défilé loin). */
+  epingler(i: number): void {
+    this.epinglee = i >= 0 ? Math.floor(i / TAILLE_PAGE) : -1;
+    const p = this.epinglee;
+    if (p >= 0 && i < this.total && !this.pages.has(p) && !this.enCours.has(p)) void this.chargerPage(p);
   }
 
   /** Livres aux index donnés (sélection multiple) : les pages absentes du cache sont demandées
@@ -146,35 +192,19 @@ export class Bibliotheque {
     return res;
   }
 
-  /** Dernier index du groupe qui commence à `i` (en-tête de série : sélection de toute la série).
-   *  Les pages absentes sont demandées au backend. */
-  async finGroupe(i: number): Promise<number> {
-    const premier = (await this.livresDe([i]))[0];
-    if (!premier || this.params.groupe === 'aucun') return i;
-    const nom = this.nomGroupe(premier);
-    let j = i;
-    while (j + 1 < this.total) {
-      const lot: number[] = [];
-      for (let k = j + 1; k < Math.min(this.total, j + 1 + TAILLE_PAGE); k++) lot.push(k);
-      const livres = await this.livresDe(lot);
-      const k = livres.findIndex((l) => this.nomGroupe(l) !== nom);
-      if (k >= 0) return j + k;
-      j += livres.length;
-      if (livres.length === 0) break;
+  /** Premier et dernier index du groupe qui contient `i`, en UN appel (`groupes_vue`, relecture B3 :
+   *  avant, le début du groupe était cherché livre par livre, un appel IPC par pas hors du cache —
+   *  71 s pour un groupe de 10 000 livres). Sans regroupement : [i, i]. */
+  async bornesGroupe(i: number): Promise<[number, number]> {
+    if (this.params.groupe === 'aucun') return [i, i];
+    const groupes = await groupesVue({ ...this.params, debut: 0, nombre: TAILLE_PAGE });
+    let debut = 0;
+    for (const g of groupes) {
+      const fin = debut + g.nombre - 1;
+      if (i >= debut && i <= fin) return [debut, fin];
+      debut = fin + 1;
     }
-    return j;
-  }
-
-  /** Premier index du groupe qui contient `i`. */
-  async debutDuGroupe(i: number): Promise<number> {
-    if (this.params.groupe === 'aucun') return i;
-    let k = i;
-    while (k > 0) {
-      const [p, l] = await this.livresDe([k - 1, k]);
-      if (!p || !l || this.nomGroupe(p) !== this.nomGroupe(l)) break;
-      k--;
-    }
-    return k;
+    return [i, i];
   }
 
   private async chargerPage(p: number): Promise<void> {

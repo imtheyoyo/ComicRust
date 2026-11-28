@@ -1176,6 +1176,7 @@ pub fn run() {
             cmd_fenetre::acquitter_plantage,
             crate::cmd_lecture_etat::marquer_lecture,
             crate::cmd_jauges::jauges_listes,
+            crate::cmd_vue::rangs_vue,
             crate::cmd_manquants::etat_manquants,
             crate::cmd_manquants::verifier_manquants,
             crate::cmd_manquants::arreter_manquants,

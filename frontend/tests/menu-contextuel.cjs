@@ -348,7 +348,7 @@ async function testsPiles(browser) {
 }
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME, args: ['--no-sandbox'] } : {});
   try {
     await testsLivres(browser);
     await testsBords(browser);

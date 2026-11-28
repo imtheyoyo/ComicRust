@@ -82,6 +82,8 @@ class Manquants {
 
   private minuterie: ReturnType<typeof setInterval> | undefined;
   private desabonner: (() => void) | undefined;
+  /** Jeton des démarrages / arrêts (voir `demarrer`). */
+  private demarrages = 0;
 
   get nombre(): number {
     return this.etat?.nbManquants ?? 0;
@@ -115,14 +117,23 @@ class Manquants {
    *  la version egui ; la base de ComicRust est tenue à jour par l'analyse des dossiers). */
   async demarrer(verifier: boolean): Promise<void> {
     this.arreter();
-    this.desabonner = await ecouter<BibliothequeModifiee>('bibliotheque-modifiee', () => {
+    const n = this.demarrages;
+    const desabonner = await ecouter<BibliothequeModifiee>('bibliotheque-modifiee', () => {
       void this.rafraichir();
     });
+    // Deux démarrages rapprochés (ou un arrêt pendant l'abonnement) : seul le dernier garde son
+    // écoute, l'autre est retirée aussitôt (sinon jamais désabonnée, relecture B8).
+    if (n !== this.demarrages) {
+      desabonner();
+      return;
+    }
+    this.desabonner = desabonner;
     await this.rafraichir();
     if (verifier) void this.verifier();
   }
 
   arreter(): void {
+    this.demarrages++;
     this.desabonner?.();
     this.desabonner = undefined;
     clearInterval(this.minuterie);

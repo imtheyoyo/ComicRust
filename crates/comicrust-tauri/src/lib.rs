@@ -28,6 +28,8 @@
 
 pub mod avancement;
 pub mod biblio;
+/// Rangs de livres dans la vue (suivi de la sélection par identifiant, commande `rangs_vue`).
+pub mod cmd_vue;
 pub mod connexion;
 pub mod couvertures;
 pub mod diagnostic;

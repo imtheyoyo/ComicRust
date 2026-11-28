@@ -7,6 +7,7 @@
   import { RectangleSelection, touchesLignes } from '../lib/rectangleSelection.svelte';
   import { COLONNES, colonnesVisibles, largeurColonne, LARGEUR_MAX, LARGEUR_MIN, LARGEUR_MIN_FICHIER, type Colonne } from '../lib/colonnes';
   import { enregistrerTableau, reglagesTableau } from '../lib/prefs';
+  import { ID_MANQUANTS } from '../lib/manquants.svelte';
 
   interface Props {
     bib: Bibliotheque;
@@ -29,7 +30,7 @@
 
   /** Liste affichée : colonne « # » (rang dans la liste, tri « ordre »). */
   // La liste virtuelle « Livres manquants » n'a pas d'ordre propre : pas de colonne « # ».
-  const avecRang = $derived(!!bib.params.liste && bib.params.liste !== '@manquants');
+  const avecRang = $derived(!!bib.params.liste && bib.params.liste !== ID_MANQUANTS);
 
   // Colonnes comme egui (11 colonnes, ordre et formats de lib/colonnes.ts) ; visibilité et largeurs
   // choisies sont mémorisées dans data\comicrust-tauri.json (`vue.tableau`).
@@ -197,20 +198,20 @@
   <div class="entete" role="row" tabindex="-1" style:height="{HAUT_ENTETE}px" style:grid-template-columns={gabarit} style:min-width="{largeurTotale}px"
     oncontextmenu={(e) => { e.preventDefault(); ouvrirMenu(e.clientX, e.clientY); }}>
     {#if avecRang}
-      <button class="ch num" role="columnheader" onclick={() => ontri('ordre')} tabindex="-1" title="Ordre de la liste">#{fleche('ordre')}</button>
+      <div role="columnheader" class="cel-entete num"><button class="ch num" onclick={() => ontri('ordre')} tabindex="-1" title="Ordre de la liste">#{fleche('ordre')}</button></div>
     {/if}
-    <button class="ch bouton-colonnes" type="button" tabindex="-1" aria-label="Choisir les colonnes" title="Choisir les colonnes" aria-haspopup="menu"
+    <div role="columnheader" class="cel-entete"><button class="ch bouton-colonnes" type="button" tabindex="-1" aria-label="Choisir les colonnes" title="Choisir les colonnes" aria-haspopup="menu"
       aria-expanded={!!menu} data-testid="colonnes-bouton"
-      onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); if (menu) menu = null; else ouvrirMenu(r.left, r.bottom + 2); }}>☰</button>
+      onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); if (menu) menu = null; else ouvrirMenu(r.left, r.bottom + 2); }}>☰</button></div>
     {#each colonnes as c, i (c.id)}
-      <div class="cel-entete {c.num ? 'num' : ''}" data-colonne={c.id}>
+      <div class="cel-entete {c.num ? 'num' : ''}" role="columnheader" data-colonne={c.id}>
         {#if c.tri}
           {@const clef = c.tri}
-          <button class="ch {c.num ? 'num' : ''}" role="columnheader" onclick={() => ontri(clef)} tabindex="-1"
+          <button class="ch {c.num ? 'num' : ''}" onclick={() => ontri(clef)} tabindex="-1"
             >{c.titre}{fleche(c.tri)}</button
           >
         {:else}
-          <span class="ch {c.num ? 'num' : ''}" role="columnheader">{c.titre}</span>
+          <span class="ch {c.num ? 'num' : ''}">{c.titre}</span>
         {/if}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <span class="poignee-col" data-testid="poignee-colonne" data-colonne={c.id} title="Glisser pour redimensionner (double-clic : largeur d'origine)"
@@ -254,31 +255,31 @@
         onpointerdown={(e) => onappui?.(e, i)}
       >
         {#if l}
-          {#if avecRang}<span class="cellule num discret">{l.rang ?? ''}</span>{/if}
-          <span class="mini"><img src={l.urlCouverture} alt="" loading="lazy" decoding="async" draggable="false" /></span>
+          {#if avecRang}<span class="cellule num discret" role="gridcell">{l.rang ?? ''}</span>{/if}
+          <span class="mini" role="gridcell"><img src={l.urlCouverture} alt="" loading="lazy" decoding="async" draggable="false" /></span>
           {#if bib.debutGroupe(i) && !(bib.params.groupe === 'serie' && colonnes.some((c) => c.id === 'serie'))}
             <!-- En-tête du groupe (autre regroupement que la série, ou colonne Série masquée) : étiquette au-dessus de
                  la première ligne ; clic = tout le groupe, on peut la glisser aussitôt. -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <span class="etiquette-groupe" title="{bib.nomGroupe(l)} — cliquer pour sélectionner tout le groupe (Ctrl : l'ajouter)" data-groupe={i}
+            <span class="etiquette-groupe" role="gridcell" tabindex="-1" title="{bib.nomGroupe(l)} — cliquer pour sélectionner tout le groupe (Ctrl : l'ajouter)" data-groupe={i}
               onpointerdown={(e) => { if (e.button !== 0) return; e.stopPropagation(); ongroupe?.(i, modificateurs(e)); onappui?.(e, i, true); }}
               onclick={(e) => e.stopPropagation()}>▸ {bib.nomGroupe(l)}</span>
           {/if}
           {#each colonnes as c (c.id)}
             {#if c.id === 'titre'}
-              <span class="cellule" class:manquant={l.manquant} title={l.manquant ? `${l.titre} — fichier introuvable` : l.titre}>{#if l.manquant}<span class="alerte-manquant" data-testid="indicateur-manquant" aria-label="Fichier introuvable">⚠ </span>{/if}{l.titre}</span>
+              <span class="cellule" role="gridcell" class:manquant={l.manquant} title={l.manquant ? `${l.titre} — fichier introuvable` : l.titre}>{#if l.manquant}<span class="alerte-manquant" data-testid="indicateur-manquant" aria-label="Fichier introuvable">⚠ </span>{/if}{l.titre}</span>
             {:else if c.id === 'serie' && bib.debutGroupe(i) && bib.params.groupe === 'serie'}
               <!-- En-tête de la série (vue groupée) : clic = toute la série ; on peut la glisser aussitôt. -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <span class="cellule tete-groupe" title="{bib.nomGroupe(l)} — cliquer pour sélectionner toute la série (Ctrl : l'ajouter)" data-groupe={i}
+              <span class="cellule tete-groupe" role="gridcell" tabindex="-1" title="{bib.nomGroupe(l)} — cliquer pour sélectionner toute la série (Ctrl : l'ajouter)" data-groupe={i}
                 onpointerdown={(e) => { if (e.button !== 0) return; e.stopPropagation(); ongroupe?.(i, modificateurs(e)); onappui?.(e, i, true); }}
                 onclick={(e) => e.stopPropagation()}>▸ {bib.nomGroupe(l)}</span>
             {:else}
-              <span class="cellule {c.num ? 'num' : ''} {c.id === 'serie' || c.num ? '' : 'discret'}" data-col={c.id} title={c.cellule(l)}>{c.cellule(l) || (c.num ? '' : '—')}</span>
+              <span class="cellule {c.num ? 'num' : ''} {c.id === 'serie' || c.num ? '' : 'discret'}" role="gridcell" data-col={c.id} title={c.cellule(l)}>{c.cellule(l) || (c.num ? '' : '—')}</span>
             {/if}
           {/each}
         {:else}
-          {#if avecRang}<span></span>{/if}<span></span><span class="cellule"><span class="squelette"></span></span>
+          {#if avecRang}<span role="gridcell"></span>{/if}<span role="gridcell"></span><span class="cellule" role="gridcell"><span class="squelette"></span></span>
         {/if}
       </div>
     {/each}

@@ -62,16 +62,24 @@ export class EtatListes {
   surSelection: (id: string | null) => void = (id) => (this.courante = id);
 
   private demandes = new Set<string>();
+  /** Jeton de l'arbre : incrémenté à chaque demande d'arbre et à chaque arbre reçu d'une
+   *  modification ; une réponse plus ancienne n'écrase jamais un arbre plus récent (relecture B6). */
+  private numeroArbre = 0;
+  /** Jeton des réponses de `depot_livres_possible` (un glisser précédent ne compte plus). */
+  private numeroDepots = 0;
   private minuterie: ReturnType<typeof setInterval> | undefined;
 
   async charger(): Promise<void> {
+    const n = ++this.numeroArbre;
     try {
-      this.arbre = await arbreListes();
+      const arbre = await arbreListes();
+      if (n !== this.numeroArbre) return; // un arbre plus récent a été demandé ou reçu
+      this.arbre = arbre;
       this.erreur = '';
       this.verifierCourante();
       jauges.rafraichir(); // comptes à jour (premier chargement, listes relues, après un scan…)
     } catch (e) {
-      this.erreur = messageErreur(e);
+      if (n === this.numeroArbre) this.erreur = messageErreur(e);
     }
   }
 
@@ -88,9 +96,10 @@ export class EtatListes {
 
   private async surveiller() {
     if (!this.arbre || this.occupe) return;
+    const n = this.numeroArbre;
     try {
       const e = await etatListes();
-      if (!this.arbre) return;
+      if (!this.arbre || n !== this.numeroArbre) return; // arbre changé pendant la demande
       if (e.version !== this.arbre.etat.version) await this.charger();
       else if (JSON.stringify(e) !== JSON.stringify(this.arbre.etat)) this.arbre.etat = e;
     } catch {
@@ -117,6 +126,7 @@ export class EtatListes {
     this.occupe = true;
     try {
       const r = await f();
+      ++this.numeroArbre; // une relecture partie avant la modification ne doit pas l'effacer
       this.arbre = r.arbre;
       const texte = [r.info, ...(r.avertissements ?? []).map((a) => `⚠ ${a}`)].filter(Boolean).join('\n');
       if (texte) this.info = { texte, erreur: false };
@@ -201,9 +211,10 @@ export class EtatListes {
     if (this.depots.has(id)) return this.depots.get(id);
     if (!this.demandes.has(id)) {
       this.demandes.add(id);
+      const n = this.numeroDepots;
       void depotLivresPossible(id, this.courante ?? undefined).then(
-        (r) => this.depots.set(id, r),
-        (e) => this.depots.set(id, messageErreur(e)),
+        (r) => { if (n === this.numeroDepots) this.depots.set(id, r); },
+        (e) => { if (n === this.numeroDepots) this.depots.set(id, messageErreur(e)); },
       );
     }
     return undefined;
@@ -211,6 +222,7 @@ export class EtatListes {
 
   /** Nouveau glisser : les réponses précédentes ne valent plus (lecture seule, liste affichée…). */
   viderDepots(): void {
+    this.numeroDepots++;
     this.demandes.clear();
     this.depots.clear();
   }
