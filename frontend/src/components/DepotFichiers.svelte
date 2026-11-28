@@ -5,7 +5,7 @@
   // le lire comme livre (dossier d'images) et l'ajouter aux dossiers de la bibliothèque.
   // Affiché seulement quand la bibliothèque est ouverte (le chemin du lancement attend jusque-là).
   import { onMount } from 'svelte';
-  import { ajouterDossier, importerCbl, lancerScan, lancementInitial, messageErreur, type GenreChemin } from '../lib/api';
+  import { ajouterDossier, fichiersTransmis, importerCbl, lancerScan, lancementInitial, messageErreur, type GenreChemin } from '../lib/api';
   import type { SuiviScan } from '../lib/bibliotheque.svelte';
   import { attendreOuvreur, ecouterDepots, enregistrerRouteurChemins, traiterChemin, type ActionsChemin } from '../lib/fenetre';
   import type { EtatListes } from '../lib/listes.svelte';
@@ -95,7 +95,15 @@
       (chemins) => void traiter(chemins[0]),
       (actif) => (survol = actif),
     )
-      .then((f) => (vivant ? (arreter = f) : f()))
+      .then((f) => {
+        if (!vivant) return f();
+        arreter = f;
+        // Écoute en place : fichiers transmis par d'autres lancements (« Ouvrir avec ») pendant le
+        // chargement de la page ; les suivants arrivent comme un dépôt.
+        void fichiersTransmis()
+          .then((l) => l.forEach((x) => vivant && void traiter(x.chemin, x.genre)))
+          .catch((e) => console.warn('fichiers transmis', e));
+      })
       .catch((e) => console.warn('glisser-déposer indisponible', e));
     // Argument de ligne de commande : rendu une seule fois par le backend.
     void lancementInitial()

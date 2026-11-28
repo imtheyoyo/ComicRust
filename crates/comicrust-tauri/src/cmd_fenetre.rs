@@ -5,16 +5,18 @@
 //! - [`EtatFenetre`] : géométrie lue au démarrage, suivi des écritures, chemin passé en argument ;
 //! - [`restaurer_et_afficher`] : fenêtre créée masquée, repositionnée puis montrée (pas de saut) ;
 //! - [`evenement_fenetre`] : mémorisation au redimensionnement, au déplacement et à la fermeture ;
-//! - commandes : titre, lancement initial, nature d'un chemin, rapport de plantage.
+//! - [`recevoir_transmis`] : chemin transmis par un autre lancement, gardé jusqu'à ce que le front
+//!   écoute (commande `fichiers_transmis`) ;
+//! - commandes : titre, lancement initial, fichiers transmis, nature d'un chemin, rapport de plantage.
 
-use crate::fenetre::{self, Ecran, GenreChemin, Placement, Suivi};
+use crate::fenetre::{self, Ecran, FileTransmis, GenreChemin, Placement, Suivi};
 use crate::plantage::{self, RapportPlantage};
 use crate::reglages::{self, ReglagesFenetre};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
-use tauri::{Manager, PhysicalPosition, PhysicalSize};
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize};
 
 /// État géré par Tauri pour la fenêtre et le lancement.
 pub struct EtatFenetre {
@@ -24,6 +26,8 @@ pub struct EtatFenetre {
     /// Chemin reçu en argument, rendu une seule fois par `lancement_initial`.
     initial: Mutex<Option<PathBuf>>,
     suivi: Mutex<Suivi>,
+    /// Chemins transmis par d'autres lancements, en attendant que le front écoute.
+    transmis: Mutex<FileTransmis>,
 }
 
 fn verrou<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -36,7 +40,13 @@ impl EtatFenetre {
         // Réglages illisibles : on ouvre par défaut, sans rien écraser (la lecture échouera de
         // même à la sauvegarde et l'erreur est ignorée : les réglages de l'utilisateur sont gardés).
         let lus = reglages::lire_fenetre(&data).unwrap_or_default();
-        Self { data, lus, initial: Mutex::new(initial), suivi: Mutex::new(Suivi::nouveau(lus)) }
+        Self {
+            data,
+            lus,
+            initial: Mutex::new(initial),
+            suivi: Mutex::new(Suivi::nouveau(lus)),
+            transmis: Mutex::new(FileTransmis::default()),
+        }
     }
 }
 
@@ -125,6 +135,34 @@ pub fn lancement_initial(etat: tauri::State<'_, EtatFenetre>) -> Option<Lancemen
     let chemin = verrou(&etat.initial).take()?;
     let genre = fenetre::classer_chemin(&chemin);
     Some(LancementInitial { chemin: chemin.display().to_string(), genre })
+}
+
+/// Charge de l'événement `tauri://drag-drop` (même forme qu'un vrai dépôt de fichier).
+fn charge_depot(chemin: &Path) -> serde_json::Value {
+    serde_json::json!({ "paths": [chemin.display().to_string()], "position": { "x": 0, "y": 0 } })
+}
+
+/// Chemin transmis par un autre lancement (« Ouvrir avec », double-clic sur un `.cbz`) : envoyé au
+/// front comme un dépôt de fichier (`tauri://drag-drop` de la fenêtre principale) s'il écoute
+/// déjà, sinon gardé jusqu'à `fichiers_transmis`.
+pub fn recevoir_transmis(app: &tauri::AppHandle, chemin: PathBuf) {
+    let Some(etat) = app.try_state::<EtatFenetre>() else { return };
+    let a_envoyer = verrou(&etat.transmis).recevoir(chemin);
+    if let Some(c) = a_envoyer {
+        let _ = app.emit_to("main", "tauri://drag-drop", charge_depot(&c));
+    }
+}
+
+/// Le front écoute les dépôts (montage de `DepotFichiers`) : rend les chemins transmis par
+/// d'autres lancements pendant le chargement de la page ; les suivants arrivent par
+/// `tauri://drag-drop`.
+#[tauri::command(async)]
+pub fn fichiers_transmis(etat: tauri::State<'_, EtatFenetre>) -> Vec<LancementInitial> {
+    verrou(&etat.transmis)
+        .front_pret()
+        .into_iter()
+        .map(|c| LancementInitial { genre: fenetre::classer_chemin(&c), chemin: c.display().to_string() })
+        .collect()
 }
 
 /// Nature d'un chemin déposé sur la fenêtre : `livre`, `dossier`, `liste` ou `absent`.

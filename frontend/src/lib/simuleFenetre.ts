@@ -22,7 +22,7 @@ export function genreSimule(chemin: string): GenreChemin {
 /** Version affichée dans le titre simulé (le vrai backend utilise `CARGO_PKG_VERSION`). */
 export const VERSION_SIMULEE = '0.0.0-simule';
 
-export const COMMANDES_FENETRE = ['definir_titre_fenetre', 'lancement_initial', 'classer_chemin', 'lire_plantage', 'acquitter_plantage'];
+export const COMMANDES_FENETRE = ['definir_titre_fenetre', 'lancement_initial', 'fichiers_transmis', 'classer_chemin', 'lire_plantage', 'acquitter_plantage'];
 
 export interface TracesFenetre {
   /** Titres de fenêtre demandés, dans l'ordre. */
@@ -64,6 +64,9 @@ export function creerFenetreSimulee() {
           document.title = titre;
           return null;
         }
+        case 'fichiers_transmis':
+          // Pas d'autre lancement en mode simulé (un dépôt se simule par `comicrust-simule-depot`).
+          return [];
         case 'lancement_initial': {
           if (!initial) return null;
           const l: LancementInitial = { chemin: initial, genre: genreSimule(initial) };

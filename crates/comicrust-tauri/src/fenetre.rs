@@ -290,9 +290,71 @@ pub fn classer_chemin(p: &Path) -> GenreChemin {
     }
 }
 
+// ───────────────────────── Fichiers transmis par un autre lancement ─────────────────────────
+
+/// Chemin passé à un lancement suivant (« Ouvrir avec », double-clic sur un `.cbz`) transmis à
+/// l'instance ouverte : `args` (programme compris) et dossier courant du lancement ; un chemin
+/// relatif l'est à ce dossier. `None` sans chemin (simple relance : la fenêtre passe devant).
+pub fn chemin_transmis(args: Vec<String>, dossier_courant: &str) -> Option<PathBuf> {
+    let chemin = analyser_arguments(args.into_iter().skip(1).map(OsString::from)).chemin?;
+    let chemin = if chemin.is_relative() { Path::new(dossier_courant).join(chemin) } else { chemin };
+    Some(rendre_absolu(&chemin))
+}
+
+/// File des chemins transmis par d'autres lancements, en attendant que le front écoute : un
+/// fichier reçu pendant le chargement de la page (événement émis avant l'abonnement) serait
+/// perdu. Le front signale qu'il est prêt (commande `fichiers_transmis`, au montage de
+/// `DepotFichiers`) : il reçoit la file, et les chemins suivants lui sont envoyés directement.
+#[derive(Debug, Default)]
+pub struct FileTransmis {
+    pret: bool,
+    attente: Vec<PathBuf>,
+}
+
+impl FileTransmis {
+    /// Nouveau chemin reçu : `Some` s'il faut l'envoyer tout de suite au front (déjà prêt),
+    /// `None` s'il est gardé dans la file.
+    pub fn recevoir(&mut self, chemin: PathBuf) -> Option<PathBuf> {
+        if self.pret {
+            Some(chemin)
+        } else {
+            self.attente.push(chemin);
+            None
+        }
+    }
+
+    /// Le front écoute : rend (et vide) la file, dans l'ordre d'arrivée.
+    pub fn front_pret(&mut self) -> Vec<PathBuf> {
+        self.pret = true;
+        std::mem::take(&mut self.attente)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fichier transmis avant que le front écoute : gardé, rendu quand il est prêt, puis les
+    /// suivants passent directement.
+    #[test]
+    fn file_des_fichiers_transmis() {
+        let mut f = FileTransmis::default();
+        assert_eq!(f.recevoir(PathBuf::from("/bd/a.cbz")), None, "front pas prêt : gardé");
+        assert_eq!(f.recevoir(PathBuf::from("/bd/b.cbl")), None);
+        assert_eq!(f.front_pret(), [PathBuf::from("/bd/a.cbz"), PathBuf::from("/bd/b.cbl")]);
+        assert_eq!(f.recevoir(PathBuf::from("/bd/c.cbz")), Some(PathBuf::from("/bd/c.cbz")));
+        assert!(f.front_pret().is_empty(), "file vidée");
+    }
+
+    #[test]
+    fn chemin_d_un_lancement_suivant() {
+        let base = std::env::temp_dir();
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(chemin_transmis(args(&["exe", "--mcp"]), "/x"), None);
+        assert_eq!(chemin_transmis(args(&["exe", "a.cbz"]), &base.display().to_string()), Some(base.join("a.cbz")));
+        let absolu = base.join("b.cbz");
+        assert_eq!(chemin_transmis(args(&["exe", &absolu.display().to_string()]), "/ailleurs"), Some(absolu));
+    }
 
     fn ecran(x: i32, y: i32, l: u32, h: u32) -> Ecran {
         Ecran { x, y, largeur: l, hauteur: h }
