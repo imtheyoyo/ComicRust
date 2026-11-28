@@ -162,4 +162,4 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 Recette du 28/11/2026 ([rapport](rapports/tauri-v1.0.2-2026-11-28.txt)) : déroulée par Claude via le MCP sur les copies autonome et liée (fichiers de test dans `Echantillons RECETTE\_recette_1.0.2`, aucune écriture dans ComicRack), tests ComicRack / Explorateur par Yoyo. Section 1 (correctifs) : tout OK sauf CD-01 et MP-02 non testés. Sections 2 à 10 (non-régression) : rejouées par le MCP le 28/11 avec une liste et des fichiers de test : 40 tests OK, aucun échec ; non rejoués : FE-04, LM-05, PF-01, RE-02, RE-04, DL-02, JG-02, MS-02, BD-01/02 (détail dans le rapport). 7 défauts mineurs → tauri-v1.0.3 (voir « Anomalies »).
 
-**Décision : (en attente du GO explicite de Yoyo)**
+**Décision : GO** confirmé par Yoyo le 28/11/2026 ; défauts mineurs → tauri-v1.0.3.
