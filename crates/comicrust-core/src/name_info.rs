@@ -7,6 +7,13 @@
 //! sont évaluées « de droite à gauche » (`RegexOptions.RightToLeft`) : on garde alors la
 //! correspondance qui finit le plus à droite, étendue au maximum vers la gauche pour les
 //! chiffres (voir [`rightmost`]).
+//!
+//! **Écart volontaire** (recette tauri-v1.0.2) : chez ComicRack, le préfixe `c\w*\s*` du
+//! numéro (prévu pour « ch12 », « chapter 5 ») accepte un « c » au milieu d'un mot :
+//! « Recette102 - Ordre des pages » donnait la série « Re - Ordre des pages » n° 102 (le mot
+//! « Recette » était tronqué). Ici, ce préfixe doit commencer un mot ([`inside_word`]) : un
+//! nombre collé à des lettres au milieu d'un mot n'est pas un numéro, et la série ne tronque
+//! jamais un mot. Les autres cas suivent ComicRack à l'identique.
 
 use std::sync::OnceLock;
 
@@ -71,6 +78,13 @@ fn after_part(text: &str, start: usize) -> bool {
     let before = &text[..start];
     let trimmed = before.trim_end();
     trimmed.len() < before.len() && trimmed.to_lowercase().ends_with("part")
+}
+
+/// Le « c » du préfixe `c\w*` est-il au milieu d'un mot (lettre ou chiffre juste avant) ?
+/// Seul ce préfixe peut commencer par une lettre : un numéro qui commencerait ainsi tronquerait
+/// le mot (« Re|cette102 »).
+fn inside_word(text: &str, start: usize) -> bool {
+    text[start..].starts_with(['c', 'C']) && text[..start].chars().next_back().is_some_and(char::is_alphanumeric)
 }
 
 fn rightmost_where(re: &Regex, text: &str, ok: impl Fn(usize) -> bool) -> Option<(usize, usize)> {
@@ -157,7 +171,7 @@ pub fn from_file_path(path: &str) -> NameInfo {
     }
     let number_match = {
         let t = text.clone();
-        rightmost_where(rx_number(), &text, move |start| !after_part(&t, start))
+        rightmost_where(rx_number(), &text, move |start| !after_part(&t, start) && !inside_word(&t, start))
     };
     let found = number_match.map(|(s, e)| text[s..e].to_string()).unwrap_or_default();
     if let Some(m) = number_match {
@@ -206,6 +220,30 @@ mod tests {
         // Nom de ta collection : numéro après « # », année avec mois.
         let i = from_file_path(r"Z:\04\COSMIC COLLECTION #224 2012_05 - Thanos Rising 1-5 (Jason Aaron)(2013).cbz");
         assert_eq!(i.series, "COSMIC COLLECTION");
+    }
+
+    /// Recette tauri-v1.0.2 : un nombre collé à des lettres au milieu d'un mot n'est pas un
+    /// numéro ; la série ne tronque jamais un mot.
+    #[test]
+    fn numero_colle_au_milieu_d_un_mot() {
+        let f = |p: &str| {
+            let i = from_file_path(p);
+            (i.series, i.number, i.volume)
+        };
+        let s = |a: &str, n: &str, v: i32| (a.to_string(), n.to_string(), v);
+        assert_eq!(f(r"D:\BD\Recette102 - Ordre des pages.cbz"), s("Recette102 - Ordre des pages", "", -1));
+        assert_eq!(f(r"D:\BD\Recette 102 - Ordre des pages.cbz"), s("Recette  - Ordre des pages", "102", -1));
+        assert_eq!(f(r"D:\BD\Spirou 12.cbz"), s("Spirou", "12", -1));
+        assert_eq!(f(r"D:\BD\Thanos v1 #20.cbz"), s("Thanos", "20", 1));
+        assert_eq!(f(r"D:\BD\XIII - 05 - Rouge total.cbz"), s("XIII -  - Rouge total", "5", -1));
+        assert_eq!(f(r"D:\BD\2000AD 1234.cbz"), s("2000AD", "1234", -1));
+        assert_eq!(f(r"D:\BD\Blake & Mortimer 01.cbz"), s("Blake & Mortimer", "1", -1));
+        // Préfixe « c… » en début de mot : toujours un numéro (comme ComicRack).
+        assert_eq!(f(r"D:\BD\Naruto ch12.cbz"), s("Naruto", "12", -1));
+        // Avec une espace, ComicRack prend le seul nombre (`\b` essayé d'abord) : mot gardé.
+        assert_eq!(f(r"D:\BD\Naruto chapitre 7.cbz"), s("Naruto chapitre", "7", -1));
+        // Même règle pour un « c » au milieu d'un mot suivi d'un nombre : rien de tronqué.
+        assert_eq!(f(r"D:\BD\Batch12.cbz").0, "Batch12");
     }
 
     #[test]
