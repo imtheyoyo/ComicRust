@@ -3,7 +3,7 @@
 use super::*;
 use std::io::Write;
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
 #[test]
@@ -442,7 +442,16 @@ fn sha_hex(octets: &[u8]) -> String {
 /// Serveur d'une release `tag` (egui plus récente et brouillon mêlés) ; le zip passe par une
 /// 302 comme sur GitHub. `empreinte` : contenu du `.sha256`.
 fn serveur_release(tag: &'static str, zip: Vec<u8>, empreinte: String) -> u16 {
-    serveur(move |chemin, port| {
+    serveur(routes_release(tag, zip, empreinte))
+}
+
+/// Routes de [`serveur_release`].
+fn routes_release(
+    tag: &'static str,
+    zip: Vec<u8>,
+    empreinte: String,
+) -> impl Fn(&str, u16) -> Option<Reponse> + Send + 'static {
+    move |chemin, port| {
         let base = format!("http://127.0.0.1:{port}");
         let nom = nom_paquet(tag);
         match chemin {
@@ -464,7 +473,7 @@ fn serveur_release(tag: &'static str, zip: Vec<u8>, empreinte: String) -> u16 {
             "/fichiers/sha" => Some(ok(empreinte.clone())),
             _ => None,
         }
-    })
+    }
 }
 
 fn installer_depuis(port: u16, app: &Path) -> Result<Bilan, String> {
@@ -582,6 +591,70 @@ fn bout_en_bout_avec_un_serveur_local() {
         })
         .collect();
     assert_eq!(prog.last(), Some(&(zip.len() as u64, zip.len() as u64)));
+}
+
+/// B1 : fermeture demandée pendant l'installation (fenêtre ou application) : empêchée, le front
+/// est prévenu une fois par demande, une seule attente est lancée ; l'attente rend la main à la fin
+/// de l'installation, réussie ou en échec, et la fermeture redevient libre. (Avant : la fermeture
+/// était empêchée sans jamais être refaite, d'où un processus fantôme sans fenêtre qui gardait le
+/// mutex d'instance unique.)
+#[test]
+fn fermeture_pendant_l_installation_differee_jusqu_a_la_fin() {
+    for reussie in [true, false] {
+        let zip = paquet("99");
+        let empreinte = format!("{}  x.zip", sha_hex(if reussie { &zip } else { b"autre chose" }));
+        // Porte : le zip n'est servi qu'une fois ouverte (installation retenue en cours).
+        let porte = Arc::new((Mutex::new(false), Condvar::new()));
+        let p2 = porte.clone();
+        let routes = routes_release("tauri-v99.0.0", zip, empreinte);
+        let port = serveur(move |chemin, port| {
+            if chemin == "/fichiers/zip" {
+                let (m, c) = &*p2;
+                let mut ouverte = m.lock().unwrap();
+                while !*ouverte {
+                    ouverte = c.wait(ouverte).unwrap();
+                }
+            }
+            routes(chemin, port)
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let app = installation(tmp.path());
+        let (journal, s) = sortie();
+        let maj =
+            Maj::nouveau(app.join("data"), app.clone(), true, s).avec_url(format!("http://127.0.0.1:{port}/releases"));
+        assert_eq!(maj.demander_fermeture(), DemandeFermeture::Libre, "sans installation : fermeture libre");
+        assert!(!maj.fermeture_demandee());
+        maj.attendre_fin_installation(); // rend la main tout de suite
+        maj.verifier(true);
+        attendre_statut(&maj, &[EtatStatut::Disponible]);
+        maj.installer("tauri-v99.0.0").unwrap();
+        assert!(maj.installation_en_cours());
+
+        assert_eq!(maj.demander_fermeture(), DemandeFermeture::Differee { premiere: true });
+        assert_eq!(maj.demander_fermeture(), DemandeFermeture::Differee { premiere: false }, "une seule attente");
+        assert!(maj.fermeture_demandee());
+        let prevenu = journal.lock().unwrap().iter().filter(|e| **e == EvenementMaj::FermetureDifferee).count();
+        assert_eq!(prevenu, 2, "le front est prévenu à chaque demande");
+        assert_eq!(EvenementMaj::FermetureDifferee.pour_le_front().0, "maj://fermeture-differee");
+
+        // Fil d'attente (celui que lance l'application avant `app.exit(0)`).
+        let fini = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (m2, f2) = (maj.clone(), fini.clone());
+        let attente = std::thread::spawn(move || {
+            m2.attendre_fin_installation();
+            f2.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!fini.load(std::sync::atomic::Ordering::SeqCst), "attend la fin de l'installation");
+        assert!(maj.installation_en_cours());
+
+        *porte.0.lock().unwrap() = true;
+        porte.1.notify_all();
+        attente.join().unwrap();
+        let s = maj.statut();
+        assert_eq!(s.etat, if reussie { EtatStatut::Installee } else { EtatStatut::Echec }, "{s:?}");
+        assert_eq!(maj.demander_fermeture(), DemandeFermeture::Libre, "après l'installation : fermeture libre");
+    }
 }
 
 /// Vérification automatique : la version ignorée n'est pas proposée (silence), une vérification

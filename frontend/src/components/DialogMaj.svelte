@@ -75,6 +75,9 @@
       {/if}
     {:else if statut.etat === 'installation'}
       <p>Installation de ComicRust {release?.tag ?? ''}…</p>
+      {#if miseAJour.fermetureDifferee}
+        <p class="avertissement" role="status" data-testid="maj-fermeture-differee">Installation en cours : ComicRust se fermera à la fin.</p>
+      {/if}
       <div class="barre" role="progressbar" aria-label="Téléchargement de la mise à jour" aria-valuemin="0" aria-valuemax="100"
         aria-valuenow={Math.round(fraction * 100)} data-testid="maj-progression">
         <div class="rempli" style:width="{fraction * 100}%"></div>

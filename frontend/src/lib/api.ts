@@ -1084,16 +1084,20 @@ export async function majOuvrirPage(url: string): Promise<void> {
   }
   await appeler<void>('maj_ouvrir_page', { url });
 }
-/** Abonnement aux deux événements de la mise à jour ; renvoie la fonction de désabonnement. */
+/** Abonnement aux événements de la mise à jour ; renvoie la fonction de désabonnement.
+ *  `surFermetureDifferee` : fermeture demandée pendant l'installation (`maj://fermeture-differee`),
+ *  refusée pour l'instant : ComicRust se fermera à la fin de l'installation. */
 export async function ecouterMaj(
   surStatut: (s: StatutMaj) => void,
   surProgression: (p: ProgressionMaj) => void,
+  surFermetureDifferee: () => void = () => {},
 ): Promise<UnlistenFn> {
-  const [a, b] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     ecouter<StatutMaj>('maj://statut', surStatut),
     ecouter<ProgressionMaj>('maj://progression', surProgression),
+    ecouter<null>('maj://fermeture-differee', () => surFermetureDifferee()),
   ]);
-  return () => { a(); b(); };
+  return () => { a(); b(); c(); };
 }
 
 /** URL d'une page. `largeurMax` : largeur souhaitée en pixels physiques (0 = taille d'origine ;
@@ -1466,6 +1470,9 @@ export interface RapportPlantage {
 /** Titre de la fenêtre : « <titre> — ComicRust » ; `null` : « ComicRust ». */
 export const definirTitreFenetre = (titre: string | null) => appeler<void>('definir_titre_fenetre', { titre });
 export const lancementInitial = () => appeler<LancementInitial | null>('lancement_initial');
+/** Le front écoute les dépôts : chemins transmis par d'autres lancements (« Ouvrir avec ») pendant
+ *  le chargement de la page ; les suivants arrivent comme un dépôt de fichier. */
+export const fichiersTransmis = () => appeler<LancementInitial[]>('fichiers_transmis');
 export const classerChemin = (chemin: string) => appeler<GenreChemin>('classer_chemin', { chemin });
 export const lirePlantage = () => appeler<RapportPlantage | null>('lire_plantage');
 /** Le rapport a été vu : le backend supprime `data\plantage.txt`. */

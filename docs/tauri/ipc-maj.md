@@ -22,6 +22,10 @@ Commandes :
 
 - `maj://statut` : `StatutMaj`
 - `maj://progression` : `{ recu: number, total: number }` (≤ 10 par seconde)
+- `maj://fermeture-differee` : sans charge. La fenêtre (ou l'application) a été fermée pendant une
+  installation : la fermeture est empêchée, le front ouvre la fenêtre « Mise à jour » avec « Installation
+  en cours : ComicRust se fermera à la fin », et l'application se ferme d'elle-même à la fin de
+  l'installation, réussie ou en échec (`Maj::demander_fermeture`, fil d'attente puis `app.exit(0)`).
 
 Règles : une vérification automatique (`manuel = false`) n'émet `disponible` que si la version n'est pas
 ignorée ; en cas d'erreur ou si à jour, elle reste silencieuse côté interface (le front n'affiche rien). Une
@@ -119,6 +123,7 @@ ensuite, `inactif` si rien n'est proposé.
 `installation` (`manuel: true`, `release`) → `maj://progression` répétés (au plus 10/s ; le dernier vaut
 toujours `recu = total`) → `installee` (`bilan`) | `echec` (`erreur`, `release`).
 `total` est la taille annoncée par GitHub (relevée à `recu` si plus petite).
+Fermeture pendant l'installation : voir `maj://fermeture-differee` (jamais de processus sans fenêtre).
 
 **Redémarrage** (`maj_redemarrer`) : proposé après `installee`. L'application relance son exe avec les mêmes
 arguments plus `--attendre-pid <pid>`, puis se ferme (`app.exit(0)` : la lecture des livres ouverts est

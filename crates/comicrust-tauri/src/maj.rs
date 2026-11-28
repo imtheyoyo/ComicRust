@@ -828,7 +828,25 @@ pub struct EtatMaj {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvenementMaj {
     Statut(StatutMaj),
-    Progression { recu: u64, total: u64 },
+    Progression {
+        recu: u64,
+        total: u64,
+    },
+    /// Fermeture demandée pendant l'installation : refusée pour l'instant, ComicRust se fermera
+    /// à la fin de l'installation (`maj://fermeture-differee`).
+    FermetureDifferee,
+}
+
+/// Réponse de `Maj::demander_fermeture` (fermeture de la fenêtre ou de l'application).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DemandeFermeture {
+    /// Aucune installation en cours : la fermeture se fait normalement.
+    Libre,
+    /// Installation en cours : la fermeture est **empêchée** (une copie interrompue laisserait
+    /// une installation incomplète) et l'application doit se fermer à la fin de l'installation,
+    /// réussie ou non. `premiere` : première demande, celle qui lance l'attente de la fin
+    /// (`Maj::attendre_fin_installation` puis fermeture) ; les suivantes n'en relancent pas.
+    Differee { premiere: bool },
 }
 
 impl EvenementMaj {
@@ -839,6 +857,7 @@ impl EvenementMaj {
             EvenementMaj::Progression { recu, total } => {
                 ("maj://progression", serde_json::json!({ "recu": recu, "total": total }))
             }
+            EvenementMaj::FermetureDifferee => ("maj://fermeture-differee", Value::Null),
         }
     }
 }
@@ -853,7 +872,7 @@ mod reseau {
     use super::*;
     use crate::reglages;
     use std::io::Write;
-    use std::sync::{Arc, Mutex, MutexGuard};
+    use std::sync::{Arc, Condvar, Mutex, MutexGuard};
     use std::time::Instant;
 
     /// Intervalle minimal entre deux événements de progression (≤ 10 par seconde).
@@ -1035,12 +1054,16 @@ mod reseau {
         statut: StatutMaj,
         /// Release de la dernière vérification (adresses complètes).
         release: Option<Release>,
+        /// Fermeture demandée pendant l'installation (l'application se fermera à sa fin).
+        fermeture_demandee: bool,
     }
 
     /// État de la mise à jour, partagé par les commandes IPC (géré par Tauri).
     #[derive(Clone)]
     pub struct Maj {
         interne: Arc<Mutex<Interne>>,
+        /// Réveille `attendre_fin_installation` à chaque changement de statut.
+        changement: Arc<Condvar>,
         data: PathBuf,
         app_dir: PathBuf,
         url_api: String,
@@ -1056,7 +1079,12 @@ mod reseau {
         /// [`installable`](super::installable).
         pub fn nouveau(data: PathBuf, app_dir: PathBuf, installable: bool, sortie: SortieMaj) -> Self {
             Self {
-                interne: Arc::new(Mutex::new(Interne { statut: StatutMaj::default(), release: None })),
+                interne: Arc::new(Mutex::new(Interne {
+                    statut: StatutMaj::default(),
+                    release: None,
+                    fermeture_demandee: false,
+                })),
+                changement: Arc::new(Condvar::new()),
                 data,
                 app_dir,
                 url_api: url_api(),
@@ -1085,6 +1113,7 @@ mod reseau {
         /// Change le statut ; l'émet si `emettre`.
         fn poser(&self, statut: StatutMaj, emettre: bool) {
             self.verrou().statut = statut.clone();
+            self.changement.notify_all();
             if emettre {
                 (self.sortie)(EvenementMaj::Statut(statut));
             }
@@ -1100,6 +1129,39 @@ mod reseau {
         /// incomplète).
         pub fn installation_en_cours(&self) -> bool {
             self.verrou().statut.etat == EtatStatut::Installation
+        }
+
+        /// Fermeture de la fenêtre principale ou de l'application demandée. Pendant une
+        /// installation : la demande est retenue, le front prévenu (`maj://fermeture-differee` :
+        /// « ComicRust se fermera à la fin ») et la fermeture doit être empêchée ; l'appelant
+        /// lance, à la première demande, l'attente de la fin (`attendre_fin_installation`) puis
+        /// ferme l'application. Sinon : [`DemandeFermeture::Libre`].
+        pub fn demander_fermeture(&self) -> DemandeFermeture {
+            let reponse = {
+                let mut g = self.verrou();
+                if g.statut.etat != EtatStatut::Installation {
+                    return DemandeFermeture::Libre;
+                }
+                let premiere = !g.fermeture_demandee;
+                g.fermeture_demandee = true;
+                DemandeFermeture::Differee { premiere }
+            };
+            (self.sortie)(EvenementMaj::FermetureDifferee);
+            reponse
+        }
+
+        /// Vrai si une fermeture a été demandée pendant l'installation en cours (ou finie).
+        pub fn fermeture_demandee(&self) -> bool {
+            self.verrou().fermeture_demandee
+        }
+
+        /// Attend la fin de l'installation en cours (réussie ou en échec) ; rend la main tout de
+        /// suite sans installation.
+        pub fn attendre_fin_installation(&self) {
+            let mut g = self.verrou();
+            while g.statut.etat == EtatStatut::Installation {
+                g = self.changement.wait(g).unwrap_or_else(|e| e.into_inner());
+            }
         }
 
         /// `maj_etat`.
@@ -1263,7 +1325,12 @@ mod reseau {
                     }
                 };
                 let work = moi.app_dir.join("data").join(DOSSIER_MAJ);
-                let resultat = installer_release(&release, &moi.app_dir, &work, &mut progression);
+                // Une panique ne doit jamais laisser le statut « installation » pour toujours :
+                // la fermeture de l'application attend la fin de l'installation.
+                let resultat = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    installer_release(&release, &moi.app_dir, &work, &mut progression)
+                }))
+                .unwrap_or_else(|_| Err("erreur interne pendant l'installation (voir data\\plantage.txt)".into()));
                 // Dernier point de progression toujours envoyé (100 %).
                 if recu_final > 0 {
                     (moi.sortie)(EvenementMaj::Progression { recu: recu_final, total: total.max(recu_final) });

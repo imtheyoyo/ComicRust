@@ -19,6 +19,8 @@ export class EtatMiseAJour {
   fenetre = $state(false);
   /** Échec d'une commande elle-même (refus immédiat du backend). */
   erreurCommande = $state('');
+  /** Fermeture demandée pendant l'installation : ComicRust se fermera à la fin de celle-ci. */
+  fermetureDifferee = $state(false);
   private desabonner?: () => void;
 
   /** Release proposée par le dernier statut (disponible, installation, installée, échec d'installation). */
@@ -59,7 +61,15 @@ export class EtatMiseAJour {
   async demarrer(): Promise<void> {
     this.arreter();
     try {
-      this.desabonner = await ecouterMaj((s) => this.appliquer(s), (p) => (this.progression = p));
+      this.desabonner = await ecouterMaj(
+        (s) => this.appliquer(s),
+        (p) => (this.progression = p),
+        () => {
+          // Fenêtre fermée pendant l'installation : le message est montré dans la fenêtre « Mise à jour ».
+          this.fermetureDifferee = true;
+          this.fenetre = true;
+        },
+      );
       const e = await majEtat();
       this.etat = e;
       // Statut déjà connu (vérification lancée par le backend avant l'abonnement) : on le garde.
