@@ -521,7 +521,8 @@ mod tests {
         ];
         let l = vers_pages_livre(&fiche, &[], &HashSet::new(), "x");
         assert_eq!((l[1].type_page.as_str(), l[1].libelle_type.as_str()), ("Advertisment", "Publicité"));
-        let l = transformer(&l, &OperationPages::Deplacer { images: vec![1], position: 3 }).expect("opération acceptée");
+        let l =
+            transformer(&l, &OperationPages::Deplacer { images: vec![1], position: 3 }).expect("opération acceptée");
         assert_eq!((l[2].type_page.as_str(), l[2].libelle_type.as_str()), ("Advertisment", "Publicité"));
         // Liste renvoyée telle quelle : rien à enregistrer.
         let renvoi: Vec<PageModifiee> = vers_pages_livre(&fiche, &[], &HashSet::new(), "x")
