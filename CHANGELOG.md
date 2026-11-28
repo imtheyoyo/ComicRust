@@ -5,6 +5,49 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v1.0.2] — 2026-11-28
+
+Version **corrective** issue de la relecture complète du code (six relectures indépendantes, 24/11/2026)
+et des décisions de Yoyo du 25/11/2026.
+
+### Corrections
+- **Archives piégées ou corrompues** : lectures en mémoire bornées (ZIP, 7z, RAR, TAR, ComicInfo) ; un CBZ
+  qui annonce une taille énorme ou une « bombe » ZIP donne une erreur au lieu de fermer l'application ;
+  WebComic (`.cbw`) sans plantage sur un chemin accentué, tailles bornées ; JPEG XL démesuré refusé.
+- **Écritures plus sûres** : CBZ réécrit puis synchronisé sur le disque avant remplacement, jamais d'écrasement
+  d'un CBZ apparu entre-temps, original recontrôlé ; ComicInfo en UTF-16 conservé ; types de page écrits par
+  ComicRack (« Advertisment », types combinés) acceptés (écriture des infos, conversion et analyse).
+- **Lecture seule ComicRack** : en mode lié sans « Lecture et écriture », **aucune écriture dans les fichiers
+  des livres** non plus (infos dans les fichiers, conversion, renommage, scripts) ; entrées grisées avec la raison.
+- **Sauvegardes de ComicDb.xml** dans `data\sauvegardes\comicdb\` (plus de `.bak` chez ComicRack).
+- **Mot de passe MySQL** : le mot de passe chiffré n'est plus effacé quand la version portable démarre sur un
+  autre poste ; un ancien mot de passe en clair est rechiffré ; réutilisé seulement pour le même serveur.
+- **Mise à jour intégrée** « tout ou rien » (retour arrière complet en cas d'erreur), fermeture bloquée pendant
+  l'installation, redirections HTTPS uniquement (effectif à partir de la mise à jour suivante).
+- **Instance unique** par dossier : ouvrir un livre alors que ComicRust tourne l'ouvre dans la fenêtre existante.
+- **Sélection** suivie par livre (et non par rang) quand la vue est relue : plus d'action sur un autre livre
+  après « Marquer comme lu », une analyse ou la fermeture du lecteur.
+- **Lecteur** : le clavier ne peut plus atteindre les boutons cachés de la bibliothèque.
+- **Serveur MCP** : requêtes venant d'une page web refusées (origine `null`, type et hôte contrôlés).
+- **Parité ComicRack** : expression régulière des listes intelligentes sans casse ; pages triées par valeur
+  numérique (2, 9, 010, 011) ; livre d'une seule page « lu » (et « Marquer comme lu » accepté).
+- **Bedetheque Scraper 2** : séries avec « & » ou « # » trouvées ; une erreur sur un livre n'arrête plus le lot ;
+  une seule fenêtre d'erreur réseau par exécution.
+- Divers : fiches en double et corbeilles du NAS à l'analyse et dans la recherche des manquants, couverture
+  mise à jour après analyse, `avancement.json` protégé, réglages écrits de façon sûre avec copie de secours,
+  caches cohérents, scripts (caractères invalides, clés `#@Key` en double, fin de script), affichage (compteur,
+  mois de parution, accessibilité).
+
+### Optimisations
+- Profil de compilation optimisé : exécutables environ 30 % plus petits.
+- Tri par série environ 4 fois plus rapide ; « Sélectionner tout le groupe » quasi instantané.
+- Moins de requêtes pour Bedetheque (pages gardées en mémoire pendant l'exécution).
+- Analyse plus légère (CBT lus sans parcours complet, moins d'accès disque sur le NAS), couverture des RAR
+  solides et 7z sans tout décompresser, couvertures lues hors du fil de l'interface, `avancement.json` écrit en différé.
+
+### Recette
+[`recette/tauri-v1.0.2.md`](recette/tauri-v1.0.2.md) : les correctifs et la non-régression complète.
+
 ## [tauri-v1.0.1] — 2026-11-22
 
 Version d'améliorations suite à la recette tauri-v1.0.0 (GO du 22/11/2026, 44/44 OK).
