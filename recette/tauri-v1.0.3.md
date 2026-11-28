@@ -4,7 +4,7 @@
 |---|---|
 | Version | tauri-v1.0.3 (petits correctifs issus de la recette de la tauri-v1.0.2) |
 | Paquet | `ComicRust-Tauri-tauri-v1.0.3-windows-x64.zip` |
-| SHA-256 | `(à renseigner à la publication)` |
+| SHA-256 | `1414298df701ad7d5daca26843a98d1670239d8ca93fe49076e195267df8dc25` |
 | Contenu | « Publicité » pour le type ComicRack « Advertisment », raison de lecture seule propre aux fichiers, tri « Avancement » (jamais ouverts = 0 %), série déduite du nom de fichier sans mot tronqué, dépôt en fin de liste dans l'espace vide, README du paquet complété |
 | Origine | [recette tauri-v1.0.2](tauri-v1.0.2.md) : **GO** du 28/11/2026 ; anomalies mineures notées à cette recette |
 
