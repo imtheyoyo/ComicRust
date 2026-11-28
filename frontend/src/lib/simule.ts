@@ -135,7 +135,8 @@ const cle = (l: LivreInterne, c: ClefTri): string | number => {
     case 'lecture': return l.lu ? l.ajout : 0;
     case 'note': return l.note;
     case 'pages': return l.pages;
-    case 'avancement': return l.lu ? 100 : l.pageCourante;
+    // Pourcentage, comme ComicRack (`ReadPercentage` : 0 pour un livre jamais ouvert, en tête en croissant).
+    case 'avancement': return avancementDe(l);
     case 'taille': return l.pages * 310_000;
     case 'fichier': return l.fichier;
     case 'ordre': return l.ajout; // sans liste : ordre de la bibliothèque

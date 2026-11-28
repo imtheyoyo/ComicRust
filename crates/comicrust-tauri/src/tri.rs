@@ -220,6 +220,12 @@ fn sens(o: Ordering, desc: bool) -> Ordering {
     }
 }
 
+/// Avancement servant au tri, comme `ComicBook.ReadPercentage` de ComicRack : 0 % pour un
+/// livre jamais ouvert ou sans nombre de pages connu.
+fn avancement(b: &LibraryBook) -> u32 {
+    b.read_percent().unwrap_or(0)
+}
+
 fn cmp_clef(clef: ClefTri, a: &LibraryBook, b: &LibraryBook, desc: bool) -> Ordering {
     let parution = |x: &LibraryBook| x.year.filter(|y| *y > 0).map(|y| (y, x.month.unwrap_or(0), x.day.unwrap_or(0)));
     match clef {
@@ -231,7 +237,9 @@ fn cmp_clef(clef: ClefTri, a: &LibraryBook, b: &LibraryBook, desc: bool) -> Orde
         ClefTri::Lecture => cmp_opt(date(&a.opened), date(&b.opened), desc),
         ClefTri::Note => cmp_opt(a.rating.filter(|r| *r > 0.0), b.rating.filter(|r| *r > 0.0), desc),
         ClefTri::Pages => cmp_opt(a.page_count, b.page_count, desc),
-        ClefTri::Avancement => cmp_opt(a.read_percent(), b.read_percent(), desc),
+        // ComicRack (`ComicBook.ReadPercentage`) : 0 quand `LastPageRead <= 0` ou `PageCount <= 0`.
+        // Un livre jamais ouvert est donc à 0 % : en tête en croissant, en fin en décroissant.
+        ClefTri::Avancement => sens(avancement(a).cmp(&avancement(b)), desc),
         ClefTri::Taille => cmp_opt(a.file_size, b.file_size, desc),
         ClefTri::Fichier => sens(minuscules(&a.file).cmp(&minuscules(&b.file)), desc),
         // Comparé par `trier` (rang dans la liste) ; ici, à égalité : série.
@@ -365,6 +373,31 @@ mod tests {
         assert_eq!(v, [2, 1, 3, 0], "Alpha 9, Alpha 10, Zeta 1, Zeta 2");
         trier(&mut v, &l, ClefTri::Serie, true, Regroupement::Serie, &|_| None);
         assert_eq!(v, [0, 3, 1, 2]);
+    }
+
+    /// Recette 1.0.2 : tri « Avancement » comme ComicRack (`ReadPercentage` vaut 0 quand le
+    /// livre n'a jamais été ouvert) : jamais ouverts avec les 0 %, en tête en croissant.
+    #[test]
+    fn avancement_jamais_ouvert_vaut_zero_pour_cent() {
+        let mk = |id: &str, serie: &str, lu: Option<u32>, pages: Option<u32>| LibraryBook {
+            id: id.into(),
+            series: Some(serie.into()),
+            last_page_read: lu,
+            page_count: pages,
+            ..Default::default()
+        };
+        let l = vec![
+            mk("lu", "A", Some(19), Some(20)),
+            mk("jamais", "B", None, Some(20)),
+            mk("moitie", "C", Some(9), Some(20)),
+            mk("zero", "D", Some(0), Some(20)),
+            mk("sans-pages", "E", Some(3), None),
+        ];
+        let mut v = vec![0, 1, 2, 3, 4];
+        trier(&mut v, &l, ClefTri::Avancement, false, Regroupement::Aucun, &|_| None);
+        assert_eq!(v, [1, 3, 4, 2, 0], "0 % (B, D, E par série), puis 50 %, puis lu");
+        trier(&mut v, &l, ClefTri::Avancement, true, Regroupement::Aucun, &|_| None);
+        assert_eq!(v, [0, 2, 1, 3, 4], "décroissant : jamais ouverts en fin (avec les 0 %)");
     }
 
     #[test]
