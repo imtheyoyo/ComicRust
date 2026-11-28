@@ -285,7 +285,8 @@ fn masquer_retire_le_mot_de_passe() {
 fn mysql_comicrack_lecture_seule() {
     use mysql::prelude::Queryable;
     // Garde commune du cœur : base « …test… » seulement, jamais comickrack_demo.
-    let Some(url) = comicrust_core::db::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL du transfert ignoré") else {
+    let Some(url) = comicrust_core::db::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL du transfert ignoré")
+    else {
         return;
     };
     let cfg = DbConfig::from_connection_string(&url).unwrap();

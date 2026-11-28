@@ -922,7 +922,8 @@ fn cbl_en_lecture_seule() {
 #[test]
 fn mysql_deux_postes() {
     // Garde commune du cœur : base « …test… » seulement, jamais comickrack_demo.
-    let Some(url) = comicrust_core::db::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL des listes ignoré") else {
+    let Some(url) = comicrust_core::db::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL des listes ignoré")
+    else {
         return;
     };
     let db = comicrust_core::db::DbConfig::from_connection_string(&url).unwrap();
