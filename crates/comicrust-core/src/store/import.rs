@@ -580,7 +580,9 @@ impl Store {
                 report.cancelled = true;
                 return Ok(report);
             }
-            let counts = self.conn.write_tx(|conn| import_batch(conn, chunk, &by_path))?;
+            // Existence des fichiers (NAS : lent) vérifiée hors de la transaction d'écriture.
+            let kept = files_to_keep(&mut self.conn, chunk)?;
+            let counts = self.conn.write_tx(|conn| import_batch(conn, chunk, &by_path, &kept))?;
             report.books_added += counts.added;
             report.books_replaced += counts.replaced;
             report.books_updated += counts.updated;
@@ -726,12 +728,36 @@ fn save_lists(conn: &mut Conn, rows: &[ListRow]) -> Result<(), Error> {
     Ok(())
 }
 
+/// Livres du lot dont la base garde son fichier (voir `import_batch`) : identifiant en
+/// minuscules → chemin de la base au moment du contrôle. Les `exists` (accès disque, lents
+/// sur un NAS) sont faits **avant** la transaction d'écriture, pour ne pas tenir le verrou
+/// pendant ces accès ; `import_batch` vérifie que la base a toujours ce chemin.
+fn files_to_keep(conn: &mut Conn, chunk: &[&LibraryBook]) -> Result<HashMap<String, String>, Error> {
+    let ids: Vec<String> = chunk.iter().map(|b| b.id.clone()).collect();
+    let cr_files: HashMap<String, Option<&str>> =
+        chunk.iter().map(|b| (b.id.to_ascii_lowercase(), b.file.as_deref())).collect();
+    let mut out = HashMap::new();
+    for (id, file, _) in readings_by_id(conn, &ids)? {
+        let id = id.to_ascii_lowercase();
+        if let (Some(db_file), Some(Some(cr_file))) = (file, cr_files.get(&id)) {
+            if scanner::path_key(&db_file) != scanner::path_key(cr_file)
+                && Path::new(&db_file).exists()
+                && !Path::new(cr_file).exists()
+            {
+                out.insert(id, db_file);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Écrit un lot de fiches ComicRack (dans une transaction), avec fusion des lectures et
-/// remplacement des livres de même fichier.
+/// remplacement des livres de même fichier. `kept` : résultat de [`files_to_keep`].
 fn import_batch(
     conn: &mut Conn,
     chunk: &[&LibraryBook],
     by_path: &HashMap<String, Vec<String>>,
+    kept: &HashMap<String, String>,
 ) -> Result<BatchCounts, Error> {
     let counter = schema::bump(conn, "update_counter")?;
     let mut counts = BatchCounts::default();
@@ -742,18 +768,13 @@ fn import_batch(
     // depuis le transfert précédent si le fichier de la base existe et pas celui de
     // ComicRack. On garde alors les colonnes « fichier » de la base (sinon le livre
     // deviendrait manquant et le nouveau fichier reviendrait comme un autre livre).
-    let cr_files: HashMap<String, Option<&str>> =
-        chunk.iter().map(|b| (b.id.to_ascii_lowercase(), b.file.as_deref())).collect();
+    // Contrôle des fichiers fait avant la transaction (`files_to_keep`) : gardé seulement
+    // si la base a toujours le même chemin (sinon rien n'est gardé, comme sans contrôle).
     let mut keep_ids: Vec<String> = Vec::new();
     for (id, file, r) in readings_by_id(conn, &ids)? {
         let id = id.to_ascii_lowercase();
-        if let (Some(db_file), Some(Some(cr_file))) = (file.as_deref(), cr_files.get(&id)) {
-            if scanner::path_key(db_file) != scanner::path_key(cr_file)
-                && Path::new(db_file).exists()
-                && !Path::new(cr_file).exists()
-            {
-                keep_ids.push(id.clone());
-            }
+        if file.is_some() && kept.get(&id) == file.as_ref() {
+            keep_ids.push(id.clone());
         }
         same_id.insert(id, r);
     }
