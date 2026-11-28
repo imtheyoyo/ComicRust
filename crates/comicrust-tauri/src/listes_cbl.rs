@@ -193,18 +193,6 @@ fn nom_liste(liste: &ReadingList, chemin: &Path) -> String {
     }
 }
 
-/// Écrit un fichier dans un temporaire du même dossier puis le renomme.
-fn ecrire_atomique(chemin: &Path, octets: &[u8]) -> Result<(), String> {
-    let dossier = chemin.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = dossier.join(format!(".{nom}.comicrust-tmp"));
-    std::fs::write(&tmp, octets).map_err(|e| format!("{} : {e}", tmp.display()))?;
-    std::fs::rename(&tmp, chemin).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("{} : {e}", chemin.display())
-    })
-}
-
 impl Biblio {
     /// Aperçu de l'import (rien n'est créé).
     pub fn analyser_cbl(&self, chemin: &str) -> Result<RapportCbl, String> {
@@ -288,7 +276,10 @@ impl Biblio {
         let n = livres.len();
         let rl = ReadingList { name: nom, books: CblBooks { book: livres } };
         let xml = rl.to_xml().map_err(|e| format!("liste .cbl impossible à écrire : {e}"))?;
-        ecrire_atomique(&chemin, xml.as_bytes())?;
+        // Temporaire vidé sur le disque avant le renommage (jamais un .cbl à moitié écrit). Pas de
+        // copie de secours : le fichier exporté se refait depuis la liste, et une copie `.bak` encombrerait
+        // le dossier choisi par l'utilisateur.
+        crate::reglages::ecrire_atomique(&chemin, xml.as_bytes(), None)?;
         Ok(ExportCbl { chemin: chemin.display().to_string(), livres: n })
     }
 }

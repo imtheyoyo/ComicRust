@@ -755,6 +755,18 @@ impl Cible {
             _ => None,
         }
     }
+
+    /// **Point de décision unique** des écritures dans les fichiers des livres (décision D1 du
+    /// 25/11/2026) : ComicInfo.xml dans l'archive, conversion CBR→CBZ, renommage / déplacement,
+    /// écritures demandées par les scripts. Bibliothèque en lecture seule (ComicRack sans
+    /// « Lecture et écriture », `ComicDb.xml`, aucune bibliothèque) : **aucun** fichier n'est
+    /// modifié, avec la raison habituelle. Mode autonome et « Lecture et écriture » : permis.
+    pub fn fichiers_modifiables(&self) -> Result<(), String> {
+        match self {
+            Cible::LectureSeule(m) => Err(m.clone()),
+            Cible::Store(_) | Cible::Comicrack(_) => Ok(()),
+        }
+    }
 }
 
 /// Progression limitée à ~10 émissions par seconde.
@@ -940,8 +952,10 @@ fn textes_renommage(de: &Path, vers: &Path) -> (String, String) {
 
 // ───────────────────────────── Service ─────────────────────────────
 
-/// Suggestions mises en cache : (bibliothèque pour laquelle elles valent, par champ).
-type CacheSuggestions = Option<(usize, HashMap<&'static str, Arc<Vec<String>>>)>;
+/// Suggestions mises en cache : (état de la bibliothèque `(génération, révision des fiches)` pour
+/// lequel elles valent, par champ). L'adresse de la base ne suffit pas : une fiche modifiée sur
+/// place la garde.
+type CacheSuggestions = Option<((u64, u64), HashMap<&'static str, Arc<Vec<String>>>)>;
 
 /// Service d'édition, partageable entre les commandes (clonage bon marché).
 #[derive(Clone)]
@@ -977,6 +991,14 @@ impl Edition {
             Some(m) => Some(m.to_string()),
             None => self.refus_ecriture_base(cible).err(),
         }
+    }
+
+    /// Pourquoi les fichiers des livres ne sont pas modifiables maintenant ([`Cible::fichiers_modifiables`],
+    /// puis base injoignable ou configuration MySQL incomplète : le fichier changerait sans que la
+    /// fiche suive). `Ok` : modifiables. Utilisé par toutes les opérations sur les fichiers.
+    pub fn motif_fichiers(&self, cible: &Cible) -> Result<(), String> {
+        cible.fichiers_modifiables()?;
+        self.refus_ecriture_base(cible)
     }
 
     /// Écriture dans une base (ComicRust ou ComicRack) : refusée, avec un message lisible, quand la
@@ -1095,8 +1117,7 @@ impl Edition {
         max: Option<usize>,
     ) -> Result<Vec<Proposition>, String> {
         let Some(def) = edit::field(champ).filter(|d| a_des_suggestions(d)) else { return Ok(Vec::new()) };
-        let base = self.biblio.base()?;
-        let cle = Arc::as_ptr(&base) as usize;
+        let (base, cle) = self.biblio.base_et_contenu().ok_or("aucune bibliothèque ouverte")?;
         let toutes = {
             let mut c = self.suggestions.lock().unwrap_or_else(|e| e.into_inner());
             if c.as_ref().is_none_or(|(k, _)| *k != cle) {
@@ -1295,8 +1316,8 @@ impl Edition {
         sortie: Sortie,
     ) -> Result<BilanOperation, String> {
         let _occupe = self.occuper()?;
-        // Base injoignable : rien n'est écrit (le fichier changerait sans que la fiche suive).
-        self.refus_ecriture_base(&self.cible())?;
+        // Lecture seule (D1) ou base injoignable : aucun fichier n'est écrit.
+        self.motif_fichiers(&self.cible())?;
         let base = self.biblio.base()?;
         let livres = self.livres(&base, ids);
         if livres.is_empty() {
@@ -1442,13 +1463,8 @@ impl Edition {
         let _occupe = self.occuper()?;
         let ranger = ranger.unwrap_or_else(|| self.reglages_edition().ranger_original.unwrap_or(false));
         let cible = self.cible();
-        self.refus_ecriture_base(&cible)?;
-        if ranger && cible.lecture_seule().is_some() {
-            return Err("bibliothèque en lecture seule : l'original ne peut pas être rangé dans « _originaux » \
-                        (la fiche continuerait de pointer sur lui). Décoche « ranger l'original », ou active \
-                        l'écriture dans la base ComicRack."
-                .into());
-        }
+        // Lecture seule (D1) : aucun CBZ créé ni original rangé ; base injoignable : rien non plus.
+        self.motif_fichiers(&cible)?;
         let base = self.biblio.base()?;
         let livres = self.livres(&base, ids);
         if livres.is_empty() {
@@ -1663,9 +1679,7 @@ impl Edition {
     pub fn renommer_deplacer(&self, d: &DemandeRenommage, sortie: Sortie) -> Result<ResultatRenommage, String> {
         let _occupe = self.occuper()?;
         let cible = self.cible();
-        if let Some(m) = self.raison_lecture_seule(&cible) {
-            return Err(m);
-        }
+        self.motif_fichiers(&cible)?;
         let modele = d.modele.trim();
         if modele.is_empty() {
             return Err("modèle de nom vide".into());

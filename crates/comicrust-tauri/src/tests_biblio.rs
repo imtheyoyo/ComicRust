@@ -779,3 +779,79 @@ fn fusion_fiche_seule_et_zero_page() {
     fusionner_lecture(&mut d, Some(Avancement { page: 3, page_max: 3, pages: 0, relecture: true }));
     assert_eq!(d.relecture, None);
 }
+
+// ───────────── Relecture indépendante (tauri-v1.0.2) : caches ─────────────
+
+/// Un fichier remplacé au même chemin (autre contenu) puis analysé : sa couverture en cache est
+/// oubliée (fichier du cache supprimé, révision de l'URL changée).
+#[test]
+fn analyse_oublie_la_couverture_des_fichiers_modifies() {
+    let d = tempfile::tempdir().unwrap();
+    let bd = d.path().join("bd");
+    creer_bd(&bd);
+    let b = autonome(&d.path().join("data"));
+    b.ajouter_dossier(&bd.to_string_lossy()).unwrap();
+    scanner(&b);
+    let f = bd.join("Asterix 01.cbz");
+    let id = b.livre_par_chemin(&f).unwrap().id;
+    b.couverture(&id).unwrap();
+    let cache = b.dossier_couvertures().join(crate::couvertures::nom_cache(&id, 0));
+    assert!(cache.is_file());
+    let url = b.url_couverture(&id);
+    // Nouveau contenu (autre couleur, plus de pages : taille différente).
+    std::thread::sleep(Duration::from_millis(20));
+    cbz_de_test(&f, [10, 200, 10, 255], 6, Some(&info("Astérix", "1", "Dargaud")));
+    let evts = scanner(&b);
+    assert!(matches!(evts.last(), Some(EvenementScan::Termine { mis_a_jour: 1, .. })), "{evts:?}");
+    assert!(!cache.exists(), "couverture périmée oubliée");
+    assert_ne!(b.url_couverture(&id), url, "révision de l'URL changée");
+}
+
+/// La clé du cache de vue comprend la révision des fiches : une vue calculée avant un changement
+/// de contenu n'est jamais resservie après lui.
+#[test]
+fn cache_de_vue_depend_de_la_revision_des_fiches() {
+    let d = tempfile::tempdir().unwrap();
+    let bd = d.path().join("bd");
+    creer_bd(&bd);
+    let b = autonome(&d.path().join("data"));
+    b.ajouter_dossier(&bd.to_string_lossy()).unwrap();
+    scanner(&b);
+    let req = requete("serie", SensTri::Asc, None, None);
+    let (_, v1) = b.vue_complete(&req).unwrap();
+    let (_, v2) = b.vue_complete(&req).unwrap();
+    assert!(Arc::ptr_eq(&v1, &v2), "même état : vue en cache");
+    b.changer_contenu_sans_vider_la_vue();
+    let (_, v3) = b.vue_complete(&req).unwrap();
+    assert!(!Arc::ptr_eq(&v1, &v3), "révision changée : vue recalculée");
+    // Liste virtuelle « Livres manquants » : même règle.
+    let mut rm = req.clone();
+    rm.liste = Some(crate::manquants::ID_LISTE_MANQUANTS.into());
+    let (_, m1) = b.vue_complete(&rm).unwrap();
+    assert!(Arc::ptr_eq(&m1, &b.vue_complete(&rm).unwrap().1));
+    b.changer_contenu_sans_vider_la_vue();
+    assert!(!Arc::ptr_eq(&m1, &b.vue_complete(&rm).unwrap().1));
+}
+
+/// Une lecture notée pendant le rechargement de la bibliothèque (lecteur fermé pendant `ouvrir`)
+/// n'est pas écrasée par la base lue avant elle : la bibliothèque est rechargée.
+#[test]
+fn ouvrir_recharge_si_une_fiche_change_pendant_le_chargement() {
+    let d = tempfile::tempdir().unwrap();
+    let bd = d.path().join("bd");
+    creer_bd(&bd);
+    let data = d.path().join("data");
+    let b = autonome(&data);
+    b.ajouter_dossier(&bd.to_string_lossy()).unwrap();
+    scanner(&b);
+    let id = b.livre_par_chemin(&bd.join("Asterix 01.cbz")).unwrap().id;
+    let (b2, id2, cfg) = (b.clone(), id.clone(), b.store_autonome().unwrap());
+    *b.crochet_chargement.lock().unwrap() = Some(Box::new(move || {
+        let ouvert = comicrust_core::scanner::now_iso();
+        comicrust_core::store::Store::open_existing(&cfg).unwrap().set_progress(&id2, 2, 3, &ouvert).unwrap();
+        b2.noter_lecture(&id2, 2, 3, &ouvert);
+    }));
+    b.ouvrir().unwrap();
+    let l = b.livre(&id).unwrap();
+    assert_eq!((l.current_page, l.last_page_read), (Some(2), Some(3)), "lecture gardée après le rechargement");
+}

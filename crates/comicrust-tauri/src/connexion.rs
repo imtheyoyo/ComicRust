@@ -52,16 +52,20 @@ impl std::fmt::Debug for ParametresMysql {
 
 impl ParametresMysql {
     /// Connexion complète. `memorise` : connexion déjà enregistrée, dont le mot de passe est repris
-    /// quand le formulaire n'en fournit pas.
+    /// quand le formulaire n'en fournit pas — **seulement pour le même serveur** (hôte, port et
+    /// utilisateur identiques) : le mot de passe d'un serveur n'est jamais envoyé à un autre.
     pub fn resoudre(&self, memorise: Option<&DbConfig>) -> Result<DbConfig, String> {
+        let (host, user) = (self.serveur.trim().to_string(), self.utilisateur.trim().to_string());
+        let meme_serveur =
+            |c: &&DbConfig| c.host.trim().eq_ignore_ascii_case(&host) && c.port == self.port && c.user.trim() == user;
         let cfg = DbConfig {
-            host: self.serveur.trim().to_string(),
-            port: self.port,
-            user: self.utilisateur.trim().to_string(),
             password: match &self.mot_de_passe {
                 Some(m) => m.clone(),
-                None => memorise.map(|c| c.password.clone()).unwrap_or_default(),
+                None => memorise.filter(meme_serveur).map(|c| c.password.clone()).unwrap_or_default(),
             },
+            host,
+            port: self.port,
+            user,
             database: self.base.trim().to_string(),
         };
         if !cfg.is_complete() {
@@ -246,6 +250,17 @@ mod tests {
         // Mot de passe explicitement vide : respecté.
         assert_eq!(p(Some("")).resoudre(Some(&memo)).unwrap().password, "");
         assert_eq!(p(None).resoudre(None).unwrap().password, "");
+        // Autre serveur, autre port ou autre utilisateur : le mot de passe mémorisé n'est pas repris.
+        for autre in [
+            DbConfig { host: "autre".into(), ..memo.clone() },
+            DbConfig { port: 3306, ..memo.clone() },
+            DbConfig { user: "v".into(), ..memo.clone() },
+        ] {
+            assert_eq!(p(None).resoudre(Some(&autre)).unwrap().password, "", "{autre:?}");
+        }
+        // Même serveur à la casse près (nom d'hôte) : repris ; autre base : repris.
+        let memo2 = DbConfig { host: "SRV".into(), database: "autre".into(), ..memo.clone() };
+        assert_eq!(p(None).resoudre(Some(&memo2)).unwrap().password, m);
     }
 
     #[test]

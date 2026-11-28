@@ -67,6 +67,43 @@ pub struct Reglages {
     /// Fichiers récemment ouverts, le plus récent en premier (bloc `recents`, 15 au plus).
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "recents_tolerants")]
     pub recents: Vec<String>,
+    /// Mots de passe enregistrés **illisibles ici** (chiffrés sur un autre PC ou un autre compte
+    /// Windows) : texte chiffré d'origine, réécrit tel quel par [`ecrire`] tant que la connexion
+    /// n'a pas été ressaisie (sinon une simple écriture de réglage l'effacerait pour de bon).
+    #[serde(skip)]
+    pub(crate) secrets_illisibles: Vec<SecretIllisible>,
+}
+
+/// Mot de passe enregistré que ce poste ne sait pas déchiffrer (voir `Reglages::secrets_illisibles`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SecretIllisible {
+    /// Clé JSON de la connexion (`storeMysql`, `comicrackMysql`).
+    cle: &'static str,
+    /// Connexion telle que lue (mot de passe vide) : le texte n'est réécrit que si elle n'a pas changé.
+    connexion: DbConfig,
+    /// Texte chiffré d'origine.
+    chiffre: String,
+}
+
+/// Clés JSON des connexions MySQL enregistrées.
+const CLES_CONNEXIONS: [&str; 2] = ["storeMysql", "comicrackMysql"];
+
+/// Préfixe d'un mot de passe chiffré par `comicrust_core::secret` (DPAPI).
+const PREFIXE_CHIFFRE: &str = "dpapi:";
+
+impl Reglages {
+    fn connexion(&self, cle: &str) -> Option<&DbConfig> {
+        match cle {
+            "storeMysql" => self.store_mysql.as_ref(),
+            "comicrackMysql" => self.comicrack_mysql.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+/// Mot de passe brut (tel qu'écrit dans le fichier) de la connexion `cle`.
+fn mot_de_passe_brut<'a>(v: &'a Value, cle: &str) -> Option<&'a str> {
+    v.get(cle)?.get("password")?.as_str().filter(|m| !m.is_empty())
 }
 
 // ───────────────────────────── Fichiers récents (lot L6) ─────────────────────────────
@@ -871,41 +908,155 @@ fn verrou() -> MutexGuard<'static, ()> {
     VERROU.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Réglages gardés en mémoire : (fichier, texte lu, contenu analysé). Le fichier est relu (il est
+/// petit) mais n'est analysé à nouveau que si son texte a changé ; [`ecrire`] y met ce qu'il vient
+/// d'écrire. Comparer le texte, et non la date, reste juste même pour deux écritures dans la
+/// même milliseconde (horloge des fichiers grossière).
+type EnMemoire = Option<(PathBuf, String, Reglages)>;
+static EN_MEMOIRE: Mutex<EnMemoire> = Mutex::new(None);
+
+fn en_memoire() -> MutexGuard<'static, EnMemoire> {
+    EN_MEMOIRE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Chemin du fichier de réglages.
 pub fn chemin_reglages(data: &Path) -> PathBuf {
     data.join(FICHIER_REGLAGES)
 }
 
+/// Copie de secours des réglages (`comicrust-tauri.json.bak`), relue si le fichier principal est
+/// illisible (coupure de courant pendant une écriture…).
+pub fn chemin_secours(data: &Path) -> PathBuf {
+    chemin_reglages(data).with_extension("json.bak")
+}
+
+/// Écrit `octets` dans `chemin` sans jamais laisser un fichier à moitié écrit : temporaire du même
+/// dossier, **vidé sur le disque** (`sync_all`) avant le renommage (sinon, après une coupure de
+/// courant, NTFS peut garder le renommage mais pas les données). Avec `secours`, l'ancien fichier
+/// est d'abord copié en `<chemin>.bak` (lui aussi vidé sur le disque). Le temporaire est supprimé
+/// en cas d'échec.
+pub(crate) fn ecrire_atomique(chemin: &Path, octets: &[u8], secours: Option<&Path>) -> Result<(), String> {
+    use std::io::Write;
+    let dossier = chemin.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = dossier.join(format!(".{nom}.comicrust-tmp"));
+    let ecrit = (|| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(octets)?;
+        f.sync_all()
+    })();
+    if let Err(e) = ecrit {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("{} : {e}", tmp.display()));
+    }
+    if let Some(bak) = secours {
+        // Copie de secours de la version précédente, seulement si elle se relit (jamais un
+        // fichier abîmé à la place d'une bonne sauvegarde).
+        if let Ok(ancien) = std::fs::read(chemin) {
+            if serde_json::from_slice::<Value>(ancien.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&ancien)).is_ok() {
+                let copie = (|| -> std::io::Result<()> {
+                    let mut f = std::fs::File::create(bak)?;
+                    f.write_all(&ancien)?;
+                    f.sync_all()
+                })();
+                if let Err(e) = copie {
+                    eprintln!("copie de secours {} non écrite : {e}", bak.display());
+                }
+            }
+        }
+    }
+    std::fs::rename(&tmp, chemin).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{} : {e}", chemin.display())
+    })
+}
+
+/// Texte des réglages : fichier principal, ou sa copie de secours s'il est illisible (JSON
+/// invalide, fichier vide après une coupure). `None` : pas de fichier (premier démarrage).
+fn texte_reglages(data: &Path) -> Result<Option<String>, String> {
+    let p = chemin_reglages(data);
+    let valide = |t: &str| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).is_ok();
+    let principal = match std::fs::read_to_string(&p) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("réglages illisibles ({}) : {e}", p.display())),
+    };
+    if valide(&principal) {
+        return Ok(Some(principal));
+    }
+    match std::fs::read_to_string(chemin_secours(data)) {
+        Ok(t) if valide(&t) => {
+            eprintln!("réglages illisibles ({}) : copie de secours utilisée", p.display());
+            Ok(Some(t))
+        }
+        // Pas de secours valable : le texte principal, dont l'erreur sera signalée.
+        _ => Ok(Some(principal)),
+    }
+}
+
 /// Lit les réglages ; fichier absent = réglages vides (premier démarrage). Un fichier
-/// illisible est une erreur (on n'écrase pas en silence ce que l'utilisateur avait choisi).
+/// illisible est une erreur (on n'écrase pas en silence ce que l'utilisateur avait choisi),
+/// sauf si sa copie de secours se relit.
 pub fn lire(data: &Path) -> Result<Reglages, String> {
     let p = chemin_reglages(data);
-    match std::fs::read_to_string(&p) {
-        Ok(t) => serde_json::from_str(t.trim_start_matches('\u{feff}'))
-            .map_err(|e| format!("réglages illisibles ({}) : {e}", p.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Reglages::default()),
-        Err(e) => Err(format!("réglages illisibles ({}) : {e}", p.display())),
+    let Some(texte) = texte_reglages(data)? else { return Ok(Reglages::default()) };
+    if let Some((c, t, r)) = en_memoire().as_ref() {
+        if *c == p && *t == texte {
+            return Ok(r.clone());
+        }
     }
+    let r = analyser(&p, &texte)?;
+    *en_memoire() = Some((p, texte, r.clone()));
+    Ok(r)
+}
+
+/// Réglages d'après le texte du fichier `p`, mots de passe illisibles ici compris.
+fn analyser(p: &Path, texte: &str) -> Result<Reglages, String> {
+    let texte = texte.trim_start_matches('\u{feff}');
+    let mut r: Reglages =
+        serde_json::from_str(texte).map_err(|e| format!("réglages illisibles ({}) : {e}", p.display()))?;
+    // Mots de passe chiffrés illisibles ici : texte d'origine gardé pour être réécrit tel quel.
+    if let Ok(brut) = serde_json::from_str::<Value>(texte) {
+        for cle in CLES_CONNEXIONS {
+            let (Some(stocke), Some(cfg)) = (mot_de_passe_brut(&brut, cle), r.connexion(cle)) else { continue };
+            if cfg.password.is_empty() {
+                let s = SecretIllisible { cle, connexion: cfg.clone(), chiffre: stocke.to_string() };
+                r.secrets_illisibles.push(s);
+            }
+        }
+    }
+    Ok(r)
 }
 
 /// Vrai si le fichier de réglages mentionne une base MySQL pour le mode autonome (clé
 /// `storeMysql`, même illisible ou incomplète — donc ignorée par [`lire`]) : on ne propose alors
 /// jamais de créer une base SQLite à la place.
 pub fn mysql_mentionne(data: &Path) -> bool {
-    std::fs::read_to_string(chemin_reglages(data))
+    texte_reglages(data)
         .ok()
+        .flatten()
         .and_then(|t| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).ok())
         .is_some_and(|v| v.get("storeMysql").is_some_and(|m| !m.is_null()))
 }
 
-/// Écrit les réglages (fichier temporaire puis renommage : jamais à moitié écrit).
+/// Écrit les réglages (atomique, copie de secours de la version précédente). Un mot de passe
+/// illisible sur ce poste (voir [`Reglages`]) est réécrit chiffré tel qu'il a été lu, tant que
+/// la connexion n'a pas changé.
 pub fn ecrire(data: &Path, r: &Reglages) -> Result<(), String> {
     let p = chemin_reglages(data);
-    let tmp = p.with_extension("json.tmp");
-    let texte = serde_json::to_string_pretty(r).map_err(|e| e.to_string())?;
+    let mut v = serde_json::to_value(r).map_err(|e| e.to_string())?;
+    for s in &r.secrets_illisibles {
+        let inchangee = r.connexion(s.cle).is_some_and(|c| *c == s.connexion);
+        if let (true, Some(o)) = (inchangee, v.get_mut(s.cle).and_then(Value::as_object_mut)) {
+            o.insert("password".into(), Value::String(s.chiffre.clone()));
+        }
+    }
+    let texte = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(data).map_err(|e| format!("{} : {e}", data.display()))?;
-    std::fs::write(&tmp, texte).map_err(|e| format!("{} : {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &p).map_err(|e| format!("{} : {e}", p.display()))
+    ecrire_atomique(&p, texte.as_bytes(), Some(&chemin_secours(data)))?;
+    // Gardé en mémoire tel qu'il sera relu (mot de passe passé par le coffre), jamais `r` lui-même.
+    *en_memoire() = analyser(&p, &texte).ok().map(|relu| (p, texte, relu));
+    Ok(())
 }
 
 /// Lit, modifie puis réécrit les réglages (atomique, sous verrou) : chaque appelant ne change
@@ -916,6 +1067,26 @@ pub fn modifier<T>(data: &Path, f: impl FnOnce(&mut Reglages) -> T) -> Result<T,
     let resultat = f(&mut r);
     ecrire(data, &r)?;
     Ok(resultat)
+}
+
+/// Anciens réglages dont un mot de passe MySQL est **en clair** (versions anciennes, saisie à la
+/// main) : réécrits aussitôt, le mot de passe chiffré. À appeler au démarrage. Renvoie vrai si
+/// le fichier a été réécrit. Sans coffre (hors Windows), le mot de passe est retiré du fichier
+/// plutôt que laissé en clair.
+pub fn rechiffrer_mots_de_passe(data: &Path) -> Result<bool, String> {
+    let _v = verrou();
+    let Some(texte) = texte_reglages(data)? else { return Ok(false) };
+    let Ok(brut) = serde_json::from_str::<Value>(texte.trim_start_matches('\u{feff}')) else { return Ok(false) };
+    let en_clair =
+        CLES_CONNEXIONS.iter().any(|c| mot_de_passe_brut(&brut, c).is_some_and(|m| !m.starts_with(PREFIXE_CHIFFRE)));
+    if !en_clair {
+        return Ok(false);
+    }
+    let r = lire(data)?;
+    ecrire(data, &r)?;
+    // La copie de secours garderait l'ancien texte en clair : remplacée par la version chiffrée.
+    std::fs::copy(chemin_reglages(data), chemin_secours(data)).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 /// Préférences d'affichage enregistrées (vides si le fichier n'existe pas encore).
@@ -1055,6 +1226,7 @@ mod tests {
             },
             analyse: ReglagesAnalyse { au_demarrage: Some(false), suivre_comicrack: None },
             recents: vec!["D:/BD/x.cbz".to_string()],
+            secrets_illisibles: Vec::new(),
         };
         ecrire(d.path(), &r).unwrap();
         assert_eq!(lire(d.path()).unwrap(), r);
@@ -1077,6 +1249,114 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(chemin_reglages(d.path()), "{pas du json").unwrap();
         assert!(lire(d.path()).is_err());
+    }
+
+    /// Relecture indépendante (tauri-v1.0.2) : un mot de passe chiffré sur un autre poste
+    /// (illisible ici) n'est plus effacé par la première écriture de réglage venue.
+    #[test]
+    fn mot_de_passe_illisible_conserve_tant_que_la_connexion_ne_change_pas() {
+        let d = tempfile::tempdir().unwrap();
+        let chiffre = "dpapi:0102030405";
+        std::fs::write(
+            chemin_reglages(d.path()),
+            format!(
+                r#"{{"mode":"autonome","storeMysql":{{"host":"nas","port":3306,"user":"cr","password":"{chiffre}","database":"comicrust"}}}}"#
+            ),
+        )
+        .unwrap();
+        let r = lire(d.path()).unwrap();
+        assert_eq!(r.store_mysql.as_ref().map(|c| c.password.as_str()), Some(""), "illisible ici");
+        let brut = |d: &Path| -> Value {
+            serde_json::from_str(&std::fs::read_to_string(chemin_reglages(d)).unwrap()).unwrap()
+        };
+        // Écriture sans rapport (géométrie de la fenêtre) : le texte chiffré est réécrit tel quel.
+        enregistrer_fenetre(d.path(), ReglagesFenetre { largeur: Some(800), ..Default::default() }).unwrap();
+        assert_eq!(brut(d.path())["storeMysql"]["password"], chiffre);
+        enregistrer_preferences_vue(d.path(), PreferencesVue::default()).unwrap();
+        assert_eq!(brut(d.path())["storeMysql"]["password"], chiffre);
+        // Connexion ressaisie (autre serveur) : l'ancien texte n'est plus réécrit.
+        modifier(d.path(), |r| r.store_mysql.as_mut().unwrap().host = "autre".into()).unwrap();
+        assert_ne!(brut(d.path())["storeMysql"]["password"], chiffre);
+    }
+
+    #[test]
+    fn mot_de_passe_en_clair_rechiffre_au_demarrage() {
+        let d = tempfile::tempdir().unwrap();
+        let clair = format!("clair-{}", std::process::id());
+        std::fs::write(
+            chemin_reglages(d.path()),
+            format!(
+                r#"{{"mode":"comicrack","comicrackMysql":{{"host":"h","port":3306,"user":"u","password":"{clair}","database":"b"}}}}"#
+            ),
+        )
+        .unwrap();
+        // Une copie de secours ancienne avec le même mot de passe en clair.
+        std::fs::copy(chemin_reglages(d.path()), chemin_secours(d.path())).unwrap();
+        assert!(rechiffrer_mots_de_passe(d.path()).unwrap());
+        for f in [chemin_reglages(d.path()), chemin_secours(d.path())] {
+            let t = std::fs::read_to_string(&f).unwrap();
+            assert!(!t.contains(&clair), "{} : {t}", f.display());
+        }
+        let r = lire(d.path()).unwrap();
+        assert_eq!(r.mode, Some(Mode::Comicrack));
+        assert!(r.comicrack_mysql.is_some());
+        #[cfg(windows)]
+        assert_eq!(r.comicrack_mysql.unwrap().password, clair, "rechiffré, toujours lisible");
+        // Plus rien en clair : rien à refaire.
+        assert!(!rechiffrer_mots_de_passe(d.path()).unwrap());
+        // Mot de passe chiffré (même illisible) : pas de réécriture.
+        let e = tempfile::tempdir().unwrap();
+        std::fs::write(
+            chemin_reglages(e.path()),
+            r#"{"storeMysql":{"host":"h","port":3306,"user":"u","password":"dpapi:00","database":"b"}}"#,
+        )
+        .unwrap();
+        assert!(!rechiffrer_mots_de_passe(e.path()).unwrap());
+        assert!(!rechiffrer_mots_de_passe(tempfile::tempdir().unwrap().path()).unwrap());
+    }
+
+    #[test]
+    fn ecriture_atomique_et_copie_de_secours_relue() {
+        let d = tempfile::tempdir().unwrap();
+        modifier(d.path(), |r| r.mode = Some(Mode::Autonome)).unwrap();
+        assert!(!chemin_secours(d.path()).exists(), "rien à sauvegarder la première fois");
+        enregistrer_fenetre(d.path(), ReglagesFenetre { largeur: Some(640), ..Default::default() }).unwrap();
+        // La copie de secours est la version précédente.
+        let secours: Reglages =
+            serde_json::from_str(&std::fs::read_to_string(chemin_secours(d.path())).unwrap()).unwrap();
+        assert_eq!(secours.mode, Some(Mode::Autonome));
+        assert!(secours.fenetre.est_vide());
+        // Aucun temporaire laissé.
+        let restes: Vec<_> = std::fs::read_dir(d.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("comicrust-tmp"))
+            .collect();
+        assert!(restes.is_empty(), "{restes:?}");
+        // Coupure de courant : fichier principal vide (ou abîmé) → copie de secours relue.
+        for abime in ["", "{\"mode\":\"auto"] {
+            std::fs::write(chemin_reglages(d.path()), abime).unwrap();
+            let r = lire(d.path()).unwrap();
+            assert_eq!(r.mode, Some(Mode::Autonome), "{abime:?}");
+        }
+        // L'écriture suivante repart de la copie de secours, et ne sauvegarde pas le fichier abîmé.
+        enregistrer_fenetre(d.path(), ReglagesFenetre { largeur: Some(700), ..Default::default() }).unwrap();
+        assert!(serde_json::from_str::<Value>(&std::fs::read_to_string(chemin_secours(d.path())).unwrap()).is_ok());
+        assert_eq!(lire(d.path()).unwrap().fenetre.largeur, Some(700));
+        // Sans copie de secours valable : erreur, comme avant.
+        std::fs::write(chemin_secours(d.path()), "x").unwrap();
+        std::fs::write(chemin_reglages(d.path()), "y").unwrap();
+        assert!(lire(d.path()).is_err());
+    }
+
+    #[test]
+    fn reglages_en_memoire_suivent_une_modification_exterieure_immediate() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(chemin_reglages(d.path()), r#"{"mode":"autonome"}"#).unwrap();
+        assert_eq!(lire(d.path()).unwrap().mode, Some(Mode::Autonome));
+        // Même longueur, aussitôt (même tic d'horloge des fichiers) : relu quand même.
+        std::fs::write(chemin_reglages(d.path()), r#"{"mode":"comicrack"}"#).unwrap();
+        assert_eq!(lire(d.path()).unwrap().mode, Some(Mode::Comicrack));
     }
 
     /// Vue propre à chaque liste : fusion liste par liste, `null` efface, lecture tolérante,

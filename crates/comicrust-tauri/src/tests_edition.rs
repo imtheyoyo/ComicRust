@@ -294,6 +294,26 @@ fn suggestions_depuis_la_bibliotheque() {
     assert_eq!(jeton_courant("a, b", true), "b");
 }
 
+/// Relecture tauri-v1.0.2 : les suggestions suivent une fiche modifiée sur place (le cache était
+/// indexé par l'adresse de la base, inchangée après une modification).
+#[test]
+fn suggestions_suivent_une_modification() {
+    let d = tempfile::tempdir().unwrap();
+    bd(&d.path().join("BD"));
+    let (b, e) = autonome(&d.path().join("data"), &d.path().join("BD"));
+    assert!(e.proposer_valeurs("Writer", "zo", false, None).unwrap().is_empty());
+    let dm = DemandeModification {
+        ids: vec![id_par_fichier(&b, "Thanos 02.cbz")],
+        champs: vec![modif("Writer", "Zorro Nouveau")],
+        pages: None,
+        ecrire_dans_fichier: false,
+        confirme: false,
+    };
+    e.appliquer_modifications(&dm, &|_| {}).unwrap();
+    let p = e.proposer_valeurs("Writer", "zo", false, None).unwrap();
+    assert_eq!(p.iter().map(|x| x.valeur.as_str()).collect::<Vec<_>>(), ["Zorro Nouveau"]);
+}
+
 #[test]
 fn garde_fou_au_dela_du_seuil() {
     let d = tempfile::tempdir().unwrap();
@@ -514,17 +534,22 @@ fn comicdb_xml_lecture_seule_pour_les_fiches() {
         apercu: true,
         confirme: false,
     };
-    assert!(e.renommer_deplacer(&rn, &|_| {}).is_err());
-    assert!(e
-        .convertir_cbr_cbz(std::slice::from_ref(&id), Some(true), false, &|_| {})
-        .unwrap_err()
-        .contains("lecture seule"));
-    // Les fichiers restent modifiables (fiche du ComicDb.xml écrite dans le CBZ).
-    let r = e.ecrire_infos_fichiers(std::slice::from_ref(&id), false, &|_| {}).unwrap();
-    assert_eq!(r.livres[0].statut, Statut::Ok, "{}", r.rapport);
+    assert_eq!(e.renommer_deplacer(&rn, &|_| {}).unwrap_err(), LECTURE_SEULE_XML);
+    // D1 (25/11/2026) : aucun fichier de livre n'est modifié en lecture seule, avec ou sans
+    // rangement de l'original.
+    let avant = std::fs::read(&fichier).unwrap();
+    for ranger in [Some(true), Some(false)] {
+        assert_eq!(
+            e.convertir_cbr_cbz(std::slice::from_ref(&id), ranger, false, &|_| {}).unwrap_err(),
+            LECTURE_SEULE_XML
+        );
+    }
+    assert_eq!(e.ecrire_infos_fichiers(std::slice::from_ref(&id), false, &|_| {}).unwrap_err(), LECTURE_SEULE_XML);
+    assert_eq!(std::fs::read(&fichier).unwrap(), avant, "CBZ intact");
     let (x, _) = comic_info(&fichier);
-    assert!(x.contains("<Writer>Jim Starlin</Writer>"), "{x}");
+    assert!(!x.contains("<Writer>Jim Starlin</Writer>"), "{x}");
     assert!(std::fs::read_to_string(&xml).unwrap().contains("<Series>Thanos</Series>"), "ComicDb.xml intact");
+    assert_eq!(Cible::LectureSeule("x".into()).fichiers_modifiables().unwrap_err(), "x");
 }
 
 #[test]
@@ -958,7 +983,7 @@ fn mysql_comicrack_lecture_et_ecriture() {
     let lecteur = Lecteur::nouveau(data.clone(), b.clone());
     let e = Edition::nouvelle(b.clone(), lecteur.clone());
 
-    // Défaut : lecture seule ; les fichiers restent modifiables, rien dans ComicRack.
+    // Défaut : lecture seule ; ni la base ComicRack ni les fichiers ne sont modifiés (D1).
     let f = e.lire_fiches(&[id.to_string()]).unwrap();
     assert_eq!(f.lecture_seule.as_deref(), Some(LECTURE_SEULE_COMICRACK));
     let dm = DemandeModification {
@@ -969,8 +994,7 @@ fn mysql_comicrack_lecture_et_ecriture() {
         confirme: false,
     };
     assert!(e.appliquer_modifications(&dm, &|_| {}).is_err());
-    let r = e.ecrire_infos_fichiers(&[id.to_string()], false, &|_| {}).unwrap();
-    assert_eq!(r.livres[0].statut, Statut::Ok, "{}", r.rapport);
+    assert_eq!(e.ecrire_infos_fichiers(&[id.to_string()], false, &|_| {}).unwrap_err(), LECTURE_SEULE_COMICRACK);
     assert_eq!(data_de(&mut conn).1, 5, "lecture seule : base ComicRack intacte");
     // Lecture en lecture seule : rien dans ComicRack.
     let o = lecteur.ouvrir_livre(id).unwrap();

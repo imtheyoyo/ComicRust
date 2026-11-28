@@ -6,6 +6,17 @@ use super::*;
 use crate::surveillance::{ecrits_du_bilan, Connexion, EtatBase, SourceBase, MOTIF_HORS_LIGNE};
 use comicrust_core::db::{Applied, Changes, WriteReport};
 
+/// Pourquoi des modifications extérieures n'ont pas été appliquées.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ecartees {
+    /// Bibliothèque rechargée entre-temps : la base rechargée les contient déjà (ou le sondage
+    /// suivant, sur un surveillant neuf, les trouvera).
+    Rechargee,
+    /// Analyse ou édition commencée pendant le sondage : le surveillant les a pourtant comptées
+    /// comme vues ; il doit être reconstruit pour les retrouver.
+    Occupee,
+}
+
 /// Ce que le sondage doit savoir de la bibliothèque, pris sous un seul verrou.
 pub(crate) struct Instantane {
     pub generation: u64,
@@ -68,17 +79,24 @@ impl Biblio {
     }
 
     /// Applique des modifications faites hors de ComicRust (ComicRack, autre poste) à la
-    /// bibliothèque affichée. `None` si la bibliothèque a été rechargée entre-temps
-    /// (`generation` périmée : ces modifications sont déjà dans la base rechargée ou le seront au
-    /// sondage suivant). Renvoie le bilan et les identifiants ajoutés ou modifiés.
-    pub(crate) fn appliquer_changements(&self, generation: u64, ch: Changes) -> Option<(Applied, Vec<String>)> {
+    /// bibliothèque affichée. Renvoie le bilan et les identifiants ajoutés ou modifiés, ou pourquoi
+    /// rien n'a été appliqué ([`Ecartees`]).
+    pub(crate) fn appliquer_changements(
+        &self,
+        generation: u64,
+        ch: Changes,
+    ) -> Result<(Applied, Vec<String>), Ecartees> {
         let ids: Vec<String> = ch.updated.iter().map(|b| b.id.clone()).collect();
         let (bilan, anciens) = {
             let mut g = self.verrou();
-            if g.generation != generation || g.scan_en_cours || g.edition_en_cours {
-                return None;
+            if g.generation != generation {
+                return Err(Ecartees::Rechargee);
             }
-            let base = Arc::make_mut(g.base.as_mut()?);
+            if g.scan_en_cours || g.edition_en_cours {
+                return Err(Ecartees::Occupee);
+            }
+            let Some(base) = g.base.as_mut() else { return Err(Ecartees::Rechargee) };
+            let base = Arc::make_mut(base);
             // Livres déjà présents : leur couverture a pu changer (fichier remplacé dans ComicRack).
             let anciens: Vec<(String, usize)> = ch
                 .updated
@@ -96,7 +114,13 @@ impl Biblio {
         for (id, image) in &anciens {
             self.oublier_couverture(id, *image);
         }
-        Some((bilan, ids))
+        Ok((bilan, ids))
+    }
+
+    /// Tests : marque la bibliothèque occupée (édition en cours) ou libre, sans garde.
+    #[cfg(test)]
+    pub(crate) fn occuper_pour_test(&self, occupee: bool) {
+        self.verrou().edition_en_cours = occupee;
     }
 
     /// Signale à la surveillance les fiches écrites par ComicRust dans la base MySQL de ComicRack

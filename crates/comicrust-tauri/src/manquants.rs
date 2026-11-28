@@ -468,12 +468,24 @@ fn etat_fichier(chemin: &Path) -> std::io::Result<FileState> {
 // ───────────────────────────── Liste virtuelle ─────────────────────────────
 
 impl Biblio {
-    /// Contenu de la liste virtuelle « Livres manquants » (version 0 : le contenu est relu à
-    /// chaque calcul de la vue, invalidée à chaque changement de marque).
+    /// Contenu de la liste virtuelle « Livres manquants » (version 0 : la vue est invalidée à
+    /// chaque changement de marque, sa clé comprenant la révision des fiches).
+    ///
+    /// Gardé en cache pour l'état de la base `(génération, révision des fiches)` : une marque
+    /// « manquant » posée ou retirée change la révision, donc le contenu est recalculé.
     pub(crate) fn membres_manquants(&self) -> Result<(Members, u64), String> {
-        let base = self.base()?;
-        let ids = base.books.iter().filter(|b| est_manquant(b)).map(|b| b.id.clone()).collect();
-        Ok((Members::Ids(ids), 0))
+        let (base, cle) = self.base_et_contenu().ok_or("aucune bibliothèque ouverte")?;
+        let mut cache = self.manquants_en_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let ids = match cache.as_ref().filter(|(c, _)| *c == cle) {
+            Some((_, ids)) => ids.clone(),
+            None => {
+                let ids: Arc<Vec<String>> =
+                    Arc::new(base.books.iter().filter(|b| est_manquant(b)).map(|b| b.id.clone()).collect());
+                *cache = Some((cle, ids.clone()));
+                ids
+            }
+        };
+        Ok((Members::Ids(ids.as_ref().clone()), 0))
     }
 }
 
@@ -861,7 +873,18 @@ impl Manquants {
                 self.biblio.signaler_ecriture_autonome(w.books.iter().map(|b| b.id.clone()), Some(w.counter));
                 w.books
             }
-            Cible::Comicrack(cfg) => self.relocaliser_comicrack(cfg, &livres)?,
+            Cible::Comicrack(cfg) => {
+                let (ecrites, erreur) = self.relocaliser_comicrack(cfg, &livres)?;
+                if let Some(e) = erreur {
+                    // Écriture partielle : les fiches réellement écrites sont reportées et signalées
+                    // avant de rendre l'erreur (déjà signalées à la surveillance, elles ne
+                    // reviendraient jamais d'elles-mêmes).
+                    let ids = self.biblio.remplacer_fiches(&ecrites, true);
+                    self.signaler(ids, 0);
+                    return Err(e);
+                }
+                ecrites
+            }
             Cible::LectureSeule(m) => return Err(m.clone()),
         };
         // Couvertures refaites : le fichier a changé.
@@ -878,11 +901,13 @@ impl Manquants {
         Ok(BilanOperation { nb: n, info, erreur: None })
     }
 
+    /// Fiches écrites dans la base MySQL de ComicRack et, si une partie a échoué, l'erreur (les
+    /// fiches écrites le sont quand même : voir [`fiches_et_erreur`]).
     fn relocaliser_comicrack(
         &self,
         cfg: &DbConfig,
         livres: &[(LibraryBook, PathBuf)],
-    ) -> Result<Vec<LibraryBook>, String> {
+    ) -> Result<(Vec<LibraryBook>, Option<String>), String> {
         let mut editions = Vec::new();
         for (b, chemin) in livres {
             let f = etat_fichier(chemin).map_err(|e| format!("{} : {e}", chemin.display()))?;
@@ -891,10 +916,7 @@ impl Manquants {
         let rapport = db::update_books(cfg, &editions)
             .map_err(|e| format!("base ComicRack inaccessible, fiches non modifiées : {e}"))?;
         self.biblio.signaler_rapport_comicrack(&rapport);
-        if let Some((id, m)) = rapport.failed.first() {
-            return Err(format!("{id} : {m}"));
-        }
-        Ok(rapport.written.iter().map(|w| w.book.clone()).collect())
+        Ok(fiches_et_erreur(&rapport))
     }
 
     // ───────────── Retirer de la bibliothèque ─────────────
@@ -965,6 +987,13 @@ impl Manquants {
         }
         Ok(BilanOperation { nb: k, info, erreur: retrait.erreur })
     }
+}
+
+/// Bilan d'une écriture MySQL de ComicRack : fiches écrites (toujours rendues, même si d'autres ont
+/// échoué) et première erreur éventuelle.
+pub(crate) fn fiches_et_erreur(rapport: &db::WriteReport) -> (Vec<LibraryBook>, Option<String>) {
+    let ecrites = rapport.written.iter().map(|w| w.book.clone()).collect();
+    (ecrites, rapport.failed.first().map(|(id, m)| format!("{id} : {m}")))
 }
 
 /// Fiches supprimées d'une base.

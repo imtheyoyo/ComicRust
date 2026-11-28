@@ -403,12 +403,13 @@ fn identifiant_libre(dossier: &Path, base: &str) -> String {
     (2..).map(|n| format!("{base}-{n}")).find(|c| libre(c)).unwrap_or_else(|| base.to_string())
 }
 
-/// Nom affichable sans risque dans un commentaire CSS : pas de contrôle, pas de `/*` ni `*/`.
+/// Nom affichable sans risque dans un commentaire CSS : pas de contrôle, pas de `/*` ni `*/`, ni
+/// `<` / `>` (un nom `<script>` rendrait le thème importé refusé à chaque chargement).
 fn nom_sur(nom: &str) -> String {
     let n: String = nom.chars().filter(|c| !c.is_control()).collect();
     // `*` et `/` sont ôtés un à un : retirer `*/` puis `/*` pouvait en recréer (`**//`).
     n.chars()
-        .filter(|c| !matches!(c, '*' | '/'))
+        .filter(|c| !matches!(c, '*' | '/' | '<' | '>'))
         .collect::<String>()
         .trim()
         .chars()
@@ -696,6 +697,12 @@ mod tests {
         let contenu = std::fs::read_to_string(tmp.path().join(format!("{}.css", i.id))).unwrap();
         assert!(contenu.starts_with("/* @nom: evil  a{b:c} */\n"), "{contenu}");
         assert!(crate::themes_css::valider_css(&contenu).erreurs.is_empty());
+        // Un nom avec `<script>` : chevrons retirés, le thème importé reste chargeable.
+        let i = importer_theme(tmp.path(), "Mon <script> thème", ":root{}").unwrap();
+        assert!(i.avertissements.iter().all(|a| !a.contains("refusé")), "{:?}", i.avertissements);
+        assert!(charger_theme(tmp.path(), &i.id).is_ok());
+        let contenu = std::fs::read_to_string(tmp.path().join(format!("{}.css", i.id))).unwrap();
+        assert!(!contenu.contains('<') && contenu.starts_with("/* @nom: Mon script thème */"), "{contenu}");
     }
 
     #[test]
