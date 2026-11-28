@@ -5,6 +5,26 @@ publiée telle quelle comme notes de la release GitHub correspondante (et affich
 ComicRust par « Nouveautés… » lors d'une mise à jour). Chaque version a sa recette dans
 [`recette/`](recette).
 
+## [tauri-v1.0.3] — 2026-11-28
+
+Petits correctifs relevés à la recette de la tauri-v1.0.2 (GO du 28/11/2026).
+
+### Corrections
+- **Onglet Pages** : une page de type « Advertisment » (orthographe de ComicRack) s'affiche « Publicité » et
+  ne bloque plus les opérations sur les pages ; la fiche n'est pas réécrite tant que rien n'est modifié.
+- **Lecture seule ComicRack** : la raison affichée sur « Écrire les infos », « Convertir » et « Renommer / déplacer »
+  parle désormais des fichiers des livres.
+- **Tri « Avancement »** : les livres jamais ouverts comptent pour 0 % (comme ComicRack) : en tête en croissant.
+- **Série déduite du nom de fichier** : un nombre collé au milieu d'un mot n'est plus pris pour un numéro
+  (« Recette102 - Ordre des pages » donnait la série « Re - Ordre des pages » n° 102). Écart volontaire avec
+  ComicRack, qui tronque ce cas.
+- **Piles et livres d'une liste de lecture** : déposer dans l'espace vide après le dernier élément les place en fin de liste.
+- **Documentation** : README du paquet complété (nouveautés des 1.0.1 et 1.0.2) ; taille des exécutables de la
+  1.0.2 corrigée dans ce journal.
+
+### Recette
+[`recette/tauri-v1.0.3.md`](recette/tauri-v1.0.3.md).
+
 ## [tauri-v1.0.2] — 2026-11-28
 
 Version **corrective** issue de la relecture complète du code (six relectures indépendantes, 24/11/2026)
@@ -41,7 +61,7 @@ et des décisions de Yoyo du 25/11/2026.
   mois de parution, accessibilité).
 
 ### Optimisations
-- Profil de compilation optimisé : exécutables environ 30 % plus petits.
+- Profil de compilation optimisé : exécutables plus petits (environ −7 % sous Windows : 33,4 Mo au lieu de 36,2 Mo ; −29 % pour l'outil en ligne de commande sous Linux).
 - Tri par série environ 4 fois plus rapide ; « Sélectionner tout le groupe » quasi instantané.
 - Moins de requêtes pour Bedetheque (pages gardées en mémoire pendant l'exécution).
 - Analyse plus légère (CBT lus sans parcours complet, moins d'accès disque sur le NAS), couverture des RAR
