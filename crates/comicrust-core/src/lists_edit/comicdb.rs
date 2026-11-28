@@ -8,7 +8,7 @@
 //!   `ExtendedSettings`) si la base a changé (`SaveInBackground`, `IsDirty`).
 //!
 //! Une modification faite pendant que ComicRack tourne serait donc écrasée (et ComicRack
-//! ne la verrait pas) : [`ComicDbLists::save`] **refuse d'écrire si ComicRack est lancé**
+//! ne la verrait pas) : [`ComicDbLists::save_in`] **refuse d'écrire si ComicRack est lancé**
 //! ([`comicrack_running`]), ou si cela ne peut pas être vérifié. La vérification est faite
 //! au début **et juste avant le remplacement du fichier**.
 //!
@@ -230,11 +230,19 @@ impl ComicDbLists {
 
     /// Enregistre `rows` dans le fichier (voir le module) ; refuse si ComicRack est lancé.
     /// `backups` : dossier des sauvegardes ([`backup_dir`] du dossier `data`), créé si besoin.
-    pub fn save(&self, rows: &[ListRow], backups: &Path) -> Result<SaveReport, Error> {
+    pub fn save_in(&self, rows: &[ListRow], backups: &Path) -> Result<SaveReport, Error> {
         self.save_checked(rows, backups, comicrack_running)
     }
 
-    /// Comme [`ComicDbLists::save`], avec la détection de ComicRack fournie (tests).
+    /// Ancienne forme, gardée pour la version egui archivée (`crates/comicrust`, non
+    /// modifiable) : sauvegardes à côté de `ComicDb.xml`. L'application Tauri passe par
+    /// [`save_checked`](Self::save_checked) avec le dossier `data\sauvegardes\comicdb`.
+    pub fn save(&self, rows: &[ListRow]) -> Result<SaveReport, Error> {
+        let dir = self.path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        self.save_in(rows, &dir)
+    }
+
+    /// Comme [`ComicDbLists::save_in`], avec la détection de ComicRack fournie (tests).
     pub fn save_checked(
         &self,
         rows: &[ListRow],

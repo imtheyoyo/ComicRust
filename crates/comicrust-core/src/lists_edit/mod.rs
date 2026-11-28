@@ -11,7 +11,7 @@
 //!
 //! - base de ComicRust : [`crate::store::Store::save_list_rows`] (refus si un autre poste a
 //!   modifié les listes entre-temps) ;
-//! - `ComicDb.xml` de ComicRack : [`ComicDbLists::save`] (voir [`comicdb`] : refus si
+//! - `ComicDb.xml` de ComicRack : [`ComicDbLists::save_in`] (voir [`comicdb`] : refus si
 //!   ComicRack est lancé, sauvegarde, remplacement atomique).
 //!
 //! # Ce qui est conservé
