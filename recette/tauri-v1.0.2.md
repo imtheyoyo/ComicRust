@@ -144,14 +144,20 @@ Les tests **[m]** (mineurs) n'empêchent pas le passage.
 
 | Test | Gravité | Constat | Correctif prévu |
 |---|---|---|---|
-| | | | |
+| (onglet Pages) | [m] | Type de page « Advertisment » (orthographe de ComicRack) affiché tel quel au lieu de « Publicité » | tauri-v1.0.3 |
+| LS-01 | [m] | La raison du grisage parle des « fiches » pour les actions sur les fichiers | tauri-v1.0.3 |
+| PF-02 | [m] | Exécutable Windows −7 % (33,4 Mo / 36,2 Mo) et non −30 % comme annoncé dans le CHANGELOG | tauri-v1.0.3 (CHANGELOG corrigé) |
+| (tri) | [m] | Tri « Avancement » croissant : livres jamais ouverts en fin de liste (parité à vérifier) | tauri-v1.0.3 |
+| (analyse) | [m] | « Recette102 - X » compris comme série « Re - X » n° 102 (parité à vérifier) | tauri-v1.0.3 |
 
 ## Bilan
 
 | Catégorie | Total | OK | KO |
 |---|---|---|---|
-| [B] bloquants | | | |
-| [M] majeurs | | | |
-| [m] mineurs | | | |
+| [B] bloquants (section 1) | 5 | 5 | 0 |
+| [M] majeurs (section 1) | 11 | 10 | 0 (CD-01 non testé) |
+| [m] mineurs (section 1) | 4 | 3 | 0 (MP-02 non testé) |
 
-**Décision : (à remplir)**
+Recette du 28/11/2026 ([rapport](rapports/tauri-v1.0.2-2026-11-28.txt)) : déroulée par Claude via le MCP sur les copies autonome et liée (fichiers de test dans `Echantillons RECETTE\_recette_1.0.2`, aucune écriture dans ComicRack), tests ComicRack / Explorateur par Yoyo. Section 1 (correctifs) : tout OK sauf CD-01 et MP-02 non testés. Sections 2 à 10 (non-régression) : parcours partiel par le MCP (dernière liste, jauges, sous-menu Scripts, lecteur, analyse, menus), le reste couvert par les tests automatiques. 5 défauts mineurs → tauri-v1.0.3 (voir « Anomalies »).
+
+**Décision : (en attente du GO explicite de Yoyo)**

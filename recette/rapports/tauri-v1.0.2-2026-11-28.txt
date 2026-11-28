@@ -1,0 +1,12 @@
+Recette ComicRust tauri-v1.0.2 — 28/11/2026 (déroulée par Claude via le MCP sur les copies autonome et liée, fichiers et listes de test uniquement ; tests ComicRack / Explorateur par Yoyo)
+
+Par Claude (MCP) — OK : P-01 (version 1.0.2 des deux copies), archives piégées (pas de plantage), types de page ComicRack lus, TP-01 (2, 9, 010, 011), LU-01, LU-02 (95 % = Lu), SE-01, FO-01 (40 Tab, focus dans le lecteur ; infos utilisables), CB-01, SL-01 (476 / 0 avec casse / regex invalide signalée), LS-01, LS-02, MP-01 (mot de passe jamais stocké, relu dans ComicRack.ini), CA-01 partiel (F11/Échap, pages, couvertures), GR-01 (700 livres en 27 ms), MC-01, non-régression 1.0.1 (dernière liste, jauges, sous-menu Scripts).
+Par Yoyo — OK : P-01 (titre « ComicRust 1.0.2 »), IU-01, CA-01, LU-01 et LU-02 côté ComicRack, BQ-01. Non testés : CD-01, MP-02.
+
+Défauts mineurs (→ tauri-v1.0.3, décision de Yoyo) :
+1. Type de page « Advertisment » affiché tel quel au lieu de « Publicité ».
+2. Raison du grisage en lecture seule : « fiches » au lieu de « fichiers » pour les actions sur les fichiers.
+3. Taille de l'exécutable Windows : −7 % (33,4 Mo / 36,2 Mo), pas −30 % : corriger le CHANGELOG.
+4. Tri « Avancement » croissant : livres jamais ouverts en fin de liste (parité ComicRack à vérifier).
+5. « Recette102 - X » compris comme série « Re - X » n° 102 (parité ComicRack à vérifier).
+Mesures : ComicRust-Tauri.exe 33,4 Mo ; ComicRust-Tauri-mcp.exe 33,7 Mo (36,2 Mo en 1.0.1).
