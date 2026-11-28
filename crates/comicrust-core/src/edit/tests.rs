@@ -452,7 +452,10 @@ const CR_A: &str = r#"<ComicBook Id="aaaaaaaa-0000-4000-8000-000000000001" File=
 
 #[test]
 fn mysql_comicrack_edits() {
-    let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test d'écriture ComicRack ignoré") else { return };
+    let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test d'écriture ComicRack ignoré")
+    else {
+        return;
+    };
     use mysql::prelude::Queryable;
     let _lock = crate::db::tests::mysql_lock();
     let cfg = DbConfig::from_connection_string(&url).unwrap();
@@ -709,7 +712,10 @@ fn sqlite_pages_edit() {
 
 #[test]
 fn mysql_comicrack_pages_edit() {
-    let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test d'écriture ComicRack ignoré") else { return };
+    let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test d'écriture ComicRack ignoré")
+    else {
+        return;
+    };
     use mysql::prelude::Queryable;
     let _lock = crate::db::tests::mysql_lock();
     let cfg = DbConfig::from_connection_string(&url).unwrap();

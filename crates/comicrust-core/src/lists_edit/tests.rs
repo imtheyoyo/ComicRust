@@ -493,8 +493,11 @@ fn comicdb_save() {
     // Sauvegardes dans le dossier `data` de ComicRust : rien d'autre que ComicDb.xml dans
     // le dossier de ComicRack (version portable).
     assert_eq!(report.backup.parent(), Some(bak.as_path()));
-    let mut chez_comicrack: Vec<String> =
-        std::fs::read_dir(dir.path()).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect();
+    let mut chez_comicrack: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|f| f.file_name().to_string_lossy().into_owned())
+        .collect();
     chez_comicrack.sort();
     assert_eq!(chez_comicrack, ["ComicDb.xml", "data"]);
     let name = report.backup.file_name().unwrap().to_string_lossy().into_owned();

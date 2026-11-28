@@ -499,7 +499,9 @@ pub(crate) mod tests {
     /// chaîne de connexion d'une base de test (créée et remplie par le test).
     #[test]
     fn mysql_server() {
-        let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL ignoré") else { return };
+        let Some(url) = crate::db::tests::test_mysql_url("COMICRUST_TEST_MYSQL absent : test MySQL ignoré") else {
+            return;
+        };
         let _lock = mysql_lock();
         let cfg = DbConfig::from_connection_string(&url).unwrap();
         let mut conn = connect(&cfg).unwrap();
