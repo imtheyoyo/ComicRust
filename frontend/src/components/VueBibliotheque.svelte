@@ -1175,6 +1175,8 @@
     },
     groupeDe: (i) => groupesGlisser?.find((g) => i >= g.debut && i <= g.fin) ?? null,
     deplacerGroupes,
+    // Dépôt dans le vide après le dernier livre : fin de liste.
+    dernier: () => bib.total - 1,
     contient: (i) => sel.contient(i),
     choisir: (i) => sel.unique(i),
     selectionPrete: () => selectionGroupeEnCours,
@@ -1206,6 +1208,8 @@
     // Chaque pile est un groupe d'un seul élément.
     groupeDe: (i) => ({ rang: i, debut: i, fin: i }),
     deplacerGroupes: deplacerPiles,
+    // Dépôt dans le vide après la dernière pile (à sa droite ou sous la dernière rangée) : fin de liste.
+    dernier: () => bib.piles.length - 1,
     // Glisser une pile de la sélection : toutes les piles sélectionnées partent ; hors sélection :
     // seulement celle-là.
     contient: (i) => selPiles.contient(i),

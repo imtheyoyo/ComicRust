@@ -1,7 +1,8 @@
 // Glisser-déposer de livres (étape 5), à la souris (événements pointer, comme l'onglet Pages :
 // pas de glisser HTML5, que WebView2 réserve aux fichiers déposés dans la fenêtre) :
 // - sur une liste de lecture du panneau des listes ([data-liste-id]) : ajout ;
-// - entre deux livres de la vue ([data-index]) ou, en vue empilée, entre deux piles ([data-pile])  : réordonnancement de la liste affichée, si elle
+// - entre deux livres de la vue ([data-index]) ou, en vue empilée, entre deux piles ([data-pile]), ou dans
+//   le vide après le dernier (fin de liste) : réordonnancement de la liste affichée, si elle
 //   est triée dans l'ordre de la liste (y compris une série entière sélectionnée par son en-tête).
 // Un badge suit le pointeur (« 3 livres — Ajouter à « … » », ou le refus), un trait montre la place.
 
@@ -38,6 +39,9 @@ export interface ContexteGlisser {
   /** Cellules à survoler : `index` (livres, défaut) ou `pile` (vue empilée : attribut `data-pile`,
    *  chaque pile est un groupe d'un seul élément, déposé entre deux piles). */
   cellule?: 'index' | 'pile';
+  /** Index de la dernière cellule de la vue (-1 si vide) : un dépôt dans le vide **après** elle (à
+   *  sa droite sur sa rangée, ou sous la dernière rangée) place les éléments en fin de liste. */
+  dernier?: () => number;
   /** Glisser de séries entières : groupe de la vue qui contient l'index `i` (rang du groupe,
    *  premier et dernier index), ou null si les groupes ne sont pas encore connus. */
   groupeDe: (i: number) => { rang: number; debut: number; fin: number } | null;
@@ -165,7 +169,8 @@ export class GlisserLivres {
       return;
     }
     if (!cellule) {
-      this.indication = null;
+      // Vide après la dernière cellule : fin de liste ; ailleurs (entre deux cellules) : rien.
+      if (!this.calculerFin(z, attr)) this.indication = null;
       return;
     }
     const r = cellule.getBoundingClientRect();
@@ -181,6 +186,32 @@ export class GlisserLivres {
     this.trait = h
       ? { x: (apres ? r.right + 5 : r.left - 8), y: r.top, l: 3, h: r.height }
       : { x: Math.max(zr.left, r.left), y: (apres ? r.bottom : r.top) - 1, l: Math.min(r.width, zr.width), h: 3 };
+  }
+
+  /** Pointeur dans le vide après la dernière cellule de la vue (à sa droite sur sa rangée en grille,
+   *  ou plus bas qu'elle) : dépôt en fin de liste, trait après la dernière cellule. `false` sinon
+   *  (dernière cellule non affichée, pointeur ailleurs, groupes pas encore connus). */
+  private calculerFin(z: HTMLElement, attr: string): boolean {
+    const n = this.ctx.dernier?.() ?? -1;
+    if (n < 0) return false;
+    const der = z.querySelector<HTMLElement>(`[data-${attr}="${n}"]`);
+    if (!der) return false;
+    const r = der.getBoundingClientRect();
+    const h = this.ctx.horizontal();
+    const apres = this.y > r.bottom || (h && this.y >= r.top && this.x > r.right);
+    if (!apres) return false;
+    if (this.groupes) {
+      const g = this.ctx.groupeDe(n);
+      if (!g) return false;
+      this.indication = { type: 'groupes', insertion: g.rang + 1 };
+    } else {
+      this.indication = { type: 'deplacer', avant: n + 1 };
+    }
+    const zr = z.getBoundingClientRect();
+    this.trait = h
+      ? { x: r.right + 5, y: r.top, l: 3, h: r.height }
+      : { x: Math.max(zr.left, r.left), y: r.bottom - 1, l: Math.min(r.width, zr.width), h: 3 };
+    return true;
   }
 
   /** Séries entières : avant le groupe survolé (première moitié de ses livres) ou après lui. */
