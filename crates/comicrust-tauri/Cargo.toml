@@ -23,7 +23,6 @@ default = []
 app = [
     "dep:tauri",
     "dep:tauri-plugin-dialog",
-    "dep:tauri-plugin-single-instance",
     "dep:tauri-build",
     "dep:ureq",
     "dep:windows-sys",
@@ -48,9 +47,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 tauri = { version = "2", optional = true }
 # Dialogues natifs de fichiers (Ouvrir / Enregistrer / dossier) : lot L8, docs/tauri/ipc-dialogue.md.
 tauri-plugin-dialog = { version = "2", optional = true }
-# Instance unique : un 2e lancement (« Ouvrir avec », double-clic sur un .cbz) transmet son fichier à
-# l'instance déjà ouverte au lieu de partager `data\` avec elle (écritures perdues).
-tauri-plugin-single-instance = { version = "2", optional = true }
 # Mise à jour intégrée (module `maj`) : empreintes et extraction du paquet (noyau testable).
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
@@ -62,8 +58,18 @@ ureq = { version = "3", features = ["platform-verifier", "win-system-proxy"], op
 # Protocole DevTools de WebView2 (fonction `mcp`) : mêmes versions que celles de Tauri (wry).
 webview2-com = { version = "0.39", optional = true }
 windows = { version = "0.62", optional = true }
-# Mise à jour : attente de la fin de l'ancienne instance (`--attendre-pid`).
-windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+# Mise à jour : attente de la fin de l'ancienne instance (`--attendre-pid`). Instance unique par
+# dossier `data\` (module `portable`) : mutex nommé, canal nommé (fichier transmis par un 2e
+# lancement) et passage au premier plan.
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }

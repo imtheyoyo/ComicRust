@@ -25,7 +25,7 @@ use crate::scripts::apercu::{Apercu as ApercuScript, Bilan as BilanScript};
 use crate::scripts::{self, ConfigScripts, EtatScripts, Scripts};
 use crate::surveillance::{self, EtatBase, Surveillance};
 use crate::transfert::{ApercuTransfert, DemandeTransfert, ResumeTransfert, Transfert};
-use crate::{fenetre, infos_application, plantage, portable, themes, InfosApplication};
+use crate::{couvertures, fenetre, infos_application, plantage, portable, themes, InfosApplication};
 use comicrust_core::scripting::Hook;
 use serde_json::{Map, Value};
 use std::path::PathBuf;
@@ -931,23 +931,64 @@ fn reponse_couverture(statut: u16, jpeg: Vec<u8>, origine: Option<&'static str>)
     r.body(jpeg).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
 }
 
-/// Greffon `single-instance` : une deuxième instance a été lancée sur le même dossier `data\`.
+/// Instance unique (`portable::ecouter`) : un autre lancement a eu lieu sur le même dossier `data\`.
 /// La fenêtre passe au premier plan ; le fichier, dossier ou `.cbl` passé en argument (relatif
-/// au dossier courant de la deuxième instance) est transmis au front comme un dépôt de fichier
-/// (événement `tauri://drag-drop` de la fenêtre principale) : même traitement qu'un glisser-déposer
-/// (`DepotFichiers.svelte` : livre ouvert dans le lecteur, `.cbl` importé, dossier proposé).
+/// au dossier courant de l'autre lancement) est transmis au front comme un dépôt de fichier
+/// (`cmd_fenetre::recevoir_transmis` : gardé tant que le front n'écoute pas) : même traitement
+/// qu'un glisser-déposer (`DepotFichiers.svelte` : livre ouvert dans le lecteur, `.cbl` importé,
+/// dossier proposé).
 fn deuxieme_lancement(app: &tauri::AppHandle, args: Vec<String>, dossier_courant: String) {
     if let Some(f) = app.get_webview_window("main") {
         let _ = f.unminimize();
         let _ = f.show();
         let _ = f.set_focus();
     }
-    let lancement = fenetre::analyser_arguments(args.into_iter().skip(1).map(std::ffi::OsString::from));
-    if let Some(chemin) = lancement.chemin {
-        let chemin = if chemin.is_relative() { PathBuf::from(dossier_courant).join(chemin) } else { chemin };
-        let chemin = fenetre::rendre_absolu(&chemin);
-        let charge = serde_json::json!({ "paths": [chemin.display().to_string()], "position": { "x": 0, "y": 0 } });
-        let _ = app.emit_to("main", "tauri://drag-drop", charge);
+    if let Some(chemin) = fenetre::chemin_transmis(args, &dossier_courant) {
+        cmd_fenetre::recevoir_transmis(app, chemin);
+    }
+}
+
+/// Fermeture demandée (fenêtre principale ou application) : pendant l'installation d'une mise à
+/// jour, elle est empêchée (vrai) ; le front affiche « Installation en cours : ComicRust se
+/// fermera à la fin » (`maj://fermeture-differee`) et, à la première demande, un fil attend la fin
+/// de l'installation (réussie ou non) puis ferme l'application. Jamais de processus sans fenêtre
+/// qui garderait le mutex d'instance unique.
+fn differer_fermeture(app: &tauri::AppHandle) -> bool {
+    let Some(m) = app.try_state::<Maj>() else { return false };
+    match m.demander_fermeture() {
+        maj::DemandeFermeture::Libre => false,
+        maj::DemandeFermeture::Differee { premiere } => {
+            if premiere {
+                let (maj, app) = (m.inner().clone(), app.clone());
+                std::thread::spawn(move || {
+                    maj.attendre_fin_installation();
+                    app.exit(0);
+                });
+            }
+            if let Some(f) = app.get_webview_window("main") {
+                let _ = f.unminimize();
+                let _ = f.show();
+                let _ = f.set_focus();
+            }
+            true
+        }
+    }
+}
+
+/// Lancement sur un dossier `data\` déjà ouvert par une autre instance : le message de
+/// l'exe `--mcp` (sortie d'erreur et `data\mcp-journal.txt`), le serveur MCP n'étant pas démarré.
+#[cfg(feature = "mcp")]
+fn signaler_mcp_deja_ouvert(data: &std::path::Path) {
+    if !crate::mcp::actif() {
+        return;
+    }
+    let message = "ComicRust est déjà ouvert sur ce dossier : serveur MCP non démarré \
+                   (fermer l'autre instance, ou lancer une copie de ComicRust dans un autre dossier).";
+    eprintln!("{message}");
+    let ligne = format!("{} {message}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(data.join("mcp-journal.txt")) {
+        let _ = f.write_all(ligne.as_bytes());
     }
 }
 
@@ -980,14 +1021,31 @@ pub fn run() {
     }
     let initial = fenetre::analyser_arguments(std::env::args_os().skip(1)).chemin.map(|p| fenetre::rendre_absolu(&p));
     // Instance unique par dossier `data\` (exe normal et exe `-mcp` compris) : deux instances
-    // sur les mêmes fichiers perdaient des écritures (avancement, réglages). L'identifiant de
-    // l'application devient propre au dossier : deux copies portables restent indépendantes.
-    let mut contexte = tauri::generate_context!();
+    // sur les mêmes fichiers perdaient des écritures (avancement, réglages). La clé propre au
+    // dossier ne sert qu'au mutex et au canal nommés (`portable`) : l'identifiant de
+    // `tauri.conf.json` n'est jamais modifié (aucun chemin dérivé de lui ne doit changer).
+    let contexte = tauri::generate_context!();
     let cle_instance = portable::cle_instance(&contexte.config().identifier, &data);
-    contexte.config_mut().identifier = cle_instance.clone();
     let (premiere, _garde_instance) = portable::premiere_instance(&cle_instance);
+    if !premiere && ancienne_terminee {
+        // Deuxième lancement (« Ouvrir avec », double-clic sur un .cbz…) : ses arguments vont à
+        // l'instance ouverte, qui ouvre le fichier et passe au premier plan ; ce processus s'arrête
+        // sans rien toucher dans `data\`.
+        #[cfg(feature = "mcp")]
+        signaler_mcp_deja_ouvert(&data);
+        let dossier = std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default();
+        let args: Vec<String> = std::env::args_os().map(|a| a.to_string_lossy().into_owned()).collect();
+        if let Err(e) = portable::transmettre(&cle_instance, &portable::encoder_transmission(&dossier, &args)) {
+            eprintln!("ComicRust est déjà ouvert sur ce dossier, mais ne répond pas ({e}).");
+        }
+        std::process::exit(0);
+    }
     let dossier_app = portable::exe_dir();
     if premiere {
+        // Ordre des pages changé (v1.0.2) : cache des couvertures et vignettes vidé une fois.
+        if let Err(e) = couvertures::migrer_cache(&couvertures::dossier(&data)) {
+            eprintln!("ComicRust : cache des couvertures non vidé ({e}) ; nouvel essai au prochain lancement");
+        }
         // Mise à jour précédente : suppression des `.old` notés dans `data\maj\anciens.txt` et des
         // téléchargements, avant la création de la fenêtre. Jamais depuis une deuxième instance
         // (elle supprimerait le téléchargement en cours de la première).
@@ -1004,14 +1062,7 @@ pub fn run() {
 
     let bibliotheque = Biblio::nouvelle(data.clone());
     let lecteur = Lecteur::nouveau(data.clone(), bibliotheque.clone());
-    let mut constructeur = tauri::Builder::default();
-    if ancienne_terminee {
-        // Deuxième lancement (« Ouvrir avec », double-clic sur un .cbz…) : le greffon arrête ce
-        // processus et transmet ses arguments à l'instance ouverte, qui ouvre le fichier et passe
-        // au premier plan. En premier, comme le demande le greffon.
-        constructeur = constructeur.plugin(tauri_plugin_single_instance::init(deuxieme_lancement));
-    }
-    constructeur
+    tauri::Builder::default()
         // Dialogues natifs de fichiers (Ouvrir, dossier, Enregistrer sous) : docs/tauri/ipc-dialogue.md.
         .plugin(tauri_plugin_dialog::init())
         .manage(Edition::nouvelle(bibliotheque.clone(), lecteur.clone()))
@@ -1020,8 +1071,18 @@ pub fn run() {
         .manage(bibliotheque)
         .manage(EtatFenetre::nouveau(data.clone(), initial))
         .manage(DossierData(data))
-        // Géométrie de la fenêtre mémorisée (redimensionnement, déplacement, fermeture).
-        .on_window_event(cmd_fenetre::evenement_fenetre)
+        // Géométrie de la fenêtre mémorisée (redimensionnement, déplacement, fermeture). Fermeture
+        // de la fenêtre principale pendant l'installation d'une mise à jour : empêchée, ComicRust
+        // se fermera à la fin de l'installation (`differer_fermeture`).
+        .on_window_event(|fen, evenement| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = evenement {
+                if fen.label() == "main" && differer_fermeture(fen.app_handle()) {
+                    api.prevent_close();
+                    return;
+                }
+            }
+            cmd_fenetre::evenement_fenetre(fen, evenement)
+        })
         // Couvertures : `cr-couv://localhost/<id>` (Windows : `http://cr-couv.localhost/<id>`), servies
         // depuis le cache `data\couvertures` par les fils de `Biblio::pool` (jamais le fil principal :
         // la première lecture d'une archive sur le NAS peut durer). 404 si illisible.
@@ -1171,6 +1232,7 @@ pub fn run() {
             crate::cmd_diagnostic::rapport_livres,
             cmd_fenetre::definir_titre_fenetre,
             cmd_fenetre::lancement_initial,
+            cmd_fenetre::fichiers_transmis,
             cmd_fenetre::classer_chemin,
             cmd_fenetre::lire_plantage,
             cmd_fenetre::acquitter_plantage,
@@ -1245,6 +1307,17 @@ pub fn run() {
             #[cfg(feature = "mcp")]
             let fenetre = if crate::mcp::actif() { fenetre.initialization_script(crate::mcp::SCRIPT) } else { fenetre };
             let principale = fenetre.build()?;
+            // Instance unique : les lancements suivants sur ce dossier transmettent leurs arguments
+            // (une instance relancée après une mise à jour attend que l'ancienne libère le canal).
+            let recepteur = app.handle().clone();
+            portable::ecouter(
+                &cle_instance,
+                Box::new(move |octets| {
+                    if let Some((dossier, args)) = portable::decoder_transmission(&octets) {
+                        deuxieme_lancement(&recepteur, args, dossier);
+                    }
+                }),
+            );
             cmd_fenetre::restaurer_et_afficher(&principale, &app.state::<EtatFenetre>());
             // Surveillance de la base : modifications extérieures et état en ligne / hors ligne.
             let emetteur = app.handle().clone();
@@ -1269,14 +1342,12 @@ pub fn run() {
             // Fermeture demandée : scripts et automatismes annulés, attente de 8 s au plus (une
             // application en cours finit le livre en cours : jamais de fichier sans sa fiche).
             tauri::RunEvent::ExitRequested { api, .. } => {
-                // Installation d'une mise à jour en cours : la fermeture attend sa fin (une copie
-                // interrompue laisserait une installation incomplète). La fenêtre reste ouverte.
-                if app.try_state::<Maj>().is_some_and(|m| m.installation_en_cours()) {
+                // Filet de sécurité (la fermeture de la fenêtre est déjà retenue plus haut) :
+                // installation d'une mise à jour en cours, la sortie attend sa fin (une copie
+                // interrompue laisserait une installation incomplète), puis l'application se
+                // ferme d'elle-même (`differer_fermeture` : fil d'attente puis `app.exit(0)`).
+                if differer_fermeture(app) {
                     api.prevent_exit();
-                    if let Some(f) = app.get_webview_window("main") {
-                        let _ = f.show();
-                        let _ = f.set_focus();
-                    }
                     return;
                 }
                 if let Some(s) = app.try_state::<Scripts>() {

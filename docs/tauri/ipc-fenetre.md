@@ -20,6 +20,7 @@ tolérante (champ invalide ou hors bornes ignoré).
 |---|---|---|
 | `definir_titre_fenetre` | `titre: string \| null` | titre « <titre> — ComicRust 1.0.1 » ou « ComicRust 1.0.1 » (voir ci-dessous) |
 | `lancement_initial` | | `{ chemin, genre } \| null`, **une seule fois** |
+| `fichiers_transmis` | | `[{ chemin, genre }]` : chemins transmis par d'autres lancements avant que le front écoute (appelée au montage de `DepotFichiers`, une fois l'écoute des dépôts en place) ; les suivants arrivent comme un dépôt (`tauri://drag-drop`) |
 | `classer_chemin` | `chemin` | `'livre' \| 'dossier' \| 'liste' \| 'absent'` |
 | `lire_plantage` | | `{ texte, resume, fichier } \| null` |
 | `acquitter_plantage` | | supprime `data\plantage.txt` |
@@ -37,8 +38,16 @@ au plus) et ajoute le repère. Hors Tauri, `simuleFenetre.ts` imite la commande 
 
 ## Ligne de commande
 `ComicRust-Tauri.exe [fichier | dossier | liste.cbl] [--mcp] [--attendre-pid N]` : le premier argument qui
-n'est pas une option est le chemin (rendu absolu). Les options `--…` sont ignorées. Pas de
-single-instance (la version egui n'en a pas non plus).
+n'est pas une option est le chemin (rendu absolu). Les options `--…` sont ignorées.
+
+**Instance unique par dossier `data\`** (module `portable`, Windows) : mutex nommé `Local\<clé>-premiere`
+et canal nommé `\\.\pipe\<clé>-transmission`, où la clé est l'identifiant de `tauri.conf.json` suivi
+d'un hachage du dossier `data\` canonique (deux copies portables restent indépendantes). L'identifiant
+de l'application n'est jamais modifié et le profil WebView2 est fixé à `data\webview2`
+(`data_directory` de la fenêtre et `WEBVIEW2_USER_DATA_FOLDER`). Un lancement suivant écrit son dossier
+courant et ses arguments dans le canal puis s'arrête ; l'instance ouverte passe au premier plan et
+traite le chemin comme un dépôt. L'exe `--mcp` lancé sur un dossier déjà ouvert l'indique
+(« serveur MCP non démarré », sortie d'erreur et `data\mcp-journal.txt`).
 
 ## Front
 - Dépôt (`onDragDropEvent`, permission `core:event` de `core:default`) : premier chemin seulement.
